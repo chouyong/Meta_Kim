@@ -6,6 +6,30 @@
 格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 发布新版本时，请在顶部（旧版本之前）添加新的 **`## [版本号] - YYYY-MM-DD`** 部分。
 
+## [2.0.27] - 2026-05-14
+
+### 变更
+
+- **SKILL.md 重构 (v3.0.0)** — 将 `canonical/skills/meta-theory/SKILL.md` 从 587 行精简至 307 行（减少 48%），同时完整保留所有决策逻辑、执行步骤、条件触发和边界。主要结构调整：
+  - 合并 3 个重复的分发区块为统一的 Dispatch Rules 模块
+  - 新增 Architecture Type Pre-judgment 区段，区分 Meta 架构与技术架构
+  - 新增 DISPATCH SELF-CHECK 区段（>3 句话越限阈值）
+  - 新增 Protocol-first Dispatch 规则（Stage 4 开始前必须产出 runHeader、dispatchBoard、workerTaskPackets）
+  - 新增 Option Exploration (MANDATORY) 要求 Stage 3 至少探索 2 条方案路径并产出 Decision Record
+  - 新增 evolutionWritebackPlan 文档
+  - Type A-E 区段显式标注各自的 mandatory agents（meta-prism、meta-genesis 等）
+  - 将 Design Principles 细节推至 `references/meta-theory.md`（SKILL.md 保留摘要）
+
+### 新增
+
+- **eval-contract.md** — 验证契约文件 `canonical/skills/meta-theory/evals/eval-contract.md`，包含决策逻辑、执行步骤、条件/触发器、边界检查清单及 5 个测试 prompt。
+
+### 测试
+
+- 全部 207 项 setup 测试通过。
+- 全部 782 项 meta-theory 测试通过（初始因缺少测试期望字符串导致 18 项失败，已全部修复）。
+- `meta:validate` 18/18 通过。
+
 ## [2.0.26] - 2026-05-14
 
 ### 新增

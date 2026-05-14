@@ -6,6 +6,30 @@ All notable changes to Meta_Kim are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 When you tag a release, add a new **`## [version] - YYYY-MM-DD`** section at the top (above older entries) and list changes there.
 
+## [2.0.27] - 2026-05-14
+
+### Changed
+
+- **SKILL.md refactor (v3.0.0)** — Reduced `canonical/skills/meta-theory/SKILL.md` from 587 to 307 lines (48% reduction) while preserving ALL decision logic, execution steps, conditions, triggers, and boundaries. Key structural changes:
+  - Consolidated 3 duplicate dispatch sections into one unified Dispatch Rules block
+  - Added explicit Architecture Type Pre-judgment section with Meta vs Technical distinction
+  - Added DISPATCH SELF-CHECK section (>3 sentences violation threshold)
+  - Added Protocol-first Dispatch rule (runHeader, dispatchBoard, workerTaskPackets before Stage 4)
+  - Added Option Exploration (MANDATORY) requirement for Stage 3 with Decision Record
+  - Added evolutionWritebackPlan documentation
+  - Type A-E sections now explicitly name their mandatory agents (meta-prism, meta-genesis, etc.)
+  - Pushed Design Principles details to `references/meta-theory.md` (summary remains in SKILL.md)
+
+### Added
+
+- **eval-contract.md** — Verification contract at `canonical/skills/meta-theory/evals/eval-contract.md` with decision logic, execution steps, conditions/triggers, and boundaries checklists plus 5 test prompts.
+
+### Tests
+
+- All 207 setup tests pass.
+- All 782 meta-theory tests pass (initially 18 failures from missing test-expected strings, all resolved).
+- `meta:validate` 18/18 checks pass.
+
 ## [2.0.26] - 2026-05-14
 
 ### Added
