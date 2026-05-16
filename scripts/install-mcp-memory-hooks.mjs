@@ -850,8 +850,9 @@ async function install() {
     );
   } else {
     warn("MCP Memory Service is NOT responding on http://localhost:8000");
-    info("Start it with: python -m mcp_memory_service");
-    info("Or:            uv run memory server -s hybrid");
+    info(
+      "Start the HTTP service with: MCP_ALLOW_ANONYMOUS_ACCESS=true memory server --http",
+    );
   }
 
   if (!sessionStartOk || !stopOk || !crossRuntimeOk) {
