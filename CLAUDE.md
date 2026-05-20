@@ -286,6 +286,7 @@ Use it as compressed codebase context, not as an infallible truth source:
 - if `graphify-out/wiki/index.md` exists, use it for broad navigation
 - for focused questions, prefer graph queries or subgraph extraction when available
 - treat ambiguous graph nodes as uncertain dependencies requiring manual verification
+- `npm run meta:graphify:check` and `npm run meta:validate` compare the graph's built commit with current `git rev-parse HEAD` and fail when `GRAPH_REPORT.md` is stale
 - after modifying code files, run `npm run meta:graphify:rebuild`
 
 Graphify installation and runtime wiring are handled by setup and helper scripts:

@@ -828,8 +828,15 @@
         "dashboard",
         "api_service",
         "data_pipeline",
+        "runtime_package",
+        "install_release",
         "article",
         "custom"
+      ],
+      "releaseInstallLaneIds": [
+        "release",
+        "install",
+        "runtime_package"
       ],
       "coverageJudgmentEnum": [
         "complete",
@@ -900,6 +907,30 @@
         "runtimeNicknamesAreAliasesOnly": true,
         "forbiddenPrimaryNamePattern": "^[A-Z][a-z]+$",
         "description": "User-visible agent names must be short business role names: use role or role-scope forms such as 前端, 后端-登录, 测试-安装, frontend, backend-login. Avoid long task descriptions such as frontend-page-implementation. Host-generated personal nicknames such as Huygens or Mill may be recorded only as runtimeInstanceAlias."
+      },
+      "longTermCapabilityPolicy": {
+        "abstractCapabilitySlotsRequired": true,
+        "allowedMetaSkillProviders": [
+          "agent-teams-playbook",
+          "superpowers",
+          "ecc",
+          "findskill",
+          "meta-theory"
+        ],
+        "selectedSkillScope": "run_only",
+        "forbidConcreteSkillInLongTermAgentIdentity": true,
+        "forbiddenConcreteSkillPatterns": [
+          "superpowers/<concrete-skill>",
+          "gstack/<concrete-skill>",
+          "everything-claude-code:<concrete-skill>",
+          "fixed dependency child skill lists"
+        ],
+        "oversizedGovernanceAgentPolicy": {
+          "exceptionAllowed": true,
+          "exceptionRequiresReason": true,
+          "splitDocumentationAllowed": true,
+          "description": "A large governance agent may stay intact only when it owns a coherent governance boundary; otherwise split supporting detail into references while preserving the agent identity boundary."
+        }
       },
       "description": "Capability-first role blueprint. It separates businessRoleId, roleDisplayName, selected owner agent, assigned responsibility slice, owner responsibility delta, and per-run role instances so the same agent can run multiple named shards in parallel without confusing users. ownerResolution uses reuse_existing_owner, upgrade_existing_owner, or create_owner_first."
     },

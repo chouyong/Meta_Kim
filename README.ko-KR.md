@@ -503,7 +503,7 @@ flowchart TB
 | 역량 표면 | Claude Code | Codex | OpenClaw | Cursor |
 | --- | --- | --- | --- | --- |
 | **Agent** | 네이티브 agents/subagents, 프로젝트 및 사용자 범위 모두 성숙 | 강력한 custom agents/subagents | 워크스페이스형 agent, agent-to-agent 지원 | 경량 agent 투영 |
-| **스킬 / 참조** | 네이티브 스킬, 참조, 성숙한 글로벌 생태계 | `.agents/skills/` 잘 작동 | 워크스페이스 스킬 + 설치 가능 스킬 | 가벼운 스킬/참조 지원 |
+| **스킬 / 참조** | 네이티브 스킬, 참조, 성숙한 글로벌 생태계 | `.codex/skills/` 잘 작동 | 워크스페이스 스킬 + 설치 가능 스킬 | `.cursor/skills/` 기반의 가벼운 스킬/참조 지원 |
 | **Hook / 자동화** | 프로젝트 hook + settings.json + 플러그인 생태계 | 저장소 수준 네이티브 hook 파일 표면 없음 | 워크스페이스 boot/hook 스타일 역량 | 가장 약한 네이티브 거버넌스 hook |
 | **MCP / 설정** | 완전한 네이티브 MCP 및 설정 표면 | 런타임 어댑터와 MCP로 연결 가능 | 명확한 워크스페이스 설정 | MCP 사용 가능하지만 표면이 가벼움 |
 | **거버넌스 루프 수용력** | **가장 높음** | 높지만 Claude Code보다는 낮음 | 높지만 형태가 다름 | 가장 가벼움 |
@@ -515,7 +515,7 @@ flowchart TB
 | 레이어 | 위치 | 목적 |
 | --- | --- | --- |
 | **Canonical 소스** | `canonical/`, `config/contracts/workflow-contract.json` | 장기 편집 우선 위치 |
-| **런타임 투영** | `.claude/`, `.codex/`, `.agents/skills/`, `openclaw/`, `.cursor/` | 같은 역량을 다른 런타임에 투영 |
+| **런타임 투영** | `.claude/`, `.codex/`, `openclaw/`, `.cursor/` | 같은 역량을 다른 런타임에 투영 |
 | **로컬 상태** | `.meta-kim/state/{profile}/`, `.meta-kim/local.overrides.json` | 프로필 수준 상태, run 인덱스, 연속성 |
 | **스크립트 및 검사** | `scripts/`, `npm run *` | 동기화, 검증, 발견, 수락 |
 
@@ -698,7 +698,8 @@ flowchart TB
 | 명령 | 목적 |
 | --- | --- |
 | `node setup.mjs` | 대화형 설치/업데이트/점검 마법사 |
-| `node setup.mjs --update` | 모든 스킬과 의존성 업데이트 |
+| `git pull --ff-only` | clone 설치 사용자가 GitHub에서 최신 Meta_Kim 소스 코드를 가져옴 |
+| `node setup.mjs --update` | 현재 설치된 투영, 스킬, 의존성을 새로 고침. Meta_Kim 소스 코드는 가져오지 않음 |
 | `node setup.mjs --check` | 환경 점검 (디스크에 쓰지 않음) |
 | `node setup.mjs --lang ko-KR` | 한국어 인터페이스 지정 |
 

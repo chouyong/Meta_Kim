@@ -262,6 +262,7 @@ Rules:
 - If `graphify-out/wiki/index.md` exists, use it for broad navigation instead of raw source browsing.
 - Use graph queries or subgraph extraction when available for focused relationships.
 - Dirty `graphify-out/` files can be expected after hooks or incremental updates; dirty graph files are not a reason to skip graph context.
+- `npm run meta:graphify:check` and `npm run meta:validate` compare the graph's built commit with current `git rev-parse HEAD` and fail when `GRAPH_REPORT.md` is stale.
 - After modifying code files, run `npm run meta:graphify:rebuild` to keep the graph current across Windows, macOS, and Linux.
 
 ## Maintenance Loop

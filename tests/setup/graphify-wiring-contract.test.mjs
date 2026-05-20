@@ -1,10 +1,35 @@
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import {
+  chmodSync,
+  mkdtempSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import os from "node:os";
 import path from "node:path";
+import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), "../..");
+
+function writeFakeExecutable(dir, name, source) {
+  const scriptPath = path.join(dir, `${name}.mjs`);
+  writeFileSync(scriptPath, source);
+
+  if (process.platform === "win32") {
+    const cmdPath = path.join(dir, `${name}.cmd`);
+    writeFileSync(cmdPath, `@echo off\r\nnode "%~dp0${name}.mjs" %*\r\n`);
+    return cmdPath;
+  }
+
+  const binPath = path.join(dir, name);
+  writeFileSync(binPath, `#!/usr/bin/env node\nimport "./${name}.mjs";\n`);
+  chmodSync(binPath, 0o755);
+  return binPath;
+}
 
 describe("graphify idempotent wiring (contract)", () => {
   test("graphify-cli.mjs invokes hook install after claude install", () => {
@@ -97,5 +122,94 @@ describe("graphify idempotent wiring (contract)", () => {
       "utf8",
     );
     assert.match(src, /GRAPH_REPORT\.md/);
+  });
+
+  test("graphify check fails when GRAPH_REPORT.md was built from an older HEAD", () => {
+    const tmp = mkdtempSync(path.join(os.tmpdir(), "meta-kim-graphify-"));
+    const bin = path.join(tmp, "bin");
+    const repo = path.join(tmp, "repo");
+    mkdirSync(bin);
+    mkdirSync(path.join(repo, "graphify-out"), { recursive: true });
+
+    const fakePython = `
+const args = process.argv.slice(2).filter((arg) => arg !== "-3");
+if (args.includes("--version")) {
+  console.log("Python 3.12.0");
+  process.exit(0);
+}
+if (args.join(" ") === "-m pip --version") {
+  console.log("pip 24.0");
+  process.exit(0);
+}
+if (args.join(" ") === "-m pip show graphifyy") {
+  console.log("Name: graphifyy\\nVersion: 1.2.3");
+  process.exit(0);
+}
+process.exit(1);
+`;
+    for (const name of ["py", "python", "python3"]) {
+      writeFakeExecutable(bin, name, fakePython);
+    }
+    for (const args of [
+      ["init"],
+      ["config", "user.email", "test@example.invalid"],
+      ["config", "user.name", "Test User"],
+    ]) {
+      const result = spawnSync("git", args, { cwd: repo, encoding: "utf8" });
+      assert.equal(result.status, 0, result.stderr);
+    }
+    writeFileSync(path.join(repo, "tracked.txt"), "fresh head\n");
+    for (const args of [
+      ["add", "tracked.txt"],
+      ["commit", "-m", "seed"],
+    ]) {
+      const result = spawnSync("git", args, { cwd: repo, encoding: "utf8" });
+      assert.equal(result.status, 0, result.stderr);
+    }
+
+    const head = spawnSync("git", ["rev-parse", "HEAD"], {
+      cwd: repo,
+      encoding: "utf8",
+    }).stdout.trim();
+    assert.notEqual(
+      head,
+      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "test fixture must use a stale graph commit",
+    );
+
+    writeFileSync(
+      path.join(repo, "graphify-out", "GRAPH_REPORT.md"),
+      "# Graph Report\n\n## Graph Freshness\n- Built from commit: `aaaaaaaa`\n",
+    );
+    writeFileSync(
+      path.join(repo, "graphify-out", "graph.json"),
+      JSON.stringify({
+        nodes: [{ id: "n1", label: "n1" }],
+        links: [{ source: "n1", target: "n1" }],
+        built_at_commit: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      }),
+    );
+
+    try {
+      const result = spawnSync(
+        process.execPath,
+        [path.join(root, "scripts", "graphify-cli.mjs"), "check"],
+        {
+          cwd: repo,
+          encoding: "utf8",
+          env: {
+            ...process.env,
+            PATH: `${bin}${path.delimiter}${process.env.PATH ?? ""}`,
+            Path: `${bin}${path.delimiter}${process.env.Path ?? ""}`,
+          },
+        },
+      );
+
+      assert.notEqual(result.status, 0);
+      assert.match(result.stderr, /GRAPH_REPORT\.md is stale/);
+      assert.match(result.stderr, /npm run meta:graphify:rebuild/);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
   });
 });

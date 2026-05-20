@@ -15,6 +15,7 @@ import {
 import {
   canonicalAgentsDir,
   canonicalRuntimeAssetsDir,
+  canonicalSkillsDir,
   canonicalSkillPath,
   canonicalSkillReferencesDir,
   repoRoot,
@@ -608,12 +609,14 @@ function resolveProjectionDirs(scope) {
   return {
     // Claude Code
     claudeAgentsProjectionDir: claude.agentsDir,
+    claudeSkillsProjectionDir: claude.skillsDir,
     claudeSkillProjectionRoot: claude.skillRoot,
     claudeHooksProjectionDir: claude.hooksDir,
     claudeSettingsProjectionPath: claude.settingsFile,
     claudeMcpProjectionPath: claude.mcpFile,
 
     // Codex
+    codexSkillsDir: codex.skillsDir,
     codexSkillRoot: codex.skillRoot,
     codexLegacySkillFile: globalScope ? null : codex.legacySkillFile,
     codexLegacySkillReferencesDir: globalScope
@@ -629,6 +632,7 @@ function resolveProjectionDirs(scope) {
     // OpenClaw
     openclawWorkspaceDir: openclaw.workspaceDir,
     openclawDisplayWorkspaceDir: openclaw.displayWorkspaceDir,
+    openclawSkillsDir: openclaw.skillsDir,
     openclawSkillRoot: openclaw.skillRoot,
     openclawLegacySkillFile: globalScope ? null : openclaw.legacySkillFile,
     openclawLegacySkillReferencesDir: globalScope
@@ -639,6 +643,7 @@ function resolveProjectionDirs(scope) {
 
     // Cursor
     cursorAgentsDir: cursor.agentsDir,
+    cursorSkillsDir: cursor.skillsDir,
     cursorSkillRoot: cursor.skillRoot,
     cursorHooksDir: cursor.hooksDir,
     cursorHooksFile: cursor.hooksFile,
@@ -649,11 +654,13 @@ function resolveProjectionDirs(scope) {
 
     displayPaths: {
       claudeAgents: claude.display.agentsDir,
+      claudeSkills: claude.display.skillsDir,
       claudeSkill: claude.display.skillRoot,
       claudeHooks: claude.display.hooksDir,
       claudeSettings: claude.display.settingsFile,
       claudeMcp: claude.display.mcpFile,
       codexAgents: codex.display.agentsDir,
+      codexSkillsRoot: codex.display.skillsDir,
       codexSkills: codex.display.skillRoot,
       codexHooks: globalScope ? null : codex.display.hooksDir,
       codexHooksFile: globalScope ? null : codex.display.hooksFile,
@@ -663,9 +670,11 @@ function resolveProjectionDirs(scope) {
         ? openclaw.baseDir
         : "openclaw/workspaces",
       openclawTemplate: openclaw.display.templateConfigFile,
+      openclawSkillsRoot: openclaw.display.skillsDir,
       openclawSkills: openclaw.display.skillRoot,
       openclawHooks: openclaw.display.hooksDir,
       cursorAgents: cursor.display.agentsDir,
+      cursorSkillsRoot: cursor.display.skillsDir,
       cursorSkill: cursor.display.skillRoot,
       cursorHooks: cursor.display.hooksDir,
       cursorHooksFile: cursor.display.hooksFile,
@@ -1040,6 +1049,57 @@ async function loadSkillReferences() {
   );
 }
 
+async function collectSkillFiles(rootDir, currentDir = rootDir, bucket = []) {
+  const entries = await fs.readdir(currentDir, { withFileTypes: true });
+  for (const entry of entries) {
+    const entryPath = path.join(currentDir, entry.name);
+    if (entry.isDirectory()) {
+      await collectSkillFiles(rootDir, entryPath, bucket);
+    } else if (entry.isFile()) {
+      bucket.push({
+        relativePath: path.relative(rootDir, entryPath).replace(/\\/g, "/"),
+        content: await fs.readFile(entryPath, "utf8"),
+      });
+    }
+  }
+  return bucket.sort((left, right) =>
+    left.relativePath.localeCompare(right.relativePath),
+  );
+}
+
+async function loadCanonicalSkills() {
+  const entries = await fs.readdir(canonicalSkillsDir, { withFileTypes: true });
+  const skills = [];
+
+  for (const entry of entries.filter((item) => item.isDirectory())) {
+    const skillRoot = path.join(canonicalSkillsDir, entry.name);
+    const skillPath = path.join(skillRoot, "SKILL.md");
+    let raw = null;
+    try {
+      raw = await fs.readFile(skillPath, "utf8");
+    } catch (error) {
+      if (error.code === "ENOENT") {
+        continue;
+      }
+      throw error;
+    }
+
+    assertPortableSkillFrontmatter(raw, skillPath);
+    skills.push({
+      id: entry.name,
+      root: skillRoot,
+      skillPath,
+      files: await collectSkillFiles(skillRoot),
+    });
+  }
+
+  if (skills.length === 0) {
+    throw new Error("No canonical skills found under canonical/skills/*/SKILL.md.");
+  }
+
+  return skills.sort((left, right) => left.id.localeCompare(right.id));
+}
+
 function assertPortableSkillFrontmatter(raw, filePath) {
   const validation = validateSkillFrontmatter(raw);
   if (!validation.ok) {
@@ -1373,16 +1433,45 @@ export function buildCursorProjectHooksJson({
   });
 }
 
+async function syncRuntimeSkills(
+  runtimeId,
+  runtimeSkillsDir,
+  displaySkillsDir,
+  canonicalSkills,
+  changedFiles,
+) {
+  for (const skill of canonicalSkills) {
+    for (const file of skill.files) {
+      const targetPath = path.join(
+        runtimeSkillsDir,
+        skill.id,
+        ...file.relativePath.split("/"),
+      );
+      if (
+        (
+          await writeGeneratedFile(
+            targetPath,
+            applyRuntimePaths(file.content, runtimeId),
+          )
+        ).changed
+      ) {
+        changedFiles.push(
+          `${displaySkillsDir}/${skill.id}/${file.relativePath}`,
+        );
+      }
+    }
+  }
+}
+
 async function syncClaudeProjection(
   dirs,
   agents,
-  portableSkill,
-  skillReferences,
+  canonicalSkills,
   changedFiles,
 ) {
   const {
     claudeAgentsProjectionDir,
-    claudeSkillProjectionRoot,
+    claudeSkillsProjectionDir,
     claudeHooksProjectionDir,
     claudeSettingsProjectionPath,
     claudeMcpProjectionPath,
@@ -1402,31 +1491,13 @@ async function syncClaudeProjection(
     }
   }
 
-  if (
-    (
-      await writeGeneratedFile(
-        path.join(claudeSkillProjectionRoot, "SKILL.md"),
-        applyRuntimePaths(portableSkill, "claude"),
-      )
-    ).changed
-  ) {
-    changedFiles.push(`${displayPaths.claudeSkill}/SKILL.md`);
-  }
-
-  for (const reference of skillReferences) {
-    if (
-      (
-        await writeGeneratedFile(
-          path.join(claudeSkillProjectionRoot, "references", reference.name),
-          reference.content,
-        )
-      ).changed
-    ) {
-      changedFiles.push(
-        `${displayPaths.claudeSkill}/references/${reference.name}`,
-      );
-    }
-  }
+  await syncRuntimeSkills(
+    "claude",
+    claudeSkillsProjectionDir,
+    displayPaths.claudeSkills,
+    canonicalSkills,
+    changedFiles,
+  );
 
   const hookEntries = (
     await fs.readdir(canonicalClaudeHooksDir, { withFileTypes: true })
@@ -1581,10 +1652,7 @@ Examples:
   const dirs = resolveProjectionDirs(scope);
   const agents = await loadAgents();
   const teamDirectory = buildWorkspaceDirectory(agents);
-  const portableSkill = await tryReadCanonical(canonicalSkillPath);
-  if (!portableSkill) return [];
-  assertPortableSkillFrontmatter(portableSkill, canonicalSkillPath);
-  const skillReferences = await loadSkillReferences();
+  const canonicalSkills = await loadCanonicalSkills();
   const changedFiles = [];
 
   // Safety assertion: all writes must stay within allowedRoots
@@ -1626,8 +1694,7 @@ Examples:
     await syncClaudeProjection(
       dirs,
       agents,
-      portableSkill,
-      skillReferences,
+      canonicalSkills,
       changedFiles,
     );
   }
@@ -1739,28 +1806,13 @@ Examples:
     ) {
       changedFiles.push("openclaw/skills/references");
     }
-    if (
-      (
-        await writeGeneratedFile(
-          path.join(dirs.openclawSkillRoot, "SKILL.md"),
-          applyRuntimePaths(portableSkill, "openclaw"),
-        )
-      ).changed
-    ) {
-      changedFiles.push(`${dp.openclawSkills}/SKILL.md`);
-    }
-    for (const reference of skillReferences) {
-      if (
-        (
-          await writeGeneratedFile(
-            path.join(dirs.openclawSkillRoot, "references", reference.name),
-            applyRuntimePaths(reference.content, "openclaw"),
-          )
-        ).changed
-      ) {
-        changedFiles.push(`${dp.openclawSkills}/references/${reference.name}`);
-      }
-    }
+    await syncRuntimeSkills(
+      "openclaw",
+      dirs.openclawSkillsDir,
+      dp.openclawSkillsRoot,
+      canonicalSkills,
+      changedFiles,
+    );
   }
 
   if (selectedTargets.includes("codex")) {
@@ -1775,28 +1827,13 @@ Examples:
       changedFiles.push(".codex/skills/references");
     }
 
-    if (
-      (
-        await writeGeneratedFile(
-          path.join(dirs.codexSkillRoot, "SKILL.md"),
-          applyRuntimePaths(portableSkill, "codex"),
-        )
-      ).changed
-    ) {
-      changedFiles.push(`${dp.codexSkills}/SKILL.md`);
-    }
-    for (const reference of skillReferences) {
-      if (
-        (
-          await writeGeneratedFile(
-            path.join(dirs.codexSkillRoot, "references", reference.name),
-            applyRuntimePaths(reference.content, "codex"),
-          )
-        ).changed
-      ) {
-        changedFiles.push(`${dp.codexSkills}/references/${reference.name}`);
-      }
-    }
+    await syncRuntimeSkills(
+      "codex",
+      dirs.codexSkillsDir,
+      dp.codexSkillsRoot,
+      canonicalSkills,
+      changedFiles,
+    );
     if (
       scope !== "global" &&
       (
@@ -2005,28 +2042,13 @@ Examples:
     }
 
     // Skill projections (.cursor/skills/meta-theory/)
-    if (
-      (
-        await writeGeneratedFile(
-          path.join(dirs.cursorSkillRoot, "SKILL.md"),
-          applyRuntimePaths(portableSkill, "cursor"),
-        )
-      ).changed
-    ) {
-      changedFiles.push(`${dp.cursorSkill}/SKILL.md`);
-    }
-    for (const reference of skillReferences) {
-      if (
-        (
-          await writeGeneratedFile(
-            path.join(dirs.cursorSkillRoot, "references", reference.name),
-            applyRuntimePaths(reference.content, "cursor"),
-          )
-        ).changed
-      ) {
-        changedFiles.push(`${dp.cursorSkill}/references/${reference.name}`);
-      }
-    }
+    await syncRuntimeSkills(
+      "cursor",
+      dirs.cursorSkillsDir,
+      dp.cursorSkillsRoot,
+      canonicalSkills,
+      changedFiles,
+    );
 
     if (dirs.cursorHooksDir && dirs.cursorHooksFile) {
       const memoryHookContent = await tryReadCanonical(canonicalSharedMemoryHookPath);
@@ -2172,7 +2194,7 @@ Examples:
       hasDisplayPrefix(f, dirs.displayPaths.claudeAgents),
     ).length,
     claudeSkill: changedFiles.filter((f) =>
-      hasDisplayPrefix(f, dirs.displayPaths.claudeSkill),
+      hasDisplayPrefix(f, dirs.displayPaths.claudeSkills),
     ).length,
     claudeHooks: changedFiles.filter((f) =>
       hasDisplayPrefix(f, dirs.displayPaths.claudeHooks),
@@ -2192,7 +2214,7 @@ Examples:
       hasDisplayPrefix(f, dirs.displayPaths.codexAgents),
     ).length,
     codexSkill: changedFiles.filter((f) =>
-      hasDisplayPrefix(f, dirs.displayPaths.codexSkills),
+      hasDisplayPrefix(f, dirs.displayPaths.codexSkillsRoot),
     ).length,
     codexHooks: changedFiles.filter((f) =>
       hasDisplayPrefix(f, dirs.displayPaths.codexHooks),
@@ -2211,7 +2233,7 @@ Examples:
       normalizeDisplayPath(f).startsWith(openclawWorkspacePrefix),
     ).length,
     openclawSkill: changedFiles.filter((f) =>
-      hasDisplayPrefix(f, dirs.displayPaths.openclawSkills),
+      hasDisplayPrefix(f, dirs.displayPaths.openclawSkillsRoot),
     ).length,
     openclawHooks: changedFiles.filter((f) =>
       hasDisplayPrefix(f, dirs.displayPaths.openclawHooks),
@@ -2225,7 +2247,7 @@ Examples:
       hasDisplayPrefix(f, dirs.displayPaths.cursorAgents),
     ).length,
     cursorSkill: changedFiles.filter((f) =>
-      hasDisplayPrefix(f, dirs.displayPaths.cursorSkill),
+      hasDisplayPrefix(f, dirs.displayPaths.cursorSkillsRoot),
     ).length,
     cursorHooks: changedFiles.filter((f) =>
       hasDisplayPrefix(f, dirs.displayPaths.cursorHooks),
@@ -2253,7 +2275,7 @@ Examples:
           summaryKind: "agents",
         },
         {
-          label: dirs.displayPaths.claudeSkill,
+          label: dirs.displayPaths.claudeSkills,
           count: layerCounts.claudeSkill,
           summaryKind: "files",
         },
@@ -2283,7 +2305,7 @@ Examples:
           summaryKind: "agents",
         },
         {
-          label: dirs.displayPaths.codexSkills,
+          label: dirs.displayPaths.codexSkillsRoot,
           count: layerCounts.codexSkill,
           summaryKind: "files",
         },
@@ -2313,7 +2335,7 @@ Examples:
           summaryKind: "workspaces",
         },
         {
-          label: dirs.displayPaths.openclawSkills,
+          label: dirs.displayPaths.openclawSkillsRoot,
           count: layerCounts.openclawSkill,
           summaryKind: "files",
         },
@@ -2338,7 +2360,7 @@ Examples:
           summaryKind: "agents",
         },
         {
-          label: dirs.displayPaths.cursorSkill,
+          label: dirs.displayPaths.cursorSkillsRoot,
           count: layerCounts.cursorSkill,
           summaryKind: "files",
         },

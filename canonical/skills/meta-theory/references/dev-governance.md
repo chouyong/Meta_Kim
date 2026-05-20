@@ -416,20 +416,20 @@ Before proceeding from Critical to Fetch, check:
 
 ### Complexity Routing
 
-| File Changes | Complexity | Executed Path | Upgrade to 10-Step? |
+| File Changes | Complexity | Executed Path | Upgrade to 11-phase business workflow? |
 |-------------|-----------|---------------|-------------------|
 | 1 file, pure logic/style/comments | Simple | Execution → Review → Verification → Evolution (4 stages, still owner-driven) | No — 8-stage is the minimum; even these 4 stages suffice |
 | 2-5 files, 1 module | Medium | Full 8-stage spine | No — 8-stage is the complete executable chain for medium complexity |
-| >5 files OR cross-system OR multi-team | Complex | Full 8-stage spine, with escalation gates | **Yes** — upgrade to full 10-step governance when: (a) >5 files, (b) cross-system dependencies detected, (c) multi-team handoff required, (d) security-sensitive changes, or (e) business-workflow revision/summary/feedback phases are needed per the run contract |
+| >5 files OR cross-system OR multi-team | Complex | Full 8-stage spine, with escalation gates | **Yes** — upgrade to the full 11-phase business workflow when: (a) >5 files, (b) cross-system dependencies detected, (c) multi-team handoff required, (d) security-sensitive changes, or (e) business-workflow revision/summary/feedback/mirror phases are needed per the run contract |
 
 **Upgrade Trigger Conditions** (any one is sufficient):
 - File scope > 5 files
 - Cross-system dependency detected (Stage 3 Thinking identifies shared components across module boundaries)
 - Multi-team handoff required (business department + meta department coordination)
 - Security-sensitive or permission-critical changes
-- Business run contract explicitly requires 11-step phases (direction/planning/execution/review/meta-review/revision/verification/summary/feedback/evolution/mirror)
+- Business run contract explicitly requires the 11-phase business workflow (direction/planning/execution/review/meta-review/revision/verification/summary/feedback/evolution/mirror)
 
-**Note**: The 8-stage spine is the **minimum executable chain** regardless of complexity. The 10-step governance is an **upgrade layer** for complex scenarios — the 8 stages still run, but extended with direction refinement, summary, and feedback phases before Evolution.
+**Note**: The 8-stage spine is the **minimum executable chain** regardless of complexity. The 11-phase business workflow is an **upgrade layer** for complex scenarios — the 8 stages still run, and the business workflow adds direction refinement, summary, feedback, evolution, and mirror phases around the executable spine.
 
 ### Critical Stage Output
 
@@ -505,15 +505,43 @@ IF capability not found in local scan:
 ```
 Using the SAME capability keywords from Step 1–1.5:
   Grep capability-search-index.tsv filtering for type=skills
-  Collect matching skill IDs and descriptions
-  Record in fetchPacket.recommendedSkills per sub-task:
-    { "subTaskId": "task-001", "skills": ["coding-standards", "code-security"], "source": "search-index" }
-  ALSO check matched agent's YAML frontmatter for recommended_skills field
-    (pre-populated by previous Evolution runs — gives faster lookup without re-searching)
-  Merge both sources: search-index discovery + agent's recommended_skills
+  Collect matching providers, package IDs, concrete skill IDs, commands, and descriptions
+  Record candidates in capabilitySearchResult per sub-task:
+    {
+      "subTaskId": "task-001",
+      "capabilitySlot": "code quality review",
+      "candidateProviders": ["superpowers", "ecc"],
+      "candidateSkills": ["coding-standards", "code-security"],
+      "candidateCommands": [],
+      "source": "search-index"
+    }
+  Select concrete run-scoped entries only after scoring:
+    { "subTaskId": "task-001", "selectedSkill": { "provider": "superpowers", "skillId": "coding-standards", "selectionScope": "run_scoped" } }
+  ALSO check matched agent's YAML frontmatter for abstract capability slots or provider compatibility
+    (pre-populated by previous Evolution runs — gives faster lookup without binding concrete skills)
+  Merge both sources: search-index discovery + agent's abstract slots/provider compatibility
 ```
 
 **Why Step 1.6 runs during Fetch, not Evolution**: The first run must already know which skills to use. Evolution only caches the discovery for faster future runs. Skill ignorance on first run = agent does worse work for no reason.
+
+### Skill Binding Model (Fetch-time only)
+
+Long-term agent identity may inherit only:
+
+- abstract capability slots, such as `test generation`, `browser QA`, `security review`, or `planning discipline`
+- meta-skill package providers, such as `superpowers` or `ecc`
+- provider compatibility rules, such as required runtime, permission class, or expected artifact shape
+
+Long-term agent identity must not inherit:
+
+- concrete sub-skill IDs selected for one run
+- shell commands selected for one run
+- plugin sub-capabilities selected for one run
+- prompts that force one provider's fixed tactic as the agent's permanent method
+
+`superpowers` and `ecc` are capability providers / meta-skill package providers, not fixed playbooks. `findskill` is a runtime-local capability search entrypoint during Fetch, not a durable skill binding. A concrete sub-skill, command, or plugin sub-capability is valid only when written as a run-scoped selection in `capabilitySearchResult`, `selectedSkill`, `businessFlowBlueprintPacket`, `agentBlueprintPacket`, `workerTaskPacket`, or another current-run artifact.
+
+Review and Evolution must reject any agent creation or agent iteration that copies a run-scoped `selectedSkill` into durable identity. Evolution may update an agent with a new abstract capability slot or provider compatibility rule, but not with the specific skill/command that happened to win one Fetch.
 
 **Step 1.7 — Business-flow capability matrix** (run before final owner selection):
 
@@ -535,9 +563,18 @@ Each lane becomes a capability slot with:
   "spineStage": "Fetch | Thinking | Execution | Review | Verification | Evolution",
   "capabilityNeed": "frontend implementation",
   "capabilitySearchQuery": "frontend implementation owner + relevant skills",
+  "capabilitySearchResult": {
+    "capabilitySlot": "frontend implementation",
+    "candidateProviders": ["superpowers", "ecc"],
+    "candidateSkills": [],
+    "candidateCommands": [],
+    "searchEntrypoints": ["capability-index", "findskill"],
+    "bindingPolicy": "run_scoped_selection_only"
+  },
   "ownerLayer": "execution",
   "candidateOwners": [],
   "candidateSkills": [],
+  "selectedSkill": null,
   "selectedOwner": null,
   "selectionReason": "why this owner best covers the lane",
   "coverageStatus": "covered | partial | missing | omitted_with_reason",
@@ -811,13 +848,27 @@ Break Stage 1's task into independent sub-tasks:
       "collisionPolicy": "no_overlap | merge_by_owner | lock_required",
       "fileScope": ["file-or-module-a", "file-or-module-b"],
       "constraints": ["boundary1", "dependency1"],
-      "recommendedSkills": ["skill-id-1", "skill-id-2"]
+      "capabilitySearchResult": {
+        "capabilitySlot": "frontend implementation",
+        "candidateProviders": ["superpowers", "ecc"],
+        "candidateSkills": ["skill-id-1", "skill-id-2"],
+        "candidateCommands": [],
+        "searchEntrypoints": ["capability-index", "findskill"],
+        "bindingPolicy": "run_scoped_selection_only"
+      },
+      "selectedSkill": {
+        "provider": "superpowers",
+        "skillId": "skill-id-1",
+        "command": null,
+        "selectionReason": "best ROI for this task after Fetch",
+        "selectionScope": "run_scoped"
+      }
     }
   ]
 }
 ```
 
-`recommendedSkills` comes from Fetch Step 1.6 — skills discovered via search index + agent's own `recommended_skills` YAML field (cached by previous Evolution runs). During Execution, include these skill references in the agent's dispatch prompt so the agent invokes them during work.
+`capabilitySearchResult` and `selectedSkill` come from Fetch Step 1.6. They are run-scoped and may be included in the dispatch prompt for this execution only. Do not copy `selectedSkill.skillId`, `selectedSkill.command`, or any plugin sub-capability into the agent's durable SOUL, identity, boundary, or permanent recommended skill list. Durable agent updates may mention only abstract capability slots and provider compatibility.
 
 **Short business role naming rule**: The user-facing `owner` / `roleDisplayName` must explain the role briefly, not the platform nickname or a long task sentence. Use role or role-scope forms such as `前端`, `后端-登录`, `测试-安装`, `frontend`, `backend-login`, `db-schema`. Prefer `前端` over `前端页面实现`, and prefer `frontend` over `frontend-page-implementation`. Random personal aliases assigned by the host runtime are stored only in `runtimeInstanceAlias`; they must not appear as the primary role name in the task board or final summary.
 
@@ -957,8 +1008,11 @@ Thinking must lock down the execution protocol before any `Agent` tool invocatio
         "capabilityNeed": "frontend implementation",
         "assignedResponsibilitySlice": "Implement the home route UI from the UX and UI handoff",
         "ownerResponsibilityDelta": "Reuse existing frontend implementation boundary; narrow it to home route files",
-        "agentIterationPlan": "Dispatch with exact route scope, approved skills, shard rules, and verification steps",
+        "agentIterationPlan": "Dispatch with exact route scope, run-scoped selectedSkill entries, shard rules, and verification steps",
         "ownerResolution": "reuse_existing_owner",
+        "abstractCapabilitySlots": ["frontend implementation", "browser QA handoff"],
+        "providerCompatibility": ["superpowers", "ecc"],
+        "durableSkillBindingPolicy": "abstract_slots_and_providers_only",
         "minInstances": 1,
         "maxInstances": 3,
         "parallelizable": true,
@@ -995,7 +1049,21 @@ Thinking must lock down the execution protocol before any `Agent` tool invocatio
       "artifactNamespace": "frontend",
       "collisionPolicy": "no_overlap",
       "deliverableLink": "how this packet connects back to the primary deliverable",
-      "recommendedSkills": ["skill-id-1", "skill-id-2"]
+      "capabilitySearchResult": {
+        "capabilitySlot": "frontend implementation",
+        "candidateProviders": ["superpowers", "ecc"],
+        "candidateSkills": ["skill-id-1", "skill-id-2"],
+        "candidateCommands": [],
+        "searchEntrypoints": ["capability-index", "findskill"],
+        "bindingPolicy": "run_scoped_selection_only"
+      },
+      "selectedSkill": {
+        "provider": "superpowers",
+        "skillId": "skill-id-1",
+        "command": null,
+        "selectionReason": "best ROI for this task after Fetch",
+        "selectionScope": "run_scoped"
+      }
     }
   ],
   "resultMergePlan": {

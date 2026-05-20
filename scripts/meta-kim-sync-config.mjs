@@ -8,9 +8,9 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export const repoRoot = path.resolve(__dirname, "..");
 export const canonicalRoot = path.join(repoRoot, "canonical");
 export const canonicalAgentsDir = path.join(canonicalRoot, "agents");
+export const canonicalSkillsDir = path.join(canonicalRoot, "skills");
 export const canonicalSkillRoot = path.join(
-  canonicalRoot,
-  "skills",
+  canonicalSkillsDir,
   "meta-theory",
 );
 export const canonicalSkillPath = path.join(canonicalSkillRoot, "SKILL.md");
@@ -53,6 +53,7 @@ const runtimeProfileCatalog = {
       ],
       outputPaths: {
         agentsDir: ".claude/agents",
+        skillsDir: ".claude/skills",
         skillRoot: ".claude/skills/meta-theory",
         hooksDir: ".claude/hooks",
         settingsFile: ".claude/settings.json",
@@ -78,6 +79,7 @@ const runtimeProfileCatalog = {
       assetTypes: ["agents", "skills", "hooks", "commands", "config", "mcp"],
       outputPaths: {
         agentsDir: ".codex/agents",
+        skillsDir: ".codex/skills",
         skillRoot: ".codex/skills/meta-theory",
         hooksDir: ".codex/hooks",
         hooksFile: ".codex/hooks.json",
@@ -103,6 +105,7 @@ const runtimeProfileCatalog = {
       assetTypes: ["workspaces", "skills", "hooks", "config", "mcp"],
       outputPaths: {
         workspacesDir: "openclaw/workspaces",
+        skillsDir: "openclaw/skills",
         skillRoot: "openclaw/skills/meta-theory",
         templateConfigFile: "openclaw/openclaw.template.json",
       },
@@ -125,6 +128,7 @@ const runtimeProfileCatalog = {
       assetTypes: ["agents", "skills", "hooks", "mcp"],
       outputPaths: {
         agentsDir: ".cursor/agents",
+        skillsDir: ".cursor/skills",
         skillRoot: ".cursor/skills/meta-theory",
         hooksDir: ".cursor/hooks",
         hooksFile: ".cursor/hooks.json",
@@ -363,6 +367,7 @@ const runtimeProjectionLayouts = {
   claude: {
     project: {
       agentsDir: [".claude", "agents"],
+      skillsDir: [".claude", "skills"],
       skillRoot: [".claude", "skills", "meta-theory"],
       hooksDir: [".claude", "hooks"],
       settingsFile: [".claude", "settings.json"],
@@ -370,6 +375,7 @@ const runtimeProjectionLayouts = {
     },
     global: {
       agentsDir: ["agents"],
+      skillsDir: ["skills"],
       skillRoot: ["skills", "meta-theory"],
       hooksDir: ["hooks", "meta-kim"],
       settingsFile: ["settings.json"],
@@ -379,6 +385,7 @@ const runtimeProjectionLayouts = {
   codex: {
     project: {
       agentsDir: [".codex", "agents"],
+      skillsDir: [".codex", "skills"],
       skillRoot: [".codex", "skills", "meta-theory"],
       legacySkillFile: [".codex", "skills", "meta-theory.md"],
       legacySkillReferencesDir: [".codex", "skills", "references"],
@@ -389,6 +396,7 @@ const runtimeProjectionLayouts = {
     },
     global: {
       agentsDir: ["agents"],
+      skillsDir: ["skills"],
       skillRoot: ["skills", "meta-theory"],
       hooksDir: ["hooks"],
       hooksFile: ["hooks.json"],
@@ -399,6 +407,7 @@ const runtimeProjectionLayouts = {
   openclaw: {
     project: {
       workspacesRoot: ["openclaw", "workspaces"],
+      skillsDir: ["openclaw", "skills"],
       skillRoot: ["openclaw", "skills", "meta-theory"],
       legacySkillFile: ["openclaw", "skills", "meta-theory.md"],
       legacySkillReferencesDir: ["openclaw", "skills", "references"],
@@ -407,6 +416,7 @@ const runtimeProjectionLayouts = {
     },
     global: {
       workspacesRoot: [],
+      skillsDir: ["skills"],
       skillRoot: ["skills", "meta-theory"],
       hooksDir: ["hooks"],
       templateConfigFile: ["openclaw.template.json"],
@@ -415,6 +425,7 @@ const runtimeProjectionLayouts = {
   cursor: {
     project: {
       agentsDir: [".cursor", "agents"],
+      skillsDir: [".cursor", "skills"],
       skillRoot: [".cursor", "skills", "meta-theory"],
       hooksDir: [".cursor", "hooks"],
       hooksFile: [".cursor", "hooks.json"],
@@ -422,6 +433,7 @@ const runtimeProjectionLayouts = {
     },
     global: {
       agentsDir: ["agents"],
+      skillsDir: ["skills"],
       skillRoot: ["skills", "meta-theory"],
       hooksDir: ["hooks"],
       hooksFile: ["hooks.json"],
@@ -631,6 +643,9 @@ export function validateSyncManifest(manifest) {
         `sync manifest canonicalRoots.${key} must be a non-empty string`,
       );
     }
+  }
+  if (manifest.canonicalRoots.skills !== "canonical/skills") {
+    throw new Error("sync manifest canonicalRoots.skills must be canonical/skills");
   }
 }
 

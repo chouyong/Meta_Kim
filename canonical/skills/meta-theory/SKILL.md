@@ -319,6 +319,12 @@ Capability index layers: (1) repo canonical (2) runtime mirrors (3) local global
 
 **Skill ROI filter**: when several skills could apply, score them with `ROI = (Task Coverage x Usage Frequency) / (Context Cost + Learning Curve)`. Choose the highest useful ROI skill set, not the largest skill set. Low-ROI skills stay out of the prompt unless Fetch finds a specific capability gap they cover.
 
+**Skill Binding Model (hard rule)**: long-term agent identity may inherit only abstract capability slots and meta-skill package providers. Do not write concrete sub-skills, shell commands, plugin sub-capabilities, or one-off tool choices into an agent's durable SOUL / boundary / identity. Concrete skill or command choices are run-scoped selections created after Fetch and must live in current-run artifacts such as `capabilitySearchResult`, `selectedSkill`, `businessFlowBlueprintPacket`, `agentBlueprintPacket`, and `workerTaskPackets`.
+
+- `superpowers` and `ecc` are capability providers / meta-skill package providers. They are not a fixed tactic, mandatory workflow, or permanent per-agent skill list.
+- `findskill` is a runtime-local capability search entrypoint used during Fetch. It is not evidence that the discovered concrete skill should be bound into long-term agent identity.
+- Agent creation and agent iteration must follow the same rule: Genesis defines durable capability slots and boundaries; Artisan records provider compatibility and Fetch-time selection rules; the current run records the selected concrete skill/command/plugin capability.
+
 **Business-flow capability matrix (mandatory for executable deliverables)**: Fetch must expand a user request into a complete business-flow capability matrix before choosing agents. Do not only search for the first obvious role. For each deliverable type, list the lanes that may be needed, then capability-match every lane:
 
 | Deliverable type | Default lanes to consider |
@@ -419,7 +425,7 @@ Agent(
 
 ## Type B: Agent Creation
 
-**Entry**: confirm capability gap, enumerate ≥2 creation approaches. `meta-genesis` designs SOUL.md identity; `meta-artisan` matches skill/tool loadout.
+**Entry**: confirm capability gap, enumerate ≥2 creation approaches. `meta-genesis` designs SOUL.md identity; `meta-artisan` defines abstract capability slots, provider compatibility, and Fetch-time skill-selection rules. Concrete skills, commands, or plugin sub-capabilities are selected only after Fetch for the current run.
 
 **Factory Station pipeline** (see `references/create-agent.md` for full spec):
 1. Discovery → data collection → coupling grouping → user confirmation
@@ -602,7 +608,7 @@ Before dispatching, verify task brief includes relevant principle constraints. D
 - `references/dev-governance.md` — Full 8-stage spine with Stage 3 artifact contracts
 - `references/create-agent.md` — Type B pipeline with station templates
 - `references/rhythm-orchestration.md` — Attention cost model, card dealing rules
-- `references/ten-step-governance.md` — Complete 10-step governance path
+- `references/ten-step-governance.md` — 11-phase business workflow reference; legacy file name kept as a compatibility alias
 - `references/intent-amplification.md` — Intent Core + Delivery Shell model
 
 Read when the corresponding Type requires deep methodology.

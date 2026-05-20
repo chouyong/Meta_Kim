@@ -96,6 +96,45 @@ describe("business-flow blueprint orchestration", async () => {
     assert.ok(contract.protocols?.agentBlueprintPacket);
   });
 
+  test("business flow contract covers release/install and runtime package lanes", () => {
+    const protocol = contract.protocols?.businessFlowBlueprintPacket ?? {};
+
+    for (const deliverableType of ["runtime_package", "install_release"]) {
+      assert.ok(
+        protocol.deliverableTypeEnum?.includes(deliverableType),
+        `deliverableTypeEnum must include ${deliverableType}`,
+      );
+    }
+
+    for (const laneId of ["release", "install", "runtime_package"]) {
+      assert.ok(
+        protocol.releaseInstallLaneIds?.includes(laneId),
+        `releaseInstallLaneIds must include ${laneId}`,
+      );
+    }
+  });
+
+  test("agent blueprint contract forbids fixed concrete child skills in long-term identity", () => {
+    const policy =
+      contract.protocols?.agentBlueprintPacket?.longTermCapabilityPolicy ?? {};
+
+    assert.equal(policy.forbidConcreteSkillInLongTermAgentIdentity, true);
+    assert.equal(policy.selectedSkillScope, "run_only");
+    for (const provider of [
+      "agent-teams-playbook",
+      "superpowers",
+      "ecc",
+      "findskill",
+    ]) {
+      assert.ok(
+        policy.allowedMetaSkillProviders?.includes(provider),
+        `${provider} must remain allowed as a meta-skill package provider`,
+      );
+    }
+    assert.ok(Array.isArray(policy.forbiddenConcreteSkillPatterns));
+    assert.ok(policy.forbiddenConcreteSkillPatterns.length >= 1);
+  });
+
   test("user-visible agent names must be short business role names, not runtime nicknames", () => {
     const namingPolicy = contract.protocols?.agentBlueprintPacket?.namingPolicy;
     assert.equal(namingPolicy?.businessSemanticNamesOnly, true);
