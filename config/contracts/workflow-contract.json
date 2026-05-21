@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 8,
+  "schemaVersion": 9,
   "owner": "Meta_Kim",
   "businessWorkflow": {
     "id": "business",
@@ -423,6 +423,27 @@
         "fallbackMustDeclareNotPopup": true,
         "claudeNativeChoiceSurfaceUnchanged": true,
         "description": "Codex meta-theory confirmation and decision surfaces must show short multi-option content embedded in a clean user-facing choice card, written according to the runtime/tool selected output language first when Codex or the host has already chosen one, then the user's explicit output-language choice, then the user's latest input language when no stronger language source exists, while keeping protocol identifiers canonical. This is a Codex presentation rule and does not replace preDecisionOptionFrame, formal confirmation gates, or Claude Code native AskUserQuestion behavior. Normal users should not see Preflight, nativeChoiceSurface, conversation_fallback, Multi-Option Snapshot, packet ids, or protocol plumbing unless they explicitly ask for debug, audit, protocol, or governance trace output. When Codex falls back to conversation_fallback and this matters to the user's expectation, it must be described in plain language as a chat card rather than a popup."
+      },
+      "choiceSurfaceGate": {
+        "required": true,
+        "stateField": "choiceSurfaceState",
+        "stateEnum": [
+          "not_allowed",
+          "critical_clarification_allowed",
+          "execution_confirmation_allowed",
+          "completed"
+        ],
+        "defaultState": "not_allowed",
+        "criticalClarificationRule": "Allowed only during Critical when Fetch cannot proceed safely; may clarify intent, scope, permissions, safety, or language; must not present execution options.",
+        "executionConfirmationRule": "Allowed only after contentEvidencePacket and preDecisionOptionFrame exist, before Execution; must present evidence-backed candidate paths and a recommended default.",
+        "forbiddenPrematureTriggers": [
+          "popup_test_request",
+          "interactive_box_test_request",
+          "multiple_options_without_fetch_evidence",
+          "execution_confirmation_before_preDecisionOptionFrame"
+        ],
+        "humanCheck": "No candidate paths means no execution confirmation; no Fetch evidence means Thinking is not complete; no Thinking result means no pre-Execution confirmation.",
+        "description": "Visible choice surfaces are gated by stage and evidence. A user request to test a popup is treated as a task requirement to route through Critical -> Fetch -> Thinking, not permission to call request_user_input before evidence-backed options exist."
       }
     },
     "runStatusEnvelope": {

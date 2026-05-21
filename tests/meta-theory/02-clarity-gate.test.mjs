@@ -26,6 +26,9 @@ describe("Clarity Gate unified execution confirmation", async () => {
   );
   const workflowContract = await readFile("config/contracts/workflow-contract.json");
   const workflowContractJson = JSON.parse(workflowContract);
+  const devGov = await readFile(
+    "canonical/skills/meta-theory/references/dev-governance.md",
+  );
 
   test("confirmation happens after Fetch and Thinking, before Execution", () => {
     assert.match(skillContent, /Fetch\/content evidence.*Thinking\/pre-decision option framing/s);
@@ -263,6 +266,36 @@ describe("Clarity Gate unified execution confirmation", async () => {
     assert.equal(codexPolicy.protocolIdentifiersRemainCanonical, true);
     assert.equal(codexPolicy.fallbackMustDeclareNotPopup, true);
     assert.equal(codexPolicy.claudeNativeChoiceSurfaceUnchanged, true);
+  });
+
+  test("Choice Surface Gate forbids premature popup or execution confirmation", () => {
+    const combined = `${skillContent}\n${workflowContract}\n${devGov}`;
+    const gate =
+      workflowContractJson.runDiscipline?.userInteractionPolicy
+        ?.choiceSurfaceGate;
+
+    assert.ok(gate, "workflow contract must define choiceSurfaceGate");
+    assert.equal(gate.required, true);
+    assert.equal(gate.stateField, "choiceSurfaceState");
+    for (const state of [
+      "not_allowed",
+      "critical_clarification_allowed",
+      "execution_confirmation_allowed",
+      "completed",
+    ]) {
+      assert.ok(gate.stateEnum?.includes(state), `missing state ${state}`);
+      assert.match(combined, new RegExp(state));
+    }
+
+    assert.match(combined, /FORBIDDEN: premature choice surface/i);
+    assert.match(combined, /test a popup|interactive box|popup_test_request/i);
+    assert.match(combined, /Critical[\s\S]*Fetch[\s\S]*Thinking/);
+    assert.match(combined, /Fetch cannot proceed safely/i);
+    assert.match(combined, /must not present execution options/i);
+    assert.match(combined, /contentEvidencePacket[\s\S]*preDecisionOptionFrame/);
+    assert.match(combined, /No candidate paths means no execution confirmation/i);
+    assert.match(combined, /no Fetch evidence means Thinking is not complete/i);
+    assert.match(combined, /no Thinking result means no pre-Execution confirmation/i);
   });
 });
 

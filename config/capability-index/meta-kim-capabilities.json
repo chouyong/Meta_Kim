@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-05-21T12:05:17.392Z",
+  "generatedAt": "2026-05-21T14:00:21.080Z",
   "registryName": "meta-kim-capabilities",
   "scope": "repo-canonical",
   "canonicalProjection": "config/capability-index/meta-kim-capabilities.json",
@@ -193,8 +193,8 @@
         "type": "skills",
         "namespace": "canonical",
         "path": "canonical/skills/meta-theory/SKILL.md",
-        "size": 51596,
-        "modified": "2026-05-21T11:50:18.876Z"
+        "size": 53551,
+        "modified": "2026-05-21T13:51:14.839Z"
       },
       "repo:canonical-reference:create-agent": {
         "id": "create-agent",
@@ -211,8 +211,8 @@
         "namespace": "canonical-reference",
         "path": "canonical/skills/meta-theory/references/dev-governance.md",
         "relativePath": "dev-governance.md",
-        "size": 100654,
-        "modified": "2026-05-21T11:50:18.880Z"
+        "size": 101941,
+        "modified": "2026-05-21T13:51:29.878Z"
       },
       "repo:canonical-reference:intent-amplification": {
         "id": "intent-amplification",
@@ -276,8 +276,8 @@
         "namespace": "canonical-runtime-assets",
         "path": "canonical/runtime-assets/shared/hooks/meta-kim-memory-save.mjs",
         "relativePath": "meta-kim-memory-save.mjs",
-        "size": 15338,
-        "modified": "2026-05-18T20:17:07.760Z"
+        "size": 17059,
+        "modified": "2026-05-21T12:06:01.034Z"
       },
       "repo:canonical-runtime-assets:skip-reminder.mjs": {
         "id": "skip-reminder.mjs",
@@ -294,8 +294,8 @@
         "namespace": "canonical-runtime-assets",
         "path": "canonical/runtime-assets/claude/hooks/spine-state.mjs",
         "relativePath": "spine-state.mjs",
-        "size": 15706,
-        "modified": "2026-05-21T11:30:12.854Z"
+        "size": 19286,
+        "modified": "2026-05-21T13:56:31.262Z"
       },
       "repo:canonical-runtime-assets:utils.mjs": {
         "id": "utils.mjs",
@@ -321,8 +321,8 @@
         "namespace": "canonical-runtime-assets",
         "path": "canonical/runtime-assets/claude/hooks/enforce-agent-dispatch.mjs",
         "relativePath": "enforce-agent-dispatch.mjs",
-        "size": 9328,
-        "modified": "2026-05-19T17:56:55.035Z"
+        "size": 9575,
+        "modified": "2026-05-21T13:57:18.191Z"
       },
       "repo:canonical-runtime-assets:post-console-log-warn.mjs": {
         "id": "post-console-log-warn.mjs",

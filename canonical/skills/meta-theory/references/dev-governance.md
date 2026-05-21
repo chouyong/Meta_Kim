@@ -204,6 +204,15 @@ Default public notice shape:
 
 **Codex native surface boundary**: Codex's official `default_mode_request_user_input` feature flag enables `request_user_input` in Default mode; Meta_Kim's Codex config should set `[features] default_mode_request_user_input = true` so Codex can expose the native interaction surface when the active host supports it. Do not claim Codex produced a popup unless `request_user_input` was available and actually invoked. Codex exec and repository hook adapters cannot create native UI by themselves; they must use a localized `conversation_fallback` chat card and label it as a chat card, not a popup.
 
+**Choice Surface Gate**: Before any runtime question tool, native choice, `request_user_input`, or `conversation_fallback`, record `choiceSurfaceState` as one of `not_allowed`, `critical_clarification_allowed`, `execution_confirmation_allowed`, or `completed`.
+
+- `not_allowed` is the default before Critical classification. No visible choice surface may appear.
+- `critical_clarification_allowed` applies only during Critical and only when Fetch cannot proceed safely. The question may clarify intent, scope, permission, safety, or language. It must not present execution options.
+- `execution_confirmation_allowed` applies only after Fetch has produced `contentEvidencePacket` and Thinking has produced `preDecisionOptionFrame`, and before Execution begins. This is the normal consolidated execution confirmation.
+- `completed` means the user has answered or an allowed skip has been recorded; do not ask again unless scope materially changes.
+
+Popup or interaction testing is a requirement to route through the normal flow, not permission to skip to a native choice surface. If no evidence-backed candidate paths exist, the execution confirmation is premature. If Fetch evidence is missing, Thinking is incomplete. If Thinking is incomplete, pre-Execution confirmation is forbidden.
+
 **Decision Triggers** (from `config/contracts/workflow-contract.json` → `userInteractionPolicy`):
 
 1. `non_trivial_executable_decision`: executable work is not trivial and no explicit auto-proceed exists

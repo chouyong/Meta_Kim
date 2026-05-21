@@ -29,6 +29,13 @@ export const STAGE_PUBLIC_LABELS = {
   evolution: "Evolution",
 };
 
+export const CHOICE_SURFACE_STATES = [
+  "not_allowed",
+  "critical_clarification_allowed",
+  "execution_confirmation_allowed",
+  "completed",
+];
+
 const STAGE_PROGRESS_PERCENT = {
   critical: 12,
   fetch: 25,
@@ -235,6 +242,7 @@ export function createInitialState({ taskClassification, triggerReason }) {
     triggerReason: triggerReason || "user_invocation",
     dispatchedAgents: [],
     dispatchChain: {},
+    choiceSurfaceState: "not_allowed",
     queryBypass: false,
     executionStarted: false,
     // Simple mode: allows hook skipping for lightweight tasks
@@ -450,6 +458,11 @@ export function checkStageRequirements(state) {
     };
   }
 
+  const choiceSurfaceGate = checkChoiceSurfaceGate(state);
+  if (!choiceSurfaceGate.met) {
+    return choiceSurfaceGate;
+  }
+
   return {
     met: missing.length === 0,
     missing,
@@ -458,6 +471,116 @@ export function checkStageRequirements(state) {
         ? `Stage "${stage}" requires meta-agent(s): ${missing.join(", ")}. Dispatch them via Agent tool first.`
         : "requirements met",
   };
+}
+
+function normalizeChoiceSurfaceState(value) {
+  return CHOICE_SURFACE_STATES.includes(value) ? value : "not_allowed";
+}
+
+function hasFetchEvidence(state) {
+  return !!(
+    state?.fetchRecord ||
+    state?.fetchPacket ||
+    state?.contentEvidencePacket ||
+    state?.capabilityEvidencePacket
+  );
+}
+
+function hasCandidateOptions(frame) {
+  if (!frame || typeof frame !== "object") return false;
+  const optionFields = [
+    frame.candidatePaths,
+    frame.solutionPaths,
+    frame.options,
+    frame.candidates,
+    frame.cards,
+  ];
+  return optionFields.some((value) => Array.isArray(value) && value.length > 0);
+}
+
+function getPreDecisionOptionFrame(state) {
+  return (
+    state?.preDecisionOptionFrame ||
+    state?.cardPlanPacket ||
+    state?.businessFlowBlueprintPacket ||
+    null
+  );
+}
+
+function hasChoiceGateSkip(state) {
+  const frame = getPreDecisionOptionFrame(state);
+  return !!(
+    state?.choiceGateSkip ||
+    frame?.choiceGateSkip ||
+    state?.intentGatePacket?.choiceGateSkip
+  );
+}
+
+export function checkChoiceSurfaceGate(state) {
+  if (!state || state.queryBypass || state.simpleMode) {
+    return { met: true, missing: [], reason: "choice surface gate bypassed" };
+  }
+
+  const stage = normalizeStage(state.currentStage);
+  const stageIdx = STAGE_ORDER.indexOf(stage);
+  const thinkingIdx = STAGE_ORDER.indexOf("thinking");
+  const executionIdx = STAGE_ORDER.indexOf("execution");
+  const choiceState = normalizeChoiceSurfaceState(state.choiceSurfaceState);
+  const fetchEvidencePresent = hasFetchEvidence(state);
+  const preDecisionFrame = getPreDecisionOptionFrame(state);
+  const candidateOptionsPresent = hasCandidateOptions(preDecisionFrame);
+  const skipRecorded = hasChoiceGateSkip(state);
+  const decisionBasisPresent =
+    fetchEvidencePresent && (candidateOptionsPresent || skipRecorded);
+
+  if (
+    stageIdx < thinkingIdx &&
+    (choiceState === "execution_confirmation_allowed" ||
+      choiceState === "completed")
+  ) {
+    return {
+      met: false,
+      missing: ["Fetch evidence", "Thinking candidate options"],
+      reason:
+        "Choice Surface Gate violation: execution confirmation appeared before Fetch and Thinking completed.",
+    };
+  }
+
+  if (
+    stage === "thinking" &&
+    (choiceState === "execution_confirmation_allowed" ||
+      choiceState === "completed") &&
+    !decisionBasisPresent
+  ) {
+    return {
+      met: false,
+      missing: ["Fetch evidence", "preDecisionOptionFrame"],
+      reason:
+        "Choice Surface Gate violation: execution confirmation requires Fetch evidence and a Thinking option frame.",
+    };
+  }
+
+  if (stageIdx >= executionIdx) {
+    if (!decisionBasisPresent) {
+      return {
+        met: false,
+        missing: ["Fetch evidence", "preDecisionOptionFrame"],
+        reason:
+          "Execution cannot start before Fetch evidence and Thinking candidate options are recorded.",
+      };
+    }
+
+    if (choiceState !== "completed" && !skipRecorded) {
+      return {
+        met: false,
+        missing: ["choiceSurfaceState=completed"],
+        reason:
+          "Execution cannot start before execution confirmation is completed or an explicit choiceGateSkip is recorded.",
+      };
+    }
+  }
+
+  return { met: true, missing: [], reason: "choice surface gate met" };
 }
 
 export function setQueryBypass(state, bypass) {

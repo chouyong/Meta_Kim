@@ -43,6 +43,21 @@ Every user-visible Codex confirmation or decision surface produced under this sk
 
 When Codex exposes the `request_user_input` tool, use it for Decision surfaces. In Default mode, Meta_Kim's Codex config should enable Codex's official `[features] default_mode_request_user_input = true` flag so that this native interaction path is available when the active host supports it.
 
+**Choice Surface Gate (mandatory before `request_user_input`, native question tools, native choices, or `conversation_fallback`)**:
+
+Before any visible choice surface, set or infer `choiceSurfaceState`:
+
+| `choiceSurfaceState` | Allowed timing | Allowed content | Forbidden content |
+|---|---|---|---|
+| `not_allowed` | Default state before Critical classification | No choice surface | Any popup/card/question asking the user to choose an execution path |
+| `critical_clarification_allowed` | Critical only, and only when Fetch cannot proceed safely | Blocking clarification needed to understand intent, scope, write permission, safety, or language | Execution options, implementation plan choices, "which方案" confirmation, or popup capability tests |
+| `execution_confirmation_allowed` | After Fetch content evidence and Thinking `preDecisionOptionFrame` exist, before Execution | Consolidated execution confirmation with evidence-backed candidate paths and recommended default | New discovery questions that should have happened in Critical/Fetch |
+| `completed` | After the user answered or an allowed skip was recorded | No repeat confirmation unless scope materially changed | Stage-by-stage confirmation spam |
+
+**FORBIDDEN: premature choice surface**. Do not invoke `request_user_input`, a native question tool, or a fallback choice card just because the user asks to "test a popup", "see whether the interactive box appears", or similar. Treat that as a task requirement, not permission to bypass Critical -> Fetch -> Thinking. If information is incomplete but Fetch can still proceed, continue Fetch instead of interrupting. If information is incomplete and Fetch cannot proceed safely, ask only blocking Critical clarification, not an execution-plan confirmation.
+
+**Human check**: no candidate paths means no execution confirmation; no Fetch evidence means Thinking is not complete; no Thinking result means no pre-Execution confirmation.
+
 Normal user-facing output must be a clean choice card, not a protocol dump. Do not show a `Preflight` block, `nativeChoiceSurface`, `conversation_fallback`, `Multi-Option Snapshot`, or other internal packet fields unless the user explicitly asks for debug, audit, protocol, or governance trace output. If a fallback matters to the user's expectation, say it in plain language, for example: "当前以聊天确认卡展示，不是弹窗。"
 
 The choice card must be short and must show at least two viable options for the current decision. It must follow the runtime/tool selected output language first, then the user's explicit output-language choice, then the user's latest input language when no stronger language source exists. Keep only protocol identifiers such as `Critical`, `Fetch`, `Thinking`, and `Execution` in their canonical form when they are truly needed. Example labels such as `Option A` are placeholders; localize them in the actual response, for example `方案 A` when the selected or inferred language is Chinese.
