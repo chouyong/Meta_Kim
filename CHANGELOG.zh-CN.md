@@ -6,6 +6,23 @@
 格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 发布新版本时，请在顶部（旧版本之前）添加新的 **`## [版本号] - YYYY-MM-DD`** 部分。
 
+## [2.0.40] - 2026-05-21
+
+### 新增
+
+- **公开元运行状态 envelope** — meta-theory 运行现在会写入跨运行时的 `active-run.json` 和每轮 `status.json`，用户可以看到元治理是否已触发、当前阶段、进度、下一步和阻塞。
+- **运行状态 CLI** — 新增 `npm run meta:run-status`，用于读取当前公开元治理状态，并支持本地化的未运行输出。
+- **运行状态测试** — 新增状态 envelope 合同、跨平台状态文件写入、本地化状态文本和 notice 模板规则测试。
+
+### 变更
+
+- **阶段通知** — 将偏协议的阶段示例改为简短公开状态提示，默认隐藏 `Preflight`、fallback surface 名称、packet id 和 protocol trace。
+- **运行时镜像** — 已同步项目和全局 Claude Code、Codex、OpenClaw、Cursor 的 meta-theory mirror，带上状态 envelope 行为。
+
+### 修复
+
+- **状态语言匹配** — 公开状态标签和阶段说明现在会跟随用户选择或推断出的语言，同时保留 `Critical`、`Fetch` 等 canonical 阶段名为英文。
+
 ## [2.0.39] - 2026-05-20
 
 ### 新增

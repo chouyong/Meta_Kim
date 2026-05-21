@@ -422,6 +422,88 @@
         "description": "Codex meta-theory confirmation and decision surfaces must show short multi-option content embedded in a clean user-facing choice card, written according to the user's explicit output-language choice first, or the user's latest input language when no explicit choice exists, while keeping protocol identifiers canonical. This is a Codex presentation rule and does not replace preDecisionOptionFrame, formal confirmation gates, or Claude Code native AskUserQuestion behavior. Normal users should not see Preflight, nativeChoiceSurface, conversation_fallback, Multi-Option Snapshot, packet ids, or protocol plumbing unless they explicitly ask for debug, audit, protocol, or governance trace output. When Codex falls back to conversation_fallback and this matters to the user's expectation, it must be described in plain language as a chat card rather than a popup."
       }
     },
+    "runStatusEnvelope": {
+      "enabled": true,
+      "schemaVersion": 1,
+      "purpose": "Give users a stable answer to whether meta-theory governance is active, how far it has progressed, and which stage is current without exposing hidden protocol packets.",
+      "stateFiles": {
+        "activeRun": ".meta-kim/state/{profile}/active-run.json",
+        "perRunStatus": ".meta-kim/state/{profile}/runs/{runId}/status.json"
+      },
+      "writer": "runtime_spine_state_adapter",
+      "pathPolicy": {
+        "crossPlatform": true,
+        "useNodePathJoin": true,
+        "mustStayWithin": ".meta-kim/state",
+        "profileSanitization": "A-Za-z0-9._- only, fallback default"
+      },
+      "requiredFields": [
+        "schemaVersion",
+        "active",
+        "runId",
+        "triggeredBy",
+        "currentStage",
+        "currentStageKey",
+        "stageIndex",
+        "stageTotal",
+        "percent",
+        "completed",
+        "next",
+        "blockedOn",
+        "startedAt",
+        "updatedAt",
+        "lastUserVisibleNotice",
+        "surfaceMode",
+        "locale",
+        "languageSource",
+        "publicSurface",
+        "stagePurpose",
+        "stagePurposeByLocale"
+      ],
+      "stageOrder": [
+        "Critical",
+        "Fetch",
+        "Thinking",
+        "Execution",
+        "Review",
+        "Meta-Review",
+        "Verification",
+        "Evolution"
+      ],
+      "progressPercentByStage": {
+        "Critical": 12,
+        "Fetch": 25,
+        "Thinking": 38,
+        "Execution": 50,
+        "Review": 63,
+        "Meta-Review": 75,
+        "Verification": 88,
+        "Evolution": 100
+      },
+      "publicDisplayPolicy": {
+        "primaryDisplay": "conversation_notice",
+        "showAtActivation": true,
+        "showAtStageTransition": true,
+        "showWhenUserAsksStatus": true,
+        "nativeEnhancementAllowed": true,
+        "popupRequired": false,
+        "doNotExposeInternalPacketFieldsByDefault": true,
+        "hiddenInternalFields": [
+          "Preflight",
+          "nativeChoiceSurface",
+          "conversation_fallback",
+          "packet_id",
+          "protocol_trace"
+        ]
+      },
+      "languagePolicy": "User-facing run status labels and stage purpose text must follow explicit output-language choice first, then latest user input language when the runtime can infer it; the envelope stores localized stagePurposeByLocale values so runtimes can render status in the user's language while keeping stage labels canonical.",
+      "runtimeAdapters": {
+        "claude": "Write the envelope from spine-state hooks and optionally surface it through native status/question UI when available.",
+        "codex": "Write/read the same envelope; surface status as a localized chat notice unless a real host-native choice/status surface is exposed.",
+        "cursor": "Write/read the same envelope; surface status through custom mode/project-rule notices when available, otherwise chat notice.",
+        "openclaw": "Write/read the same envelope from workspace agent state and expose it through workspace status or chat notice."
+      }
+    },
     "controlIntervention": {
       "decisionTypeEnum": [
         "skip",

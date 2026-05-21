@@ -314,15 +314,39 @@ Every option presented must include:
 At each stage transition, output a notice (not a popup):
 
 ```markdown
-## 📋 Stage: {Name}
+Meta governance active: {Current Stage} ({stageIndex}/{stageTotal}, {percent}%)
 
-**Inferred:**
-- Type: {A/B/C/D/E}
-- Scope: {description}
-- Next: {next stage name}
-
-**No confirmation required** unless multiple viable approaches exist.
+Completed: {completed stages or "none"}
+Current: {plain-language work happening now}
+Next: {next stage name or "none"}
+Blocked: {blocker or "none"}
 ```
+
+This notice is the public view of the `runStatusEnvelope`, not the internal protocol trace. It must answer: whether meta-theory governance is active, where it is now, how far it has progressed, what is next, and whether it is blocked. Keep the language aligned with the user's explicit output-language choice first, then latest input language. Keep only protocol stage labels canonical.
+
+The envelope stores localized `stagePurposeByLocale` text. Runtime adapters must render labels such as "Completed / Current / Next / Blocked" in the user's chosen or inferred language; only protocol stage names such as `Critical` and `Fetch` stay in canonical English.
+
+The runtime must also maintain a cross-platform public status file:
+
+```text
+.meta-kim/state/{profile}/active-run.json
+.meta-kim/state/{profile}/runs/{runId}/status.json
+```
+
+These files use the shared `runStatusEnvelope` contract so Claude Code, Codex, Cursor, and OpenClaw can all answer "where is meta now?" without exposing `Preflight`, `nativeChoiceSurface`, `conversation_fallback`, packet ids, or protocol traces to normal users.
+
+Example user-facing notice:
+
+```text
+Meta governance active: Fetch (2/8, 25%)
+
+Completed: Critical
+Current: gathering capability, evidence, and constraint context
+Next: Thinking
+Blocked: none
+```
+
+Do not use this Notice as a Decision surface. If the user must choose among multiple viable paths, use the normal native choice tool or clean conversation choice card after Fetch and Thinking.
 
 ## Fetch-first Pattern (Search → Match → Invoke)
 
@@ -525,6 +549,7 @@ Every station must leave explicit deliverables:
 {
   "active": true,
   "version": 2,
+  "runId": "<stable run id>",
   "triggeredAt": "<ISO timestamp>",
   "currentStage": "critical",
   "stages": {
@@ -544,6 +569,8 @@ Every station must leave explicit deliverables:
   "queryBypass": false
 }
 ```
+
+Writing this spine state also writes the public run status envelope to `.meta-kim/state/{profile}/active-run.json` and `.meta-kim/state/{profile}/runs/{runId}/status.json`. The public envelope is for user status notices and "what stage are we in?" queries; the spine state remains the internal execution gate.
 
 **Dispatch chain enforcement (mandatory)**: The enforcement hook checks that each stage dispatches the required meta-agent. The Agent tool's `description` field **must contain the meta-agent name** (e.g., "meta-warden coordinate") for the hook to record it in `dispatchChain`.
 

@@ -4,6 +4,65 @@ import { join, dirname, resolve, relative, isAbsolute } from "node:path";
 const META_KIM_STATE_ROOT = ".meta-kim/state";
 const DEFAULT_SPINE_STATE_DIR = ".meta-kim/state/default/spine";
 const SPINE_STATE_FILE = "spine-state.json";
+const ACTIVE_RUN_STATUS_FILE = "active-run.json";
+const RUN_STATUS_FILE = "status.json";
+
+export const STAGE_ORDER = [
+  "critical",
+  "fetch",
+  "thinking",
+  "execution",
+  "review",
+  "meta_review",
+  "verification",
+  "evolution",
+];
+
+export const STAGE_PUBLIC_LABELS = {
+  critical: "Critical",
+  fetch: "Fetch",
+  thinking: "Thinking",
+  execution: "Execution",
+  review: "Review",
+  meta_review: "Meta-Review",
+  verification: "Verification",
+  evolution: "Evolution",
+};
+
+const STAGE_PROGRESS_PERCENT = {
+  critical: 12,
+  fetch: 25,
+  thinking: 38,
+  execution: 50,
+  review: 63,
+  meta_review: 75,
+  verification: 88,
+  evolution: 100,
+};
+
+const STAGE_PUBLIC_PURPOSES = {
+  "en-US": {
+    critical:
+      "checking whether governance is active and whether clarification is needed",
+    fetch: "gathering capability, evidence, and constraint context",
+    thinking: "comparing viable paths and shaping the execution plan",
+    execution: "dispatching or applying the approved work",
+    review: "checking output quality, risk, and boundary fit",
+    meta_review: "checking whether the review standard itself was sufficient",
+    verification: "confirming findings are closed and the result is usable",
+    evolution: "deciding whether durable writeback is needed",
+  },
+  "zh-CN": {
+    critical: "判断元治理是否已触发，以及是否需要先澄清",
+    fetch: "正在收集能力、证据和约束",
+    thinking: "正在比较可行方案并形成执行计划",
+    execution: "正在派发或执行已确认的工作",
+    review: "正在检查产出质量、风险和边界匹配",
+    meta_review: "正在检查 Review 阶段本身是否足够可靠",
+    verification: "正在确认问题是否闭环、结果是否可用",
+    evolution: "正在判断是否需要写回长期规则或能力",
+  },
+};
 
 export const STAGE_META_AGENT_MAP = {
   critical: {
@@ -46,6 +105,10 @@ const META_AGENT_NAMES = [
   "meta-prism",
   "meta-scout",
 ];
+
+function createRunId(timestamp = new Date().toISOString()) {
+  return `meta-${timestamp.replace(/[:.]/g, "-")}`;
+}
 
 function isWithin(parent, target) {
   const rel = relative(parent, target);
@@ -114,6 +177,42 @@ function ensureDir(filePath) {
   return mkdir(dirname(filePath), { recursive: true });
 }
 
+function normalizeStage(stageName) {
+  if (typeof stageName !== "string") return "critical";
+  const normalized = stageName.trim().toLowerCase().replace(/-/g, "_");
+  return STAGE_ORDER.includes(normalized) ? normalized : "critical";
+}
+
+function profileFromState(state) {
+  return sanitizeStateProfile(
+    state?.profile || state?.stateProfile || process.env.META_KIM_STATE_PROFILE,
+  );
+}
+
+function normalizeLocale(input) {
+  const raw = typeof input === "string" ? input.trim().toLowerCase() : "";
+  if (raw.startsWith("zh")) return "zh-CN";
+  return "en-US";
+}
+
+function localeFromState(state) {
+  return normalizeLocale(
+    state?.userLanguage ||
+      state?.intentGatePacket?.userLanguage ||
+      state?.locale ||
+      process.env.META_KIM_LOCALE ||
+      process.env.LANG,
+  );
+}
+
+function runStatusPaths(cwd, profile, runId) {
+  const profileDir = resolveProfileStateDir(cwd, profile);
+  return {
+    activeRun: join(profileDir, ACTIVE_RUN_STATUS_FILE),
+    runStatus: join(profileDir, "runs", runId, RUN_STATUS_FILE),
+  };
+}
+
 export async function readSpineState(cwd) {
   const filePath = spineStatePath(cwd);
   try {
@@ -128,13 +227,16 @@ export async function writeSpineState(cwd, state) {
   const filePath = spineStatePath(cwd);
   await ensureDir(filePath);
   await writeFile(filePath, JSON.stringify(state, null, 2), "utf-8");
+  await writeMetaRunStatus(cwd, state);
 }
 
 export function createInitialState({ taskClassification, triggerReason }) {
+  const triggeredAt = new Date().toISOString();
   return {
     active: true,
     version: 2,
-    triggeredAt: new Date().toISOString(),
+    runId: createRunId(triggeredAt),
+    triggeredAt,
     currentStage: "critical",
     stages: {
       critical: { status: "in_progress", completedAt: null },
@@ -159,17 +261,100 @@ export function createInitialState({ taskClassification, triggerReason }) {
   };
 }
 
+export function createMetaRunStatusEnvelope(state, options = {}) {
+  const currentStage = normalizeStage(
+    options.currentStage || state?.currentStage || "critical",
+  );
+  const stageIndex = STAGE_ORDER.indexOf(currentStage) + 1;
+  const stageTotal = STAGE_ORDER.length;
+  const stages = state?.stages || {};
+  const completed = STAGE_ORDER.filter(
+    (stage) => stages?.[stage]?.status === "completed",
+  ).map((stage) => STAGE_PUBLIC_LABELS[stage]);
+  const nextStage =
+    stageIndex < stageTotal ? STAGE_ORDER[stageIndex] : null;
+  const startedAt =
+    state?.triggeredAt || state?.startedAt || new Date().toISOString();
+  const updatedAt = new Date().toISOString();
+  const runId = state?.runId || createRunId(startedAt);
+  const locale = options.locale
+    ? normalizeLocale(options.locale)
+    : localeFromState(state);
+  const stagePurposeByLocale = Object.fromEntries(
+    Object.entries(STAGE_PUBLIC_PURPOSES).map(([localeKey, table]) => [
+      localeKey,
+      table[currentStage],
+    ]),
+  );
+
+  return {
+    schemaVersion: 1,
+    active: state?.active !== false,
+    runId,
+    triggeredBy:
+      state?.triggerReason || state?.triggeredBy || "meta-theory",
+    currentStage: STAGE_PUBLIC_LABELS[currentStage],
+    currentStageKey: currentStage,
+    stageIndex,
+    stageTotal,
+    percent: STAGE_PROGRESS_PERCENT[currentStage],
+    completed,
+    next: nextStage ? STAGE_PUBLIC_LABELS[nextStage] : null,
+    blockedOn: state?.blockedOn || null,
+    startedAt,
+    updatedAt,
+    lastUserVisibleNotice: state?.lastUserVisibleNotice || null,
+    surfaceMode: "public",
+    locale,
+    languageSource:
+      state?.userLanguage || state?.intentGatePacket?.userLanguage
+        ? "state"
+        : "environment_or_default",
+    publicSurface: {
+      primaryDisplay: "conversation_notice",
+      nativeEnhancementAllowed: true,
+      popupRequired: false,
+      hiddenInternalFields: [
+        "Preflight",
+        "nativeChoiceSurface",
+        "conversation_fallback",
+        "packet_id",
+        "protocol_trace",
+      ],
+    },
+    stagePurpose: stagePurposeByLocale[locale] || stagePurposeByLocale["en-US"],
+    stagePurposeByLocale,
+  };
+}
+
+export async function writeMetaRunStatus(cwd, state, options = {}) {
+  if (!state || typeof state !== "object") return null;
+  const envelope = createMetaRunStatusEnvelope(state, options);
+  const profile = profileFromState(state);
+  const paths = runStatusPaths(cwd, profile, envelope.runId);
+  await ensureDir(paths.activeRun);
+  await ensureDir(paths.runStatus);
+  const serialized = JSON.stringify(envelope, null, 2);
+  await Promise.all([
+    writeFile(paths.activeRun, serialized, "utf-8"),
+    writeFile(paths.runStatus, serialized, "utf-8"),
+  ]);
+  return envelope;
+}
+
+export async function readMetaRunStatus(cwd, profile) {
+  const filePath = runStatusPaths(cwd, sanitizeStateProfile(profile), "latest")
+    .activeRun;
+  try {
+    const raw = await readFile(filePath, "utf-8");
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
 export function advanceStage(state, stageName) {
-  const stageOrder = [
-    "critical",
-    "fetch",
-    "thinking",
-    "execution",
-    "review",
-    "meta_review",
-    "verification",
-    "evolution",
-  ];
+  const stageOrder = STAGE_ORDER;
 
   const idx = stageOrder.indexOf(stageName);
   if (idx === -1) return state;
@@ -210,16 +395,7 @@ export function completeStage(state, stageName) {
     completedAt: new Date().toISOString(),
   };
 
-  const stageOrder = [
-    "critical",
-    "fetch",
-    "thinking",
-    "execution",
-    "review",
-    "meta_review",
-    "verification",
-    "evolution",
-  ];
+  const stageOrder = STAGE_ORDER;
   const idx = stageOrder.indexOf(stageName);
   if (idx < stageOrder.length - 1) {
     const nextStage = stageOrder[idx + 1];

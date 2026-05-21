@@ -181,6 +181,21 @@ Stage names remain canonical English protocol labels (`Critical`, `Fetch`, `Thin
 - **Notice (no popup)**: Informational updates, stage transitions, progress reports. Output directly to conversation, no response required. See `canonical/templates/user-interaction/notice-template.md`
 - **Decision (popup)**: Use the runtime's native confirmation mechanism when multiple viable options exist. Each option must include 4 dimensions. See `canonical/templates/user-interaction/decision-template.md`
 
+**Run status envelope**: every governed run must maintain a public status envelope in `.meta-kim/state/{profile}/active-run.json` and `.meta-kim/state/{profile}/runs/{runId}/status.json`. This envelope is the cross-runtime answer to "has meta started, how far is it, which stage is current, what is next, and is it blocked?" It is written by the runtime spine-state adapter using Node path APIs so Windows, macOS, Linux, Claude Code, Codex, Cursor, and OpenClaw all share the same state shape. The public notice reads from this envelope and must not expose `Preflight`, `nativeChoiceSurface`, `conversation_fallback`, packet ids, or protocol traces unless the user explicitly asks for debug/audit/protocol output.
+
+The public status renderer follows the same language rule as all other user-facing meta-theory text: explicit output-language choice first, then latest user input language when inferable. The envelope stores localized `stagePurposeByLocale` text so labels and stage purpose can be shown in the user language while canonical stage names remain English.
+
+Default public notice shape:
+
+```text
+Meta governance active: {Current Stage} ({stageIndex}/{stageTotal}, {percent}%)
+
+Completed: {completed stages or none}
+Current: {plain-language stage purpose}
+Next: {next stage or none}
+Blocked: {blocker or none}
+```
+
 **Non-trivial execution rule**: For non-trivial executable work, Decision is the default after Fetch and pre-decision Thinking unless the user explicitly chose auto-proceed, the task is trivial, or `queryBypass: true` applies. Skips must be recorded as `choiceGateSkip`; silent skips fail Review.
 
 **Codex visible multi-option choice rule**: In Codex, every user-visible `meta-theory` confirmation or decision surface must include a short multi-option choice card with at least two options and a recommended default. This applies to user-facing Decisions; Notices and summaries may stay concise unless they ask the user to choose. It is a presentation rule only: it does not turn every Notice into a popup, does not override `queryBypass`, and does not replace `preDecisionOptionFrame` or the formal Decision gate. The choice card must follow the user's explicit output-language choice first, then the user's latest input language when no explicit choice exists, while required protocol identifiers such as `Critical` and `Fetch` stay canonical. If only one practical path exists, include the rejected alternative and the reason it was rejected. Claude Code native question tool behavior remains unchanged.
