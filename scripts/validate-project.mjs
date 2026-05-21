@@ -697,8 +697,8 @@ async function validateWorkflowContract() {
   );
   assert(
     userLanguagePolicy?.userFacingTextLanguageSource ===
-      "latest_user_message_or_explicit_preference",
-    "workflow-contract.json userLanguagePolicy must follow latest user language or explicit preference.",
+      "explicit_output_language_choice_else_latest_user_input_language",
+    "workflow-contract.json userLanguagePolicy must follow explicit output-language choice first, then latest user input language.",
   );
   assert(
     typeof userLanguagePolicy?.fallbackLocale === "string" &&

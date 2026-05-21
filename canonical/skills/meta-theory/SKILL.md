@@ -43,7 +43,7 @@ Every user-visible Codex output produced under this skill must include a **Multi
 
 The snapshot must be short and must show at least two viable options whenever the output is visible to the user, including status updates, preflight notes, confirmation cards, degraded-path notices, review summaries, verification summaries, and final answers.
 
-The snapshot is user-facing text. It must follow the user's latest language or explicit language preference. Keep only protocol identifiers such as `Critical`, `Fetch`, `Thinking`, `Execution`, `nativeChoiceSurface`, and `conversation_fallback` in their canonical form. Example labels such as `Option A` are placeholders; localize them in the actual response, for example `方案 A` for Chinese.
+The snapshot is user-facing text. It must first follow the user's explicit output-language choice when one exists; if no explicit choice exists, infer the language from the user's latest input. Keep only protocol identifiers such as `Critical`, `Fetch`, `Thinking`, `Execution`, `nativeChoiceSurface`, and `conversation_fallback` in their canonical form. Example labels such as `Option A` are placeholders; localize them in the actual response, for example `方案 A` when the selected or inferred language is Chinese.
 
 Do not describe a Codex fallback card as a popup. In Codex, `conversation_fallback` means a chat card in the conversation. Call it a native popup only when a real Codex host-provided choice tool is available and has actually been invoked.
 
@@ -154,7 +154,7 @@ Conductor owns evidence-lane validation and may not finalize dispatch until the 
 
 Protocol stage labels stay canonical English: `Critical`, `Fetch`, `Thinking`, `Execution`, `Review`, `Meta-Review`, `Verification`, `Evolution`.
 
-User-facing text must follow the user's latest language or explicit language preference. Do not hardcode Chinese, English, or any single human language for clarification prompts, option labels, confirmation text, or explanations. If the user changes language mid-run, subsequent user-visible cards and summaries follow the newer preference while preserving canonical stage labels.
+User-facing text must follow this language priority: first the user's explicit output-language choice, then the user's latest input language when no explicit choice exists. Do not hardcode Chinese, English, or any single human language for clarification prompts, option labels, confirmation text, or explanations. If the user changes language mid-run without an explicit output-language override, subsequent user-visible cards and summaries follow the newer input language while preserving canonical stage labels.
 
 For `clarify`, `option_select`, and `confirm_execution` cards, prefer the current platform's native choice surface when it exists:
 

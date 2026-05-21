@@ -221,7 +221,8 @@ describe("Clarity Gate unified execution confirmation", async () => {
     assert.match(skillContent, /Every user-visible Codex output/s);
     assert.match(skillContent, /Multi-Option Snapshot/);
     assert.match(skillContent, /at least two viable options/i);
-    assert.match(skillContent, /user's latest language/i);
+    assert.match(skillContent, /explicit output-language choice/i);
+    assert.match(skillContent, /latest input/i);
     assert.match(skillContent, /Option A.*placeholders|placeholders.*Option A/s);
     assert.match(skillContent, /方案 A/);
     assert.match(skillContent, /conversation_fallback.*chat card/i);
@@ -235,7 +236,10 @@ describe("Clarity Gate unified execution confirmation", async () => {
     assert.equal(codexPolicy.required, true);
     assert.equal(codexPolicy.minimumOptions, 2);
     assert.equal(codexPolicy.appliesTo, "every_user_visible_codex_meta_theory_output");
-    assert.equal(codexPolicy.languagePolicy, "latest_user_language");
+    assert.equal(
+      codexPolicy.languagePolicy,
+      "explicit_output_language_choice_else_latest_user_input_language",
+    );
     assert.equal(codexPolicy.protocolIdentifiersRemainCanonical, true);
     assert.equal(codexPolicy.fallbackMustDeclareNotPopup, true);
     assert.equal(codexPolicy.claudeNativeChoiceSurfaceUnchanged, true);

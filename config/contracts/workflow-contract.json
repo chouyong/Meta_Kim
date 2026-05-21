@@ -320,9 +320,9 @@
     "userLanguagePolicy": {
       "hardcodedSingleHumanLanguageForbidden": true,
       "stageLabelsRemainCanonicalEnglish": true,
-      "userFacingTextLanguageSource": "latest_user_message_or_explicit_preference",
+      "userFacingTextLanguageSource": "explicit_output_language_choice_else_latest_user_input_language",
       "fallbackLocale": "en",
-      "description": "Stage names such as Critical, Fetch, Thinking, and Review remain canonical protocol labels. Human-facing option labels, clarifying questions, explanations, and confirmation text must follow the user's latest language or explicit language preference instead of hardcoding Chinese, English, or any single locale."
+      "description": "Stage names such as Critical, Fetch, Thinking, and Review remain canonical protocol labels. Human-facing option labels, clarifying questions, explanations, and confirmation text must first follow the user's explicit output-language choice when one exists; when no explicit choice exists, infer the language from the user's latest input instead of hardcoding Chinese, English, or any single locale."
     },
     "runtimeNativeChoiceSurfaces": {
       "claude": {
@@ -402,13 +402,13 @@
         "minimumOptions": 2,
         "appliesTo": "every_user_visible_codex_meta_theory_output",
         "requiredLabel": "Multi-Option Snapshot",
-        "languagePolicy": "latest_user_language",
+        "languagePolicy": "explicit_output_language_choice_else_latest_user_input_language",
         "protocolIdentifiersRemainCanonical": true,
         "requiresRecommendedDefault": true,
         "requiresRejectedAlternativeWhenOnlyOnePracticalPathExists": true,
         "fallbackMustDeclareNotPopup": true,
         "claudeNativeChoiceSurfaceUnchanged": true,
-        "description": "Codex meta-theory delivery must show a short visible multi-option snapshot on every user-visible output, written in the user's latest language while keeping protocol identifiers canonical. This is a Codex presentation rule and does not replace preDecisionOptionFrame, formal confirmation gates, or Claude Code native AskUserQuestion behavior. When Codex falls back to conversation_fallback, it must be described as a chat card rather than a popup."
+        "description": "Codex meta-theory delivery must show a short visible multi-option snapshot on every user-visible output, written according to the user's explicit output-language choice first, or the user's latest input language when no explicit choice exists, while keeping protocol identifiers canonical. This is a Codex presentation rule and does not replace preDecisionOptionFrame, formal confirmation gates, or Claude Code native AskUserQuestion behavior. When Codex falls back to conversation_fallback, it must be described as a chat card rather than a popup."
       }
     },
     "controlIntervention": {

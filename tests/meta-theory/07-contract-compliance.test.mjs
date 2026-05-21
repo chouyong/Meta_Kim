@@ -271,7 +271,7 @@ describe("workflow-contract.json — schema compliance", async () => {
     assert.equal(language.stageLabelsRemainCanonicalEnglish, true);
     assert.equal(
       language.userFacingTextLanguageSource,
-      "latest_user_message_or_explicit_preference",
+      "explicit_output_language_choice_else_latest_user_input_language",
     );
     assert.ok(language.fallbackLocale, "userLanguagePolicy.fallbackLocale");
 
