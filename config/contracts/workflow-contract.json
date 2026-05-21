@@ -400,15 +400,26 @@
       "codexVisibleMultiOptionOutput": {
         "required": true,
         "minimumOptions": 2,
-        "appliesTo": "every_user_visible_codex_meta_theory_output",
-        "requiredLabel": "Multi-Option Snapshot",
+        "appliesTo": "every_user_visible_codex_meta_theory_confirmation_or_decision_surface",
+        "normalPresentation": "embedded_clean_choice_card",
+        "debugLabel": "Multi-Option Snapshot",
+        "visibleLabelRequired": false,
+        "internalPreflightHiddenByDefault": true,
+        "internalFieldsHiddenByDefault": [
+          "Preflight",
+          "nativeChoiceSurface",
+          "conversation_fallback",
+          "packet_id",
+          "protocol_trace"
+        ],
+        "debugVisibilityRequiresExplicitUserRequest": true,
         "languagePolicy": "explicit_output_language_choice_else_latest_user_input_language",
         "protocolIdentifiersRemainCanonical": true,
         "requiresRecommendedDefault": true,
         "requiresRejectedAlternativeWhenOnlyOnePracticalPathExists": true,
         "fallbackMustDeclareNotPopup": true,
         "claudeNativeChoiceSurfaceUnchanged": true,
-        "description": "Codex meta-theory delivery must show a short visible multi-option snapshot on every user-visible output, written according to the user's explicit output-language choice first, or the user's latest input language when no explicit choice exists, while keeping protocol identifiers canonical. This is a Codex presentation rule and does not replace preDecisionOptionFrame, formal confirmation gates, or Claude Code native AskUserQuestion behavior. When Codex falls back to conversation_fallback, it must be described as a chat card rather than a popup."
+        "description": "Codex meta-theory confirmation and decision surfaces must show short multi-option content embedded in a clean user-facing choice card, written according to the user's explicit output-language choice first, or the user's latest input language when no explicit choice exists, while keeping protocol identifiers canonical. This is a Codex presentation rule and does not replace preDecisionOptionFrame, formal confirmation gates, or Claude Code native AskUserQuestion behavior. Normal users should not see Preflight, nativeChoiceSurface, conversation_fallback, Multi-Option Snapshot, packet ids, or protocol plumbing unless they explicitly ask for debug, audit, protocol, or governance trace output. When Codex falls back to conversation_fallback and this matters to the user's expectation, it must be described in plain language as a chat card rather than a popup."
       }
     },
     "controlIntervention": {

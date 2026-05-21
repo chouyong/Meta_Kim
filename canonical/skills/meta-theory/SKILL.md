@@ -33,36 +33,42 @@ When running inside Codex, this skill is an execution protocol, not just a discu
 
 - `Agent(...)` maps to Codex `spawn_agent`. A user invocation of `/meta-theory`, `meta-theory`, `meta theory`, `元理论`, or a `[$meta-theory](...)` skill mention is itself an explicit user request for subagents/delegation/parallel agent work; do not require the user to additionally say "use subagents" or "allow spawn_agent".
 - Apply `agent-teams-playbook` from the first available skill root before substantive work; convert its blueprint into capability-matched `spawn_agent` calls
-- Output a **Preflight block** before analysis: loaded skills, Type, scenario/mode, read/write scope, authorization tier, capability lookup path, planned agents or blocked reason
+- Build an internal Preflight packet before analysis: loaded skills, Type, scenario/mode, read/write scope, authorization tier, capability lookup path, planned agents or blocked reason. Do not show this packet to normal users. Show it only when the user explicitly asks for debug, audit, protocol, or governance trace output.
 - Keep main Codex thread limited to clarification, routing, verification, and synthesis
 - If `agent-teams-playbook` cannot load or `spawn_agent` is unavailable, record the blocked reason and follow the degraded path — do not silently continue as main-thread analysis
 
-### Codex Multi-Option Output Rule
+### Codex Multi-Option Choice Surface Rule
 
-Every user-visible Codex output produced under this skill must include a **Multi-Option Snapshot**. This is a Codex delivery rule, not a replacement for the Thinking-stage `preDecisionOptionFrame` or the formal confirmation gate.
+Every user-visible Codex confirmation or decision surface produced under this skill must contain multi-option choice content. This is a Codex delivery rule, not a replacement for the Thinking-stage `preDecisionOptionFrame` or the formal confirmation gate.
 
-The snapshot must be short and must show at least two viable options whenever the output is visible to the user, including status updates, preflight notes, confirmation cards, degraded-path notices, review summaries, verification summaries, and final answers.
+Normal user-facing output must be a clean choice card, not a protocol dump. Do not show a `Preflight` block, `nativeChoiceSurface`, `conversation_fallback`, `Multi-Option Snapshot`, or other internal packet fields unless the user explicitly asks for debug, audit, protocol, or governance trace output. If a fallback matters to the user's expectation, say it in plain language, for example: "当前以聊天确认卡展示，不是弹窗。"
 
-The snapshot is user-facing text. It must first follow the user's explicit output-language choice when one exists; if no explicit choice exists, infer the language from the user's latest input. Keep only protocol identifiers such as `Critical`, `Fetch`, `Thinking`, `Execution`, `nativeChoiceSurface`, and `conversation_fallback` in their canonical form. Example labels such as `Option A` are placeholders; localize them in the actual response, for example `方案 A` when the selected or inferred language is Chinese.
+The choice card must be short and must show at least two viable options for the current decision. It must first follow the user's explicit output-language choice when one exists; if no explicit choice exists, infer the language from the user's latest input. Keep only protocol identifiers such as `Critical`, `Fetch`, `Thinking`, and `Execution` in their canonical form when they are truly needed. Example labels such as `Option A` are placeholders; localize them in the actual response, for example `方案 A` when the selected or inferred language is Chinese.
 
 Do not describe a Codex fallback card as a popup. In Codex, `conversation_fallback` means a chat card in the conversation. Call it a native popup only when a real Codex host-provided choice tool is available and has actually been invoked.
 
-Required shape:
+Normal public shape:
 
 ```text
-Multi-Option Snapshot:
-- Option A: [plain-language path]. Result: [what the user gets]. Trade-off: [main cost or risk].
-- Option B: [plain-language path]. Result: [what the user gets]. Trade-off: [main cost or risk].
-- Default: [chosen or recommended path] because [evidence-based reason].
+这是执行前确认卡，不会修改文件。
+
+1. [choice dimension]
+A. [plain-language path]. Result: [what the user gets]. Trade-off: [main cost or risk].
+B. [plain-language path]. Result: [what the user gets]. Trade-off: [main cost or risk].
+
+Default: [chosen or recommended path] because [evidence-based reason].
 ```
 
 If only one practical path exists, still show the rejected alternative so the user can see the decision boundary:
 
 ```text
-Multi-Option Snapshot:
-- Option A: [practical path]. Result: [what the user gets]. Trade-off: [main cost or risk].
-- Option B: [rejected path]. Result: [what would happen]. Trade-off: Rejected because [specific reason].
-- Default: Option A because [specific reason].
+这是执行前确认卡，不会修改文件。
+
+1. [choice dimension]
+A. [practical path]. Result: [what the user gets]. Trade-off: [main cost or risk].
+B. [rejected path]. Result: [what would happen]. Trade-off: Rejected because [specific reason].
+
+Default: A because [specific reason].
 ```
 
 This Codex rule does not alter Claude Code behavior. Claude Code native question tool remains unchanged: when available, it remains the primary surface for blocking clarification and execution confirmation.

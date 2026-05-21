@@ -216,17 +216,18 @@ describe("Clarity Gate unified execution confirmation", async () => {
     assert.match(codexPolicyText, /chat card.*popup|popup.*chat card/i);
   });
 
-  test("Codex meta-theory outputs always include a visible multi-option snapshot", () => {
-    assert.match(skillContent, /Codex Multi-Option Output Rule/);
-    assert.match(skillContent, /Every user-visible Codex output/s);
-    assert.match(skillContent, /Multi-Option Snapshot/);
+  test("Codex meta-theory choice surfaces embed options without exposing protocol logs", () => {
+    assert.match(skillContent, /Codex Multi-Option Choice Surface Rule/);
+    assert.match(skillContent, /confirmation or decision surface/s);
+    assert.match(skillContent, /clean choice card/i);
+    assert.match(skillContent, /Do not show a `Preflight` block/i);
+    assert.match(skillContent, /unless the user explicitly asks for debug, audit, protocol, or governance trace output/i);
     assert.match(skillContent, /at least two viable options/i);
     assert.match(skillContent, /explicit output-language choice/i);
     assert.match(skillContent, /latest input/i);
     assert.match(skillContent, /Option A.*placeholders|placeholders.*Option A/s);
     assert.match(skillContent, /方案 A/);
-    assert.match(skillContent, /conversation_fallback.*chat card/i);
-    assert.match(skillContent, /not a popup/i);
+    assert.match(skillContent, /当前以聊天确认卡展示，不是弹窗/);
     assert.match(skillContent, /Claude Code native question tool remains unchanged/i);
 
     const codexPolicy =
@@ -235,7 +236,18 @@ describe("Clarity Gate unified execution confirmation", async () => {
     assert.ok(codexPolicy, "workflow contract must define Codex visible multi-option policy");
     assert.equal(codexPolicy.required, true);
     assert.equal(codexPolicy.minimumOptions, 2);
-    assert.equal(codexPolicy.appliesTo, "every_user_visible_codex_meta_theory_output");
+    assert.equal(
+      codexPolicy.appliesTo,
+      "every_user_visible_codex_meta_theory_confirmation_or_decision_surface",
+    );
+    assert.equal(codexPolicy.normalPresentation, "embedded_clean_choice_card");
+    assert.equal(codexPolicy.debugLabel, "Multi-Option Snapshot");
+    assert.equal(codexPolicy.visibleLabelRequired, false);
+    assert.equal(codexPolicy.internalPreflightHiddenByDefault, true);
+    assert.ok(codexPolicy.internalFieldsHiddenByDefault?.includes("Preflight"));
+    assert.ok(codexPolicy.internalFieldsHiddenByDefault?.includes("nativeChoiceSurface"));
+    assert.ok(codexPolicy.internalFieldsHiddenByDefault?.includes("conversation_fallback"));
+    assert.equal(codexPolicy.debugVisibilityRequiresExplicitUserRequest, true);
     assert.equal(
       codexPolicy.languagePolicy,
       "explicit_output_language_choice_else_latest_user_input_language",
