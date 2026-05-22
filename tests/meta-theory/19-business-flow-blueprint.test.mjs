@@ -207,7 +207,7 @@ describe("business-flow blueprint orchestration", async () => {
       artifact.businessFlowBlueprintPacket.deliverableType = "web_app";
       artifact.businessFlowBlueprintPacket.requiredLanes = [
         lane("product"),
-        lane("frontend", "auth-specialist"),
+        lane("frontend", "meta-conductor"),
       ];
       artifact.businessFlowBlueprintPacket.optionalLanes = [];
       artifact.businessFlowBlueprintPacket.omittedLanes = [
@@ -260,7 +260,7 @@ describe("business-flow blueprint orchestration", async () => {
       validateRunArtifact(
         "tests/fixtures/run-artifacts/invalid-run-same-owner-overlap.json",
       ),
-      /same ownerAgent auth-specialist in parallelGroup auth-parallel must use one mergeOwner/,
+      /same ownerAgent meta-conductor in parallelGroup auth-parallel must use one mergeOwner/,
     );
   });
 

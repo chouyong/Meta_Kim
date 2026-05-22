@@ -213,7 +213,7 @@
     "defaultShellId": "shell-structured-status"
   },
   "dispatchEnvelopePacket": {
-    "ownerAgent": "meta-conductor",
+    "ownerAgent": "auth-specialist",
     "taskRef": "task-001",
     "allowedCapabilities": [
       "auth_refresh_hardening",
@@ -274,7 +274,7 @@
       "lengthExpectation": "targeted multi-file change",
       "visualOrAssetPlan": "none",
       "dependsOn": [],
-      "parallelGroup": "auth-parallel",
+      "parallelGroup": "auth-core",
       "mergeOwner": "meta-warden",
       "verifySteps": [
         {
@@ -286,7 +286,7 @@
           "verify": "test suite passes"
         }
       ],
-      "ownerAgent": "meta-conductor",
+      "ownerAgent": "auth-specialist",
       "businessRoleId": "backend",
       "roleDisplayName": "backend",
       "roleInstanceId": "auth-refresh#1",
@@ -301,47 +301,6 @@
       "preDecisionOptionFrameRef": "preDecisionOptionFrame",
       "userChoiceState": "explicit_auto_proceed",
       "finalizationGate": "after_user_choice_or_explicit_auto_proceed"
-    },
-    {
-      "taskPacketId": "task-002",
-      "owner": "meta-conductor",
-      "ownerMode": "existing-owner",
-      "todayTask": "update refresh-token tests for env-only behavior",
-      "output": "code diff + verification notes",
-      "deliverableLink": "auth-refresh-hardening:test-coverage",
-      "qualityBar": "no hardcoded secret and review finding fully closable",
-      "referenceDirection": "follow auth boundary rules",
-      "handoffTarget": "meta-prism",
-      "lengthExpectation": "targeted multi-file change",
-      "visualOrAssetPlan": "none",
-      "dependsOn": [],
-      "parallelGroup": "auth-parallel",
-      "mergeOwner": "meta-warden",
-      "verifySteps": [
-        {
-          "step": "replace inline secret fallback with env lookup",
-          "verify": "no hardcoded secret in refresh.ts"
-        },
-        {
-          "step": "update refresh.test.ts for new env-based path",
-          "verify": "test suite passes"
-        }
-      ],
-      "ownerAgent": "meta-conductor",
-      "businessRoleId": "backend",
-      "roleDisplayName": "backend",
-      "roleInstanceId": "auth-refresh#2",
-      "runtimeInstanceAlias": "",
-      "shardKey": "file-scope",
-      "shardScope": [
-        "auth-refresh-hardening:test-coverage"
-      ],
-      "workspaceIsolation": "same_workspace_readonly_overlap",
-      "artifactNamespace": "auth-refresh-tests",
-      "collisionPolicy": "no_overlap",
-      "preDecisionOptionFrameRef": "preDecisionOptionFrame",
-      "userChoiceState": "explicit_auto_proceed",
-      "finalizationGate": "after_user_choice_or_explicit_auto_proceed"
     }
   ],
   "workerResultPackets": [
@@ -351,16 +310,6 @@
       "status": "completed",
       "producedArtifacts": [
         "src/auth/refresh.ts",
-        "tests/auth/refresh.test.ts"
-      ],
-      "handoffTarget": "meta-prism",
-      "blockingIssues": []
-    },
-    {
-      "taskPacketId": "task-002",
-      "owner": "meta-conductor",
-      "status": "completed",
-      "producedArtifacts": [
         "tests/auth/refresh.test.ts"
       ],
       "handoffTarget": "meta-prism",
@@ -692,7 +641,7 @@
       {
         "businessRoleId": "backend",
         "roleDisplayName": "backend",
-        "ownerAgent": "meta-conductor",
+        "ownerAgent": "auth-specialist",
         "capabilityNeed": "auth refresh implementation",
         "ownerResolution": "reuse_existing_owner",
         "minInstances": 1,

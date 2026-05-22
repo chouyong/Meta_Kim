@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-05-21T18:34:32.207Z",
+  "generatedAt": "2026-05-22T05:36:57.530Z",
   "registryName": "meta-kim-capabilities",
   "scope": "repo-canonical",
   "canonicalProjection": "config/capability-index/meta-kim-capabilities.json",
@@ -101,8 +101,8 @@
         "type": "agents",
         "namespace": "canonical",
         "path": "canonical/agents/meta-artisan.md",
-        "size": 16469,
-        "modified": "2026-05-21T18:23:25.394Z",
+        "size": 16366,
+        "modified": "2026-05-22T05:35:55.530Z",
         "layer": "meta",
         "executionBlock": true
       },
@@ -111,8 +111,8 @@
         "type": "agents",
         "namespace": "canonical",
         "path": "canonical/agents/meta-chrysalis.md",
-        "size": 28818,
-        "modified": "2026-05-21T18:26:44.906Z",
+        "size": 28848,
+        "modified": "2026-05-22T05:15:33.594Z",
         "layer": "meta",
         "executionBlock": true
       },
@@ -121,8 +121,8 @@
         "type": "agents",
         "namespace": "canonical",
         "path": "canonical/agents/meta-conductor.md",
-        "size": 50985,
-        "modified": "2026-05-21T18:26:14.200Z",
+        "size": 50499,
+        "modified": "2026-05-22T05:35:55.530Z",
         "layer": "meta",
         "executionBlock": true
       },
@@ -131,8 +131,8 @@
         "type": "agents",
         "namespace": "canonical",
         "path": "canonical/agents/meta-genesis.md",
-        "size": 20004,
-        "modified": "2026-05-21T18:24:02.925Z",
+        "size": 19866,
+        "modified": "2026-05-22T05:35:55.531Z",
         "layer": "meta",
         "executionBlock": true
       },
@@ -141,8 +141,8 @@
         "type": "agents",
         "namespace": "canonical",
         "path": "canonical/agents/meta-librarian.md",
-        "size": 20105,
-        "modified": "2026-05-21T18:24:13.227Z",
+        "size": 19904,
+        "modified": "2026-05-22T05:35:55.531Z",
         "layer": "meta",
         "executionBlock": true
       },
@@ -151,8 +151,8 @@
         "type": "agents",
         "namespace": "canonical",
         "path": "canonical/agents/meta-prism.md",
-        "size": 28140,
-        "modified": "2026-05-21T18:26:22.140Z",
+        "size": 27892,
+        "modified": "2026-05-22T05:35:55.532Z",
         "layer": "meta",
         "executionBlock": true
       },
@@ -161,8 +161,8 @@
         "type": "agents",
         "namespace": "canonical",
         "path": "canonical/agents/meta-scout.md",
-        "size": 17754,
-        "modified": "2026-05-21T18:24:35.683Z",
+        "size": 17551,
+        "modified": "2026-05-22T05:35:55.533Z",
         "layer": "meta",
         "executionBlock": true
       },
@@ -171,8 +171,8 @@
         "type": "agents",
         "namespace": "canonical",
         "path": "canonical/agents/meta-sentinel.md",
-        "size": 18751,
-        "modified": "2026-05-21T18:24:44.595Z",
+        "size": 18659,
+        "modified": "2026-05-22T05:35:55.533Z",
         "layer": "meta",
         "executionBlock": true
       },
@@ -181,8 +181,8 @@
         "type": "agents",
         "namespace": "canonical",
         "path": "canonical/agents/meta-warden.md",
-        "size": 33323,
-        "modified": "2026-05-21T18:26:02.245Z",
+        "size": 33549,
+        "modified": "2026-05-22T05:15:33.597Z",
         "layer": "meta",
         "executionBlock": true
       }
@@ -193,8 +193,8 @@
         "type": "skills",
         "namespace": "canonical",
         "path": "canonical/skills/meta-theory/SKILL.md",
-        "size": 60269,
-        "modified": "2026-05-21T18:25:13.483Z"
+        "size": 63400,
+        "modified": "2026-05-22T05:15:22.698Z"
       },
       "repo:canonical-reference:create-agent": {
         "id": "create-agent",
@@ -202,8 +202,8 @@
         "namespace": "canonical-reference",
         "path": "canonical/skills/meta-theory/references/create-agent.md",
         "relativePath": "create-agent.md",
-        "size": 16716,
-        "modified": "2026-05-20T07:37:50.939Z"
+        "size": 17401,
+        "modified": "2026-05-22T05:08:04.776Z"
       },
       "repo:canonical-reference:dev-governance": {
         "id": "dev-governance",
@@ -211,8 +211,8 @@
         "namespace": "canonical-reference",
         "path": "canonical/skills/meta-theory/references/dev-governance.md",
         "relativePath": "dev-governance.md",
-        "size": 101941,
-        "modified": "2026-05-21T13:51:29.878Z"
+        "size": 104126,
+        "modified": "2026-05-22T05:34:39.338Z"
       },
       "repo:canonical-reference:intent-amplification": {
         "id": "intent-amplification",
@@ -239,7 +239,7 @@
         "path": "canonical/skills/meta-theory/references/rhythm-orchestration.md",
         "relativePath": "rhythm-orchestration.md",
         "size": 8165,
-        "modified": "2026-04-30T04:49:18.900Z"
+        "modified": "2026-05-21T18:48:57.611Z"
       },
       "repo:canonical-reference:ten-step-governance": {
         "id": "ten-step-governance",
@@ -247,8 +247,8 @@
         "namespace": "canonical-reference",
         "path": "canonical/skills/meta-theory/references/ten-step-governance.md",
         "relativePath": "ten-step-governance.md",
-        "size": 10359,
-        "modified": "2026-05-20T07:37:03.841Z"
+        "size": 10332,
+        "modified": "2026-05-21T18:49:00.678Z"
       }
     },
     "hooks": {
@@ -276,8 +276,8 @@
         "namespace": "canonical-runtime-assets",
         "path": "canonical/runtime-assets/shared/hooks/meta-kim-memory-save.mjs",
         "relativePath": "meta-kim-memory-save.mjs",
-        "size": 29635,
-        "modified": "2026-05-21T16:20:41.950Z"
+        "size": 30095,
+        "modified": "2026-05-21T19:44:50.014Z"
       },
       "repo:canonical-runtime-assets:skip-reminder.mjs": {
         "id": "skip-reminder.mjs",
@@ -321,8 +321,8 @@
         "namespace": "canonical-runtime-assets",
         "path": "canonical/runtime-assets/claude/hooks/enforce-agent-dispatch.mjs",
         "relativePath": "enforce-agent-dispatch.mjs",
-        "size": 9575,
-        "modified": "2026-05-21T13:57:18.191Z"
+        "size": 9619,
+        "modified": "2026-05-22T05:15:22.699Z"
       },
       "repo:canonical-runtime-assets:post-console-log-warn.mjs": {
         "id": "post-console-log-warn.mjs",
@@ -428,8 +428,8 @@
     "commands": {}
   },
   "governanceRules": {
-    "metaAgentDispatchRule": "Meta-agents (layer='meta') are for governance coordination only. They MUST NOT be used as execution workers. Use execution-agents (layer='execution') for task execution.",
-    "fallbackBehavior": "Use general-purpose/default execution agent, NOT meta-agents. Record capability gap for future Type B agent creation.",
-    "layerClassification": "Meta-agents: id starts with 'meta-' in canonical namespace. Execution-agents: all other agents."
+    "metaAgentDispatchRule": "Meta-agents (layer='meta') are the only durable public Meta_Kim owners for Critical, Fetch, Thinking, and Review. They MUST NOT perform implementation work directly; concrete implementation capability is recorded as run-scoped matchedSkills/tools.",
+    "fallbackBehavior": "Use a governance meta owner plus run-scoped matchedSkills, or block with capabilityGapPacket. Do not persist non-governance execution agents in the public repo.",
+    "layerClassification": "Meta-agents: id starts with 'meta-' in canonical namespace. In public Meta_Kim, all other agents are ignored as durable owners and may appear only as run-scoped capability evidence when explicitly discovered."
   }
 }

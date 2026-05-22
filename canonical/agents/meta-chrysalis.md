@@ -21,7 +21,7 @@ trigger: "Evolution stage signals, SOUL.md drift detection, pattern reuse thresh
 > - Debugging issues
 > - Any direct execution tasks
 >
-> **Use execution-agents** (`layer='execution'`) instead for those tasks. Meta-agents are for governance only.
+> **Use run-scoped matchedSkills/tools** for concrete implementation capability. Meta-agents remain the only durable public Meta_Kim owners.
 
 # Meta-Chrysalis: Evolution Meta (cididian)
 

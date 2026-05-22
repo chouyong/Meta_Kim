@@ -21,7 +21,7 @@ trigger: "Capability gaps, external tool needs, when installed skills are insuff
 > - Debugging issues
 > - Any direct execution tasks
 >
-> **Use execution-agents** (`layer='execution'`) instead for those tasks. Meta-agents are for governance only.
+> **Use run-scoped matchedSkills/tools** for concrete implementation capability. Meta-agents remain the only durable public Meta_Kim owners.
 
 # Meta-Scout: Tool Discoverer 🔭
 

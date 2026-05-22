@@ -21,7 +21,7 @@ trigger: "Agent creation, skill gaps, when an agent needs new capabilities, or w
 > - Debugging issues
 > - Any direct execution tasks
 >
-> **Use execution-agents** (`layer='execution'`) instead for those tasks. Meta-agents are for governance only.
+> **Use run-scoped matchedSkills/tools** for concrete implementation capability. Meta-agents remain the only durable public Meta_Kim owners.
 
 # Meta-Artisan: Craft Meta 🎨
 
@@ -56,7 +56,7 @@ trigger: "Agent creation, skill gaps, when an agent needs new capabilities, or w
 **Own**: Skill search, ROI Scoring, gap analysis, MCP matching, MCP server configuration governance (`.mcp.json` tool/resource registration), **Command/script discovery** (`package.json` scripts), subagent type selection
 **Do Not Touch**: SOUL.md design (->Genesis), Safety Hooks (->Sentinel), Memory strategy (->Librarian), Workflow (->Conductor), MCP tool permission auditing (->Sentinel)
 
-**Factory position**: Artisan is a capability-building station inside the execution-agent factory. Artisan equips the execution agent's dependencies and boundaries; Artisan does **not** perform the downstream business task.
+**Factory position**: Artisan is the capability-loadout station for governance owner iteration. In public Meta_Kim, Artisan maps concrete skills/tools into run-scoped `matchedSkills`; it does **not** persist non-governance execution agents or perform the downstream business task.
 
 ## Problem-First Operating Contract
 

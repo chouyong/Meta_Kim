@@ -603,13 +603,14 @@
         "workflow_blocked_by_missing_declared_owner"
       ],
       "temporaryFallback": {
-        "allowed": true,
+        "allowed": false,
         "subagentType": "generalPurpose",
         "emergencyOnly": true,
         "oneOffPreferred": true,
         "requiresExplicitOwnerLabel": true,
         "requiresJustification": true,
-        "requiresEvolutionReview": true
+        "requiresEvolutionReview": true,
+        "publicRepoPolicy": "Forbidden as durable owner state. Public Meta_Kim must return to Thinking and choose a governance meta owner plus run-scoped matchedSkills, or emit capabilityGapPacket."
       }
     },
     "parallelism": {
@@ -688,7 +689,7 @@
           "create_owner_first"
         ]
       },
-      "executionAgentCardRequiredWhenOwnerResolutionAnyOf": [
+      "governanceOwnerDecisionRequiredWhenOwnerResolutionAnyOf": [
         "upgrade_existing_owner",
         "create_owner_first"
       ],
@@ -700,7 +701,7 @@
         "complex_dev",
         "meta_analysis"
       ],
-      "description": "intentPacket is required in run artifacts when taskClassification.governanceFlow is listed in intentPacketRequiredWhenGovernanceFlows (IntentGate-style intent lock-in). intentGatePacket is required for the same flows (structured ambiguity / assumptions gate before Execution). contentEvidencePacket and preDecisionOptionFrame are required before AskUserQuestion / native choice / conversation fallback for non-trivial non-query work; they prove Fetch evidence and Thinking option framing happened before interruption. dispatchEnvelopePacket, dispatchBoard, and workerTaskPacket are finalized only after user choice or an allowed recorded skip. dispatchEnvelopePacket is required for all non-pure-query flows so every executable run has an explicit owner, capability boundary, memory mode, and review / verification routing before dispatch. orchestrationTaskBoardPacket is the mandatory Conductor task board for the same executable flows. businessFlowBlueprintPacket and agentBlueprintPacket are required before workerTaskPacket so Conductor proves the full business flow was considered before dispatch. capabilityGapPacket is required when taskClassification.upgradeReasons records owner_creation_required, or when agentBlueprintPacket.roleCoverageGate fails with missing roles whose ownerResolution is upgrade_existing_owner or create_owner_first. executionAgentCard is required when capabilityGapPacket resolves the gap through execution-agent creation or upgrade, or when agentBlueprintPacket ownerResolution chooses upgrade_existing_owner or create_owner_first."
+      "description": "intentPacket is required in run artifacts when taskClassification.governanceFlow is listed in intentPacketRequiredWhenGovernanceFlows (IntentGate-style intent lock-in). intentGatePacket is required for the same flows (structured ambiguity / assumptions gate before Execution). contentEvidencePacket and preDecisionOptionFrame are required before AskUserQuestion / native choice / conversation fallback for non-trivial non-query work; they prove Fetch evidence and Thinking option framing happened before interruption. dispatchEnvelopePacket, dispatchBoard, and workerTaskPacket are finalized only after user choice or an allowed recorded skip. dispatchEnvelopePacket is required for all non-pure-query flows so every executable run has an explicit governance owner, capability boundary, memory mode, and review / verification routing before dispatch. orchestrationTaskBoardPacket is the mandatory Conductor task board for the same executable flows. businessFlowBlueprintPacket and agentBlueprintPacket are required before workerTaskPacket so Conductor proves the full business flow was considered before dispatch. capabilityGapPacket is required when taskClassification.upgradeReasons records owner_creation_required, or when agentBlueprintPacket.roleCoverageGate fails with missing roles whose ownerResolution is upgrade_existing_owner or create_owner_first. In public Meta_Kim, owner creation or upgrade means a governance meta-owner decision plus run-scoped matchedSkills; executionAgentCard remains a compatibility packet for external/private execution-agent registries only."
     },
     "localState": {
       "root": ".meta-kim/state",
@@ -1165,7 +1166,8 @@
         "roleCoverageGate",
         "missingRoles",
         "duplicateRolePolicy",
-        "namingPolicy"
+        "namingPolicy",
+        "governanceStageCoverage"
       ],
       "roleCoverageGateEnum": [
         "pass",
@@ -1182,19 +1184,42 @@
         "ownerAgent",
         "ownerResponsibilityDelta",
         "agentIterationPlan",
-        "ownerResolution"
+        "ownerResolution",
+        "matchedSkills",
+        "skillSelectionScope",
+        "governanceStageNodes"
       ],
       "ownerResolutionEnum": [
         "reuse_existing_owner",
         "upgrade_existing_owner",
         "create_owner_first"
       ],
+      "skillSelectionScopeEnum": [
+        "run_scoped"
+      ],
+      "matchedSkillRequiredFields": [
+        "matchId",
+        "capabilitySlot",
+        "providerId",
+        "skillId",
+        "source",
+        "roiScore",
+        "selectionReason",
+        "selectionScope",
+        "persistencePolicy",
+        "fallback"
+      ],
+      "governanceStageNodeRequiredFields": [
+        "stage",
+        "ownerAgent",
+        "responsibility"
+      ],
       "roleCoverageFailureRule": {
         "whenRoleCoverageGate": "fail",
         "whenMissingRolesNonEmpty": true,
         "createOrUpgradeRequires": [
           "capabilityGapPacket",
-          "executionAgentCard"
+          "governanceOwnerDecision"
         ]
       },
       "namingPolicy": {
@@ -1209,6 +1234,8 @@
       },
       "longTermCapabilityPolicy": {
         "abstractCapabilitySlotsRequired": true,
+        "openSourceProjectKeepsGovernanceMetaAgentsOnly": true,
+        "nonGovernanceExecutionAgentsIgnoredInPublicRepo": true,
         "allowedMetaSkillProviders": [
           "agent-teams-playbook",
           "superpowers",
@@ -1231,7 +1258,79 @@
           "description": "A large governance agent may stay intact only when it owns a coherent governance boundary; otherwise split supporting detail into references while preserving the agent identity boundary."
         }
       },
-      "description": "Capability-first role blueprint. It separates businessRoleId, roleDisplayName, selected owner agent, assigned responsibility slice, owner responsibility delta, and per-run role instances so the same agent can run multiple named shards in parallel without confusing users. ownerResolution uses reuse_existing_owner, upgrade_existing_owner, or create_owner_first."
+      "ownerAgentPublicRepoRule": {
+        "allowedOwnerAgents": [
+          "meta-warden",
+          "meta-conductor",
+          "meta-genesis",
+          "meta-artisan",
+          "meta-sentinel",
+          "meta-librarian",
+          "meta-prism",
+          "meta-scout",
+          "meta-chrysalis"
+        ],
+        "forbidPersistedNonGovernanceExecutionAgents": true,
+        "fallbackBehavior": "Use a governance meta owner plus run-scoped matchedSkills, or block with capabilityGapPacket."
+      },
+      "runScopedSkillPersistenceGate": {
+        "failWhenConcreteSkillCopiedToDurableIdentity": true,
+        "allowedDurableReferences": [
+          "abstractCapabilitySlots",
+          "providerCompatibility",
+          "longTermCapabilityPolicy"
+        ]
+      },
+      "governanceStageCoveragePolicy": {
+        "requiredStages": [
+          "Critical",
+          "Fetch",
+          "Thinking",
+          "Review"
+        ],
+        "allowedOwnerAgents": [
+          "meta-warden",
+          "meta-conductor",
+          "meta-genesis",
+          "meta-artisan",
+          "meta-sentinel",
+          "meta-librarian",
+          "meta-prism",
+          "meta-scout",
+          "meta-chrysalis"
+        ],
+        "stageAllowedAgents": {
+          "Critical": [
+            "meta-warden",
+            "meta-conductor",
+            "meta-sentinel",
+            "meta-librarian"
+          ],
+          "Fetch": [
+            "meta-conductor",
+            "meta-scout",
+            "meta-artisan",
+            "meta-librarian",
+            "meta-genesis"
+          ],
+          "Thinking": [
+            "meta-conductor",
+            "meta-genesis",
+            "meta-artisan",
+            "meta-sentinel",
+            "meta-warden"
+          ],
+          "Review": [
+            "meta-prism",
+            "meta-warden",
+            "meta-sentinel",
+            "meta-chrysalis"
+          ]
+        },
+        "skillSelectionScope": "run_scoped",
+        "description": "Open-source Meta_Kim ignores non-governance execution agents in durable project state. Critical, Fetch, Thinking, and Review orchestration nodes are owned only by governance meta agents; concrete skills/tools are selected per run and recorded as matchedSkills, never as durable non-meta agent dependencies."
+      },
+      "description": "Capability-first role blueprint. In the open-source project, ownerAgent is one of the governance meta agents, while concrete execution capability is expressed through run-scoped matchedSkills and governanceStageNodes. It separates businessRoleId, roleDisplayName, selected governance owner, assigned responsibility slice, owner responsibility delta, and per-run role instances so the same governance owner can run multiple named shards in parallel without confusing users. ownerResolution uses reuse_existing_owner, upgrade_existing_owner, or create_owner_first."
     },
     "orchestrationTask": {
       "requiredFields": [
@@ -1281,7 +1380,7 @@
         "inputs",
         "outputs"
       ],
-      "description": "Mandatory execution-agent role card whenever the factory creates or upgrades an execution agent. The card defines purpose, boundaries, dependencies, inputs, and outputs."
+      "description": "Compatibility packet for external/private execution-agent registries. Public Meta_Kim does not use this as durable owner state; public owner creation or upgrade is represented by governance meta-owner decisions plus run-scoped matchedSkills."
     },
     "cardDecision": {
       "requiredFields": [

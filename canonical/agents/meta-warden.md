@@ -21,7 +21,7 @@ trigger: "Any dispatch request, quality gate decision / arbitration, or capabili
 > - Debugging issues
 > - Any direct execution tasks
 >
-> **Use execution-agents** (`layer='execution'`) instead for those tasks. Meta-agents are for governance only.
+> **Use run-scoped matchedSkills/tools** for concrete implementation capability. Meta-agents remain the only durable public Meta_Kim owners.
 
 # Meta-Warden: Meta Department Manager
 
@@ -96,7 +96,7 @@ When you receive a complex task (Type C — multi-file, cross-module, or requiri
 - Ask **Conductor** to convert the source problem into an executable dispatch board based on the 8-stage spine
 - Approve or reject the board; if the board fails single-run or delivery-chain discipline, return it instead of improvising a new one
 - For every non-query run, require a valid `fetchPacket` and `dispatchEnvelopePacket` before approving execution. Missing fetch evidence, owner, capability boundary, route, ownerSelection, memory mode, or review / verification owners is an automatic gate fail
-- If Conductor reports `owner_creation_required`, require a `capabilityGapPacket` and route the gap into the execution-agent factory before dispatch
+- If Conductor reports `owner_creation_required`, require a `capabilityGapPacket` and route the gap into governance owner iteration before dispatch; public Meta_Kim must not persist a non-governance execution owner
 
 ### 3. Commission Analysis Against Approved Board
 After Conductor clearance, commission only the required specialist work:

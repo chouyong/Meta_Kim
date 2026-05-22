@@ -94,7 +94,7 @@ function warnMetaAgentExecution(agentName, stage) {
   const warning = `\n⚠️  [Meta_Kim] WARNING: Meta-agent "${agentName}" may be used for execution work in stage "${stage}"\n` +
     `Meta-agents (layer='meta') are for governance coordination only.\n` +
     `They should NOT perform direct execution tasks like writing code or running tests.\n` +
-    `Use execution-agents (layer='execution') for execution work.\n` +
+    `Use governance meta owners plus run-scoped matchedSkills/tools for public Meta_Kim execution capability.\n` +
     `If this is governance work (coordination, review, synthesis), you may ignore this warning.\n`;
 
   process.stderr.write(warning);

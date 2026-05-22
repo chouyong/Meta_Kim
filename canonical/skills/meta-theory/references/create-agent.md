@@ -69,43 +69,43 @@ On-demand trigger questions (answer honestly before skipping):
 - Must it need to remember what it did last time across sessions?
 - Must it hand off results to other Agents or coordinate execution order across agents?
 
-## Execution-Agent Factory Lane
+## Governance Owner Factory Lane
 
-When Type B is triggered by a **capability gap in actual business execution**, use the stricter **execution-agent factory lane** instead of an ad-hoc prompt-writing loop.
+When Type B is triggered by a **capability gap in public Meta_Kim**, use the stricter **governance owner factory lane** instead of an ad-hoc prompt-writing loop. Public Meta_Kim does not persist non-governance execution agents; implementation capability is recorded as run-scoped skill/tool evidence.
 
 Professional role split:
 
 - **Warden** is the **public front door** and approval owner.
 - **Conductor** owns orchestration only: it converts the gap into a task board and later dispatches the result.
-- **Base-meta factory** owns capability building only: **Genesis + Artisan + Scout + Sentinel + Librarian**.
-- **Execution agents are the actual workers**. The factory never performs business execution directly.
+- **Base-meta factory** owns governance capability building only: **Genesis + Artisan + Scout + Sentinel + Librarian**.
+- **Run-scoped `matchedSkills` are the implementation capability evidence**. The factory never performs business execution directly.
 
 Factory lane:
 
 1. **Warden** confirms that an existing owner is insufficient.
 2. **Conductor** emits the capability-gap decision and task board.
-3. **Genesis** defines the execution-agent identity.
+3. **Genesis** defines or refines governance owner identity and boundary.
 4. **Artisan** defines abstract capability slots, provider compatibility, and Fetch-time skill / tool selection rules.
 5. **Scout** backfills external capability only when local coverage is missing.
 6. **Sentinel** validates safety boundaries.
 7. **Librarian** provisions memory / reuse strategy.
 8. **Prism** runs the quality gate.
-9. **Warden** approves admission into the callable execution roster.
+9. **Warden** approves the governance owner decision and run-scoped capability match.
 
 Rule: Conductor may participate before or after the factory, but **Conductor does not build capability**.
 
-## Fixed Artifacts (Execution-Agent Factory Mode)
+## Fixed Artifacts (Governance Owner Factory Mode)
 
-The execution-agent factory lane must produce these explicit artifacts:
+The public governance owner factory lane must produce these explicit artifacts:
 
 1. **Capability Gap Sheet** (`capabilityGapPacket`) — what is missing, which owners were checked, and what decision was made.
-2. **Execution Agent Role Card** (`executionAgentCard`) — the execution agent's contract.
+2. **Governance Owner Decision** (`agentBlueprintPacket.roles[]` + `matchedSkills`) — the governance owner contract and run-scoped capability evidence. `executionAgentCard` is a compatibility packet for external/private execution-agent registries only.
 3. **Orchestration Task Board** (`orchestrationTaskBoardPacket`) — ordered execution tasks plus synthesis owner.
 4. **Evolution Record** (`evolutionWritebackPacket`) — retain / upgrade / retire outcomes after the run.
 
-## Execution Agent Role Card
+## External Execution Agent Role Card Compatibility
 
-Every created or upgraded execution agent must ship with one explicit role card. No free-form shortcut.
+External/private execution-agent registries may still require `executionAgentCard`. Public Meta_Kim must not use that packet as durable public owner state; public creation or upgrade is represented by governance owner fields plus `matchedSkills`.
 
 Required fields:
 
@@ -116,7 +116,7 @@ Required fields:
 - **Inputs** — what it accepts
 - **Outputs** — what it must deliver
 
-This card is the build contract for the factory and the dispatch contract for Conductor.
+This compatibility card is the build contract for an external/private factory and the dispatch contract for Conductor outside the public governance-only boundary.
 
 ### Skill Binding Rules For Created Or Iterated Agents
 
@@ -126,7 +126,7 @@ Created or upgraded agents inherit durable capability shape, not a frozen tactic
 - Long-term identity may include meta-skill package providers, such as `superpowers` or `ecc`, as compatible capability providers.
 - Long-term identity must not include the concrete sub-skill, shell command, plugin sub-capability, or prompt tactic that happened to win one Fetch.
 - `findskill` is only a runtime-local capability search entrypoint. Its search result can justify a current-run `selectedSkill`, not a permanent agent binding.
-- Concrete choices belong in run artifacts: `capabilitySearchResult`, `selectedSkill`, `executionAgentCard`, `orchestrationTaskBoardPacket`, and `workerTaskPacket`.
+Concrete choices belong in run artifacts: `capabilitySearchResult`, `matchedSkills`, `orchestrationTaskBoardPacket`, and `workerTaskPacket`; `executionAgentCard` is included only for external/private execution-agent registries.
 
 Genesis owns the durable boundary. Artisan owns provider compatibility and selection rules. Fetch owns the current-run concrete selection.
 

@@ -427,6 +427,76 @@ describe("validate-run-artifact.mjs", () => {
     );
   });
 
+  test("rejects public executionAgentCard compatibility without external registry scope", async (t) => {
+    const tempFixture = await writeTempFixture(t, (artifact) => {
+      artifact.capabilityGapPacket = {
+        gapId: "gap-public-exec-agent",
+        requestedCapability: "frontend implementation",
+        currentAgentsChecked: ["meta-conductor", "meta-artisan"],
+        insufficiencyReason:
+          "Public Meta_Kim must not persist frontend-developer as an owner.",
+        resolutionAction: "create_execution_agent",
+        requestedBy: "meta-conductor",
+        approvedBy: "meta-warden",
+      };
+      artifact.executionAgentCard = {
+        agentId: "frontend-developer",
+        businessRoleId: "frontend",
+        roleDisplayName: "frontend",
+        purpose: "External compatibility probe.",
+        capabilities: ["frontend implementation"],
+        nonCapabilities: ["governance ownership"],
+        dependencies: ["react-best-practices"],
+        inputs: ["task brief"],
+        outputs: ["patch"],
+      };
+    });
+    await assert.rejects(
+      execFileAsync(
+        "node",
+        ["scripts/validate-run-artifact.mjs", tempFixture],
+        {
+          cwd: REPO_ROOT,
+        },
+      ),
+    );
+  });
+
+  test("rejects unsupported run-scoped matched skill providers", async (t) => {
+    const tempFixture = await writeTempFixture(t, (artifact) => {
+      artifact.agentBlueprintPacket.roles[0].matchedSkills[0].providerId =
+        "unsupported-provider";
+    });
+    await assert.rejects(
+      execFileAsync(
+        "node",
+        ["scripts/validate-run-artifact.mjs", tempFixture],
+        {
+          cwd: REPO_ROOT,
+        },
+      ),
+    );
+  });
+
+  test("rejects matched skill providers outside role providerCompatibility", async (t) => {
+    const tempFixture = await writeTempFixture(t, (artifact) => {
+      artifact.agentBlueprintPacket.roles[0].providerCompatibility = [
+        "superpowers",
+      ];
+      artifact.agentBlueprintPacket.roles[0].matchedSkills[0].providerId =
+        "meta-theory";
+    });
+    await assert.rejects(
+      execFileAsync(
+        "node",
+        ["scripts/validate-run-artifact.mjs", tempFixture],
+        {
+          cwd: REPO_ROOT,
+        },
+      ),
+    );
+  });
+
   // ── Cross-project flow tests ─────────────────────────────────────────
 
   test("accepts a valid cross-project run artifact (queryScope=all_projects)", async () => {

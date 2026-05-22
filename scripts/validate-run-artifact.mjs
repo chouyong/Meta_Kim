@@ -162,6 +162,13 @@ function ensureStringArray(value, context) {
   }
 }
 
+function ensureObjectArray(value, context) {
+  ensureArray(value, context);
+  for (const [index, item] of value.entries()) {
+    ensureObject(item, `${context}[${index}]`);
+  }
+}
+
 function ensureObject(value, context) {
   ensure(value && typeof value === "object" && !Array.isArray(value), `${context} must be an object.`);
 }
@@ -175,6 +182,105 @@ function ensureNonEmptyValue(value, context) {
     return;
   }
   ensureString(value, context);
+}
+
+function governanceStagePolicy(contract) {
+  return contract.protocols?.agentBlueprintPacket?.governanceStageCoveragePolicy ?? {};
+}
+
+function allowedGovernanceAgents(contract) {
+  const configured = governanceStagePolicy(contract).allowedOwnerAgents ?? [];
+  return new Set(
+    configured.length > 0
+      ? configured
+      : [
+          "meta-warden",
+          "meta-conductor",
+          "meta-genesis",
+          "meta-artisan",
+          "meta-sentinel",
+          "meta-librarian",
+          "meta-prism",
+          "meta-scout",
+          "meta-chrysalis",
+        ],
+  );
+}
+
+function ensureGovernanceOwner(contract, ownerAgent, context) {
+  const allowed = allowedGovernanceAgents(contract);
+  ensureString(ownerAgent, context);
+  ensure(
+    allowed.has(ownerAgent),
+    `${context} must be one of the open-source governance meta agents, got: ${ownerAgent}`,
+  );
+}
+
+function validateMatchedSkills(policy, skills, context) {
+  ensureObjectArray(skills, context);
+  ensure(skills.length >= 1, `${context} must contain at least one run-scoped skill match.`);
+  const allowedProviders = new Set(
+    policy.longTermCapabilityPolicy?.allowedMetaSkillProviders ?? [],
+  );
+  for (const [index, skill] of skills.entries()) {
+    ensureFields(skill, policy.matchedSkillRequiredFields, `${context}[${index}]`);
+    ensureString(skill.matchId, `${context}[${index}].matchId`);
+    ensureString(skill.capabilitySlot, `${context}[${index}].capabilitySlot`);
+    ensureString(skill.providerId, `${context}[${index}].providerId`);
+    ensure(
+      allowedProviders.has(skill.providerId),
+      `${context}[${index}].providerId must be an allowed meta skill provider.`,
+    );
+    ensureString(skill.skillId, `${context}[${index}].skillId`);
+    ensureString(skill.source, `${context}[${index}].source`);
+    ensure(
+      Number.isFinite(skill.roiScore),
+      `${context}[${index}].roiScore must be a number.`,
+    );
+    ensureString(skill.selectionReason, `${context}[${index}].selectionReason`);
+    ensureEnum(
+      skill.selectionScope,
+      policy.skillSelectionScopeEnum,
+      `${context}[${index}].selectionScope`,
+    );
+    ensure(
+      skill.persistencePolicy === "do_not_persist_to_agent_identity",
+      `${context}[${index}].persistencePolicy must be do_not_persist_to_agent_identity.`,
+    );
+    ensureString(skill.fallback, `${context}[${index}].fallback`);
+  }
+}
+
+function validateGovernanceStageNodes(policy, nodes, context) {
+  ensureObjectArray(nodes, context);
+  ensure(nodes.length >= 1, `${context} must contain at least one governance stage node.`);
+  for (const [index, node] of nodes.entries()) {
+    ensureFields(node, policy.governanceStageNodeRequiredFields, `${context}[${index}]`);
+    ensureString(node.stage, `${context}[${index}].stage`);
+    ensure(
+      policy.governanceStageCoveragePolicy.requiredStages.includes(node.stage),
+      `${context}[${index}].stage must be one of the required governance stages.`,
+    );
+    ensureGovernanceOwner(contractFromPolicy(policy), node.ownerAgent, `${context}[${index}].ownerAgent`);
+    const stageAllowed = new Set(
+      policy.governanceStageCoveragePolicy.stageAllowedAgents?.[node.stage] ?? [],
+    );
+    ensure(
+      stageAllowed.has(node.ownerAgent),
+      `${context}[${index}].ownerAgent is not allowed for stage ${node.stage}.`,
+    );
+    ensureString(node.responsibility, `${context}[${index}].responsibility`);
+  }
+}
+
+function contractFromPolicy(policy) {
+  return {
+    protocols: {
+      agentBlueprintPacket: {
+        governanceStageCoveragePolicy: policy.governanceStageCoveragePolicy,
+      },
+    },
+  };
 }
 
 function validateRoleDisplayName(name, context) {
@@ -617,6 +723,7 @@ function validateDispatchEnvelope(contract, artifact) {
     "dispatchEnvelopePacket",
   );
   ensureString(packet.ownerAgent, "dispatchEnvelopePacket.ownerAgent");
+  ensureGovernanceOwner(contract, packet.ownerAgent, "dispatchEnvelopePacket.ownerAgent");
   ensureString(packet.businessRoleId, "dispatchEnvelopePacket.businessRoleId");
   ensureString(packet.roleDisplayName, "dispatchEnvelopePacket.roleDisplayName");
   validateRoleDisplayName(
@@ -658,10 +765,12 @@ function validateDispatchEnvelope(contract, artifact) {
     "dispatchEnvelopePacket.resultSchemaRef",
   );
   ensureString(packet.reviewOwner, "dispatchEnvelopePacket.reviewOwner");
+  ensureGovernanceOwner(contract, packet.reviewOwner, "dispatchEnvelopePacket.reviewOwner");
   ensureString(
     packet.verificationOwner,
     "dispatchEnvelopePacket.verificationOwner",
   );
+  ensureGovernanceOwner(contract, packet.verificationOwner, "dispatchEnvelopePacket.verificationOwner");
 
   const overlaps = packet.allowedCapabilities.filter((capability) =>
     packet.blockedCapabilities.includes(capability),
@@ -731,6 +840,7 @@ function validateOrchestrationTaskBoard(contract, artifact) {
     packet.synthesisOwner,
     "orchestrationTaskBoardPacket.synthesisOwner",
   );
+  ensureGovernanceOwner(contract, packet.synthesisOwner, "orchestrationTaskBoardPacket.synthesisOwner");
 
   const taskIds = new Set();
   const sequences = new Set();
@@ -749,6 +859,11 @@ function validateOrchestrationTaskBoard(contract, artifact) {
       `orchestrationTaskBoardPacket.tasks[${index}].taskKind`,
     );
     ensureString(
+      task.owner,
+      `orchestrationTaskBoardPacket.tasks[${index}].owner`,
+    );
+    ensureGovernanceOwner(
+      contract,
       task.owner,
       `orchestrationTaskBoardPacket.tasks[${index}].owner`,
     );
@@ -844,10 +959,20 @@ function validateBusinessFlowBlueprint(contract, artifact) {
           lane[field].length >= 1,
           `${context}.${field} must include at least one global capability scan candidate.`,
         );
+        if (field === "candidateOwners") {
+          for (const [ownerIndex, owner] of lane[field].entries()) {
+            ensureGovernanceOwner(
+              contract,
+              owner,
+              `${context}.candidateOwners[${ownerIndex}]`,
+            );
+          }
+        }
       } else {
         ensureString(lane[field], `${context}.${field}`);
       }
     }
+    ensureGovernanceOwner(contract, lane.selectedOwner, `${context}.selectedOwner`);
     ensureEnum(
       lane.coverageStatus,
       policy.laneCoverageStatusEnum,
@@ -927,16 +1052,39 @@ function validateAgentBlueprint(contract, artifact) {
       `agentBlueprintPacket.roles[${index}]`,
     );
     for (const field of policy.roleRequiredFields) {
+      if (["matchedSkills", "governanceStageNodes"].includes(field)) {
+        continue;
+      }
       ensureNonEmptyValue(role[field], `agentBlueprintPacket.roles[${index}].${field}`);
     }
     ensureString(role.businessRoleId, `agentBlueprintPacket.roles[${index}].businessRoleId`);
     ensureString(role.roleDisplayName, `agentBlueprintPacket.roles[${index}].roleDisplayName`);
     ensureString(role.ownerAgent, `agentBlueprintPacket.roles[${index}].ownerAgent`);
+    ensureGovernanceOwner(contract, role.ownerAgent, `agentBlueprintPacket.roles[${index}].ownerAgent`);
     ensureEnum(
       role.ownerResolution,
       policy.ownerResolutionEnum,
       `agentBlueprintPacket.roles[${index}].ownerResolution`,
     );
+    validateMatchedSkills(policy, role.matchedSkills, `agentBlueprintPacket.roles[${index}].matchedSkills`);
+    if (role.providerCompatibility !== undefined) {
+      ensureStringArray(
+        role.providerCompatibility,
+        `agentBlueprintPacket.roles[${index}].providerCompatibility`,
+      );
+      for (const [skillIndex, skill] of role.matchedSkills.entries()) {
+        ensure(
+          role.providerCompatibility.includes(skill.providerId),
+          `agentBlueprintPacket.roles[${index}].matchedSkills[${skillIndex}].providerId must appear in role providerCompatibility.`,
+        );
+      }
+    }
+    ensure(
+      role.skillSelectionScope === policy.governanceStageCoveragePolicy.skillSelectionScope &&
+        policy.skillSelectionScopeEnum.includes(role.skillSelectionScope),
+      `agentBlueprintPacket.roles[${index}].skillSelectionScope must be ${policy.governanceStageCoveragePolicy.skillSelectionScope}.`,
+    );
+    validateGovernanceStageNodes(policy, role.governanceStageNodes, `agentBlueprintPacket.roles[${index}].governanceStageNodes`);
     validateRoleDisplayName(
       role.roleDisplayName,
       `agentBlueprintPacket.roles[${index}].roleDisplayName`,
@@ -971,21 +1119,25 @@ function validateAgentBlueprint(contract, artifact) {
     );
   }
 
+  ensureObject(packet.governanceStageCoverage, "agentBlueprintPacket.governanceStageCoverage");
+  for (const stage of policy.governanceStageCoveragePolicy.requiredStages) {
+    const participants = packet.governanceStageCoverage[stage];
+    ensureStringArray(participants, `agentBlueprintPacket.governanceStageCoverage.${stage}`);
+    const stageAllowed = new Set(policy.governanceStageCoveragePolicy.stageAllowedAgents?.[stage] ?? []);
+    for (const participant of participants) {
+      ensure(
+        stageAllowed.has(participant),
+        `agentBlueprintPacket.governanceStageCoverage.${stage} contains agent outside the allowed stage set: ${participant}`,
+      );
+    }
+  }
+
   for (const lane of artifact.businessFlowBlueprintPacket.requiredLanes) {
     ensure(
       coveredLaneIds.has(lane.laneId),
       `agentBlueprintPacket.roles must cover required businessFlowBlueprintPacket lane "${lane.laneId}".`,
     );
   }
-}
-
-function hasAgentBlueprintOwnerCreationOrUpgrade(contract, artifact) {
-  const ownerResolutionAnyOf =
-    contract.runDiscipline.protocolFirst
-      .executionAgentCardRequiredWhenOwnerResolutionAnyOf ?? [];
-  return (artifact.agentBlueprintPacket?.roles ?? []).some((role) =>
-    ownerResolutionAnyOf.includes(role.ownerResolution),
-  );
 }
 
 function isCapabilityGapRequired(contract, artifact) {
@@ -1060,13 +1212,21 @@ function validateExecutionAgentCardWhenRequired(contract, artifact) {
     contract.runDiscipline.protocolFirst
       .executionAgentCardRequiredWhenResolutionActions ?? [];
   const resolutionAction = artifact.capabilityGapPacket?.resolutionAction;
-  if (
-    !when.includes(resolutionAction) &&
-    !hasAgentBlueprintOwnerCreationOrUpgrade(contract, artifact) &&
-    !(artifact.agentBlueprintPacket?.missingRoles ?? []).length
-  ) {
+  if (!when.includes(resolutionAction)) {
+    ensure(
+      artifact.executionAgentCard === undefined,
+      "executionAgentCard is external/private compatibility only and must not appear in public Meta_Kim artifacts.",
+    );
     return;
   }
+
+  const registryScope =
+    artifact.capabilityGapPacket?.executionAgentRegistryScope ??
+    artifact.executionAgentCard?.registryScope;
+  ensure(
+    registryScope === "external_private",
+    "executionAgentCard requires executionAgentRegistryScope or registryScope = external_private.",
+  );
 
   const packet = artifact.executionAgentCard;
   ensure(
@@ -1416,6 +1576,8 @@ function validateWorkerPackets(contract, artifact) {
     );
     ensureString(packet.roleDisplayName, `workerTaskPackets[${index}].roleDisplayName`);
     ensureString(packet.ownerAgent, `workerTaskPackets[${index}].ownerAgent`);
+    ensureGovernanceOwner(contract, packet.ownerAgent, `workerTaskPackets[${index}].ownerAgent`);
+    ensureGovernanceOwner(contract, packet.owner, `workerTaskPackets[${index}].owner`);
     ensureString(packet.roleInstanceId, `workerTaskPackets[${index}].roleInstanceId`);
     ensureString(packet.shardKey, `workerTaskPackets[${index}].shardKey`);
     ensureArray(packet.shardScope, `workerTaskPackets[${index}].shardScope`);
@@ -1431,6 +1593,8 @@ function validateWorkerPackets(contract, artifact) {
       packet.collisionPolicy,
       `workerTaskPackets[${index}].collisionPolicy`,
     );
+    ensureGovernanceOwner(contract, packet.mergeOwner, `workerTaskPackets[${index}].mergeOwner`);
+    ensureGovernanceOwner(contract, packet.handoffTarget, `workerTaskPackets[${index}].handoffTarget`);
     ensureEnum(
       packet.collisionPolicy,
       validCollisionPolicies,
@@ -1512,6 +1676,7 @@ function validateWorkerPackets(contract, artifact) {
       `workerResultPacket ${packet.taskPacketId} has no matching workerTaskPacket.`,
     );
     const taskPacket = taskById.get(packet.taskPacketId);
+    ensureGovernanceOwner(contract, packet.owner, `workerResultPackets[${index}].owner`);
     ensure(
       packet.owner === taskPacket.owner,
       `workerResultPacket ${packet.taskPacketId} owner must match workerTaskPacket owner.`,
@@ -1581,6 +1746,16 @@ function validateFindingChain(contract, artifact) {
       reviewPacket.sourceProjects.includes(finding.sourceProject),
       `review finding ${finding.findingId} sourceProject must appear in reviewPacket.sourceProjects.`,
     );
+    ensureGovernanceOwner(
+      contract,
+      finding.owner,
+      `reviewPacket.findings[${index}].owner`,
+    );
+    ensureGovernanceOwner(
+      contract,
+      finding.verifiedBy,
+      `reviewPacket.findings[${index}].verifiedBy`,
+    );
     ensureEnum(
       finding.closeState,
       findingClosure.closeStateEnum,
@@ -1614,6 +1789,11 @@ function validateFindingChain(contract, artifact) {
       findings.has(response.findingId),
       `revisionResponse ${response.actionId} references unknown findingId ${response.findingId}.`,
     );
+    ensureGovernanceOwner(
+      contract,
+      response.owner,
+      `verificationPacket.revisionResponses[${index}].owner`,
+    );
     revisionsByFinding.set(response.findingId, response);
   }
 
@@ -1635,6 +1815,11 @@ function validateFindingChain(contract, artifact) {
       result.closeState,
       findingClosure.closeStateEnum,
       `verificationResult ${result.findingId} closeState`,
+    );
+    ensureGovernanceOwner(
+      contract,
+      result.verifiedBy,
+      `verificationPacket.verificationResults[${index}].verifiedBy`,
     );
     ensure(
       ["verified_closed", "accepted_risk"].includes(result.closeState),

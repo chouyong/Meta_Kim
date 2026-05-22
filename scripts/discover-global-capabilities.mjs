@@ -760,6 +760,8 @@ async function collectRepoCanonicalCapabilities() {
       return {
         layer: "meta",
         executionBlock: true,
+        publicRepoOwnerEligible: true,
+        publicRepoEvidenceMode: "durable_governance_owner",
         _reason: "Canonical meta-agent (governance layer)"
       };
     }
@@ -767,6 +769,8 @@ async function collectRepoCanonicalCapabilities() {
     return {
       layer: "execution",
       executionBlock: false,
+      publicRepoOwnerEligible: false,
+      publicRepoEvidenceMode: "run_scoped_only",
       _reason: "Execution agent (work layer)"
     };
   }
@@ -867,9 +871,9 @@ async function buildRepoCapabilityIndex() {
 
   // Add governance rules to prevent meta-agent misuse
   index.governanceRules = {
-    metaAgentDispatchRule: "Meta-agents (layer='meta') are for governance coordination only. They MUST NOT be used as execution workers. Use execution-agents (layer='execution') for task execution.",
-    fallbackBehavior: "Use general-purpose/default execution agent, NOT meta-agents. Record capability gap for future Type B agent creation.",
-    layerClassification: "Meta-agents: id starts with 'meta-' in canonical namespace. Execution-agents: all other agents.",
+    metaAgentDispatchRule: "Meta-agents (layer='meta') are the only durable public Meta_Kim owners for Critical, Fetch, Thinking, and Review. They MUST NOT perform implementation work directly; concrete implementation capability is recorded as run-scoped matchedSkills/tools.",
+    fallbackBehavior: "Use a governance meta owner plus run-scoped matchedSkills, or block with capabilityGapPacket. Do not persist non-governance execution agents in the public repo.",
+    layerClassification: "Meta-agents: id starts with 'meta-' in canonical namespace. In public Meta_Kim, all other agents are ignored as durable owners and may appear only as run-scoped capability evidence when explicitly discovered.",
   };
 
   return index;
