@@ -216,6 +216,77 @@ function ensureGovernanceOwner(contract, ownerAgent, context) {
   );
 }
 
+function ensureDurableOwner(contract, artifact, ownerAgent, context) {
+  ensureString(ownerAgent, context);
+}
+
+function validateRoleOwnerPolicy(contract, role, context) {
+  const policy = contract.protocols.agentBlueprintPacket;
+  ensureEnum(role.ownerSource, policy.ownerSourceEnum, `${context}.ownerSource`);
+  ensureEnum(
+    role.agentCopyPolicy,
+    policy.agentCopyPolicyEnum,
+    `${context}.agentCopyPolicy`,
+  );
+
+  if (role.ownerSource === "meta_kim_canonical") {
+    ensureGovernanceOwner(contract, role.ownerAgent, `${context}.ownerAgent`);
+    ensure(
+      role.agentCopyPolicy === "meta_kim_governance_only",
+      `${context}.agentCopyPolicy must be meta_kim_governance_only for Meta_Kim canonical owners.`,
+    );
+  }
+
+  if (role.ownerSource === "global_reuse") {
+    ensure(
+      role.agentCopyPolicy === "use_global_directly",
+      `${context}.agentCopyPolicy must be use_global_directly for directly reused global agents; do not copy usable global agents into the project.`,
+    );
+    ensure(
+      role.ownerResolution === "reuse_existing_owner",
+      `${context}.ownerResolution must be reuse_existing_owner when a global agent is used directly.`,
+    );
+  }
+
+  if (role.ownerSource === "project_local") {
+    ensure(
+      ["copy_to_project_for_modification", "already_project_local"].includes(
+        role.agentCopyPolicy,
+      ),
+      `${context}.agentCopyPolicy must be copy_to_project_for_modification or already_project_local for project-local agents.`,
+    );
+  }
+
+  if (role.agentCopyPolicy === "copy_to_project_for_modification") {
+    ensure(
+      role.ownerSource === "project_local" &&
+        role.ownerResolution === "upgrade_existing_owner",
+      `${context}.agentCopyPolicy=copy_to_project_for_modification requires ownerSource=project_local and ownerResolution=upgrade_existing_owner; only agents that need modification are copied into the project.`,
+    );
+  }
+
+  if (
+    role.ownerSource === "project_local" &&
+    role.ownerResolution === "reuse_existing_owner"
+  ) {
+    ensure(
+      role.agentCopyPolicy === "already_project_local",
+      `${context}.agentCopyPolicy must be already_project_local when reusing an existing project-local agent without modification.`,
+    );
+  }
+
+  if (
+    ["upgrade_existing_owner", "create_owner_first"].includes(
+      role.ownerResolution,
+    ) &&
+    role.ownerSource === "global_reuse"
+  ) {
+    fail(
+      `${context} cannot modify a global_reuse agent directly; copy it to the project first and mark ownerSource=project_local.`,
+    );
+  }
+}
+
 function validateMatchedSkills(policy, skills, context) {
   ensureObjectArray(skills, context);
   ensure(skills.length >= 1, `${context} must contain at least one run-scoped skill match.`);
@@ -723,7 +794,7 @@ function validateDispatchEnvelope(contract, artifact) {
     "dispatchEnvelopePacket",
   );
   ensureString(packet.ownerAgent, "dispatchEnvelopePacket.ownerAgent");
-  ensureGovernanceOwner(contract, packet.ownerAgent, "dispatchEnvelopePacket.ownerAgent");
+  ensureDurableOwner(contract, artifact, packet.ownerAgent, "dispatchEnvelopePacket.ownerAgent");
   ensureString(packet.businessRoleId, "dispatchEnvelopePacket.businessRoleId");
   ensureString(packet.roleDisplayName, "dispatchEnvelopePacket.roleDisplayName");
   validateRoleDisplayName(
@@ -862,8 +933,9 @@ function validateOrchestrationTaskBoard(contract, artifact) {
       task.owner,
       `orchestrationTaskBoardPacket.tasks[${index}].owner`,
     );
-    ensureGovernanceOwner(
+    ensureDurableOwner(
       contract,
+      artifact,
       task.owner,
       `orchestrationTaskBoardPacket.tasks[${index}].owner`,
     );
@@ -961,8 +1033,9 @@ function validateBusinessFlowBlueprint(contract, artifact) {
         );
         if (field === "candidateOwners") {
           for (const [ownerIndex, owner] of lane[field].entries()) {
-            ensureGovernanceOwner(
+            ensureDurableOwner(
               contract,
+              artifact,
               owner,
               `${context}.candidateOwners[${ownerIndex}]`,
             );
@@ -972,7 +1045,7 @@ function validateBusinessFlowBlueprint(contract, artifact) {
         ensureString(lane[field], `${context}.${field}`);
       }
     }
-    ensureGovernanceOwner(contract, lane.selectedOwner, `${context}.selectedOwner`);
+    ensureDurableOwner(contract, artifact, lane.selectedOwner, `${context}.selectedOwner`);
     ensureEnum(
       lane.coverageStatus,
       policy.laneCoverageStatusEnum,
@@ -1060,7 +1133,7 @@ function validateAgentBlueprint(contract, artifact) {
     ensureString(role.businessRoleId, `agentBlueprintPacket.roles[${index}].businessRoleId`);
     ensureString(role.roleDisplayName, `agentBlueprintPacket.roles[${index}].roleDisplayName`);
     ensureString(role.ownerAgent, `agentBlueprintPacket.roles[${index}].ownerAgent`);
-    ensureGovernanceOwner(contract, role.ownerAgent, `agentBlueprintPacket.roles[${index}].ownerAgent`);
+    validateRoleOwnerPolicy(contract, role, `agentBlueprintPacket.roles[${index}]`);
     ensureEnum(
       role.ownerResolution,
       policy.ownerResolutionEnum,
@@ -1215,7 +1288,7 @@ function validateExecutionAgentCardWhenRequired(contract, artifact) {
   if (!when.includes(resolutionAction)) {
     ensure(
       artifact.executionAgentCard === undefined,
-      "executionAgentCard is external/private compatibility only and must not appear in public Meta_Kim artifacts.",
+      "executionAgentCard is only for execution-agent creation or upgrade, not direct global reuse or public Meta_Kim durable ownership.",
     );
     return;
   }
@@ -1223,9 +1296,14 @@ function validateExecutionAgentCardWhenRequired(contract, artifact) {
   const registryScope =
     artifact.capabilityGapPacket?.executionAgentRegistryScope ??
     artifact.executionAgentCard?.registryScope;
+  const allowedRegistryScopes = new Set(
+    contract.protocols.executionAgentCard.registryScopeEnum ?? [
+      "external_private",
+    ],
+  );
   ensure(
-    registryScope === "external_private",
-    "executionAgentCard requires executionAgentRegistryScope or registryScope = external_private.",
+    allowedRegistryScopes.has(registryScope),
+    `executionAgentCard registry scope must be one of [${[...allowedRegistryScopes].join(", ")}].`,
   );
 
   const packet = artifact.executionAgentCard;
@@ -1576,8 +1654,8 @@ function validateWorkerPackets(contract, artifact) {
     );
     ensureString(packet.roleDisplayName, `workerTaskPackets[${index}].roleDisplayName`);
     ensureString(packet.ownerAgent, `workerTaskPackets[${index}].ownerAgent`);
-    ensureGovernanceOwner(contract, packet.ownerAgent, `workerTaskPackets[${index}].ownerAgent`);
-    ensureGovernanceOwner(contract, packet.owner, `workerTaskPackets[${index}].owner`);
+    ensureDurableOwner(contract, artifact, packet.ownerAgent, `workerTaskPackets[${index}].ownerAgent`);
+    ensureDurableOwner(contract, artifact, packet.owner, `workerTaskPackets[${index}].owner`);
     ensureString(packet.roleInstanceId, `workerTaskPackets[${index}].roleInstanceId`);
     ensureString(packet.shardKey, `workerTaskPackets[${index}].shardKey`);
     ensureArray(packet.shardScope, `workerTaskPackets[${index}].shardScope`);
@@ -1593,8 +1671,8 @@ function validateWorkerPackets(contract, artifact) {
       packet.collisionPolicy,
       `workerTaskPackets[${index}].collisionPolicy`,
     );
-    ensureGovernanceOwner(contract, packet.mergeOwner, `workerTaskPackets[${index}].mergeOwner`);
-    ensureGovernanceOwner(contract, packet.handoffTarget, `workerTaskPackets[${index}].handoffTarget`);
+    ensureDurableOwner(contract, artifact, packet.mergeOwner, `workerTaskPackets[${index}].mergeOwner`);
+    ensureDurableOwner(contract, artifact, packet.handoffTarget, `workerTaskPackets[${index}].handoffTarget`);
     ensureEnum(
       packet.collisionPolicy,
       validCollisionPolicies,
@@ -1676,7 +1754,7 @@ function validateWorkerPackets(contract, artifact) {
       `workerResultPacket ${packet.taskPacketId} has no matching workerTaskPacket.`,
     );
     const taskPacket = taskById.get(packet.taskPacketId);
-    ensureGovernanceOwner(contract, packet.owner, `workerResultPackets[${index}].owner`);
+    ensureDurableOwner(contract, artifact, packet.owner, `workerResultPackets[${index}].owner`);
     ensure(
       packet.owner === taskPacket.owner,
       `workerResultPacket ${packet.taskPacketId} owner must match workerTaskPacket owner.`,
@@ -1746,8 +1824,9 @@ function validateFindingChain(contract, artifact) {
       reviewPacket.sourceProjects.includes(finding.sourceProject),
       `review finding ${finding.findingId} sourceProject must appear in reviewPacket.sourceProjects.`,
     );
-    ensureGovernanceOwner(
+    ensureDurableOwner(
       contract,
+      artifact,
       finding.owner,
       `reviewPacket.findings[${index}].owner`,
     );
@@ -1789,8 +1868,9 @@ function validateFindingChain(contract, artifact) {
       findings.has(response.findingId),
       `revisionResponse ${response.actionId} references unknown findingId ${response.findingId}.`,
     );
-    ensureGovernanceOwner(
+    ensureDurableOwner(
       contract,
+      artifact,
       response.owner,
       `verificationPacket.revisionResponses[${index}].owner`,
     );

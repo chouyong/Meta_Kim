@@ -701,7 +701,7 @@
         "complex_dev",
         "meta_analysis"
       ],
-      "description": "intentPacket is required in run artifacts when taskClassification.governanceFlow is listed in intentPacketRequiredWhenGovernanceFlows (IntentGate-style intent lock-in). intentGatePacket is required for the same flows (structured ambiguity / assumptions gate before Execution). contentEvidencePacket and preDecisionOptionFrame are required before AskUserQuestion / native choice / conversation fallback for non-trivial non-query work; they prove Fetch evidence and Thinking option framing happened before interruption. dispatchEnvelopePacket, dispatchBoard, and workerTaskPacket are finalized only after user choice or an allowed recorded skip. dispatchEnvelopePacket is required for all non-pure-query flows so every executable run has an explicit governance owner, capability boundary, memory mode, and review / verification routing before dispatch. orchestrationTaskBoardPacket is the mandatory Conductor task board for the same executable flows. businessFlowBlueprintPacket and agentBlueprintPacket are required before workerTaskPacket so Conductor proves the full business flow was considered before dispatch. capabilityGapPacket is required when taskClassification.upgradeReasons records owner_creation_required, or when agentBlueprintPacket.roleCoverageGate fails with missing roles whose ownerResolution is upgrade_existing_owner or create_owner_first. In public Meta_Kim, owner creation or upgrade means a governance meta-owner decision plus run-scoped matchedSkills; executionAgentCard remains a compatibility packet for external/private execution-agent registries only."
+      "description": "intentPacket is required in run artifacts when taskClassification.governanceFlow is listed in intentPacketRequiredWhenGovernanceFlows (IntentGate-style intent lock-in). intentGatePacket is required for the same flows (structured ambiguity / assumptions gate before Execution). contentEvidencePacket and preDecisionOptionFrame are required before AskUserQuestion / native choice / conversation fallback for non-trivial non-query work; they prove Fetch evidence and Thinking option framing happened before interruption. dispatchEnvelopePacket, dispatchBoard, and workerTaskPacket are finalized only after user choice or an allowed recorded skip. dispatchEnvelopePacket is required for all non-pure-query flows so every executable run has an explicit owner, capability boundary, memory mode, and review / verification routing before dispatch. orchestrationTaskBoardPacket is the mandatory Conductor task board for the same executable flows. businessFlowBlueprintPacket and agentBlueprintPacket are required before workerTaskPacket so Conductor proves the full business flow was considered before dispatch. capabilityGapPacket is required when taskClassification.upgradeReasons records owner_creation_required, or when agentBlueprintPacket.roleCoverageGate fails with missing roles whose ownerResolution is upgrade_existing_owner or create_owner_first. In the Meta_Kim repository itself, owner creation or upgrade means a governance meta-owner decision plus run-scoped matchedSkills. In user projects, executionAgentCard is used only when a global agent must be copied/modified locally or a new project-local agent must be created."
     },
     "localState": {
       "root": ".meta-kim/state",
@@ -1182,6 +1182,8 @@
         "roleDisplayName",
         "assignedResponsibilitySlice",
         "ownerAgent",
+        "ownerSource",
+        "agentCopyPolicy",
         "ownerResponsibilityDelta",
         "agentIterationPlan",
         "ownerResolution",
@@ -1193,6 +1195,17 @@
         "reuse_existing_owner",
         "upgrade_existing_owner",
         "create_owner_first"
+      ],
+      "ownerSourceEnum": [
+        "meta_kim_canonical",
+        "global_reuse",
+        "project_local"
+      ],
+      "agentCopyPolicyEnum": [
+        "meta_kim_governance_only",
+        "use_global_directly",
+        "copy_to_project_for_modification",
+        "already_project_local"
       ],
       "skillSelectionScopeEnum": [
         "run_scoped"
@@ -1236,6 +1249,9 @@
         "abstractCapabilitySlotsRequired": true,
         "openSourceProjectKeepsGovernanceMetaAgentsOnly": true,
         "nonGovernanceExecutionAgentsIgnoredInPublicRepo": true,
+        "downstreamProjectsMayPersistExecutionAgents": true,
+        "globalAgentDirectReusePreferred": true,
+        "copyGlobalAgentOnlyWhenModified": true,
         "allowedMetaSkillProviders": [
           "agent-teams-playbook",
           "superpowers",
@@ -1258,6 +1274,24 @@
           "description": "A large governance agent may stay intact only when it owns a coherent governance boundary; otherwise split supporting detail into references while preserving the agent identity boundary."
         }
       },
+      "globalAgentReusePolicy": {
+        "searchGlobalBeforeCopy": true,
+        "directUseDoesNotCopyToProject": true,
+        "copyToProjectOnlyWhen": [
+          "project_specific_knowledge_required",
+          "capability_boundary_must_change",
+          "skills_or_tools_must_be_persistently_added",
+          "global_agent_partial_fit_requires_iteration",
+          "recurring_project_pattern_requires_local_owner"
+        ],
+        "reviewStages": [
+          "Critical",
+          "Fetch",
+          "Thinking",
+          "Review"
+        ],
+        "description": "Fetch searches global agents, skills, tools, and capability indexes first. A global agent that already satisfies the orchestration node is used directly and is not copied into the user project. Only agents that need project-specific modification, persistent capability changes, or recurring local ownership are copied into the downstream project as project-local agents, under governance review. agentCopyPolicy=copy_to_project_for_modification is valid only with ownerSource=project_local and ownerResolution=upgrade_existing_owner."
+      },
       "ownerAgentPublicRepoRule": {
         "allowedOwnerAgents": [
           "meta-warden",
@@ -1271,7 +1305,7 @@
           "meta-chrysalis"
         ],
         "forbidPersistedNonGovernanceExecutionAgents": true,
-        "fallbackBehavior": "Use a governance meta owner plus run-scoped matchedSkills, or block with capabilityGapPacket."
+        "fallbackBehavior": "Inside the Meta_Kim repository itself, use a governance meta owner plus run-scoped matchedSkills, or block with capabilityGapPacket. During user-project use, global execution agents may be reused directly without copying, and project-local execution agents may be created or upgraded only when the governance layer approves the gap."
       },
       "runScopedSkillPersistenceGate": {
         "failWhenConcreteSkillCopiedToDurableIdentity": true,
@@ -1328,9 +1362,9 @@
           ]
         },
         "skillSelectionScope": "run_scoped",
-        "description": "Open-source Meta_Kim ignores non-governance execution agents in durable project state. Critical, Fetch, Thinking, and Review orchestration nodes are owned only by governance meta agents; concrete skills/tools are selected per run and recorded as matchedSkills, never as durable non-meta agent dependencies."
+        "description": "Open-source Meta_Kim ignores non-governance execution agents in durable Meta_Kim repository state. Critical, Fetch, Thinking, and Review governance nodes are owned only by governance meta agents. During user-project use, those governance nodes inspect each orchestration node, allow direct global-agent reuse when it already fits, and approve copying/iterating a project-local agent only when capability gaps require durable local change."
       },
-      "description": "Capability-first role blueprint. In the open-source project, ownerAgent is one of the governance meta agents, while concrete execution capability is expressed through run-scoped matchedSkills and governanceStageNodes. It separates businessRoleId, roleDisplayName, selected governance owner, assigned responsibility slice, owner responsibility delta, and per-run role instances so the same governance owner can run multiple named shards in parallel without confusing users. ownerResolution uses reuse_existing_owner, upgrade_existing_owner, or create_owner_first."
+      "description": "Capability-first role blueprint. In the open-source Meta_Kim project, ownerAgent is one of the governance meta agents, while concrete execution capability is expressed through run-scoped matchedSkills and governanceStageNodes. During user-project use, ownerAgent may be a directly reused global execution agent or a project-local execution agent created/upgraded after governance approval. ownerSource and agentCopyPolicy distinguish direct global reuse from project-local modification so usable global agents are not copied into the project; copying into the project must mean project-local upgrade work, not ordinary reuse. It separates businessRoleId, roleDisplayName, selected owner, assigned responsibility slice, owner responsibility delta, and per-run role instances so owners can run multiple named shards in parallel without confusing users. ownerResolution uses reuse_existing_owner, upgrade_existing_owner, or create_owner_first."
     },
     "orchestrationTask": {
       "requiredFields": [
@@ -1380,7 +1414,11 @@
         "inputs",
         "outputs"
       ],
-      "description": "Compatibility packet for external/private execution-agent registries. Public Meta_Kim does not use this as durable owner state; public owner creation or upgrade is represented by governance meta-owner decisions plus run-scoped matchedSkills."
+      "registryScopeEnum": [
+        "external_private",
+        "project_local"
+      ],
+      "description": "Packet for execution-agent creation or upgrade in user projects and external/private registries. It is not used for direct global reuse. Public Meta_Kim does not use this as durable owner state; public owner creation or upgrade is represented by governance meta-owner decisions plus run-scoped matchedSkills."
     },
     "cardDecision": {
       "requiredFields": [

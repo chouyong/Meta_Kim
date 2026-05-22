@@ -54,6 +54,27 @@ describe("validate-run-artifact.mjs", () => {
     return file;
   }
 
+  function routePrimaryExecutionOwner(artifact, ownerAgent) {
+    artifact.dispatchEnvelopePacket.ownerAgent = ownerAgent;
+    artifact.orchestrationTaskBoardPacket.tasks[0].owner = ownerAgent;
+    for (const lane of artifact.businessFlowBlueprintPacket.requiredLanes) {
+      lane.candidateOwners = [ownerAgent, "meta-conductor"];
+      lane.selectedOwner = ownerAgent;
+    }
+    const role = artifact.agentBlueprintPacket.roles[0];
+    role.ownerAgent = ownerAgent;
+    role.ownerResolution = "reuse_existing_owner";
+    role.ownerSource = "global_reuse";
+    role.agentCopyPolicy = "use_global_directly";
+    role.agentIterationPlan =
+      "Use the existing global owner directly; do not copy it into the project.";
+    artifact.workerTaskPackets[0].ownerAgent = ownerAgent;
+    artifact.workerTaskPackets[0].owner = ownerAgent;
+    artifact.workerResultPackets[0].owner = ownerAgent;
+    artifact.reviewPacket.findings[0].owner = ownerAgent;
+    artifact.verificationPacket.revisionResponses[0].owner = ownerAgent;
+  }
+
   test("accepts a valid run artifact with full finding lineage", async () => {
     const result = await validateFixture(validFixture);
     assert.equal(result.ok, true);
@@ -459,6 +480,96 @@ describe("validate-run-artifact.mjs", () => {
           cwd: REPO_ROOT,
         },
       ),
+    );
+  });
+
+  test("accepts direct global agent reuse without copying into the project", async (t) => {
+    const tempFixture = await writeTempFixture(t, (artifact) => {
+      routePrimaryExecutionOwner(artifact, "code-reviewer");
+    });
+    const { stdout } = await execFileAsync(
+      "node",
+      ["scripts/validate-run-artifact.mjs", tempFixture],
+      { cwd: REPO_ROOT },
+    );
+    assert.equal(JSON.parse(stdout).ok, true);
+  });
+
+  test("rejects copying a directly usable global agent into the project", async (t) => {
+    const tempFixture = await writeTempFixture(t, (artifact) => {
+      routePrimaryExecutionOwner(artifact, "code-reviewer");
+      artifact.agentBlueprintPacket.roles[0].agentCopyPolicy =
+        "copy_to_project_for_modification";
+    });
+    await assert.rejects(
+      execFileAsync(
+        "node",
+        ["scripts/validate-run-artifact.mjs", tempFixture],
+        { cwd: REPO_ROOT },
+      ),
+      /use_global_directly/,
+    );
+  });
+
+  test("accepts project-local agent upgrade when global reuse is insufficient", async (t) => {
+    const tempFixture = await writeTempFixture(t, (artifact) => {
+      routePrimaryExecutionOwner(artifact, "frontend-developer");
+      const role = artifact.agentBlueprintPacket.roles[0];
+      role.ownerSource = "project_local";
+      role.agentCopyPolicy = "copy_to_project_for_modification";
+      role.ownerResolution = "upgrade_existing_owner";
+      role.agentIterationPlan =
+        "Copy the global frontend agent into the user project before adding project-specific UI knowledge.";
+      artifact.capabilityGapPacket = {
+        gapId: "gap-project-local-frontend-upgrade",
+        requestedCapability: "project-specific frontend implementation",
+        currentAgentsChecked: ["frontend-developer", "meta-artisan"],
+        insufficiencyReason:
+          "The global frontend agent is a partial fit but needs project-specific UI conventions.",
+        resolutionAction: "upgrade_execution_agent",
+        executionAgentRegistryScope: "project_local",
+        requestedBy: "meta-conductor",
+        approvedBy: "meta-warden",
+      };
+      artifact.executionAgentCard = {
+        registryScope: "project_local",
+        agentId: "frontend-developer",
+        businessRoleId: "frontend",
+        roleDisplayName: "frontend",
+        purpose:
+          "Project-local frontend owner with persistent project UI conventions.",
+        capabilities: ["frontend implementation", "project UI conventions"],
+        nonCapabilities: ["governance arbitration"],
+        dependencies: ["global:frontend-developer"],
+        inputs: ["task brief", "project UI rules"],
+        outputs: ["project-local frontend patch"],
+      };
+    });
+    const { stdout } = await execFileAsync(
+      "node",
+      ["scripts/validate-run-artifact.mjs", tempFixture],
+      { cwd: REPO_ROOT },
+    );
+    assert.equal(JSON.parse(stdout).ok, true);
+  });
+
+  test("rejects project-local copy when no modification is planned", async (t) => {
+    const tempFixture = await writeTempFixture(t, (artifact) => {
+      routePrimaryExecutionOwner(artifact, "frontend-developer");
+      const role = artifact.agentBlueprintPacket.roles[0];
+      role.ownerSource = "project_local";
+      role.agentCopyPolicy = "copy_to_project_for_modification";
+      role.ownerResolution = "reuse_existing_owner";
+      role.agentIterationPlan =
+        "Copy the agent locally even though no persistent modification is planned.";
+    });
+    await assert.rejects(
+      execFileAsync(
+        "node",
+        ["scripts/validate-run-artifact.mjs", tempFixture],
+        { cwd: REPO_ROOT },
+      ),
+      /only agents that need modification are copied/,
     );
   });
 

@@ -71,7 +71,9 @@ On-demand trigger questions (answer honestly before skipping):
 
 ## Governance Owner Factory Lane
 
-When Type B is triggered by a **capability gap in public Meta_Kim**, use the stricter **governance owner factory lane** instead of an ad-hoc prompt-writing loop. Public Meta_Kim does not persist non-governance execution agents; implementation capability is recorded as run-scoped skill/tool evidence.
+When Type B is triggered by a **capability gap in the Meta_Kim repository itself**, use the stricter **governance owner factory lane** instead of an ad-hoc prompt-writing loop. Public Meta_Kim does not persist non-governance execution agents; implementation capability is recorded as run-scoped skill/tool evidence.
+
+When Type B is triggered while Meta_Kim is used inside a **user project**, search global agents first. If a global agent already fits, use it directly and do not copy it into the project. Copy a global agent into the user project only when project-specific knowledge, boundary changes, persistent skill/tool additions, or recurring local ownership require modification; that copy must be recorded as project-local upgrade work, not ordinary reuse.
 
 Professional role split:
 
@@ -99,13 +101,13 @@ Rule: Conductor may participate before or after the factory, but **Conductor doe
 The public governance owner factory lane must produce these explicit artifacts:
 
 1. **Capability Gap Sheet** (`capabilityGapPacket`) — what is missing, which owners were checked, and what decision was made.
-2. **Governance Owner Decision** (`agentBlueprintPacket.roles[]` + `matchedSkills`) — the governance owner contract and run-scoped capability evidence. `executionAgentCard` is a compatibility packet for external/private execution-agent registries only.
+2. **Owner Decision** (`agentBlueprintPacket.roles[]` + `matchedSkills`) — the governance owner contract and run-scoped capability evidence for Meta_Kim itself, or the direct global-reuse / project-local-copy decision for user projects. `agentCopyPolicy = copy_to_project_for_modification` is valid only with project-local upgrade intent. `executionAgentCard` is used only when an execution agent must be created or upgraded, not when a usable global agent is reused directly.
 3. **Orchestration Task Board** (`orchestrationTaskBoardPacket`) — ordered execution tasks plus synthesis owner.
 4. **Evolution Record** (`evolutionWritebackPacket`) — retain / upgrade / retire outcomes after the run.
 
 ## External Execution Agent Role Card Compatibility
 
-External/private execution-agent registries may still require `executionAgentCard`. Public Meta_Kim must not use that packet as durable public owner state; public creation or upgrade is represented by governance owner fields plus `matchedSkills`.
+External/private and user-project execution-agent registries may still require `executionAgentCard` for creation or upgrade. Public Meta_Kim must not use that packet as durable public owner state; public creation or upgrade is represented by governance owner fields plus `matchedSkills`. Directly reused global agents do not require a copied project-local card.
 
 Required fields:
 
@@ -116,7 +118,7 @@ Required fields:
 - **Inputs** — what it accepts
 - **Outputs** — what it must deliver
 
-This compatibility card is the build contract for an external/private factory and the dispatch contract for Conductor outside the public governance-only boundary.
+This card is the build contract for an execution-agent factory when an agent must be created or upgraded. It is not used just because a global agent exists; direct global reuse remains a reference, not a local copy. A copied global agent must be modified or upgraded after copy; otherwise it should stay global.
 
 ### Skill Binding Rules For Created Or Iterated Agents
 
@@ -126,7 +128,7 @@ Created or upgraded agents inherit durable capability shape, not a frozen tactic
 - Long-term identity may include meta-skill package providers, such as `superpowers` or `ecc`, as compatible capability providers.
 - Long-term identity must not include the concrete sub-skill, shell command, plugin sub-capability, or prompt tactic that happened to win one Fetch.
 - `findskill` is only a runtime-local capability search entrypoint. Its search result can justify a current-run `selectedSkill`, not a permanent agent binding.
-Concrete choices belong in run artifacts: `capabilitySearchResult`, `matchedSkills`, `orchestrationTaskBoardPacket`, and `workerTaskPacket`; `executionAgentCard` is included only for external/private execution-agent registries.
+Concrete choices belong in run artifacts: `capabilitySearchResult`, `matchedSkills`, `orchestrationTaskBoardPacket`, and `workerTaskPacket`; `executionAgentCard` is included only for project-local/external execution-agent creation or upgrade.
 
 Genesis owns the durable boundary. Artisan owns provider compatibility and selection rules. Fetch owns the current-run concrete selection.
 

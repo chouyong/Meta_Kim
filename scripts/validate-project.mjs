@@ -1272,6 +1272,8 @@ async function validateWorkflowContract() {
     "roleDisplayName",
     "assignedResponsibilitySlice",
     "ownerAgent",
+    "ownerSource",
+    "agentCopyPolicy",
     "ownerResponsibilityDelta",
     "agentIterationPlan",
     "ownerResolution",
@@ -1304,9 +1306,45 @@ async function validateWorkflowContract() {
       longTermCapabilityPolicy.openSourceProjectKeepsGovernanceMetaAgentsOnly ===
         true &&
       longTermCapabilityPolicy.nonGovernanceExecutionAgentsIgnoredInPublicRepo ===
-        true,
-    "workflow-contract.json agentBlueprintPacket.longTermCapabilityPolicy must require abstract slots, run-only concrete skill selection, open-source governance-only owners, and no fixed concrete child skills in long-term identity.",
+        true &&
+      longTermCapabilityPolicy.globalAgentDirectReusePreferred === true &&
+      longTermCapabilityPolicy.copyGlobalAgentOnlyWhenModified === true,
+    "workflow-contract.json agentBlueprintPacket.longTermCapabilityPolicy must require abstract slots, run-only concrete skill selection, open-source governance-only owners, direct global reuse, copy-only-when-modified, and no fixed concrete child skills in long-term identity.",
   );
+  const globalAgentReusePolicy =
+    agentBlueprintProtocol.globalAgentReusePolicy ?? {};
+  assert(
+    globalAgentReusePolicy.searchGlobalBeforeCopy === true &&
+      globalAgentReusePolicy.directUseDoesNotCopyToProject === true &&
+      globalAgentReusePolicy.copyToProjectOnlyWhen?.includes(
+        "project_specific_knowledge_required",
+      ) &&
+      globalAgentReusePolicy.copyToProjectOnlyWhen?.includes(
+        "capability_boundary_must_change",
+      ),
+    "workflow-contract.json agentBlueprintPacket.globalAgentReusePolicy must search global first, use matching global agents directly, and copy only when modification is required.",
+  );
+  for (const ownerSource of [
+    "meta_kim_canonical",
+    "global_reuse",
+    "project_local",
+  ]) {
+    assert(
+      agentBlueprintProtocol.ownerSourceEnum?.includes(ownerSource),
+      `workflow-contract.json agentBlueprintPacket.ownerSourceEnum must include ${ownerSource}.`,
+    );
+  }
+  for (const copyPolicy of [
+    "meta_kim_governance_only",
+    "use_global_directly",
+    "copy_to_project_for_modification",
+    "already_project_local",
+  ]) {
+    assert(
+      agentBlueprintProtocol.agentCopyPolicyEnum?.includes(copyPolicy),
+      `workflow-contract.json agentBlueprintPacket.agentCopyPolicyEnum must include ${copyPolicy}.`,
+    );
+  }
   for (const provider of [
     "agent-teams-playbook",
     "superpowers",
@@ -2101,7 +2139,7 @@ async function validateRunArtifactFixtures() {
 
   assert(
     invalidNonMetaOwnerPassed === false,
-    "scripts/validate-run-artifact.mjs must reject non-meta ownerAgent in public Meta_Kim fixtures.",
+    "scripts/validate-run-artifact.mjs must reject non-meta ownerAgent when ownerSource=meta_kim_canonical.",
   );
 }
 

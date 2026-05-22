@@ -29,17 +29,18 @@ Meta_Kim distinguishes between two agent layers. **Confusing these layers is a g
 
 | Layer | Purpose | Examples | When to Use |
 |-------|---------|----------|-------------|
-| **Meta-Agents** (`layer='meta'`) | Governance: coordination, orchestration, review, synthesis | `meta-warden`, `meta-prism`, `meta-conductor`, `meta-genesis`, `meta-artisan`, `meta-sentinel`, `meta-librarian`, `meta-scout`, `meta-chrysalis` | **Open-source durable owners** for Critical, Fetch, Thinking, and Review. They own orchestration, owner resolution, run-scoped skill matching, review, synthesis, and evolution gates. |
-| **Execution capability evidence** | Run-scoped skills, tools, commands, or external/private agents discovered for the current run | `matchedSkills`, `candidateSkills`, tool names, command evidence | **Not durable public-repo owners**. Concrete implementation capability may be recorded as run-scoped evidence, but public Meta_Kim does not persist non-governance execution agents as `ownerAgent`. |
+| **Meta-Agents** (`layer='meta'`) | Governance: coordination, orchestration, review, synthesis | `meta-warden`, `meta-prism`, `meta-conductor`, `meta-genesis`, `meta-artisan`, `meta-sentinel`, `meta-librarian`, `meta-scout`, `meta-chrysalis` | **Open-source Meta_Kim durable owners** for Critical, Fetch, Thinking, and Review. They own orchestration, owner resolution, run-scoped skill matching, review, synthesis, and evolution gates. |
+| **Execution agents / capabilities** | Global agents, project-local agents, skills, tools, and commands discovered for the current run | `frontend-developer`, `code-reviewer`, `matchedSkills`, `candidateSkills`, tool names, command evidence | In the Meta_Kim repository itself they are **not** durable public-repo owners. In user projects they may be used directly from the global registry, or copied into the project only when modification is required. |
 
 **⛔ FORBIDDEN PATTERNS**:
 - ❌ Persisting `frontend-developer`, `auth-specialist`, `backend-developer`, or similar non-meta names as `ownerAgent` in public Meta_Kim artifacts
 - ❌ Treating "ignored execution agents" as silently accepted owners. They must be converted to run-scoped capability evidence or rejected with `capabilityGapPacket`
 - ❌ Binding concrete skills or commands into long-term meta-agent identity instead of recording them in `matchedSkills`
+- ❌ Copying a usable global agent into a user project without modification need. Direct global reuse must stay direct.
 
 **How to identify layers**:
 - Meta-agents: `id` starts with `meta-` in `config/capability-index/meta-kim-capabilities.json`, OR agent's SOUL.md has `⚠️ GOVERNANCE LAYER AGENT` warning box
-- Execution-like capabilities: external/private agents, tools, commands, and skills found during Fetch. In the public repo they are capability evidence, not durable owners.
+- Execution-like capabilities: global agents, project-local agents, tools, commands, and skills found during Fetch. In the Meta_Kim repo they are capability evidence, not durable owners. In user projects they may become execution owners under the global-reuse/project-local-copy rules.
 
 **Fetch-first discipline**:
 1. Search `config/capability-index/meta-kim-capabilities.json` → check `layer` field
@@ -73,17 +74,18 @@ Anything executable / handoff-able → must have an agent owner
 
 When Fetch does not find a clean owner, resolve the gap in this order:
 
-1. **Existing governance owner found** → dispatch with that `meta-*` owner and record concrete capability in run-scoped `matchedSkills`
-2. **Durable / recurring / project-specific governance gap** → trigger Warden-approved governance-owner upgrade or governance meta-agent creation
-3. **Implementation capability gap** → keep the governance owner, record partial/missing `matchedSkills`, and emit `capabilityGapPacket`; do not persist a non-meta owner
+1. **Existing global or project-local execution owner fully fits** → use it directly. If it is global, set `ownerSource = global_reuse` and `agentCopyPolicy = use_global_directly`; do not copy it into the project.
+2. **Existing global owner partially fits but needs project-specific change** → copy it into the user project first, set `ownerSource = project_local`, `agentCopyPolicy = copy_to_project_for_modification`, and `ownerResolution = upgrade_existing_owner`, then upgrade it under Genesis/Artisan/Sentinel/Prism review.
+3. **No execution owner exists for a recurring user-project need** → create a project-local owner after Warden approves the `capabilityGapPacket`.
+4. **Meta_Kim repository governance gap** → upgrade/create only governance meta ownership; do not persist a non-meta execution agent in Meta_Kim itself.
 
-**No-owner execution is illegal.** In public Meta_Kim, a temporary non-meta fallback is also illegal as durable state; the run returns to Thinking until a governance owner and run-scoped capability evidence are explicit.
+**No-owner execution is illegal.** In Meta_Kim repository maintenance, a temporary non-meta fallback is illegal as durable state. In user projects, execution owners may be direct global agents or project-local agents, but global agents are copied locally only when modification is required. A project-local role with `ownerResolution = reuse_existing_owner` must use `agentCopyPolicy = already_project_local`; `copy_to_project_for_modification` is reserved for upgrade work.
 
 When Step 2 is chosen, the governed run must explicitly record the factory lane:
 
 - `capabilityGapPacket`
 - `orchestrationTaskBoardPacket`
-- governance owner card / `executionAgentCard` only when the gap is resolved outside the public governance-only boundary
+- governance owner card for Meta_Kim repository governance gaps, or `executionAgentCard` only when a user-project execution agent must be created or upgraded
 
 ### Protocol-First Rule
 
@@ -114,7 +116,7 @@ Pre-decision artifacts are distinct from dispatch artifacts:
 
 For `governanceFlow` in `complex_dev` or `meta_analysis`, the machine-validated JSON artifact must also include **`intentPacket`** (`trueUserIntent`, `successCriteria`, `nonGoals`, `intentPacketVersion: v1`) and **`intentGatePacket`** (`ambiguitiesResolved`, `requiresUserChoice`, `defaultAssumptions`, `pendingUserChoices`, `userLanguage`, `languageSource`, `nativeChoiceSurface`, `intentGatePacketVersion: v1`; if `requiresUserChoice` is true, include non-empty `pendingUserChoices[]`; if skipped, include the recorded skip reason from `preDecisionOptionFrame.choiceGateSkip`) before Execution — see `config/contracts/workflow-contract.json` (`protocols.intentPacket`, `protocols.intentGatePacket`, `runDiscipline.protocolFirst.intentPacketRequiredWhenGovernanceFlows` / `intentGatePacketRequiredWhenGovernanceFlows`).
 
-If `taskClassification.upgradeReasons` includes `owner_creation_required`, the artifact must also include **`capabilityGapPacket`** before Execution. In public Meta_Kim the resolution must upgrade or create governance ownership; `create_execution_agent` / `upgrade_execution_agent` are external/private-project actions, not public-repo durable owner actions.
+If `taskClassification.upgradeReasons` includes `owner_creation_required`, the artifact must also include **`capabilityGapPacket`** before Execution. In Meta_Kim repository maintenance the resolution must upgrade or create governance ownership only. In user-project use, `create_execution_agent` / `upgrade_execution_agent` are valid only when direct global reuse is insufficient; a usable global agent must not be copied.
 
 ---
 
@@ -395,7 +397,7 @@ If any one of those conditions fails, the task must be treated as `A`, `P`, or `
 > Core question: **Should I be doing this, or should I dispatch it?**
 
 Self-check list:
-- [ ] Is the current role an implementation capability? (Yes → keep a governance meta owner and record the concrete capability as run-scoped `matchedSkills`; do not persist a non-meta owner in public Meta_Kim)
+- [ ] Is the current role an implementation capability inside the Meta_Kim repository itself? (Yes → keep a governance meta owner and record the concrete capability as run-scoped `matchedSkills`; do not persist a non-meta owner in public Meta_Kim)
 - [ ] Does the task involve writing code / modifying files? (Yes → must delegate to Execution Layer; meta-theory does not execute directly)
 - [ ] Am I "conveniently" making decisions for the Execution Layer? (Yes → only provide constraints; let the Execution Layer judge implementation details autonomously)
 - [ ] Did the previous round also do a similar task? (Yes → check if a Skip-Level pattern is forming, record Scars)
@@ -915,7 +917,7 @@ ELSE (gap is one-off / emergency)
 | No governance owner covers a recurring public-repo governance need | `ownerResolution = create_owner_first`; create or compose a governance meta owner only after Warden approval |
 | Implementation capability exists only as a concrete skill/tool/external worker | Keep the governance owner; record concrete capability as `matchedSkills` with `skillSelectionScope = run_scoped` |
 
-Temporary non-meta ownership is **not allowed** in public Meta_Kim durable artifacts. If no governance owner can supervise the work, return to Thinking and emit a `capabilityGapPacket`.
+Temporary non-meta ownership is **not allowed** in public Meta_Kim durable artifacts. In user projects, non-meta execution ownership is allowed only as direct global reuse or justified project-local creation/upgrade under governance review.
 
 ### Tier-Aware Routing
 
@@ -1356,7 +1358,7 @@ Before proceeding to Step 4, the plan must pass this gate:
 | **Single-Packet Anti-Pattern** | Only 1 packet produced for a multi-file / multi-capability task | REJECT — re-decompose or justify why a single packet is genuinely sufficient (single-file, single-capability, pure logic change) |
 | **Business-flow coverage** | `businessFlowBlueprintPacket` covers expected lanes or documents omitted lanes with reasons | REJECT — add missing lanes or omission reasons |
 | **Short business role names** | `roleDisplayName` uses a coarse role-family form (`frontend`, `backend`, `test`); runtime nicknames and scoped work items are aliases or instance scope only | REJECT — replace personal/random names, scoped work items, or long task descriptions with coarse business role names |
-| **Role responsibility assignment** | Every `agentBlueprintPacket.roles[]` entry declares `assignedResponsibilitySlice`, `ownerResponsibilityDelta`, `agentIterationPlan`, `ownerResolution`, `matchedSkills`, `skillSelectionScope`, and `governanceStageNodes` | REJECT — fill the role iteration and skill-match fields before worker packets |
+| **Role responsibility assignment** | Every `agentBlueprintPacket.roles[]` entry declares `ownerSource`, `agentCopyPolicy`, `assignedResponsibilitySlice`, `ownerResponsibilityDelta`, `agentIterationPlan`, `ownerResolution`, `matchedSkills`, `skillSelectionScope`, and `governanceStageNodes`; direct global reuse is not copied, and project-local copy requires upgrade intent | REJECT — fill the role source, copy policy, iteration, and skill-match fields before worker packets |
 | **Role coverage gap** | Failed `roleCoverageGate`, non-empty `missingRoles`, or `ownerResolution = upgrade_existing_owner | create_owner_first` has `capabilityGapPacket` and approved governance-owner decision | REJECT — upgrade/create governance owner or block the run |
 | **Same-agent multi-instance** | Repeated `ownerAgent` entries have unique `roleInstanceId`, shard scope, artifact namespace, isolation/collision policy, and one merge owner | REJECT — add shard/merge rules or make the work sequential |
 | **Packet completeness** | Every packet has non-empty `owner`, `ownerAgent`, `businessRoleId`, `roleDisplayName`, `roleInstanceId`, `dependsOn` (or explicit `[]`), `parallelGroup`, `mergeOwner`, `shardKey`, `shardScope` | REJECT — fill missing fields |

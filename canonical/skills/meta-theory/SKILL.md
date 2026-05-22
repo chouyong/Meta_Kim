@@ -445,11 +445,11 @@ DEFAULT → state the core capability need explicitly
 
 **Step 3 — Score and invoke:**
 - Governance task (analyze/audit/review) → prefer meta-agent
-- Open-source Meta_Kim project task → ignore non-governance execution agents in durable owner selection; choose one or more governance meta agents as `ownerAgent` and record concrete implementation capability through run-scoped `matchedSkills`
-- External/private deployment task with an explicit execution-agent registry → prefer execution agent from capability index only outside the public Meta_Kim project boundary
+- Meta_Kim repository maintenance task → ignore non-governance execution agents in durable owner selection; choose one or more governance meta agents as `ownerAgent` and record concrete implementation capability through run-scoped `matchedSkills`
+- User-project task → search global and project-local agents first. If a global agent already fits, use it directly and do **not** copy it into the project. Copy an agent into the project only when it must be changed, given project-specific knowledge, or upgraded as a recurring local owner.
 - No match → output `capabilityGapPacket` (mandatory), then:
   1. IF this is the open-source Meta_Kim project → route the gap to governance-owner iteration (`meta-genesis` for boundary, `meta-artisan` for run-scoped skill/provider matching, `meta-sentinel` for permissions, `meta-prism` for review). Do not persist a non-meta execution agent.
-  2. IF this is an external/private project and the user approves → trigger Type B creation pipeline
+  2. IF this is a user project and the user approves durable local evolution → trigger Type B creation/upgrade pipeline
   3. IF user declines OR gap is one-off → record gap in Evolution follow-up
 
 **Hardcoded agent names are FORBIDDEN.** Always go through 3-step discovery.
@@ -466,7 +466,9 @@ Capability index layers: (1) repo canonical (2) runtime mirrors (3) local global
 - `findskill` is a runtime-local capability search entrypoint used during Fetch. It is not evidence that the discovered concrete skill should be bound into long-term agent identity.
 - Agent creation and agent iteration must follow the same rule: Genesis defines durable capability slots and boundaries; Artisan records provider compatibility and Fetch-time selection rules; the current run records the selected concrete skill/command/plugin capability.
 
-**Open-source governance-only owner rule**: In this public Meta_Kim repository, all non-governance execution agents are ignored for durable orchestration. `ownerAgent` in `agentBlueprintPacket`, `dispatchEnvelopePacket`, and `workerTaskPackets` must be one of the 9 governance meta agents. Concrete implementation capability is represented by `matchedSkills` with `skillSelectionScope = run_scoped`; it is not persisted as a new non-meta agent. If a needed owner is weak, iterate the relevant governance meta agent boundary or skill/provider rule instead of creating `frontend-developer`, `auth-specialist`, or other execution-agent files.
+**Open-source governance-only owner rule**: In this public Meta_Kim repository itself, all non-governance execution agents are ignored for durable orchestration. Meta_Kim canonical assets must keep only the 9 governance meta agents. This rule is about keeping the open-source source project clean; it does **not** forbid user projects from reusing, upgrading, or creating their own local execution agents under governance.
+
+**Global reuse before local copy rule**: During user-project use, Fetch searches global agents, project-local agents, skills, tools, and capability indexes first. A global agent that already satisfies the orchestration node is used directly (`ownerSource = global_reuse`, `agentCopyPolicy = use_global_directly`). Copying an agent into the project is allowed only when the global agent must be modified, given project-specific memory/knowledge, upgraded with persistent skills/tools, or turned into a recurring local owner (`ownerSource = project_local`, `agentCopyPolicy = copy_to_project_for_modification`, `ownerResolution = upgrade_existing_owner`). Do not copy usable global agents just to "have them" locally. If a project-local agent is simply reused without modification, record `agentCopyPolicy = already_project_local`.
 
 **Mandatory governance stage coverage**: every governed run must record `agentBlueprintPacket.governanceStageCoverage` for:
 - `Critical`: `meta-warden`, `meta-conductor`, plus `meta-sentinel` or `meta-librarian` when risk or continuity matters
@@ -474,7 +476,7 @@ Capability index layers: (1) repo canonical (2) runtime mirrors (3) local global
 - `Thinking`: `meta-conductor`, `meta-genesis`, `meta-artisan`, `meta-sentinel`, and `meta-warden` for owner resolution and skill/loadout framing
 - `Review`: `meta-prism`, `meta-warden`, plus `meta-sentinel` or `meta-chrysalis` when safety or evolution writeback is relevant
 
-Each `agentBlueprintPacket.roles[]` entry must include `matchedSkills`, `skillSelectionScope`, and `governanceStageNodes` so Review can verify that the selected governance owner and run-scoped skill set cover the orchestration node.
+Each `agentBlueprintPacket.roles[]` entry must include `ownerSource`, `agentCopyPolicy`, `matchedSkills`, `skillSelectionScope`, and `governanceStageNodes` so Review can verify whether the owner is Meta_Kim governance-only, direct global reuse, or project-local evolution, and whether the selected skill set covers the orchestration node.
 
 **Business-flow capability matrix (mandatory for executable deliverables)**: Fetch must expand a user request into a complete business-flow capability matrix before choosing agents. Do not only search for the first obvious role. Infer lanes from the requested outcome, scope, constraints, and deliverable type, then capability-match every selected lane. Use the examples below as planning prompts:
 
@@ -497,7 +499,9 @@ Output this as `businessFlowBlueprintPacket` with `requiredLanes`, `optionalLane
 - Separate the layers:
   - `businessRoleId`: stable responsibility family, e.g. `frontend`, `database`, `browser-qa`.
   - `roleDisplayName`: user-facing short business name, e.g. `frontend` or `backend`.
-  - `ownerAgent`: matched governance meta agent in the public repo, e.g. `meta-conductor`; concrete implementation capability belongs in run-scoped `matchedSkills`.
+  - `ownerAgent`: matched owner. In the Meta_Kim repo this must be a governance meta agent; in user projects it may be a directly reused global agent or a project-local agent created/upgraded after governance approval.
+  - `ownerSource`: `meta_kim_canonical | global_reuse | project_local`.
+  - `agentCopyPolicy`: `meta_kim_governance_only | use_global_directly | copy_to_project_for_modification | already_project_local`.
   - `roleInstanceId`: per-run instance id, e.g. `frontend#home-page`.
   - `runtimeInstanceAlias`: optional platform nickname, never the primary name.
 - `agentBlueprintPacket.roles[]` must also record the responsibility assignment decision:
@@ -509,7 +513,7 @@ Output this as `businessFlowBlueprintPacket` with `requiredLanes`, `optionalLane
   - `skillSelectionScope`: `run_scoped`.
   - `governanceStageNodes`: `Critical`, `Fetch`, `Thinking`, and/or `Review` nodes this governance owner participates in.
 
-**Role coverage gap rule**: if `roleCoverageGate = fail`, `missingRoles` is non-empty, or any role has `ownerResolution = upgrade_existing_owner | create_owner_first`, then output `capabilityGapPacket` and require an approved owner card before Execution. In the public repo this means governance-owner upgrade or governance-meta-agent creation; non-meta execution-agent persistence is not allowed.
+**Role coverage gap rule**: if `roleCoverageGate = fail`, `missingRoles` is non-empty, or any role has `ownerResolution = upgrade_existing_owner | create_owner_first`, then output `capabilityGapPacket` and require an approved owner card before Execution. In the Meta_Kim repo this means governance-owner upgrade only; in user projects it may mean copying a global agent into the project for modification or creating a project-local agent.
 
 **Same-agent multi-instance rule**: The same `ownerAgent` may be spawned more than once in parallel when the work is shardable. Each instance must have a unique `roleInstanceId`, `shardKey`, `shardScope`, `workspaceIsolation`, `artifactNamespace`, `collisionPolicy`, `parallelGroup`, and a unified `mergeOwner` for the parallel group. If two instances share files or decisions without a merge/lock policy, they are not parallel; make them sequential or split the design owner first.
 
@@ -575,7 +579,7 @@ When skipping, record `researchSkipReason` in `contentEvidencePacket` and state 
 
 ### Execution Capability Evidence
 
-In public Meta_Kim, non-governance execution agents are not durable owners. Fetch may discover skills, tools, commands, MCP providers, or external/private agents, but public artifacts must record them as run-scoped `matchedSkills` under one of the 9 governance meta owners. External/private deployments may still use execution-agent registries when explicitly outside the public repository boundary.
+In the Meta_Kim repository itself, non-governance execution agents are not durable owners. Fetch may discover skills, tools, commands, MCP providers, global agents, or project-local agents, but Meta_Kim public artifacts must keep durable ownership on the 9 governance meta agents. During user-project use, directly reusable global agents stay global; only agents that need modification are copied into the project for local evolution.
 
 ## How to Dispatch
 
@@ -599,7 +603,7 @@ Agent(
 
 **Factory Station pipeline** (see `references/create-agent.md` for full spec):
 1. Discovery → data collection → coupling grouping → user confirmation
-2. Pre-design → check if a governance meta owner plus run-scoped skill/tool evidence covers the need; external/private execution agents are evidence only inside the public repo
+2. Pre-design → check whether an existing global or project-local agent already covers the need. Direct global reuse wins; copy only if durable project-specific modification is required. In the Meta_Kim repo itself, keep governance meta owners only.
 3. Design → Warden gap approval → Genesis (SOUL.md) → Artisan (loadout) → optional Scout/Sentinel/Librarian → `meta-prism` review → `meta-warden` approval
 4. Review → capability-matched quality reviewer
 5. Integration → write `canonical/agents/{name}.md`
@@ -612,12 +616,12 @@ Agent(
 **Decision matrix** (`capabilityGapPacket.resolutionAction`):
 | Resolution | Trigger |
 |---|---|
-| `create_execution_agent` | External/private project only; no existing execution owner; Genesis→Artisan runs |
-| `upgrade_execution_agent` | External/private project only; partial execution owner cover; Artisan fills gap |
-| `reuse_existing_owner` | Fetch found a governance owner and run-scoped skill/tool match |
+| `create_execution_agent` | User project only; no existing execution owner; Genesis→Artisan runs and creates project-local owner |
+| `upgrade_execution_agent` | User project only; partial global/project-local owner cover; copy global to project first if modification is needed |
+| `reuse_existing_owner` | Fetch found a governance owner, global agent, or project-local agent that can be used directly |
 | `accepted_gap` | Non-critical; documented and deferred |
 
-Map this to `agentBlueprintPacket.roles[].ownerResolution` as: `reuse_existing_owner` for direct reuse, `upgrade_existing_owner` for governance owner boundary upgrades, and `create_owner_first` for approved governance owner creation. In public Meta_Kim, creation or upgrade targets governance meta agents / contracts only; concrete skills remain in run-scoped `matchedSkills`.
+Map this to `agentBlueprintPacket.roles[].ownerResolution` as: `reuse_existing_owner` for direct reuse, `upgrade_existing_owner` for an owner that must be improved, and `create_owner_first` for approved local owner creation. If `ownerSource = global_reuse`, `agentCopyPolicy` must be `use_global_directly`; if the global agent needs modification, first copy it to the user project and mark `ownerSource = project_local`, `agentCopyPolicy = copy_to_project_for_modification`, and `ownerResolution = upgrade_existing_owner`.
 
 ### Station Deliverable Contract (Mandatory)
 
@@ -706,7 +710,7 @@ Stage 2 is the gate — do not skip to Stage 3/4. Stage 4 requires protocol arti
 
 **Protocol-first Dispatch**: produce `contentEvidencePacket` and `preDecisionOptionFrame` before the user choice surface; produce finalized `runHeader`, `businessFlowBlueprintPacket`, `agentBlueprintPacket`, `dispatchEnvelopePacket`, `dispatchBoard`, and `workerTaskPackets` (with `dependsOn`, `parallelGroup`, `mergeOwner`, short business role names, and instance/shard fields) only after the user choice or an allowed recorded skip. Stage 4 may not start until all protocol artifacts are ready.
 
-**Agent blueprint gate**: Before spawning agents, validate that every visible role has a short business `roleDisplayName`; every selected durable owner is one of the governance meta agents in public Meta_Kim; every role declares `assignedResponsibilitySlice`, `ownerResponsibilityDelta`, `agentIterationPlan`, `ownerResolution`, `matchedSkills`, `skillSelectionScope`, and `governanceStageNodes`; all repeated `ownerAgent` entries have distinct `roleInstanceId`, non-overlapping or explicitly locked `shardScope`, explicit `workspaceIsolation`, unique `artifactNamespace`, `collisionPolicy`, and a unified `mergeOwner`; and every omitted business lane has a human-readable reason. FAIL means return to Thinking and, when coverage is missing or owner creation/upgrade is needed, produce `capabilityGapPacket` plus an approved governance-owner card before Execution.
+**Agent blueprint gate**: Before spawning agents, validate that every visible role has a short business `roleDisplayName`; every selected durable owner is one of the governance meta agents in public Meta_Kim; every role declares `ownerSource`, `agentCopyPolicy`, `assignedResponsibilitySlice`, `ownerResponsibilityDelta`, `agentIterationPlan`, `ownerResolution`, `matchedSkills`, `skillSelectionScope`, and `governanceStageNodes`; direct global reuse uses `use_global_directly`, project-local reuse without modification uses `already_project_local`, and project-local copy is allowed only with `upgrade_existing_owner`; all repeated `ownerAgent` entries have distinct `roleInstanceId`, non-overlapping or explicitly locked `shardScope`, explicit `workspaceIsolation`, unique `artifactNamespace`, `collisionPolicy`, and a unified `mergeOwner`; and every omitted business lane has a human-readable reason. FAIL means return to Thinking and, when coverage is missing or owner creation/upgrade is needed, produce `capabilityGapPacket` plus an approved governance-owner card before Execution.
 
 **Option Exploration (MANDATORY)**: at Stage 3, enumerate ≥2 solution paths with Pros/Cons or a Decision Record (rejected alternatives must be documented). This is not optional — every non-trivial task requires explicit option comparison.
 
@@ -757,7 +761,8 @@ If the current task is read-only, output a `writebackSuggestion` with target pat
 | Pattern spans multiple agents | Extract as skill template |
 | **Governance bypass** | **Edit meta-theory SKILL.md** — add FORBIDDEN PATH + Gate 3 override rule |
 | Protocol artifact skipped | Return to Stage 3 to produce artifacts |
-| **Global agent needs project-specific enhancement** | **Copy from global to `canonical/agents/`, enhance locally** — `meta:sync` naturally gives project-local priority over global |
+| **Global agent already fits** | **Use directly; do not copy into the project** |
+| **Global agent needs project-specific enhancement** | **Copy from global to the user project's local agent area, then enhance locally** — project-local priority applies only after modification is justified |
 
 ### Evolution Writeback Checklist (mandatory before marking Evolution complete)
 

@@ -634,7 +634,9 @@
             "ownerAgent": "meta-prism",
             "responsibility": "verify governance-only owner and quality coverage"
           }
-        ]
+        ],
+        "ownerSource": "meta_kim_canonical",
+        "agentCopyPolicy": "meta_kim_governance_only"
       }
     ],
     "roleCoverageGate": "pass",
