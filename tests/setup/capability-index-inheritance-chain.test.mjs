@@ -4,6 +4,9 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 
 import {
+  preserveGeneratedAtWhenUnchanged,
+} from "../../scripts/discover-global-capabilities.mjs";
+import {
   repoRoot,
   resolveRuntimeProjection,
 } from "../../scripts/meta-kim-sync-config.mjs";
@@ -145,6 +148,33 @@ describe("capability index inheritance chain", () => {
         `${scriptName} must refresh capability indexes before validation checks`,
       );
     }
+  });
+
+  test("global discovery keeps generatedAt stable when canonical capability content is unchanged", () => {
+    const existing = {
+      generatedAt: "2026-05-23T21:39:16.715Z",
+      registryName: "meta-kim-capabilities",
+      summary: { totalAgents: 9 },
+    };
+    const next = {
+      generatedAt: "2026-05-23T21:45:13.184Z",
+      registryName: "meta-kim-capabilities",
+      summary: { totalAgents: 9 },
+    };
+
+    assert.equal(
+      preserveGeneratedAtWhenUnchanged(next, existing).generatedAt,
+      existing.generatedAt,
+      "pure regeneration must not dirty the canonical capability index timestamp",
+    );
+    assert.equal(
+      preserveGeneratedAtWhenUnchanged(
+        { ...next, summary: { totalAgents: 10 } },
+        existing,
+      ).generatedAt,
+      next.generatedAt,
+      "real capability content changes must keep the new generation timestamp",
+    );
   });
 
   test("project validator enforces the capability index schema contract", async () => {

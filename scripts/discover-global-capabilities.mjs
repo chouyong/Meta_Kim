@@ -13,7 +13,7 @@ import { spawnSync } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { ensureProfileState } from "./meta-kim-local-state.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -1051,6 +1051,36 @@ async function buildRepoCapabilityIndex() {
   return index;
 }
 
+export function capabilityIndexWithoutGeneratedAt(index) {
+  const normalized = JSON.parse(JSON.stringify(index ?? {}));
+  delete normalized.generatedAt;
+  return normalized;
+}
+
+export function preserveGeneratedAtWhenUnchanged(nextIndex, existingIndex) {
+  if (
+    existingIndex &&
+    typeof existingIndex.generatedAt === "string" &&
+    JSON.stringify(capabilityIndexWithoutGeneratedAt(nextIndex)) ===
+      JSON.stringify(capabilityIndexWithoutGeneratedAt(existingIndex))
+  ) {
+    return {
+      ...nextIndex,
+      generatedAt: existingIndex.generatedAt,
+    };
+  }
+
+  return nextIndex;
+}
+
+async function readJsonIfExists(filePath) {
+  try {
+    return JSON.parse(await fs.readFile(filePath, "utf8"));
+  } catch {
+    return null;
+  }
+}
+
 async function buildGlobalCapabilityInventory(scannedResults, profile) {
   const index = {
     generatedAt: new Date().toISOString(),
@@ -1191,7 +1221,11 @@ async function main() {
   }
 
   const profileState = await ensureProfileState();
-  const repoCapabilityIndex = await buildRepoCapabilityIndex();
+  const canonicalIndexPath = path.join(repoRoot, CANONICAL_CAPABILITY_INDEX);
+  const repoCapabilityIndex = preserveGeneratedAtWhenUnchanged(
+    await buildRepoCapabilityIndex(),
+    await readJsonIfExists(canonicalIndexPath),
+  );
   const globalInventory = await buildGlobalCapabilityInventory(
     scannedResults,
     profileState.profile,
@@ -1206,7 +1240,6 @@ async function main() {
   // Write the repo-neutral canonical index, then mirror only that index into
   // runtime projections. Machine-specific global inventory stays local-only.
   const repoContent = `${JSON.stringify(repoCapabilityIndex, null, 2)}\n`;
-  const canonicalIndexPath = path.join(repoRoot, CANONICAL_CAPABILITY_INDEX);
   await fs.mkdir(path.dirname(canonicalIndexPath), { recursive: true });
   await fs.writeFile(canonicalIndexPath, repoContent);
 
@@ -1280,4 +1313,9 @@ async function main() {
   );
 }
 
-await main();
+if (
+  process.argv[1] &&
+  pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url
+) {
+  await main();
+}
