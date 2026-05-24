@@ -46,6 +46,7 @@ import { resolveManifestSkillSubdir } from "./scripts/install-platform-config.mj
 import { buildNodeScriptSpawn } from "./scripts/node-spawn-config.mjs";
 import {
   CLAUDE_HOOK_FILES,
+  CODEX_BUSINESS_ROLE_AGENT_IDS,
   CODEX_RUNTIME_ADAPTER_AGENT_IDS,
   META_AGENTS,
   OPENCLAW_WORKSPACE_MD,
@@ -3079,6 +3080,7 @@ function checkSync(
     const expectedCodexAgentFiles = expectedAgentProjectionFiles(".toml", [
       ...META_AGENTS,
       ...CODEX_RUNTIME_ADAPTER_AGENT_IDS,
+      ...CODEX_BUSINESS_ROLE_AGENT_IDS,
     ]);
     if (existsSync(codexAgentsDir)) {
       const summary = summarizeExpectedFiles(

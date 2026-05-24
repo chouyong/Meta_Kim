@@ -87,7 +87,7 @@ Fetch 阶段的能力索引顺序必须是：
 ## 三、派生产物 / runtime mirrors
 
 - Claude Code runtime projection：`.claude/agents/`、`.claude/skills/meta-theory/`、`.claude/hooks/`、`.claude/settings.json`、`.claude/capability-index/`
-- Codex custom agents：`.codex/agents/*.toml`，其中 `worker.toml` / `explorer.toml` 是 Codex runtime adapter，用于官方 `nickname_candidates` 的最佳努力显示名；如果 Codex Desktop / tool-backed session 不加载它们，Meta_Kim 仍以 `roleDisplayName` 为用户可见名
+- Codex custom agents：`.codex/agents/*.toml`，其中 `worker.toml` / `explorer.toml` 是 generic fallback adapter；`frontend.toml` / `backend.toml` / `test.toml` / `review.toml` / `analysis.toml` / `verify.toml` / `docs.toml` 是业务角色 adapter，用于支持官方 `nickname_candidates` 和 named custom agents 的 Codex host。如果 Codex Desktop / tool-backed session 仍显示 `Popper`、`Zeno` 或其他宿主昵称，Meta_Kim 把它记为 `runtimeInstanceAlias`，不得算作项目级 `roleDisplayName` 验收通过。
 - Codex project skill：`.agents/skills/meta-theory/SKILL.md`
 - Codex compatibility skill mirror：`.codex/skills/meta-theory/SKILL.md`
 - Codex slash command：`.codex/commands/meta-theory.md` / `~/.codex/commands/meta-theory.md`

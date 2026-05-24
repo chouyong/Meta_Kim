@@ -6,6 +6,20 @@
 格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 发布新版本时，请在顶部（旧版本之前）添加新的 **`## [版本号] - YYYY-MM-DD`** 部分。
 
+## [2.1.5] - 2026-05-24
+
+### 新增
+
+- **Codex 业务角色 custom agents** — 运行时同步现在会在 generic `worker.toml` / `explorer.toml` fallback 之外生成 `frontend.toml`、`backend.toml`、`test.toml`、`review.toml`、`analysis.toml`、`verify.toml`、`docs.toml`。支持 named custom agents 的 Codex host 可以使用稳定的业务角色名。
+
+### 修复
+
+- **Codex 侧边栏命名验收边界** — 文档和测试现在明确把 `Popper`、`Zeno` 或其他宿主昵称视为 Codex runtime instance alias。Meta_Kim 自己的任务板和 run artifact 必须继续使用粗粒度业务 `roleDisplayName`，不能把宿主侧边栏昵称算成项目命名验收通过。
+
+### 变更
+
+- **版本元数据** — 包版本提升到 `2.1.5`。
+
 ## [2.1.4] - 2026-05-24
 
 ### 新增

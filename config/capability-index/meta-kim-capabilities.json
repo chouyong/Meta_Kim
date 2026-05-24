@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-05-24T10:22:17.262Z",
+  "generatedAt": "2026-05-24T11:07:06.285Z",
   "registryName": "meta-kim-capabilities",
   "scope": "repo-canonical",
   "canonicalProjection": "config/capability-index/meta-kim-capabilities.json",
@@ -207,8 +207,8 @@
         "type": "skills",
         "namespace": "canonical",
         "path": "canonical/skills/meta-theory/SKILL.md",
-        "size": 71862,
-        "modified": "2026-05-24T10:12:48.350Z"
+        "size": 72011,
+        "modified": "2026-05-24T11:05:14.359Z"
       },
       "repo:canonical-reference:create-agent": {
         "id": "create-agent",
@@ -454,7 +454,7 @@
         "namespace": "repo-mcp",
         "path": ".mcp.json",
         "size": 220,
-        "modified": "2026-05-24T09:40:44.606Z"
+        "modified": "2026-05-24T10:31:03.494Z"
       }
     },
     "mcpTools": {
@@ -464,7 +464,7 @@
         "namespace": "repo-mcp",
         "path": ".mcp.json",
         "size": 220,
-        "modified": "2026-05-24T09:40:44.606Z"
+        "modified": "2026-05-24T10:31:03.494Z"
       },
       "repo:repo-mcp:meta-kim-runtime:get_meta_agent": {
         "id": "meta-kim-runtime:get_meta_agent",
@@ -472,7 +472,7 @@
         "namespace": "repo-mcp",
         "path": ".mcp.json",
         "size": 220,
-        "modified": "2026-05-24T09:40:44.606Z"
+        "modified": "2026-05-24T10:31:03.494Z"
       },
       "repo:repo-mcp:meta-kim-runtime:get_meta_runtime_capabilities": {
         "id": "meta-kim-runtime:get_meta_runtime_capabilities",
@@ -480,7 +480,7 @@
         "namespace": "repo-mcp",
         "path": ".mcp.json",
         "size": 220,
-        "modified": "2026-05-24T09:40:44.606Z"
+        "modified": "2026-05-24T10:31:03.494Z"
       }
     },
     "plugins": {},

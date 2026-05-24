@@ -73,7 +73,7 @@ After changing canonical sources, sync projections instead of hand-forking runti
 When this repository is opened in Codex:
 
 - `AGENTS.md` is this resident project guide.
-- `.codex/agents/*.toml` contains Codex custom-agent mirrors for the Meta_Kim team. Codex is the only target here that uses agent TOML; `worker.toml` and `explorer.toml` are Codex runtime adapters for readable host nicknames, not durable Meta_Kim owners.
+- `.codex/agents/*.toml` contains Codex custom-agent mirrors for the Meta_Kim team. Codex is the only target here that uses agent TOML; `worker.toml` and `explorer.toml` are fallback adapters for built-in Codex roles, and `frontend.toml`, `backend.toml`, `test.toml`, `review.toml`, `analysis.toml`, `verify.toml`, and `docs.toml` are business-role adapters for hosts that honor named custom agents. None of these adapters become durable Meta_Kim owners.
 - `.agents/skills/meta-theory/` is the Codex project skill mirror; `.codex/skills/meta-theory/` is kept as a compatibility mirror for older installs.
 - `.codex/hooks.json` and `.codex/hooks/` carry Codex-compatible project hook wiring.
 - `codex/config.toml.example` is generated from `canonical/runtime-assets/codex/config.toml.example`.
@@ -83,7 +83,7 @@ Cursor parity is maintained through `.cursor/agents/*.md`, `.cursor/skills/meta-
 Cross-runtime format boundary:
 
 - Claude Code agents: `.claude/agents/*.md` with YAML frontmatter.
-- Codex agents: `.codex/agents/*.toml` with `name`, `description`, `developer_instructions`, and optional ASCII `nickname_candidates`.
+- Codex agents: `.codex/agents/*.toml` with `name`, `description`, `developer_instructions`, and optional ASCII `nickname_candidates`. Do not copy Codex TOML fields into Claude Code, Cursor, or OpenClaw.
 - Cursor agents: `.cursor/agents/*.md` with YAML frontmatter plus `.cursor/rules/*.mdc` and `AGENTS.md` context.
 - OpenClaw agents: `openclaw/workspaces/<agent>/` identity/workspace files plus `openclaw/openclaw.template.json`.
 

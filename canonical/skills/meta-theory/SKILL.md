@@ -486,7 +486,7 @@ Capability index layers: (1) repo canonical (2) runtime mirrors (3) local global
 | Runtime | Agent projection | Naming/display behavior |
 |---|---|---|
 | Claude Code | `.claude/agents/*.md` with YAML frontmatter | Agent name comes from Markdown frontmatter; no Codex `nickname_candidates`. |
-| Codex | `.codex/agents/*.toml` with `name`, `description`, `developer_instructions`, and optional ASCII `nickname_candidates` | Project may provide `worker.toml` / `explorer.toml` runtime adapters as best-effort readable nicknames; host-generated aliases still remain `runtimeInstanceAlias` only. |
+| Codex | `.codex/agents/*.toml` with `name`, `description`, `developer_instructions`, and optional ASCII `nickname_candidates` | Project provides generic fallback adapters (`worker.toml`, `explorer.toml`) plus business-role adapters (`frontend.toml`, `backend.toml`, `test.toml`, `review.toml`, `analysis.toml`, `verify.toml`, `docs.toml`) for hosts that honor named custom agents. Host-generated aliases still remain `runtimeInstanceAlias` only. |
 | Cursor | `.cursor/agents/*.md` plus `.cursor/rules/*.mdc` / `AGENTS.md` context | Markdown/YAML agent mirror; no Codex TOML. |
 | OpenClaw | `openclaw/workspaces/<agent>/` files plus `openclaw/openclaw.template.json` | Workspace identity model (`BOOT.md`, `IDENTITY.md`, `SOUL.md`, `TOOLS.md`, `AGENTS.md`, `MEMORY.md`, `HEARTBEAT.md`, `USER.md`); no Codex TOML. |
 

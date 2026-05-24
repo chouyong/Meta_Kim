@@ -6,6 +6,20 @@ All notable changes to Meta_Kim are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 When you tag a release, add a new **`## [version] - YYYY-MM-DD`** section at the top (above older entries) and list changes there.
 
+## [2.1.5] - 2026-05-24
+
+### Added
+
+- **Codex business-role custom agents** — Runtime sync now generates `frontend.toml`, `backend.toml`, `test.toml`, `review.toml`, `analysis.toml`, `verify.toml`, and `docs.toml` alongside the generic `worker.toml` / `explorer.toml` fallbacks so Codex hosts that honor named custom agents can display stable role-family names.
+
+### Fixed
+
+- **Codex sidebar naming acceptance boundary** — Documentation and tests now treat `Popper`, `Zeno`, or other host aliases as Codex runtime instance aliases only. Meta_Kim's own task boards and run artifacts must keep `roleDisplayName` as a coarse business role and must not count host sidebar aliases as project naming acceptance.
+
+### Changed
+
+- **Version metadata** — Bumped the package version to `2.1.5`.
+
 ## [2.1.4] - 2026-05-24
 
 ### Added

@@ -3,9 +3,11 @@ import assert from "node:assert/strict";
 import path from "node:path";
 
 import {
+  CODEX_BUSINESS_ROLE_AGENTS,
   CODEX_RUNTIME_ADAPTER_AGENTS,
   applyRuntimePaths,
   buildCodexAgent,
+  buildCodexBusinessRoleAgent,
   buildCodexRuntimeAdapterAgent,
   buildCodexSkillContent,
   buildCursorAgent,
@@ -379,6 +381,31 @@ describe("sync-runtimes / Codex agents", () => {
     }
   });
 
+  test("emits Codex business-role custom agents with stable role names", () => {
+    const roleIds = CODEX_BUSINESS_ROLE_AGENTS.map((agent) => agent.id);
+    assert.deepEqual(roleIds, [
+      "frontend",
+      "backend",
+      "test",
+      "review",
+      "analysis",
+      "verify",
+      "docs",
+    ]);
+
+    for (const agent of CODEX_BUSINESS_ROLE_AGENTS) {
+      const rendered = buildCodexBusinessRoleAgent(agent);
+      assert.match(rendered, new RegExp(`^name = "${agent.id}"$`, "m"));
+      assert.match(
+        rendered,
+        new RegExp(`Use this role only when the task packet's roleDisplayName is ${agent.roleDisplayName}`),
+      );
+      assert.match(rendered, /^nickname_candidates = \[/m);
+      assert.match(rendered, /runtimeInstanceAlias/);
+      assert.doesNotMatch(rendered, /Popper|Zeno|agent-019e/);
+    }
+  });
+
   test("treats generated Codex adapter files as runtime agent projections", () => {
     assert.equal(
       inferProjectCategory(p(".codex", "agents", "worker.toml"), REPO),
@@ -386,6 +413,10 @@ describe("sync-runtimes / Codex agents", () => {
     );
     assert.equal(
       inferProjectCategory(p(".codex", "agents", "explorer.toml"), REPO),
+      CATEGORIES.F,
+    );
+    assert.equal(
+      inferProjectCategory(p(".codex", "agents", "frontend.toml"), REPO),
       CATEGORIES.F,
     );
   });
