@@ -6,6 +6,24 @@
 格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 发布新版本时，请在顶部（旧版本之前）添加新的 **`## [版本号] - YYYY-MM-DD`** 部分。
 
+## [2.2.3] - 2026-05-25
+
+### 修复（v2.2.2 meta-prism 审查 NEW-H1）
+
+- **H2 闭环写到了 CHANGELOG 而不是 `progress-v2.2.0.md`** — 原始 Prism v2.2.0 审查的 H2 发现明确指向进度文档。v2.2.2 commit（`c51cbcac`）把 Q4 数据层与强制层分界的说明写进了 `CHANGELOG.md`，但根本没改 `progress-v2.2.0.md` 本身。v2.2.3 通过在 canonical 进度文档末尾追加 "Q4 Status Clarification" 段落补上这个缺口，并显式连接回 v2.2.2 NEW-H1 闭环历史。
+
+### 验证
+
+- `git diff v2.2.1..v2.2.2 -- canonical/runtime-assets/shared/hooks/spine-state.mjs canonical/runtime-assets/claude/hooks/enforce-agent-dispatch.mjs` → **空**（生产钩子冻结声明被独立验证；v2.2.2 NEW-M3 关闭）。
+- `git show --stat c51cbcac -- progress-v2.2.0.md` → **空**（证实 v2.2.2 未触碰该文件；NEW-H1 证据）。
+- `node --test tests/poc-design-gate/*.test.mjs` → 59/59 通过（与 v2.2.2 一致，代码模块未动）。
+- `npm run meta:check` → 20/20 通过。
+- `npm run meta:test:meta-theory` → 796/796 通过。
+
+### 架构说明
+
+v2.2.3 是纯文档补丁（1 个文件：`progress-v2.2.0.md`），关闭 v2.2.2 meta-prism 审查的最后一个未闭环发现。生产钩子保持冻结。无代码或测试改动。v2.2.0 原始 3 个 HIGH 发现至此在代码层（v2.2.2）和文档层（v2.2.3）双重闭环。
+
 ## [2.2.2] - 2026-05-25
 
 ### 修复（Prism v2.2.0 审查 HIGH 级别发现）

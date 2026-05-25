@@ -6,6 +6,24 @@ All notable changes to Meta_Kim are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 When you tag a release, add a new **`## [version] - YYYY-MM-DD`** section at the top (above older entries) and list changes there.
 
+## [2.2.3] - 2026-05-25
+
+### Fixed (v2.2.2 meta-prism review NEW-H1)
+
+- **H2 closure lived in CHANGELOG, not in `progress-v2.2.0.md`** — the original Prism v2.2.0 review H2 finding pointed at the progress doc. The v2.2.2 commit (`c51cbcac`) added the Q4 data-vs-enforcement deferral language to `CHANGELOG.md` but never modified `progress-v2.2.0.md` itself. v2.2.3 closes that gap by appending the "Q4 Status Clarification" subsection to the canonical progress doc, with explicit closure history linking back to v2.2.2 NEW-H1.
+
+### Verification
+
+- `git diff v2.2.1..v2.2.2 -- canonical/runtime-assets/shared/hooks/spine-state.mjs canonical/runtime-assets/claude/hooks/enforce-agent-dispatch.mjs` → **empty** (frozen-scope assertion independently confirmed; v2.2.2 NEW-M3 closed).
+- `git show --stat c51cbcac -- progress-v2.2.0.md` → **empty** (confirms v2.2.2 did not touch the file; NEW-H1 evidence).
+- `node --test tests/poc-design-gate/*.test.mjs` → 59/59 pass (unchanged from v2.2.2; no code modules touched).
+- `npm run meta:check` → 20/20 pass.
+- `npm run meta:test:meta-theory` → 796/796 pass.
+
+### Architecture Notes
+
+v2.2.3 is a documentation-only patch (1 file: `progress-v2.2.0.md`) closing the last open finding from the v2.2.2 meta-prism review. Production hooks remain frozen. No code or test changes. The original 3 HIGH findings from v2.2.0 are now genuinely closed at both code (v2.2.2) and document (v2.2.3) layers.
+
 ## [2.2.2] - 2026-05-25
 
 ### Fixed (Prism v2.2.0 review HIGH findings)
