@@ -3518,6 +3518,68 @@ function fail(msg) {
   console.error(`✗ ${msg}`);
 }
 
+/**
+ * EB-004 deprecation check (v2.3.1, warn-only).
+ *
+ * Scans .meta-kim/state/<profile>/spine/spine-state.json files for
+ * `preDecisionOptionFrame.{choiceSurfaceState,solutionChoiceState,choiceGateSkip}`
+ * — these fields belong on the top-level `state` object, not nested inside
+ * `preDecisionOptionFrame`. The frame describes the question; user answers
+ * and state markers live at the top level.
+ *
+ * v2.3.1 emits warnings only. v2.4.0 will fail validation when legacy nesting
+ * is found. A helper script `scripts/migrate-spine-state-eb004.mjs` promotes
+ * the fields and removes the legacy nesting.
+ *
+ * @returns {Promise<{warnings: string[]}>}
+ */
+async function validateSpineStateChoiceFieldLocations() {
+  const warnings = [];
+  const stateDir = path.join(repoRoot, ".meta-kim", "state");
+  if (!(await exists(stateDir))) {
+    return { warnings };
+  }
+
+  let profiles;
+  try {
+    profiles = await fs.readdir(stateDir);
+  } catch {
+    return { warnings };
+  }
+
+  const legacyFields = [
+    "choiceSurfaceState",
+    "solutionChoiceState",
+    "choiceGateSkip",
+  ];
+
+  for (const profile of profiles) {
+    const stateFile = path.join(stateDir, profile, "spine", "spine-state.json");
+    if (!(await exists(stateFile))) continue;
+    let state;
+    try {
+      state = JSON.parse(await fs.readFile(stateFile, "utf8"));
+    } catch {
+      continue;
+    }
+    const frame = state?.preDecisionOptionFrame;
+    if (!frame || typeof frame !== "object" || Array.isArray(frame)) continue;
+    for (const legacyField of legacyFields) {
+      if (frame[legacyField] !== undefined) {
+        warnings.push(
+          `[EB-004 deprecation, v2.3.1 warn-only] '${toRepoRelative(stateFile)}': ` +
+            `preDecisionOptionFrame.${legacyField} should be moved to state.${legacyField} ` +
+            `(top-level). Will FAIL in v2.4.0. ` +
+            `See docs/v2.3.1-rfc-EB-004-preDecisionOptionFrame-nesting.md. ` +
+            `Helper: scripts/migrate-spine-state-eb004.mjs.`,
+        );
+      }
+    }
+  }
+
+  return { warnings };
+}
+
 async function main() {
   const TOTAL = 20;
   let current = 1;
@@ -3632,9 +3694,21 @@ async function main() {
   await validateFactoryRelease();
   pass(t.val.step15Pass);
 
+  // EB-004 deprecation check (warn-only, does not gate validation).
+  const eb004Result = await validateSpineStateChoiceFieldLocations();
+
   console.log("\n========================================");
   console.log(t.val.footerAll(TOTAL));
   console.log(t.val.footerAgents(agentIds.length));
+  if (eb004Result.warnings.length > 0) {
+    console.log("----------------------------------------");
+    console.log(
+      `EB-004 deprecation warnings (v2.3.1 warn-only, will FAIL in v2.4.0):`,
+    );
+    for (const warning of eb004Result.warnings) {
+      console.log(`  ! ${warning}`);
+    }
+  }
   console.log("========================================\n");
 }
 

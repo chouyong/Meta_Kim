@@ -6,6 +6,25 @@
 格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 发布新版本时，请在顶部（旧版本之前）添加新的 **`## [版本号] - YYYY-MM-DD`** 部分。
 
+## [2.3.1] - 2026-05-26
+
+### 修复
+
+- EB-002 (HIGH) + HOOK-INFRA-001 (LOW) — spine-state.mjs 加入 read_only_verifier 槽位 + recordDispatch 自动追加 dispatchChain + enforce-agent-dispatch.mjs 插入 read_only_verifier 闸门。
+- EB-004 (LOW) — preDecisionOptionFrame 嵌套归一化（warn-only 校验器 + 迁移辅助脚本 + 规范位置文档）。
+
+### 新增
+
+- `scripts/migrate-spine-state-eb004.mjs` 迁移辅助脚本。
+- 21 前缀只读校验命令白名单。
+- `dispatchChain[stage]_supplementary[]` 审计字段。
+
+### 变更
+
+- `STAGE_META_AGENT_MAP` schema 加新字段（增量，向后兼容）。
+- `recordDispatch` 函数签名加 `toolInput` 参数。
+- 版本 2.3.0.1 → 2.3.1。
+
 ## [2.3.0.1] - 2026-05-26
 
 ### 变更

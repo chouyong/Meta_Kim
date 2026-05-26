@@ -6,6 +6,25 @@ All notable changes to Meta_Kim are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 When you tag a release, add a new **`## [version] - YYYY-MM-DD`** section at the top (above older entries) and list changes there.
 
+## [2.3.1] - 2026-05-26
+
+### Fixed
+
+- EB-002 (HIGH) + HOOK-INFRA-001 (LOW) — read_only_verifier capability slot in spine-state.mjs + dispatchChain auto-append in recordDispatch + read_only_verifier gate in enforce-agent-dispatch.mjs.
+- EB-004 (LOW) — preDecisionOptionFrame nesting normalization (warn-only validator + migration helper + canonical-location docs).
+
+### Added
+
+- `scripts/migrate-spine-state-eb004.mjs` migration helper.
+- 21-prefix read-only verifier command whitelist.
+- `dispatchChain[stage]_supplementary[]` audit field.
+
+### Changed
+
+- `STAGE_META_AGENT_MAP` schema extended (additive, backward-compatible).
+- `recordDispatch` signature now accepts `toolInput`.
+- Version 2.3.0.1 → 2.3.1.
+
 ## [2.3.0.1] - 2026-05-26
 
 ### Changed

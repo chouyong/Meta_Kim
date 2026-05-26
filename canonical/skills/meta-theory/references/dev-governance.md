@@ -235,6 +235,8 @@ Default public notice shape:
 - `execution_confirmation_allowed` applies only after Fetch has produced `contentEvidencePacket` and Thinking has produced `preDecisionOptionFrame`, and before Execution begins. This is the normal consolidated execution confirmation.
 - `completed` means the user has answered or an allowed skip has been recorded; do not ask again unless scope materially changes.
 
+**Canonical location (v2.3.1+)**: `state.choiceSurfaceState`, `state.solutionChoiceState`, and `state.choiceGateSkip` are top-level fields on spine state. `preDecisionOptionFrame` describes the question (frameId, questions, candidatePaths, recommendedDefault); user answers and state markers live at the top level. See `docs/v2.3.1-rfc-EB-004-preDecisionOptionFrame-nesting.md`.
+
 Popup or interaction testing is a requirement to route through the normal flow, not permission to skip to a native choice surface. If no evidence-backed candidate paths exist, the execution confirmation is premature. If Fetch evidence is missing, Thinking is incomplete. If Thinking is incomplete, pre-Execution confirmation is forbidden.
 
 **Decision Triggers** (from `config/contracts/workflow-contract.json` → `userInteractionPolicy`):

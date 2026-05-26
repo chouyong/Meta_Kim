@@ -79,6 +79,8 @@ Before any visible choice surface, set or infer `choiceSurfaceState`:
 
 **Human check**: no candidate paths means no execution confirmation; no Fetch evidence means Thinking is not complete; no Thinking result means no pre-Execution confirmation.
 
+**Canonical location (v2.3.1+)**: `state.choiceSurfaceState`, `state.solutionChoiceState`, and `state.choiceGateSkip` are top-level fields on spine state. `preDecisionOptionFrame` describes the question (frameId, questions, candidatePaths, recommendedDefault); user answers and state markers live at the top level. See `docs/v2.3.1-rfc-EB-004-preDecisionOptionFrame-nesting.md`.
+
 ### Respect user choices (after questioning)
 
 After collecting user answers through a native question tool, `request_user_input`, native choice surface, or `conversation_fallback`, the analysis and final dispatch MUST respect their choices:
