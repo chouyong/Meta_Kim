@@ -6,6 +6,14 @@ All notable changes to Meta_Kim are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 When you tag a release, add a new **`## [version] - YYYY-MM-DD`** section at the top (above older entries) and list changes there.
 
+## [2.3.0.1] - 2026-05-26
+
+### Changed
+
+- Renamed `canonical/runtime-assets/claude/hooks/ecc-batching-wrapper.mjs` → `canonical/runtime-assets/claude/hooks/ecc-permission-cache-wrapper.mjs` (closes W2 F1 finding).
+- Docstring aligned with actual permission-cache behavior.
+- No behavioral change.
+
 ## [2.3.0] - 2026-05-26
 
 ### Fixed
@@ -17,7 +25,7 @@ When you tag a release, add a new **`## [version] - YYYY-MM-DD`** section at the
 
 ### Added
 
-- **EB-003 (MEDIUM) — Meta_Kim ECC batching wrapper hook (Option D, user-selected)** — `canonical/runtime-assets/claude/hooks/ecc-batching-wrapper.mjs` (NEW) implements PreToolUse session+file cache key (SHA256(session_id || file_path)) with 5-minute TTL scoped to `os.tmpdir()`. Idempotent + non-fatal cache write failure. Hook not yet wired into `.claude/settings.json` (canonical only); v2.3.x decides registration. See findings: F1 below (`EB-011` backlog).
+- **EB-003 (MEDIUM) — Meta_Kim ECC batching wrapper hook (Option D, user-selected)** — `canonical/runtime-assets/claude/hooks/ecc-permission-cache-wrapper.mjs` (NEW) implements PreToolUse session+file cache key (SHA256(session_id || file_path)) with 5-minute TTL scoped to `os.tmpdir()`. Idempotent + non-fatal cache write failure. Hook not yet wired into `.claude/settings.json` (canonical only); v2.3.x decides registration. See findings: F1 below (`EB-011` backlog).
 
 ### Changed
 
@@ -37,7 +45,7 @@ When you tag a release, add a new **`## [version] - YYYY-MM-DD`** section at the
 
 - **EB-002 (HIGH)** — `read_only_verifier` capability slot. **Spec not yet drafted.** Bug nature confirmed first-hand in v2.3.0 (W2 + W3 reviewer subagents both blocked by `enforce-agent-dispatch.mjs` from running `git diff` / `npm run meta:check` in review/meta_review stages). Requires `spine-state.mjs` changes (frozen). v2.3.1 RFC must define: acceptance criteria, allowed command whitelist, scope contract, test plan.
 - **EB-004 (LOW)** — `preDecisionOptionFrame` nesting normalization. **Spec not yet drafted.** Bug surfaced in v2.3.0 (`choiceSurfaceState` had to be set BOTH at spine top-level AND inside `preDecisionOptionFrame` to satisfy the hook's `state.choiceSurfaceState` lookup — confusing field placement). Requires `spine-state.mjs` changes. v2.3.1 RFC must define: canonical field location, migration plan, validator gate.
-- **EB-011 (LOW, new in v2.3.0)** — `ecc-batching-wrapper.mjs` docstring claims "batch the related ECC plugin install side-effects" but implementation only writes a per-(session,file) cache marker + returns `permissionDecision=allow` on cache hits (does not suppress/defer tool calls). v2.3.x decision: rename to `ecc-permission-cache-wrapper.mjs` OR strengthen behavior to actually deny/skip duplicate side-effecting calls within TTL.
+- **EB-011 (LOW, new in v2.3.0)** — `ecc-permission-cache-wrapper.mjs` docstring claims "batch the related ECC plugin install side-effects" but implementation only writes a per-(session,file) cache marker + returns `permissionDecision=allow` on cache hits (does not suppress/defer tool calls). v2.3.x decision: rename to `ecc-permission-cache-wrapper.mjs` OR strengthen behavior to actually deny/skip duplicate side-effecting calls within TTL.
 - **Hook infra bug (new finding, v2.3.0)** — Agent dispatches in `review` / `meta_review` / `verification` stages do not auto-append `ownerAgent` to `dispatchChain.<stage>`. Main thread must hand-edit spine state to record the dispatch. Tracked alongside EB-002 (same root cause: read-only reviewer cannot run verify commands; same fix surface: `spine-state.mjs`).
 
 ## [2.2.5] - 2026-05-25

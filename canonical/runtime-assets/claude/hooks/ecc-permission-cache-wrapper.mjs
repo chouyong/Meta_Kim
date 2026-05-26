@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 /**
- * ecc-batching-wrapper.mjs — Meta_Kim ECC plugin install batching wrapper hook.
+ * ecc-permission-cache-wrapper.mjs — Meta_Kim ECC plugin install permission cache hook.
  *
  * Purpose:
- *   When the Edit/Write tool repeatedly touches files inside the ECC plugin
- *   marketplace cache within a short session window, batch the related ECC
- *   plugin install side-effects so they do not trigger on every micro-edit.
+ *   Permission cache for ECC plugin install marketplace lookups. SHA256-keyed
+ *   by session_id + file_path with 5min TTL; cache hit returns
+ *   permissionDecision='allow'.
  *   Closes EB-003 (Option D: Meta_Kim wrapper hook with session+file scope + TTL).
  *
  * Scope (per Warden C10):
@@ -14,10 +14,10 @@
  *   - Scope: per session + per file (not global, not persistent across sessions)
  *
  * Behavior (PreToolUse):
- *   - Exit 0 with empty stdout: no batching applied, pass through normally
- *   - Exit 0 with hookSpecificOutput.permissionDecision=allow: cache hit, batched
+ *   - Exit 0 with empty stdout: cache miss, pass through normally (no cached decision)
+ *   - Exit 0 with hookSpecificOutput.permissionDecision=allow: cache hit, auto-allow
  *
- * Closes: EB-003 (v2.3.0)
+ * Closes: EB-003 (v2.3.0), EB-011 (v2.3.0.1 — name + docstring alignment)
  */
 
 import process from "node:process";

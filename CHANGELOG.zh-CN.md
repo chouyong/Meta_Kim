@@ -6,6 +6,14 @@
 格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 发布新版本时，请在顶部（旧版本之前）添加新的 **`## [版本号] - YYYY-MM-DD`** 部分。
 
+## [2.3.0.1] - 2026-05-26
+
+### 变更
+
+- 重命名 `canonical/runtime-assets/claude/hooks/ecc-batching-wrapper.mjs` → `canonical/runtime-assets/claude/hooks/ecc-permission-cache-wrapper.mjs`（关闭 W2 F1 评审项）。
+- Docstring 与实际权限缓存行为对齐。
+- 无行为变更。
+
 ## [2.3.0] - 2026-05-26
 
 ### 修复
@@ -17,7 +25,7 @@
 
 ### 新增
 
-- **EB-003（MEDIUM）— Meta_Kim ECC 批处理包装钩子（Option D，用户选定）** — `canonical/runtime-assets/claude/hooks/ecc-batching-wrapper.mjs`（新增）实现 PreToolUse 会话+文件缓存键（SHA256(session_id || file_path)），TTL 5 分钟，存储位置限定 `os.tmpdir()`。幂等 + 缓存写失败非致命。钩子尚未在 `.claude/settings.json` 中注册（仅 canonical），v2.3.x 决定是否注册。详见 F1（`EB-011` backlog）。
+- **EB-003（MEDIUM）— Meta_Kim ECC 批处理包装钩子（Option D，用户选定）** — `canonical/runtime-assets/claude/hooks/ecc-permission-cache-wrapper.mjs`（新增）实现 PreToolUse 会话+文件缓存键（SHA256(session_id || file_path)），TTL 5 分钟，存储位置限定 `os.tmpdir()`。幂等 + 缓存写失败非致命。钩子尚未在 `.claude/settings.json` 中注册（仅 canonical），v2.3.x 决定是否注册。详见 F1（`EB-011` backlog）。
 
 ### 变更
 
@@ -37,7 +45,7 @@
 
 - **EB-002（HIGH）** — `read_only_verifier` 能力槽。**RFC 尚未起草。** v2.3.0 亲身验证 bug 真实存在（W2 + W3 reviewer 子智能体都被 `enforce-agent-dispatch.mjs` 在 review/meta_review 阶段阻止运行 `git diff` / `npm run meta:check`）。需要修改 `spine-state.mjs`（冻结面）。v2.3.1 RFC 必须定义：验收标准、允许命令白名单、scope 契约、测试计划。
 - **EB-004（LOW）** — `preDecisionOptionFrame` 嵌套归一化。**RFC 尚未起草。** v2.3.0 暴露 bug（`choiceSurfaceState` 必须同时在 spine 顶层和 `preDecisionOptionFrame` 内设置才能满足 hook 的 `state.choiceSurfaceState` 查找——字段位置令人困惑）。需要修改 `spine-state.mjs`。v2.3.1 RFC 必须定义：字段规范位置、迁移计划、validator 关卡。
-- **EB-011（LOW，v2.3.0 新发现）** — `ecc-batching-wrapper.mjs` docstring 声称"批处理 ECC 插件安装副作用"，但实现只是写每个（会话,文件）缓存标记 + 缓存命中时返回 `permissionDecision=allow`（不实际阻止/延迟工具调用）。v2.3.x 决定：要么改名为 `ecc-permission-cache-wrapper.mjs`，要么加强行为以实际在 TTL 内拒绝/跳过重复有副作用的调用。
+- **EB-011（LOW，v2.3.0 新发现）** — `ecc-permission-cache-wrapper.mjs` docstring 声称"批处理 ECC 插件安装副作用"，但实现只是写每个（会话,文件）缓存标记 + 缓存命中时返回 `permissionDecision=allow`（不实际阻止/延迟工具调用）。v2.3.x 决定：要么改名为 `ecc-permission-cache-wrapper.mjs`，要么加强行为以实际在 TTL 内拒绝/跳过重复有副作用的调用。
 - **Hook 基础设施 bug（v2.3.0 新发现）** — 在 `review`/`meta_review`/`verification` 阶段的 Agent 分派不会自动把 `ownerAgent` 追加到 `dispatchChain.<stage>`。主线必须手编 spine state 来记录分派。与 EB-002 同源（同一 root cause：只读 reviewer 无法运行 verify 命令；同一修复面：`spine-state.mjs`）。
 
 ## [2.2.5] - 2026-05-25
