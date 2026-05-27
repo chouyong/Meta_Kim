@@ -1142,6 +1142,9 @@ describe("workflow-contract.json — schema compliance", async () => {
     assert.equal(feedback.maxBulletsPerStage, 3);
     assert.equal(feedback.hideProtocolIdsByDefault, true);
     assert.equal(feedback.debugOnlyFullPackets, true);
+    assert.equal(feedback.hideInternalFieldNamesByDefault, false);
+    assert.equal(feedback.internalFieldNamesRequireHumanLabels, true);
+    assert.equal(feedback.localizedStagePurposeRequired, true);
 
     for (const stage of ["Critical", "Fetch", "Thinking", "Review"]) {
       assert.ok(
@@ -1154,6 +1157,13 @@ describe("workflow-contract.json — schema compliance", async () => {
       assert.ok(
         feedback.requiredFields?.includes(field),
         `userFacingStageFeedbackContract missing ${field}`,
+      );
+    }
+
+    for (const field of ["surfaceRequest", "realIntent", "workerTaskPackets"]) {
+      assert.ok(
+        feedback.humanLabeledInternalFieldExamples?.includes(field),
+        `userFacingStageFeedbackContract must require human labels for ${field}`,
       );
     }
   });

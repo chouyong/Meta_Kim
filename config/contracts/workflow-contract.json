@@ -334,8 +334,22 @@
         "maxBulletsPerStage": 3,
         "maxLineCountPerStage": 3,
         "hideProtocolIdsByDefault": true,
+        "hideInternalFieldNamesByDefault": false,
+        "internalFieldNamesRequireHumanLabels": true,
+        "localizedStagePurposeRequired": true,
         "debugOnlyFullPackets": true,
-        "rule": "Each visible governance stage must emit a compact human-readable note in the user's output language: what was decided, why it matters, and what happens next. Keep protocol packet names, internal field names, and full reasoning traces hidden unless the user asks for audit/debug detail."
+        "humanLabeledInternalFieldExamples": [
+          "surfaceRequest",
+          "realProductProblem",
+          "realIntent",
+          "successCriteria",
+          "blockingUnknowns",
+          "evidence",
+          "decisionImpactMap",
+          "workerTaskPackets",
+          "reviewPacket"
+        ],
+        "rule": "Each visible governance stage must emit a compact human-readable note in the user's output language: what was decided, why it matters, and what happens next. Protocol packet names and internal field names are allowed when useful for auditability, but they must be paired with human-readable labels in the user's language; full reasoning traces stay debug-only."
       },
       "dependencyPolicy": {
         "criticalDependencyFailureActions": [

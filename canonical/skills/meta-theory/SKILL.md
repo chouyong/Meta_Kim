@@ -39,9 +39,30 @@ User-facing closure must say why changed, what changed / where changed, user imp
 
 ## Human-Readable Stage Feedback
 
-For Critical, Fetch, Thinking, and Review, output a compact human summary before or with the stage decision. Use the resolved user-facing language: runtime/tool selected output language first, explicit output-language choice second, latest input language as fallback. Keep it token-minimal: max 3 bullets per stage, one short line each.
+For Critical, Fetch, Thinking, and Review, output a compact human summary before or with the stage decision. **CRITICAL: Always use the user's input language for output**. Detect language from the user's latest message.
 
-Each visible stage note says: plain verdict, decision impact, next action. Hide packet ids, protocol fields, and debug traces by default; show them only when the user asks for audit/debug details.
+**Output Pattern Examples:**
+
+When user inputs in 中文:
+```
+**关键分析**（Stage 1）
+- 意图：优化meta-theory
+- 问题：文件过大，内容重叠
+- 下一步：调研取证
+```
+
+When user inputs in English:
+```
+**Critical Analysis** (Stage 1)
+- Intent: optimize meta-theory
+- Problem: files too large, content overlap
+- Next: Research phase
+```
+
+**Key Rules:**
+- Do not output raw-only internal keys. If a field name is useful, pair it with a human label in the user's language, e.g. `realIntent（真实意图）`.
+- Always describe the stage action in the user's language.
+- Keep it token-minimal: max 3 bullets per stage
 
 ## Architecture Type Pre-judgment
 
@@ -86,8 +107,10 @@ Use `Agent(...)`, `spawn_agent`, a skill, command, MCP capability, runtime tool,
 | 7 | Verification | rerun fresh checks and bind evidence to claims |
 | 8 | Evolution | write back durable lessons or record no-writeback |
 
-1. **Critical**: classify path and risk. Output `surfaceRequest`, `realProductProblem`, `realIntent`, `successCriteria`, `nonGoals`, `blockingUnknowns`, `noQuotaClarification`.
-2. **Fetch**: inspect only evidence that changes route, owner, risk, acceptance, or verification. Output `evidence`, `decisionImpactMap`, `capabilityDiscovery`, `capabilityGap`, `contradictionLog`.
+Visible stage names and summaries must be localized to the resolved user language. Canonical stage names remain internal anchors. Packet field names may appear when they help auditability, but they must be paired with human-readable labels instead of appearing as unexplained English keys.
+
+1. **Critical**: classify path and risk. Record internally: `surfaceRequest`, `realProductProblem`, `realIntent`, `successCriteria`, `nonGoals`, `blockingUnknowns`, `noQuotaClarification`.
+2. **Fetch**: inspect only evidence that changes route, owner, risk, acceptance, or verification. Record internally: `evidence`, `decisionImpactMap`, `capabilityDiscovery`, `capabilityGap`, `contradictionLog`.
 3. **Thinking**: produce Option Exploration with at least 2 solution paths, Pros / Cons, `minimalFixPath`, `tenXPathShift`, `chosenRationale`, `omittedTenXWithReason`, owner mapping, worker work orders, and verification plan. Thinking determines needed execution capabilities, matches existing capabilities, and creates or upgrades only for gaps.
 4. **Execution**: dispatch bounded worker tasks. Stage 4 may not start before `runHeader`, `taskClassification`, `fetchPacket`, `dispatchBoard`, `workerTaskPackets`, and owner bindings are ready.
 5. **Review**: meta-prism checks quality, boundary fit, evidence, and whether Review can reproduce the claims.

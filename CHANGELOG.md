@@ -10,7 +10,7 @@ When you tag a release, add a new **`## [version] - YYYY-MM-DD`** section at the
 
 ### Fixed
 
-- **Meta-theory delivery trust** — Slimmed `/meta-theory` into a progressive dispatcher, split large operational details into references, and aligned Critical / Fetch / Thinking / Review so visible stage feedback is compact, human-readable, and follows the resolved user-facing language.
+- **Meta-theory delivery trust** — Slimmed `/meta-theory` into a progressive dispatcher, split large operational details into references, and aligned Critical / Fetch / Thinking / Review so visible stage feedback is compact, human-readable, follows the resolved user-facing language, and pairs internal packet field names with human labels when shown.
 - **Verification evidence hardening** — Bound `verifySteps[].id` to `workerExecutionEvidence[].verifyStepRef`, parse `json-output` evidence as JSON, structure `fixEvidence`, require accepted-risk ownership/revisit data, and prevent skipped worker evidence from claiming verified or public-ready status.
 - **Cross-runtime prompt/rules alignment** — Updated Conductor, Artisan, Cursor rules, and runtime prompts so agent-team playbooks only run for 2+ independent parallel lanes, capability discovery is runtime-aware, and generated Cursor prompts avoid duplicate headers/warnings.
 - **Release documentation cleanup** — Corrected stale references to removed runtime-matrix docs, updated ECC repository references to `affaan-m/ECC`, and synchronized package metadata for the new release.

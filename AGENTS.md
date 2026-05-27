@@ -153,12 +153,14 @@ Meta-theory work must be correct before production starts, not rescued by Review
 
 Before editing files, inspect the current worktree and source files that will be changed: `git status --short`, `git diff --stat`, targeted diffs, targeted source reads, and repo-scoped search. This read-before-edit step belongs to Critical/Fetch. A hook that blocks read-only inspection is a governance defect to route to Sentinel/Conductor, not a reason to work blind.
 
-Required stage outputs:
+Required internal stage records:
 
 - Critical: `realIntent`, `successCriteria`, `nonGoals`, `blockingUnknowns`, `noQuotaClarification`
 - Fetch: `evidence`, `decisionImpactMap`, `capabilityDiscovery`, `capabilityGap`, `contradictionLog`
 - Thinking: `designFrame`, `workType`, `expertLens`, `consideredLanes`, `omittedLanesWithReason`, `workerTaskPackets`, `dependencyPolicy`
 - Review: checks upstream Critical/Fetch/Thinking quality before result polish
+
+Normal chat output for these stages must be localized, compact, and human-readable. Packet field names such as `realIntent`, `decisionImpactMap`, or `workerTaskPackets` may appear when useful, but they must be paired with human labels instead of being dumped as unexplained English keys.
 
 Governance-quality fallback is forbidden. Missing intent, evidence, design, owner, capability, dependency readiness, or worker work order means `block`, `return_to_stage`, or `capabilityGapPacket`. Runtime compatibility fallback may remain for host limitations such as a chat card instead of a popup, but it does not count as governance readiness.
 

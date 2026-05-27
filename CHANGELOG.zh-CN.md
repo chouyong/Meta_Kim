@@ -10,7 +10,7 @@
 
 ### 修复
 
-- **Meta-theory 交付可信度** — 将 `/meta-theory` 收敛为渐进式 dispatcher，长流程细节下沉到 references，并让 Critical / Fetch / Thinking / Review 的可见阶段反馈保持极简、人能看懂、且跟随用户目标语言。
+- **Meta-theory 交付可信度** — 将 `/meta-theory` 收敛为渐进式 dispatcher，长流程细节下沉到 references，并让 Critical / Fetch / Thinking / Review 的可见阶段反馈保持极简、人能看懂、跟随用户目标语言；内部 packet 字段名可显示，但必须配人话标签。
 - **验证证据链加固** — `verifySteps[].id` 必须绑定 `workerExecutionEvidence[].verifyStepRef`；`json-output` 必须真实可解析；`fixEvidence` 结构化；`accepted_risk` 必须有负责人和复查触发；`skipped` worker 证据不能再冒充 verified 或 public-ready。
 - **跨 runtime 提示词 / rules 对齐** — Conductor、Artisan、Cursor rules 和 runtime prompts 已对齐：只有 2+ 独立并行 lane 才用 agent-team playbook；能力发现按 runtime 感知；Cursor 生成提示词不再重复标题和警告。
 - **发布文档清理** — 修正已删除 runtime matrix 文档的陈旧链接；ECC 仓库统一为 `affaan-m/ECC`；同步新版本的包元数据。

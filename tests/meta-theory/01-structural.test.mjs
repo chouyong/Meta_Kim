@@ -238,10 +238,13 @@ describe("SKILL.md structural integrity", async () => {
       assert.match(raw, /Human-Readable Stage Feedback/i);
       assert.match(raw, /Critical.*Fetch.*Thinking.*Review/s);
       assert.match(raw, /human/i);
-      assert.match(raw, /user.*output language|resolved user-facing language/i);
+      assert.match(raw, /user.*language|detected user language|resolved user language/i);
       assert.match(raw, /token/i);
       assert.match(raw, /debug/i);
       assert.match(raw, /packet/i);
+      assert.match(raw, /field name|internal keys/i);
+      assert.match(raw, /human label|human-readable label|user-facing output/i);
+      assert.match(raw, /Record internally/i);
     });
   });
 
