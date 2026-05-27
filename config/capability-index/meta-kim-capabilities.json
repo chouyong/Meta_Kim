@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-05-27T11:51:05.890Z",
+  "generatedAt": "2026-05-27T14:51:07.446Z",
   "registryName": "meta-kim-capabilities",
   "scope": "repo-canonical",
   "canonicalProjection": "config/capability-index/meta-kim-capabilities.json",
@@ -115,8 +115,8 @@
         "type": "agents",
         "namespace": "canonical",
         "path": "canonical/agents/meta-artisan.md",
-        "size": 16923,
-        "modified": "2026-05-27T11:14:37.520Z",
+        "size": 17137,
+        "modified": "2026-05-27T14:31:50.099Z",
         "layer": "meta",
         "executionBlock": true
       },
@@ -135,8 +135,8 @@
         "type": "agents",
         "namespace": "canonical",
         "path": "canonical/agents/meta-conductor.md",
-        "size": 56412,
-        "modified": "2026-05-27T11:14:37.522Z",
+        "size": 56546,
+        "modified": "2026-05-27T14:31:37.086Z",
         "layer": "meta",
         "executionBlock": true
       },
@@ -216,8 +216,8 @@
         "namespace": "canonical-reference",
         "path": "canonical/skills/meta-theory/references/create-agent.md",
         "relativePath": "create-agent.md",
-        "size": 20119,
-        "modified": "2026-05-27T11:14:37.541Z"
+        "size": 20550,
+        "modified": "2026-05-27T14:32:04.559Z"
       },
       "repo:canonical-reference:dev-governance": {
         "id": "dev-governance",
@@ -288,8 +288,8 @@
         "namespace": "canonical-reference",
         "path": "canonical/skills/meta-theory/references/rhythm-orchestration.md",
         "relativePath": "rhythm-orchestration.md",
-        "size": 8165,
-        "modified": "2026-05-21T18:48:57.611Z"
+        "size": 8219,
+        "modified": "2026-05-27T14:32:14.446Z"
       },
       "repo:canonical-reference:runtime-codex": {
         "id": "runtime-codex",
@@ -315,8 +315,8 @@
         "namespace": "canonical-reference",
         "path": "canonical/skills/meta-theory/references/ten-step-governance.md",
         "relativePath": "ten-step-governance.md",
-        "size": 10332,
-        "modified": "2026-05-21T18:49:00.678Z"
+        "size": 10397,
+        "modified": "2026-05-27T14:32:21.005Z"
       },
       "repo:canonical-reference:verification-evidence": {
         "id": "verification-evidence",
@@ -572,8 +572,8 @@
         "namespace": "canonical-runtime-assets",
         "path": "canonical/runtime-assets/codex/commands/meta-theory.md",
         "relativePath": "meta-theory.md",
-        "size": 1542,
-        "modified": "2026-05-24T10:01:11.070Z"
+        "size": 1560,
+        "modified": "2026-05-27T14:31:27.930Z"
       }
     }
   },

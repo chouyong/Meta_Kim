@@ -213,6 +213,12 @@ describe("SKILL.md structural integrity", async () => {
         /Apply `agent-teams-playbook`[\s\S]{0,80}before substantive work/i,
       );
     });
+
+    test("runtime command does not force agent-teams-playbook for all non-trivial work", async () => {
+      const command = await readFile("canonical/runtime-assets/codex/commands/meta-theory.md");
+      assert.match(command, /2\+ independent parallel worker lanes/i);
+      assert.doesNotMatch(command, /For any non-trivial task,\s*first apply `agent-teams-playbook`/i);
+    });
   });
 
   // ── 6. Contract files (3 tests) ────────────────────────────────────
@@ -416,5 +422,36 @@ describe("Canonical meta-agent boundary structure", () => {
       [],
       `Reference files over 650 lines should be split: ${tooLarge.join(", ")}`,
     );
+  });
+
+  test("meta-conductor scopes agent-teams-playbook to parallel lanes only", async () => {
+    const conductor = await readFile("canonical/agents/meta-conductor.md");
+    assert.match(conductor, /2\+ independent parallel worker lanes/i);
+    assert.doesNotMatch(
+      conductor,
+      /At the start of Stage 4 \(Execution\), use the `agent-teams-playbook` provider package/i,
+    );
+  });
+
+  test("meta-artisan uses runtime-aware capability discovery instead of Claude-only scans", async () => {
+    const artisan = await readFile("canonical/agents/meta-artisan.md");
+    assert.match(artisan, /canonical capability index[\s\S]{0,160}runtime mirrors[\s\S]{0,160}local runtime inventory/i);
+    assert.doesNotMatch(artisan, /Scan `\.claude\/agents\/\*\.md`/);
+    assert.doesNotMatch(artisan, /Scan `\.claude\/skills\/\*\/SKILL\.md`/);
+  });
+
+  test("meta-theory references do not present Claude runtime mirrors as canonical instructions", async () => {
+    for (const rel of [
+      "canonical/skills/meta-theory/references/create-agent.md",
+      "canonical/skills/meta-theory/references/rhythm-orchestration.md",
+      "canonical/skills/meta-theory/references/ten-step-governance.md",
+    ]) {
+      const content = await readFile(rel);
+      assert.doesNotMatch(
+        content,
+        /(?:Read|See|Generate|lives in)\s+`\.claude\/agents\//i,
+        `${rel} should route through canonical source first, then runtime mirror`,
+      );
+    }
   });
 });

@@ -700,7 +700,7 @@ Constitutional principles for ALL Meta_Kim agents and every system they create o
 
 ### 4.1 Skill Invocation
 
-At the start of Stage 4 (Execution), use the `agent-teams-playbook` provider package to obtain team orchestration decisions. See **Long-Term Capability Slot** for the provider boundary; concrete sub-skill choices remain run-scoped.
+After Thinking and before Stage 4 (Execution), use the `agent-teams-playbook` provider package only when `workerTaskPackets` contain 2+ independent parallel worker lanes. See **Long-Term Capability Slot** for the provider boundary; concrete sub-skill choices remain run-scoped. For serial work, keep orchestration in the dispatch board and do not call the playbook.
 
 **Invocation Context**: Pass the workflow context including:
 - Current stage state from the run header contract

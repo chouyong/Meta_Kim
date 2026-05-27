@@ -88,8 +88,9 @@ Before applying the full station workflow, Artisan must name the `coreProblem` i
 
 1. **Identify Requirements** — Extract domain requirements (technologies, patterns, architectures) and work mode from SOUL.md. **Reject concrete tasks**: if the SOUL.md describes specific deliverables ("build X", "implement Y"), return it to Genesis with an abstraction failure flag
 2. **Capability Discovery** — Discover ALL capability types in priority order:
-   - **Agent**: Scan `.claude/agents/*.md` + MCP `list_meta_agents`
-   - **Skill**: Scan `.claude/skills/*/SKILL.md` + findskill
+   - **Baseline**: Search the canonical capability index, runtime mirrors, then local runtime inventory before external discovery
+   - **Agent**: Scan canonical agents, current-runtime agent mirrors, and MCP `list_meta_agents` when available
+   - **Skill**: Scan canonical skills, current-runtime skill mirrors, built-in skills, and findskill
    - **MCP Tool**: Parse `.mcp.json` + deferred tools
    - **Command**: Parse `package.json` scripts
    - **Memory**: Librarian sqlite-vec recall (if installed)
