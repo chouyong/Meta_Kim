@@ -39,7 +39,7 @@ User-facing closure must say why changed, what changed / where changed, user imp
 
 ## Human-Readable Stage Feedback
 
-For Critical, Fetch, Thinking, and Review, output a compact human summary before or with the stage decision. Keep it token-minimal: max 3 bullets per stage, one short line each.
+For Critical, Fetch, Thinking, and Review, output a compact human summary before or with the stage decision. Use the resolved user-facing language: runtime/tool selected output language first, explicit output-language choice second, latest input language as fallback. Keep it token-minimal: max 3 bullets per stage, one short line each.
 
 Each visible stage note says: plain verdict, decision impact, next action. Hide packet ids, protocol fields, and debug traces by default; show them only when the user asks for audit/debug details.
 
