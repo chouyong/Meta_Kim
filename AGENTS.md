@@ -479,12 +479,15 @@ For maintainers:
 - 原脚本强制设置了 `HF_HUB_OFFLINE=1` 和 `TRANSFORMERS_OFFLINE=1`。
 - 本机没有完整缓存 `sentence-transformers/all-MiniLM-L6-v2`，而离线模式禁止联网下载模型。
 - `mcp-memory-service` 因 embedding 模型初始化失败，无法启动 HTTP 服务。
+- 后续复测又发现 Windows 当前 TCP excluded port range 包含 `11351-11450`，Ollama 默认端口 `11434` 落在该保留区间内，因此 `ollama serve` 会报 `listen tcp 127.0.0.1:11434 ... forbidden by its access permissions`。
+- 因为 `11434` 不能监听，依赖 Ollama embedding 的 Memory Service 开机检查会误判 Ollama 不可用，并弹出 `Meta_Kim MCP Memory Service` 警告。
 
 ### 已采用的修复
 
 本机已经安装并运行 Ollama，且存在 `nomic-embed-text` 模型。因此修复方式是不再依赖 Hugging Face 下载，而是让 Memory Service 使用 Ollama 的 OpenAI-compatible embedding API：
 
-- `MCP_EXTERNAL_EMBEDDING_URL=http://127.0.0.1:11434/v1/embeddings`
+- `OLLAMA_HOST=127.0.0.1:11734`
+- `MCP_EXTERNAL_EMBEDDING_URL=http://127.0.0.1:11734/v1/embeddings`
 - `MCP_EXTERNAL_EMBEDDING_MODEL=nomic-embed-text`
 - `MCP_MEMORY_STORAGE_BACKEND=sqlite_vec`
 - `MCP_ALLOW_ANONYMOUS_ACCESS=true`
@@ -494,8 +497,11 @@ For maintainers:
 脚本同时会先检查：
 
 1. `http://127.0.0.1:8000/api/health` 是否已经 healthy。
-2. `http://127.0.0.1:11434/v1/embeddings` 是否能用 `nomic-embed-text` 返回 embedding。
-3. 只有 Ollama embedding 可用时才启动 `memory.exe server --http`。
+2. `http://127.0.0.1:11734/v1/embeddings` 是否能用 `nomic-embed-text` 返回 embedding。
+3. 如果 embedding 不可用，先用 `OLLAMA_HOST=127.0.0.1:11734` 后台启动 `ollama serve`。
+4. 只有 Ollama embedding 可用时才启动 `memory.exe server --http`。
+
+已通过 `setx OLLAMA_HOST 127.0.0.1:11734` 写入用户级持久环境变量，避免 Ollama 桌面程序下次登录时继续尝试默认的 `11434`。
 
 ### 验证结果
 
@@ -503,18 +509,84 @@ For maintainers:
 
 - 停止旧的 `memory.exe`。
 - 运行 `C:/Users/zhouy/.meta-kim/mcp-memory-start.ps1`。
+- 访问 `http://127.0.0.1:11734/api/tags`，能看到 `nomic-embed-text:latest`。
+- 访问 `http://127.0.0.1:11734/v1/embeddings`，能返回 embedding。
 - 访问 `http://127.0.0.1:8000/api/health`。
 - 返回 `{"status":"healthy"}`。
+- 确认 `8000` 由单个 `memory.exe`/`python.exe` 子进程监听，没有残留的 `mcp-memory-start.ps1`。
 
 ### 下次排障顺序
 
 如果再次出现这个弹窗，优先按以下顺序检查：
 
-1. 确认 Ollama 已启动：访问 `http://127.0.0.1:11434/api/tags`。
-2. 确认模型存在：结果里应包含 `nomic-embed-text:latest` 或 `nomic-embed-text`。
-3. 确认 Memory Service 健康：访问 `http://127.0.0.1:8000/api/health`。
-4. 查看日志：`C:/Users/zhouy/.meta-kim/mcp-memory.err.log`。
-5. 如果日志提示 external embedding dimension 为 `768`，这是 `nomic-embed-text` 的维度提示；只要健康检查通过，不是启动失败。
+1. 确认 `11434` 是否仍在 Windows excluded port range：`netsh interface ipv4 show excludedportrange protocol=tcp`。如果 `11351-11450` 仍存在，不要再用 `11434`。
+2. 确认 Ollama 已在替代端口启动：访问 `http://127.0.0.1:11734/api/tags`。
+3. 确认 embedding 可用：访问 `http://127.0.0.1:11734/v1/embeddings`，模型使用 `nomic-embed-text`。
+4. 确认 Memory Service 健康：访问 `http://127.0.0.1:8000/api/health`。
+5. 查看日志：`C:/Users/zhouy/.meta-kim/mcp-memory.err.log`。
+6. 如出现多个 `memory.exe` 或残留 `mcp-memory-start.ps1`，先清理残留进程，再单实例启动。
+7. 如果日志提示 external embedding dimension 为 `768`，这是 `nomic-embed-text` 的维度提示；只要健康检查通过，不是启动失败。
+
+## Codex Memory Hook 超时修复记录（2026-05-28）
+
+### 问题现象
+
+Codex 启动或提交提示词时出现：
+
+- `SessionStart hook (failed): error: hook timed out after 10s`
+- `UserPromptSubmit hook (failed): error: hook timed out after 10s`
+
+### 根因
+
+- Codex hook 外层超时时间是 10 秒。
+- `canonical/runtime-assets/shared/hooks/meta-kim-memory-save.mjs` 的 `UserPromptSubmit` 路径会串行执行多次 `/api/search` 和 `/api/memories`。
+- 每次 HTTP 请求原超时上限较长，Memory Service 稍慢或 Ollama embedding 冷启动时，整条 hook 链路会超过 10 秒。
+
+### 已采用的修复
+
+- 将通用 Memory Service HTTP 默认超时降到较短预算：
+  - `META_KIM_MEMORY_HTTP_TIMEOUT_MS` 默认 `1000`。
+  - `META_KIM_MEMORY_HEALTH_TIMEOUT_MS` 默认 `300`。
+- 为 Codex 单独增加快速预算：
+  - `META_KIM_CODEX_RECALL_BUDGET_MS` 默认 `2500`。
+  - `META_KIM_CODEX_POST_BUDGET_MS` 默认 `1200`。
+- Codex 的 recall 改为快速路径：
+  - 只取一个主查询。
+  - 并行读取 search 和 recent memories。
+  - 超过预算直接返回空召回，不阻塞 Codex。
+- Memory 写入也加预算，超时就跳过本轮写入，保证 hook 不拖死 Codex。
+
+### 修改和同步位置
+
+- canonical 源：`D:/knowledgeBase/Meta_Kim/canonical/runtime-assets/shared/hooks/meta-kim-memory-save.mjs`
+- 项目 Codex hook：`D:/knowledgeBase/Meta_Kim/.codex/hooks/meta-kim-memory-save.mjs`
+- 用户全局 Codex hook：`C:/Users/zhouy/.codex/hooks/meta-kim-memory-save.mjs`
+
+已运行：
+
+- `npm run meta:sync`
+- `npm run meta:check`
+- `graphify update .`
+
+### 验证结果
+
+已验证：
+
+- `node --check` 通过：canonical hook、项目 `.codex` hook、用户全局 hook。
+- 模拟 `SessionStart` 输出合法 `hookSpecificOutput` JSON，约 `1.3s` 返回。
+- 模拟 `UserPromptSubmit` 输出合法 `hookSpecificOutput` JSON，后续在 Memory Service healthy 后约 `514ms` 返回。
+- `http://127.0.0.1:8000/api/health` 返回 `{"status":"healthy"}`。
+- 用户全局 hook 文件前 4 字节为 `23 21 2F 75`，即 `#!/u`，确认无 UTF-8 BOM。
+
+### 下次排障顺序
+
+如果再次出现 Codex hook timeout：
+
+1. 先确认 `http://127.0.0.1:8000/api/health` 是否 healthy。
+2. 确认 `http://127.0.0.1:11734/v1/embeddings` 是否能返回 embedding。
+3. 用模拟输入运行用户全局 hook，观察耗时是否低于 10 秒。
+4. 检查 `C:/Users/zhouy/.codex/hooks/meta-kim-memory-save.mjs` 是否包含 `fastRecallMemories`、`withTimeout`、`META_KIM_CODEX_RECALL_BUDGET_MS`。
+5. 如果要临时停用自动启动 Memory Service，可设置 `META_KIM_DISABLE_MEMORY_AUTOSTART=1`。
 
 ## Codex Memory Hook 上下文注入修复记录（2026-05-28）
 

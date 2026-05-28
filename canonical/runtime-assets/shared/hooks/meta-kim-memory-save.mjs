@@ -21,8 +21,10 @@ import os from "node:os";
 import path from "node:path";
 import process from "node:process";
 
-const TIMEOUT_MS = 4000;
-const HEALTH_TIMEOUT_MS = 500;
+const TIMEOUT_MS = Number(process.env.META_KIM_MEMORY_HTTP_TIMEOUT_MS || 1000);
+const HEALTH_TIMEOUT_MS = Number(process.env.META_KIM_MEMORY_HEALTH_TIMEOUT_MS || 300);
+const CODEX_RECALL_BUDGET_MS = Number(process.env.META_KIM_CODEX_RECALL_BUDGET_MS || 2500);
+const CODEX_POST_BUDGET_MS = Number(process.env.META_KIM_CODEX_POST_BUDGET_MS || 1200);
 const MAX_TEXT = 3000;
 const MAX_MEMORY_CONTEXT = 1800;
 const MAX_RECENT_MEMORIES = 64;
@@ -828,6 +830,58 @@ async function recallMemories(endpoint, query, project, cwd, event) {
   return selected;
 }
 
+async function fastRecallMemories(endpoint, query, project, cwd, event) {
+  const queries = buildRecallQueries(query, project, cwd, event).slice(0, 1);
+  const terms = recallTerms(query, project, cwd, event, ...queries);
+  const [searched, recent] = await Promise.all([
+    searchMemories(endpoint, queries[0] || query),
+    recentMemories(endpoint),
+  ]);
+  const candidates = [
+    ...searched.map((memory, index) => ({
+      ...memory,
+      sourceRank: Math.max(0, 12 - index),
+    })),
+    ...recent
+      .filter((memory) => isProjectMemory(memory, project, cwd))
+      .map((memory, index) => ({
+        ...memory,
+        sourceRank: Math.max(0, 10 - index),
+      })),
+  ];
+  const byContent = new Map();
+  for (const memory of candidates) {
+    const key = memoryDedupeKey(memory.content);
+    const scored = {
+      ...memory,
+      excerpt_terms: terms,
+      recall_score: scoreMemory(memory, project, cwd, terms, Number(memory.sourceRank || 0)),
+    };
+    const existing = byContent.get(key);
+    if (!existing || scored.recall_score > existing.recall_score) {
+      byContent.set(key, scored);
+    }
+  }
+  return [...byContent.values()]
+    .filter((memory) => !isGenericLifecycleMemory(memory.content))
+    .sort((left, right) => right.recall_score - left.recall_score)
+    .slice(0, 4);
+}
+
+async function withTimeout(promise, timeoutMs, fallback) {
+  let timer;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise((resolve) => {
+        timer = setTimeout(() => resolve(fallback), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 function formatMemoryContext(memories, runtime, event) {
   if (!Array.isArray(memories) || memories.length === 0) return "";
   const lines = [
@@ -896,33 +950,44 @@ async function main() {
   if (event === "session-start") {
     context = memoryReadyStatus(endpoint);
   } else if (event !== "stop") {
-    const memories = await recallMemories(endpoint, query, project, cwd, event);
+    const memories =
+      runtime === "codex"
+        ? await withTimeout(
+            fastRecallMemories(endpoint, query, project, cwd, event),
+            CODEX_RECALL_BUDGET_MS,
+            [],
+          )
+        : await recallMemories(endpoint, query, project, cwd, event);
     context = formatMemoryContext(memories, runtime, event);
   }
 
   const content = buildContent(payload, runtime, cwd, event);
   if (content.length >= 40) {
-    await postMemory(endpoint, {
-      content,
-      tags: [runtime, event, "meta_kim", project].filter(Boolean),
-      memory_type: "observation",
-      conversation_id:
-        payload.session_id ||
-        payload.sessionId ||
-        payload.conversation_id ||
-        `${runtime}-${project}-${Date.now()}`,
-      metadata: {
-        generated_by: "meta-kim-cross-runtime-memory",
-        runtime,
-        event,
-        project_dir: cwd,
-        has_transcript:
-          Boolean(payload.transcript_path) ||
-          Boolean(payload.transcriptPath) ||
-          Boolean(payload.conversation_path) ||
-          Boolean(payload.session_path),
-      },
-    });
+    await withTimeout(
+      postMemory(endpoint, {
+        content,
+        tags: [runtime, event, "meta_kim", project].filter(Boolean),
+        memory_type: "observation",
+        conversation_id:
+          payload.session_id ||
+          payload.sessionId ||
+          payload.conversation_id ||
+          `${runtime}-${project}-${Date.now()}`,
+        metadata: {
+          generated_by: "meta-kim-cross-runtime-memory",
+          runtime,
+          event,
+          project_dir: cwd,
+          has_transcript:
+            Boolean(payload.transcript_path) ||
+            Boolean(payload.transcriptPath) ||
+            Boolean(payload.conversation_path) ||
+            Boolean(payload.session_path),
+        },
+      }),
+      runtime === "codex" ? CODEX_POST_BUDGET_MS : TIMEOUT_MS + 500,
+      false,
+    );
   }
 
   if (event === "stop") return;
