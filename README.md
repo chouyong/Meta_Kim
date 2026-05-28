@@ -487,7 +487,7 @@ Meta_Kim currently maps to four platforms:
 | Platform | Status | Mapping style |
 | --- | --- | --- |
 | **Claude Code** | Fully supported | `.claude/agents/*.md` + `SKILL.md` + hooks + MCP |
-| **Codex** | Fully supported | `.codex/agents/*.toml` + `.agents/skills/` + compatibility `.codex/skills/` + commands + hooks |
+| **Codex** | Fully supported | `.codex/agents/*.toml` + `.agents/skills/` + commands + hooks |
 | **OpenClaw** | Fully supported | `openclaw/` directory structure + workspaces + hooks |
 | **Cursor** | Fully supported | `.cursor/agents/*.md` + skills + hooks + MCP |
 
@@ -519,7 +519,7 @@ But there is an important caveat: the four runtimes are not equal. Claude Code c
 | Capability surface | Claude Code | Codex | OpenClaw | Cursor |
 | --- | --- | --- | --- | --- |
 | **Agents** | Native agents/subagents, mature at both project and user scope | Strong custom agents/subagents | Workspace-style agents, supports agent-to-agent | Lightweight agent projection |
-| **Skills / references** | Native skills, references, and a mature global ecosystem | `.agents/skills/` is the project skill root; `.codex/skills/` remains a compatibility mirror | Workspace skills and installable skills | Lighter skill/reference support |
+| **Skills / references** | Native skills, references, and a mature global ecosystem | `.agents/skills/` is the project skill root | Workspace skills and installable skills | Lighter skill/reference support |
 | **Hooks / automation** | Project hooks + settings.json + plugin ecosystem | Trusted `.codex/hooks.json` project/user hooks | Workspace boot/hook-style capabilities | `.cursor/hooks.json` lowerCamel lifecycle hooks |
 | **MCP / configuration** | Full native MCP and config surface | Can connect via runtime adapters and MCP | Clear workspace config | Can use MCP, but the surface is lighter |
 | **Governance loop capacity** | **Highest** | High, but below Claude Code | High, but different in form | Lightest |

@@ -6,6 +6,19 @@ All notable changes to Meta_Kim are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 When you tag a release, add a new **`## [version] - YYYY-MM-DD`** section at the top (above older entries) and list changes there.
 
+## [2.4.3] - 2026-05-28
+
+### Fixed
+
+- **Codex project skill root cleanup** — Codex project skills now sync only to `.agents/skills/`, matching the current project-level Codex skill location and avoiding duplicate `meta-theory` entries.
+- **Legacy `.codex/skills` migration** — Update/sync runs remove the old Meta_Kim-managed `.codex/skills/meta-theory` mirror and delete `.codex/skills` only when it becomes empty, preserving any user-owned skills.
+- **Install and verification alignment** — Setup checks, runtime validation, footprint reporting, generated Codex command docs, and multilingual README guidance now point at `.agents/skills/` as the single project skill root.
+- **Dependency security baseline** — Raised `@modelcontextprotocol/sdk` to `^1.29.0`; fresh installs resolve patched transitive packages for the npm audit findings in the local install tree.
+
+### Changed
+
+- Version bump: 2.4.2 → 2.4.3.
+
 ## [2.4.2] - 2026-05-28
 
 ### Fixed

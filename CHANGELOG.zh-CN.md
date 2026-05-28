@@ -6,6 +6,19 @@
 格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 发布新版本时，请在顶部（旧版本之前）添加新的 **`## [版本号] - YYYY-MM-DD`** 部分。
 
+## [2.4.3] - 2026-05-28
+
+### 修复
+
+- **Codex 项目 skill 根目录清理** — Codex 项目 skill 现在只同步到 `.agents/skills/`，对齐当前 Codex 项目级 skill 位置，避免重复出现 `meta-theory`。
+- **旧 `.codex/skills` 迁移** — 安装 / 更新 / 同步会移除旧的 Meta_Kim 管理镜像 `.codex/skills/meta-theory`，并且只在 `.codex/skills` 变为空时删除该目录，保留用户自己的 skill。
+- **安装与校验路径对齐** — setup check、runtime validation、footprint、生成的 Codex command 文档和多语言 README 都改为以 `.agents/skills/` 作为唯一项目 skill 根。
+- **依赖安全基线** — 将 `@modelcontextprotocol/sdk` 提升到 `^1.29.0`；新安装会解析到已修复本地 audit 问题的传递依赖版本。
+
+### 变更
+
+- 版本升级：2.4.2 → 2.4.3。
+
 ## [2.4.2] - 2026-05-28
 
 ### 修复
