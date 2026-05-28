@@ -852,12 +852,12 @@ function formatMemoryContext(memories, runtime, event) {
 function hookEventName(event) {
   if (event === "session-start") return "SessionStart";
   if (event === "user-prompt") return "UserPromptSubmit";
-  return event;
+  return event || "UserPromptSubmit";
 }
 
 function emitRuntimeContext(context, runtime, event) {
   let payload;
-  if (runtime === "claude") {
+  if (runtime === "claude" || runtime === "codex") {
     payload = {
       hookSpecificOutput: {
         hookEventName: hookEventName(event),

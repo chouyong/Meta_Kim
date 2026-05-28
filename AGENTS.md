@@ -356,3 +356,319 @@ For maintainers:
 3. `CLAUDE.md` when touching Claude Code behavior
 4. This `AGENTS.md` Mechanical Enforcement section when changing cross-runtime trigger, hook, review, verification, stop, or writeback behavior
 5. `canonical/skills/meta-theory/references/dev-governance.md` for the long-form governed execution contract
+
+## 重启交接记录（2026-05-21）
+
+以下内容是本次会话的交接记录，供重启电脑后继续工作使用。
+
+### 一、本地仓库状态
+
+- 当前目录：`D:/knowledgeBase/Meta_Kim`
+- 本地代码已从你的 fork 克隆完成。
+- `origin`：`https://github.com/chouyong/Meta_Kim.git`
+- `upstream`：`https://github.com/KimYx0207/Meta_Kim.git`
+- 当前分支：`main`
+
+### 二、与 upstream 的同步结果
+
+已执行并确认：
+
+- `git fetch upstream`
+- 比较了 `main`、`origin/main`、`upstream/main`
+
+结果：
+
+- `main` = `e1ec4f99f15ab6eb72e8a16f2f56c6b1f6ac5d84`
+- `origin/main` = `e1ec4f99f15ab6eb72e8a16f2f56c6b1f6ac5d84`
+- `upstream/main` = `e1ec4f99f15ab6eb72e8a16f2f56c6b1f6ac5d84`
+- `git rev-list --left-right --count main...upstream/main` 结果为 `0 0`
+
+结论：
+
+- 当前本地仓库已经和 `upstream` 最新代码完全同步。
+
+补充：
+
+- `git status` 时出现过 `C:/Users/zhouy/.config/git/ignore` 的权限警告。
+- 该警告不影响仓库克隆、fetch 和同步判断。
+
+### 三、项目用途说明
+
+这个仓库不是传统意义上“启动一个网站”或“运行一个后端服务”的项目。
+
+它的核心用途是：
+
+- 为 `Claude Code`、`Codex`、`OpenClaw`、`Cursor` 提供一层统一的治理和工作流配置
+- 通过 `canonical/` 作为源，再投影到各运行时目录
+
+### 四、已确认的使用入口
+
+已检查的关键文件：
+
+- `README.zh-CN.md`
+- `docs/QUICKSTART.md`
+- `package.json`
+- `bin/meta-kim.mjs`
+- `setup.mjs`
+
+已确认的入口和命令：
+
+- 安装入口：`node setup.mjs`
+- 快速检查：`node setup.mjs --check`
+- 中文安装：`node setup.mjs --lang zh-CN`
+- npm 脚本安装入口：`npm run meta:setup:install`
+
+### 五、常用命令记录
+
+安装完成后常用命令：
+
+- `npm run meta:status`
+- `npm run meta:sync`
+- `npm run meta:validate`
+- `npm run meta:doctor:governance`
+- `npm run meta:check`
+- `npm run meta:verify:all`
+
+用途说明：
+
+- `meta:status`：查看当前安装和投影状态
+- `meta:sync`：把 canonical 配置同步到 `.claude/`、`.codex/` 等运行时目录
+- `meta:validate`：校验项目完整性
+- `meta:doctor:governance`：做治理相关自检
+- `meta:check`：执行同步检查和校验
+- `meta:verify:all`：执行更完整的全量校验
+
+### 六、环境确认
+
+本机当前已确认：
+
+- Node 版本：`v25.0.0`
+- 项目要求：`>= 22.13.0`
+
+结论：
+
+- Node 版本满足项目运行要求。
+
+### 七、后续建议动作
+
+重启电脑后，建议按这个顺序继续：
+
+1. 进入仓库目录：`D:/knowledgeBase/Meta_Kim`
+2. 先执行环境检查：`node setup.mjs --check`
+3. 如准备正式安装，执行：`node setup.mjs --lang zh-CN`
+4. 安装后查看状态：`npm run meta:status`
+5. 如需同步运行时配置，执行：`npm run meta:sync`
+
+### 八、下次继续时可直接承接的任务
+
+重启后可以直接继续以下任一项：
+
+- 实际执行 `node setup.mjs --lang zh-CN` 完成安装
+- 检查安装后给 `Codex` / `Claude Code` 写入了哪些配置
+- 继续梳理本仓库的目录结构和维护方式
+- 开始修改仓库内容，并在修改后执行 `meta:sync` 与 `meta:validate`
+
+## Meta_Kim Memory Service 修复记录（2026-05-28）
+
+### 问题现象
+
+开机后弹出 `Meta_Kim MCP Memory Service` 警告，提示服务启动失败，或 `http://127.0.0.1:8000` 没有变为 healthy。Codex 启动时也可能出现 MCP startup incomplete，但 `mempalace-docker`、`modao-proto-mcp` 与这个弹窗不是同一个服务。
+
+### 根因
+
+- 开机脚本位于 `C:/Users/zhouy/.meta-kim/mcp-memory-start.ps1`。
+- 原脚本强制设置了 `HF_HUB_OFFLINE=1` 和 `TRANSFORMERS_OFFLINE=1`。
+- 本机没有完整缓存 `sentence-transformers/all-MiniLM-L6-v2`，而离线模式禁止联网下载模型。
+- `mcp-memory-service` 因 embedding 模型初始化失败，无法启动 HTTP 服务。
+
+### 已采用的修复
+
+本机已经安装并运行 Ollama，且存在 `nomic-embed-text` 模型。因此修复方式是不再依赖 Hugging Face 下载，而是让 Memory Service 使用 Ollama 的 OpenAI-compatible embedding API：
+
+- `MCP_EXTERNAL_EMBEDDING_URL=http://127.0.0.1:11434/v1/embeddings`
+- `MCP_EXTERNAL_EMBEDDING_MODEL=nomic-embed-text`
+- `MCP_MEMORY_STORAGE_BACKEND=sqlite_vec`
+- `MCP_ALLOW_ANONYMOUS_ACCESS=true`
+- `NO_PROXY=127.0.0.1,localhost`
+- 保留本机代理：`HTTP_PROXY=http://127.0.0.1:18080`、`HTTPS_PROXY=http://127.0.0.1:18080`、`ALL_PROXY=socks5://127.0.0.1:1080`
+
+脚本同时会先检查：
+
+1. `http://127.0.0.1:8000/api/health` 是否已经 healthy。
+2. `http://127.0.0.1:11434/v1/embeddings` 是否能用 `nomic-embed-text` 返回 embedding。
+3. 只有 Ollama embedding 可用时才启动 `memory.exe server --http`。
+
+### 验证结果
+
+已执行完整复测：
+
+- 停止旧的 `memory.exe`。
+- 运行 `C:/Users/zhouy/.meta-kim/mcp-memory-start.ps1`。
+- 访问 `http://127.0.0.1:8000/api/health`。
+- 返回 `{"status":"healthy"}`。
+
+### 下次排障顺序
+
+如果再次出现这个弹窗，优先按以下顺序检查：
+
+1. 确认 Ollama 已启动：访问 `http://127.0.0.1:11434/api/tags`。
+2. 确认模型存在：结果里应包含 `nomic-embed-text:latest` 或 `nomic-embed-text`。
+3. 确认 Memory Service 健康：访问 `http://127.0.0.1:8000/api/health`。
+4. 查看日志：`C:/Users/zhouy/.meta-kim/mcp-memory.err.log`。
+5. 如果日志提示 external embedding dimension 为 `768`，这是 `nomic-embed-text` 的维度提示；只要健康检查通过，不是启动失败。
+
+## Codex Memory Hook 上下文注入修复记录（2026-05-28）
+
+### 问题现象
+
+其他 Codex 终端启动或提交提示词时出现：
+
+- `SessionStart hook (failed): hook returned invalid session_start JSON output`
+- `UserPromptSubmit hook (failed): hook returned invalid user_prompt_submit JSON output`
+
+### 根因
+
+`meta-kim-memory-save.mjs` 原先在 `SessionStart` / `UserPromptSubmit` 时向 stdout 输出旧的跨运行时 JSON：
+
+```json
+{"systemMessage":"...","message":"...","continue":true}
+```
+
+当前 Codex hook 校验不接受这个格式，因此即使 hook 退出码为 0，也会被 Codex 判定为 invalid JSON output。
+
+### 已采用的修复
+
+Codex 侧 memory hook 保持两项能力：
+
+1. 继续把会话检查点写入 Meta_Kim MCP Memory Service。
+2. 继续向 Codex 注入 recalled memory context。
+
+但 stdout 输出格式改为 Codex 接受的事件专用格式：
+
+```json
+{
+  "hookSpecificOutput": {
+    "hookEventName": "UserPromptSubmit",
+    "additionalContext": "..."
+  }
+}
+```
+
+`SessionStart` 时 `hookEventName` 为 `SessionStart`，`UserPromptSubmit` 时 `hookEventName` 为 `UserPromptSubmit`。
+
+### 修改位置
+
+- 项目 hook：`D:/knowledgeBase/Meta_Kim/.codex/hooks/meta-kim-memory-save.mjs`
+- canonical 源：`D:/knowledgeBase/Meta_Kim/canonical/runtime-assets/shared/hooks/meta-kim-memory-save.mjs`
+- 用户全局 hook：`C:/Users/zhouy/.codex/hooks/meta-kim-memory-save.mjs`
+
+用户全局 hook 文件需要保持 UTF-8 无 BOM；如果 PowerShell 写入时产生 BOM，Node 会在 shebang 第一行报 `Invalid or unexpected token`。
+
+### 验证结果
+
+已验证：
+
+- `node --check` 三份 `meta-kim-memory-save.mjs` 均通过。
+- 模拟 `SessionStart` 输出合法 JSON，且 `hookSpecificOutput.hookEventName` 为 `SessionStart`。
+- 模拟 `UserPromptSubmit` 输出合法 JSON，且 `hookSpecificOutput.hookEventName` 为 `UserPromptSubmit`。
+- 用户全局 hook 文件前 4 字节为 `35 33 47 117`，即 `#!/u`，确认没有 UTF-8 BOM。
+- 已运行 `graphify update .`。
+
+### 下次排障顺序
+
+如果再次出现 Codex hook JSON output 错误，优先检查：
+
+1. `C:/Users/zhouy/.codex/hooks/meta-kim-memory-save.mjs` 是否仍使用 `hookSpecificOutput.additionalContext`。
+2. `hookSpecificOutput.hookEventName` 是否匹配当前事件：`SessionStart` 或 `UserPromptSubmit`。
+3. 用户全局 hook 文件是否无 BOM。
+4. 用模拟输入运行 hook，确认 stdout 是单个合法 JSON 对象。
+5. 如果上下文重复注入，检查全局 hook 和项目 hook 是否同时启用；重复不等同于 JSON output 错误。
+
+## 上游同步与 Codex Hook 去重合并记录（2026-05-28）
+
+### 上游同步结果
+
+已通过本机 HTTP 代理 `http://127.0.0.1:18080` 执行：
+
+- `git fetch upstream`
+- `git fetch origin`
+- `git merge --ff-only upstream/main`
+
+同步后：
+
+- `main` = `upstream/main` = `3e8c2e5e0d44723ed970283103e1ffd23a3b7814`
+- `git rev-list --left-right --count main...upstream/main` 结果为 `0 0`
+- 本地 `main` 相对 `origin/main` 领先上游同步带来的提交，推送前应先确认是否要更新 fork。
+
+### 合入的上游默认设计
+
+上游 `canonical/runtime-assets/shared/hooks/meta-kim-memory-save.mjs` 已包含跨全局 / 项目 hook 的去重逻辑：
+
+- `DEDUPE_WINDOW_MS = 10000`
+- `stableHookId(payload, runtime, cwd, event, prompt)`
+- `shouldSkipDuplicate(payload, runtime, cwd, event, prompt)`
+- `META_KIM_DISABLE_HOOK_DEDUPE=1` 可关闭去重
+
+该逻辑使用 `runtime + event + cwd + session_id/turn_id + prompt` 生成稳定 ID，并在系统临时目录 `meta-kim-hook-dedupe` 中写 marker。全局 hook 和项目 hook 同时触发同一 Codex 事件时，先执行的一方写入 marker，后执行的一方在 10 秒窗口内静默跳过。
+
+### 本地保留的 Codex 输出修复
+
+合并上游去重逻辑时，保留了 Codex 当前版本需要的 stdout 格式：
+
+```json
+{
+  "hookSpecificOutput": {
+    "hookEventName": "UserPromptSubmit",
+    "additionalContext": "..."
+  }
+}
+```
+
+因此最终行为是：
+
+1. 全局 hook 和项目 hook 可以同时存在。
+2. 同一个 Codex 事件只保存 / 注入一次上下文。
+3. Codex runtime 使用 `hookSpecificOutput.additionalContext`。
+4. Claude runtime 仍使用 `hookSpecificOutput.additionalContext`。
+5. Cursor runtime 仍使用 `{ "prompt": "..." }`。
+
+### 修改和同步位置
+
+- canonical 源：`D:/knowledgeBase/Meta_Kim/canonical/runtime-assets/shared/hooks/meta-kim-memory-save.mjs`
+- 项目 Codex hook：`D:/knowledgeBase/Meta_Kim/.codex/hooks/meta-kim-memory-save.mjs`
+- 用户全局 Codex hook：`C:/Users/zhouy/.codex/hooks/meta-kim-memory-save.mjs`
+
+已运行 `npm run meta:sync`，将 canonical 变更投影到项目运行时目录。
+
+### 验证结果
+
+已验证：
+
+- `node --check` 通过：canonical hook、项目 `.codex` hook、用户全局 hook。
+- 用户全局 hook 前 4 字节为 `35 33 47 117`，即 `#!/u`，确认无 UTF-8 BOM。
+- 快速连续运行同一模拟 `UserPromptSubmit`：项目 hook 输出一次，紧接着全局 hook 静默，证明去重生效。
+- `npm run meta:check` 通过。
+- `graphify update .` 已运行。
+
+### 下次排障顺序
+
+如果再次出现重复注入，优先检查：
+
+1. 三份 `meta-kim-memory-save.mjs` 是否都有 `shouldSkipDuplicate`。
+2. Codex 分支是否为 `runtime === "claude" || runtime === "codex"` 时输出 `hookSpecificOutput.additionalContext`。
+3. 是否设置了 `META_KIM_DISABLE_HOOK_DEDUPE=1`。
+4. 两次 hook 触发是否超过 `DEDUPE_WINDOW_MS`。
+5. 模拟测试时要在同一个 shell 调用中连续运行项目 hook 和全局 hook，避免人工/模型处理时间超过 10 秒窗口。
+
+## graphify
+
+This project has a knowledge graph at graphify-out/ with god nodes, community structure, and cross-file relationships.
+
+When the user types `/graphify`, invoke the `skill` tool with `skill: "graphify"` before doing anything else.
+
+Rules:
+- For codebase questions, first run `graphify query "<question>"` when graphify-out/graph.json exists. Use `graphify path "<A>" "<B>"` for relationships and `graphify explain "<concept>"` for focused concepts. These return a scoped subgraph, usually much smaller than GRAPH_REPORT.md or raw grep output.
+- Dirty graphify-out/ files are expected after hooks or incremental updates; dirty graph files are not a reason to skip graphify. Only skip graphify if the task is about stale or incorrect graph output, or the user explicitly says not to use it.
+- If graphify-out/wiki/index.md exists, use it for broad navigation instead of raw source browsing.
+- Read graphify-out/GRAPH_REPORT.md only for broad architecture review or when query/path/explain do not surface enough context.
+- After modifying code, run `graphify update .` to keep the graph current (AST-only, no API cost).
