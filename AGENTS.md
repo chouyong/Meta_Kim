@@ -91,6 +91,8 @@ Cross-runtime format boundary:
 
 Meta_Kim does not start with "call agent X". It starts with "what capability is needed?"
 
+For every non-query governed task, run capability search before execution. If the task touches runtime behavior, inspect `config/runtime-capability-matrix.json`. If it touches macOS, Windows, or WSL2, inspect `config/os-compatibility-matrix.json`. If it touches external reusable capability, inspect `config/capability-index/dependency-project-registry.json`. Reference-only projects are not dependencies; distill useful ideas into Meta_Kim stage data such as `config/governance/decision-pattern-catalog.json`.
+
 Use this order:
 
 ```text
@@ -179,6 +181,19 @@ For executable work, plan the business flow before writing code or changing file
 - tests / QA
 - release / install path
 - feedback and evolution
+
+Hard rules before Execution:
+
+- Fuzzy goals require intent amplification and an acceptance record.
+- Multi-path work requires best-path selection.
+- Multi-lens judgment uses dynamic lens discovery; user-mentioned books, people, or theories are seeds/fallbacks, not a fixed list.
+- Execution requires owner + weapon + verification owner.
+- Dependency projects require input/output contracts before use.
+- Codex subagents require explicit request or explicit governed task need, and hooks require trust review.
+- OpenClaw skills require third-party risk and sandbox review.
+- Cursor capabilities remain unknown/partial until verified; do not mark them native from projection files alone.
+- Public-ready requires verification plus intent acceptance; workflow completion alone is not user-goal completion.
+- Evolution must write back or record none-with-reason.
 
 Not every task needs every lane, but omitted lanes should be intentional. The business-flow blueprint should explain:
 

@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "projects": [
+    {
+      "id": "agent-teams-playbook",
+      "name": "agent-teams-playbook",
+      "source": {"type":"github","uri":"https://github.com/KimYx0207/agent-teams-playbook","localPath":null,"inspectionStatus":"external_reference","lastInspectedAt":null},
+      "capabilityCard": {"oneLine":"Parallel agent-team orchestration playbook.","taskShapes":["multi_lane_execution"],"triggerConditions":["2+ independent worker lanes"],"inputContract":{"requires":["bounded work lanes"]},"outputContract":{"produces":["parallelization advice","worker split"]},"notFor":["Critical/Fetch replacement"],"knownRisks":["external skill must be installed"],"verificationMethods":["config/skills.json entry","discover global capabilities"]},
+      "interface": {"invokeAs":"skill","preferredWeaponId":"agent-teams-playbook-skill","fallbackWeaponId":null,"requiredFiles":[],"requiredEnv":[],"requiredRuntime":["claude_code","codex","openclaw","cursor"]},
+      "scoring": {"taskFit":78,"inputOutputClarity":75,"runtimeAvailability":70,"verificationStrength":65,"reusePotential":80,"risk":25,"overall":74},
+      "reusePolicy": {"reuseWhenScoreAbove":80,"requiresHumanConfirmationAboveRisk":"medium","writebackOnUse":true,"recordUsageStats":true},
+      "evolution": {"usageCount":0,"successCount":0,"failureCount":0,"lastFailureReason":null,"nextRunHints":[]}
+    },
+    {
+      "id": "meta-kim-runtime",
+      "name": "meta-kim-runtime MCP",
+      "source": {"type":"mcp","uri":null,"localPath":"scripts/mcp/meta-runtime-server.mjs","inspectionStatus":"inspected","lastInspectedAt":"2026-05-28"},
+      "capabilityCard": {"oneLine":"Local MCP exposing Meta_Kim agent and runtime capability metadata.","taskShapes":["capability_inventory","agent_lookup"],"triggerConditions":["need meta agent list","need runtime capability facts"],"inputContract":{"requires":["MCP tool call"]},"outputContract":{"produces":["agent definitions","runtime capabilities"]},"notFor":["external research"],"knownRisks":["project path portability"],"verificationMethods":["npm run meta:test:mcp"]},
+      "interface": {"invokeAs":"mcp","preferredWeaponId":"meta-kim-runtime-mcp","fallbackWeaponId":"capability-index-file","requiredFiles":["scripts/mcp/meta-runtime-server.mjs"],"requiredEnv":[],"requiredRuntime":["claude_code","codex","cursor"]},
+      "scoring": {"taskFit":88,"inputOutputClarity":90,"runtimeAvailability":85,"verificationStrength":90,"reusePotential":88,"risk":20,"overall":87},
+      "reusePolicy": {"reuseWhenScoreAbove":80,"requiresHumanConfirmationAboveRisk":"medium","writebackOnUse":true,"recordUsageStats":true},
+      "evolution": {"usageCount":0,"successCount":0,"failureCount":0,"lastFailureReason":null,"nextRunHints":[]}
+    }
+  ]
+}

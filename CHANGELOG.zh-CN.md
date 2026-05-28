@@ -6,6 +6,28 @@
 格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 发布新版本时，请在顶部（旧版本之前）添加新的 **`## [版本号] - YYYY-MM-DD`** 部分。
 
+## [2.5.0] - 2026-05-28
+
+### 新增
+
+- **治理决策引擎** — 新增 runtime capability、OS compatibility、dependency capability、weapon routing、trigger-action、intent amplification、choice surface、dynamic lens、decision-pattern 等治理契约。
+- **能力发现与路由脚本** — 新增 probe、discovery、inventory、routing、lens selection 和 governance validators，让 Meta_Kim 在执行前能找到 owner + weapon + runtime + OS + verification 路径。
+- **治理回归测试** — 新增 trigger/action 契约、runtime matrix 规则、dependency registry 边界、weapon routing、dynamic lens selection、intent acceptance、capability routing 等测试。
+- **治理文档** — 新增 runtime capability、dependency discovery、owner/weapon routing、trigger-action governance、intent amplification、dynamic lens discovery、choice surface 和 internal decision patterns 文档。
+
+### 变更
+
+- **Kim_Decision 边界纠正** — Kim_Decision 不再被建模为 Meta_Kim 依赖。可复用的 decision-engine 部分沉淀为 Meta_Kim 自有 decision-pattern catalog，只作为参考材料使用。
+- **Meta-theory 执行规则收紧** — 更新 `AGENTS.md`、README 和 meta-theory skill：非纯问答任务先做 capability search；平台任务查 runtime/OS matrix；public-ready 必须通过 verification + intent acceptance；Evolution 必须 writeback 或记录 none-with-reason。
+- 版本升级：2.4.3 → 2.5.0。
+
+### 验证
+
+- `npm run meta:verify:governance`
+- `npm run meta:validate`
+- `npm run meta:sync`
+- `npm run meta:graphify:rebuild`
+
 ## [2.4.3] - 2026-05-28
 
 ### 修复

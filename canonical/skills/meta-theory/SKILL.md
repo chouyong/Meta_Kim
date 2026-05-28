@@ -171,6 +171,14 @@ Gap type -> Evolution target: meta-agent boundary -> specific `canonical/agents/
 
 Search in order: canonical capability index, runtime mirrors, local runtime inventory, available skills/tools, then external capability discovery when allowed.
 
+Non-query governed work must perform capability search before Execution. Platform work must inspect `config/runtime-capability-matrix.json`; Win/Mac/WSL2 work must inspect `config/os-compatibility-matrix.json`; external reuse must inspect `config/capability-index/dependency-project-registry.json`; owner/weapon routing must inspect `config/capability-index/weapon-registry.json`.
+
+Reference-only projects are not dependencies. If a project is used only as inspiration or prior art, distill its useful parts into Meta_Kim-owned governance data, such as `config/governance/decision-pattern-catalog.json`, and keep it out of dependency routes, owners, weapons, and invocation paths.
+
+Dynamic Lens Discovery is mandatory for multi-path product, strategy, growth, UX, engineering, content, or governance judgment. User-mentioned books, people, and theories are seed/fallback data only; do not enable every seed or use Lens names as final-answer decoration. Select 3-7 lenses only when they change problem definition, path selection, risk recognition, user choice, acceptance metrics, or execution action.
+
+Execution may start only after owner + weapon + verification owner are known. Public-ready may be claimed only after verification evidence and intent acceptance prove the user goal is done; workflow completion is not enough.
+
 Capability gap ladder: existing owner -> owner upgrade -> create owner -> block with `capabilityGapPacket`.
 
 Temporary fallback owners are forbidden. Do not use temporary fallback.

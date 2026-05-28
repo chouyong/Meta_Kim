@@ -6,6 +6,28 @@ All notable changes to Meta_Kim are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 When you tag a release, add a new **`## [version] - YYYY-MM-DD`** section at the top (above older entries) and list changes there.
 
+## [2.5.0] - 2026-05-28
+
+### Added
+
+- **Governance decision engine** — Added runtime capability, OS compatibility, dependency capability, weapon routing, trigger-action, intent amplification, choice surface, dynamic lens, and decision-pattern governance contracts.
+- **Capability discovery and routing scripts** — Added probes, discovery, inventory, routing, lens selection, and governance validators so Meta_Kim can find owner + weapon + runtime + OS + verification paths before execution.
+- **Governance regression tests** — Added tests for trigger/action contracts, runtime matrix rules, dependency registry boundaries, weapon routing, dynamic lens selection, intent acceptance, and capability routing.
+- **Governance docs** — Added user-facing documentation for runtime capability, dependency discovery, owner/weapon routing, trigger-action governance, intent amplification, dynamic lens discovery, choice surfaces, and internal decision patterns.
+
+### Changed
+
+- **Kim_Decision boundary correction** — Kim_Decision is no longer modeled as a Meta_Kim dependency. Useful decision-engine patterns are represented as Meta_Kim-owned data under the decision-pattern catalog and used only as reference material.
+- **Meta-theory execution rules** — Tightened `AGENTS.md`, README, and the meta-theory skill so non-query tasks search capabilities first, platform work checks runtime/OS matrices, public-ready depends on verification plus intent acceptance, and evolution must write back or record a reason.
+- Version bump: 2.4.3 → 2.5.0.
+
+### Verification
+
+- `npm run meta:verify:governance`
+- `npm run meta:validate`
+- `npm run meta:sync`
+- `npm run meta:graphify:rebuild`
+
 ## [2.4.3] - 2026-05-28
 
 ### Fixed

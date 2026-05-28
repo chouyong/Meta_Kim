@@ -166,6 +166,10 @@ flowchart LR
 
 搜索现有 agent、skill、工具、MCP 能不能覆盖这个需求。这一步的核心理念是**能力优先**——先定义需要什么能力，再搜索谁声明了这个能力，最后派给最匹配的 owner。能力索引查找顺序是 `config/capability-index/` → runtime mirror → local inventory → fallback，而不是一开始就写死一个 agent 名字。
 
+**治理决策引擎**
+
+Meta_Kim 不只是 8 阶段。它会先识别治理触发条件，再查平台能力、OS 兼容、依赖项目能力，接着分离 owner 与 weapon，根据 Win/Mac/runtime 过滤可执行路径，只在关键分叉点给用户选择项，自动执行确定性部分，再验证用户目标是否真的落地，最后把经验写回供下次复用。只作为参考的项目会被吸收成 Meta_Kim 自己的数据，不会被悄悄升级成依赖；见 `config/governance/decision-pattern-catalog.json`。
+
 **Thinking — 定义边界、owner、顺序、交付物、风险和停机条件**
 
 把任务拆成子任务，给每个子任务指定 owner，明确依赖关系和并行分组。这一步产出 `dispatchBoard`（分派看板）——谁干什么、哪些可以并行跑、最终谁负责合并。同时要探索至少 2 条方案路径，不能只走一条路。
