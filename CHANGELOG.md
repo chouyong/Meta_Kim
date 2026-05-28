@@ -6,6 +6,48 @@ All notable changes to Meta_Kim are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 When you tag a release, add a new **`## [version] - YYYY-MM-DD`** section at the top (above older entries) and list changes there.
 
+## [2.6.0] - 2026-05-29
+
+### Added
+
+- **Executable governance validators** — Added prompt executability, foundational capability preservation, and dependency compatibility validators, then wired them into `meta:verify:governance`.
+- **Governance regression coverage** — Added behavior tests for agent boundaries, reference contracts, strict intent validation, route completeness, public-ready gates, Kim_Decision routing, hardcoded path prevention, and scar/evolution rules.
+- **Dependency and capability indexes** — Extended dependency discovery and capability inventory output with runtime support, OS support, invocation paths, verification methods, writeback keys, route eligibility, and preservation metadata.
+
+### Changed
+
+- **Meta-theory dispatcher** — Reworked the canonical meta-theory skill into a compact dispatcher that routes by Critical -> Fetch -> Thinking -> Execution -> Review -> Meta-Review -> Verification -> Evolution instead of acting as a theory bundle.
+- **Reference contracts and agent SOPs** — Converted the meta-theory references and all nine governance agents into executable contracts with triggers, required inputs, output packets, pass/fail gates, escalation, verification, writeback, and preserve rules.
+- **Route and intent validation** — Upgraded execution route selection from keyword routing to owner + weapon + dependency + runtime + OS + verification scoring, and added strict run-artifact validation for intent acceptance.
+- **Runtime and OS compatibility** — Added Linux coverage alongside macOS, Windows, and WSL2, while preserving Claude Code, Codex, Cursor, and OpenClaw native/partial/unknown capability boundaries.
+- Version bump: 2.5.0 -> 2.6.0.
+
+### Fixed
+
+- **Kim_Decision state machine** — Kim_Decision is now preserved as a discovered decision protocol/skill candidate/reference state machine, not hardcoded as a local path, not disabled permanently, and never used as a code executor.
+- **Foundational capability protection** — Prompt cleanup now has validator-backed protection against removing skills, WebSearch/Browser/Research, Shell/Filesystem/Patch, MCP, Memory, Graph, Hooks, scripts, runtime tools, and native platform abilities.
+- **Public-ready gate hardening** — Public-ready now requires verification evidence, intent acceptance, no unresolved high/critical findings, and a writeback decision.
+
+### Verification
+
+- `npm run meta:validate`
+- `npm run meta:runtime:validate`
+- `npm run meta:os:check`
+- `npm run meta:deps:discover`
+- `npm run meta:deps:check`
+- `npm run meta:deps:compat`
+- `npm run meta:capabilities:index`
+- `npm run meta:capabilities:route -- --task "fuzzy product monetization task" --runtime codex --os windows --json`
+- `npm run meta:lens:select -- --taskShape strategy_product_decision --realIntent "choose shortest correct path" --json`
+- `npm run meta:governance:validate`
+- `npm run meta:route:validate`
+- `npm run meta:intent:validate -- --template`
+- `npm run meta:intent:validate -- --strict --input tests/fixtures/run-artifacts/valid-run.json`
+- `npm run meta:prompt:validate`
+- `npm run meta:foundational:validate`
+- `npm run meta:test:governance`
+- `npm run meta:verify:governance`
+
 ## [2.5.0] - 2026-05-28
 
 ### Added

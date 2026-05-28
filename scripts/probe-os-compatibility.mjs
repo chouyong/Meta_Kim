@@ -61,13 +61,13 @@ async function buildProbe() {
 async function check(probe) {
   const matrix = await readJson("config/os-compatibility-matrix.json");
   const ids = new Set(matrix.operatingSystems?.map((entry) => entry.id));
-  for (const required of ["macos", "windows", "wsl2"]) {
+  for (const required of ["macos", "windows", "linux", "wsl2"]) {
     if (!ids.has(required)) {
       throw new Error(`os-compatibility-matrix missing ${required}`);
     }
   }
   const current = probe.host.normalized;
-  if (["macos", "windows", "wsl2"].includes(current) && !ids.has(current)) {
+  if (["macos", "windows", "linux", "wsl2"].includes(current) && !ids.has(current)) {
     throw new Error(`current OS ${current} is not covered by matrix`);
   }
   if (!probe.commands.node.available || !probe.commands.git.available) {

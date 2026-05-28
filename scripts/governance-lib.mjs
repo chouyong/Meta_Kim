@@ -22,7 +22,7 @@ export const GOVERNANCE_ACTIONS = [
   "evolve_writeback",
 ];
 export const RUNTIMES = ["claude_code", "codex", "openclaw", "cursor"];
-export const OS_TARGETS = ["macos", "windows", "wsl2"];
+export const OS_TARGETS = ["macos", "windows", "linux", "wsl2"];
 export const SUPPORT = ["native", "partial", "unsupported", "unknown"];
 export const CONFIDENCE = [
   "verified_docs",

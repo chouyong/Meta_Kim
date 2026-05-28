@@ -25,7 +25,7 @@ for (const runtime of RUNTIMES) {
   }
 }
 
-for (const osName of ["macos", "windows", "wsl2"]) {
+for (const osName of ["macos", "windows", "linux", "wsl2"]) {
   assert(JSON.stringify(matrix).includes(osName), `Matrix must mention ${osName}`);
 }
 

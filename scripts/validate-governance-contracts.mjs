@@ -51,6 +51,7 @@ for (const platform of runtimeMatrix.platforms ?? []) {
 }
 assert(osMatrix.operatingSystems?.some((entry) => entry.id === "macos"), "OS matrix missing macOS");
 assert(osMatrix.operatingSystems?.some((entry) => entry.id === "windows"), "OS matrix missing Windows");
+assert(osMatrix.operatingSystems?.some((entry) => entry.id === "linux"), "OS matrix missing Linux");
 assert(osMatrix.operatingSystems?.some((entry) => entry.id === "wsl2"), "OS matrix missing WSL2");
 
 assert((lensCatalog.seeds ?? []).length >= 30, "Lens seed catalog must include >= 30 seeds");

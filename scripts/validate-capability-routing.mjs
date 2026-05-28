@@ -13,10 +13,15 @@ function route(task, runtime = "auto", os = "auto") {
 
 const fuzzy = route("fuzzy strategy task: choose a product monetization path and minimum test");
 assert(fuzzy.candidateWeapons.includes("meta-kim-decision-patterns"), "Fuzzy strategy/product task must recall internal Meta_Kim decision patterns");
-assert(!fuzzy.candidateDependencyProjects.includes("kim-decision"), "Kim_Decision is reference-only and must not be a dependency route candidate");
+if (fuzzy.candidateDependencyProjects.includes("kim-decision")) {
+  assert(!fuzzy.rankedRoutes.some((item) => item.dependencyProject === "kim-decision" && item.scoreBand === "execute"), "Kim_Decision may be discovered but must not become an execution dependency");
+}
 assert(!fuzzy.rankedRoutes.some((item) => item.owner === "general-purpose"), "No general-purpose owner allowed");
 assert(fuzzy.recommendedRoute?.weapon, "Recommended route needs weapon");
 assert(fuzzy.recommendedRoute?.verificationOwner, "Recommended route needs verification owner");
+assert(fuzzy.recommendedRoute?.runtime, "Recommended route needs runtime");
+assert(fuzzy.recommendedRoute?.os, "Recommended route needs OS");
+assert(fuzzy.recommendedRoute?.verificationMethod, "Recommended route needs verification method");
 
 const code = route("complex code refactor with tests");
 assert(!code.rankedRoutes.some((item) => item.dependencyProject === "kim-decision"), "Kim_Decision must not become implementation owner for pure code execution");

@@ -59,6 +59,34 @@
       }
     },
     {
+      "id": "linux",
+      "homeDirectory": "$HOME",
+      "configPaths": {
+        "claude": "~/.claude",
+        "codex": "~/.codex",
+        "openclaw": "~/.openclaw",
+        "cursor": "~/.cursor"
+      },
+      "shellType": "bash/zsh",
+      "pathSeparator": "/",
+      "commandQuoting": "POSIX shell quoting; quote paths with single quotes when possible.",
+      "nodeVersion": ">=22.13.0",
+      "pythonCommand": "python3",
+      "gitAvailability": "required",
+      "packageManager": "npm/pnpm/yarn/bun installed on host",
+      "symlinkBehavior": "supported; executable bit and ownership matter",
+      "permissionBehavior": "POSIX permissions; executable bit matters for shell hooks",
+      "daemonServiceBehavior": "systemd when available or background shell process",
+      "browserAutomationBehavior": "supported when browser dependencies are installed",
+      "mcpServerStartup": "stdio and background HTTP supported",
+      "hookExecutionShell": "host shell or configured command interpreter",
+      "environmentVariableSyntax": "NAME=value command or export NAME=value",
+      "localGlobalInstallPath": {
+        "local": "project runtime folders",
+        "global": "~/.<runtime>"
+      }
+    },
+    {
       "id": "wsl2",
       "homeDirectory": "$HOME inside distro",
       "configPaths": {

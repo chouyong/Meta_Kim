@@ -12,7 +12,9 @@ function route(task, runtime = "auto", os = "auto") {
 test("routing fixtures recall internal patterns and platform/OS matrices", () => {
   const fuzzy = route("fuzzy strategy task");
   assert.ok(fuzzy.candidateWeapons.includes("meta-kim-decision-patterns"));
-  assert.equal(fuzzy.candidateDependencyProjects.includes("kim-decision"), false);
+  if (fuzzy.candidateDependencyProjects.includes("kim-decision")) {
+    assert.equal(fuzzy.rankedRoutes.some((route) => route.dependencyProject === "kim-decision" && route.scoreBand === "execute"), false);
+  }
 
   const product = route("product monetization task");
   assert.ok(product.internalDecisionPatterns.includes("thinking-minimum-test"));
