@@ -5142,13 +5142,13 @@
         {
           "platform": "cursor",
           "capability": "hook",
-          "support": "unknown",
-          "confidence": "unverified",
+          "support": "partial",
+          "confidence": "repo_claim",
           "trigger": {
             "userTrigger": "User explicitly requests hook or a governed task requires it.",
             "autoTrigger": "Meta_Kim may select hook only after Fetch and Thinking identify it as a valid route component.",
             "configTrigger": "cursor runtime projection and registry configuration.",
-            "hookTrigger": "cursor lifecycle hook when verified/configured."
+            "hookTrigger": "Cursor hooks.json lifecycle events such as beforeSubmitPrompt and preToolUse when configured."
           },
           "configLocations": {
             "macos": [
@@ -5178,23 +5178,23 @@
             "wsl2": "partial"
           },
           "automationBoundary": {
-            "canAutoRun": false,
+            "canAutoRun": true,
             "requiresApproval": false,
             "requiresTrustReview": true,
             "dangerousModes": [
               "untrusted_hook"
             ],
             "blockedModes": [
-              "unverified"
+              "hook_disabled_or_untrusted"
             ]
           },
           "evidence": {
-            "source": "unknown",
-            "sourceRef": "needs official/local verification",
+            "source": "local_file",
+            "sourceRef": ".cursor/hooks.json; scripts/runtime-hook-mapping.mjs; canonical/runtime-assets/cursor/rules/meta-enforcement.mdc",
             "lastVerifiedAt": "2026-05-28",
             "verificationCommand": "cursor --version"
           },
-          "notes": "Cursor remains a light governance projection; unknown capabilities must not be treated as native."
+          "notes": "Cursor hook wiring is projected and stable enough for lifecycle/tool governance, but Meta_Kim must still avoid treating Cursor as having a verified arbitrary native question popup."
         },
         {
           "platform": "cursor",
@@ -5636,8 +5636,8 @@
           "trigger": {
             "userTrigger": "User explicitly requests native choice surface or a governed task requires it.",
             "autoTrigger": "Meta_Kim may select native choice surface only after Fetch and Thinking identify it as a valid route component.",
-            "configTrigger": "cursor runtime projection and registry configuration.",
-            "hookTrigger": "None unless the runtime maps it to a lifecycle event."
+            "configTrigger": ".cursor/rules/meta-choice-surface.mdc alwaysApply rule plus .cursor/hooks.json tool gates.",
+            "hookTrigger": "preToolUse governs tools; alwaysApply rules govern the prompt-time chat decision fallback."
           },
           "configLocations": {
             "macos": [
@@ -5662,9 +5662,9 @@
             ]
           },
           "osSupport": {
-            "macos": "unknown",
-            "windows": "unknown",
-            "wsl2": "unknown"
+            "macos": "partial",
+            "windows": "partial",
+            "wsl2": "partial"
           },
           "automationBoundary": {
             "canAutoRun": false,
@@ -5676,12 +5676,12 @@
             ]
           },
           "evidence": {
-            "source": "unknown",
-            "sourceRef": "needs official/local verification",
+            "source": "local_file",
+            "sourceRef": "canonical/runtime-assets/cursor/rules/meta-choice-surface.mdc; .cursor/hooks.json",
             "lastVerifiedAt": "2026-05-28",
             "verificationCommand": "cursor --version"
           },
-          "notes": "Cursor remains a light governance projection; unknown capabilities must not be treated as native."
+          "notes": "Stable Cursor choice behavior is an alwaysApply chat decision card fallback, not a verified native popup."
         },
         {
           "platform": "cursor",
@@ -5789,7 +5789,7 @@
             "lastVerifiedAt": "2026-05-28",
             "verificationCommand": "cursor --version"
           },
-          "notes": "Cursor remains a light governance projection; unknown capabilities must not be treated as native."
+          "notes": "Cursor tool approval/hook UI must not be treated as an arbitrary Meta_Kim multi-option popup. Use the alwaysApply chat decision card fallback for choices."
         },
         {
           "platform": "cursor",
@@ -6386,8 +6386,8 @@
           "trigger": {
             "userTrigger": "User explicitly requests human confirmation trigger or a governed task requires it.",
             "autoTrigger": "Meta_Kim may select human confirmation trigger only after Fetch and Thinking identify it as a valid route component.",
-            "configTrigger": "cursor runtime projection and registry configuration.",
-            "hookTrigger": "None unless the runtime maps it to a lifecycle event."
+            "configTrigger": ".cursor/rules/meta-choice-surface.mdc alwaysApply rule.",
+            "hookTrigger": "preToolUse remains tool governance only; ordinary choice confirmation uses the chat card fallback."
           },
           "configLocations": {
             "macos": [
@@ -6425,11 +6425,11 @@
           },
           "evidence": {
             "source": "local_file",
-            "sourceRef": ".cursor/mcp.json; .cursor/hooks.json; .cursor/rules; .cursor/agents; .cursor/skills",
+            "sourceRef": ".cursor/rules/meta-choice-surface.mdc; .cursor/hooks.json; .cursor/agents; .cursor/skills",
             "lastVerifiedAt": "2026-05-28",
             "verificationCommand": "cursor --version"
           },
-          "notes": "Cursor remains a light governance projection; unknown capabilities must not be treated as native."
+          "notes": "Cursor human confirmation is stable as a chat decision card loaded by alwaysApply rules, not as a verified native modal."
         }
       ]
     }

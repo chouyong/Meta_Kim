@@ -530,6 +530,8 @@ But there is an important caveat: the four runtimes are not equal. Claude Code c
 
 The reason is not sentiment. Claude Code natively supports agents, skills, references, hooks, settings, MCP, plugins, and global capability discovery, which makes the whole loop - dealing -> contracts -> gates -> automation guardrails -> writeback - easier to carry end to end.
 
+Choice surfaces are runtime-specific. Claude Code should use `AskUserQuestion`; Codex should use `request_user_input` when `~/.codex/config.toml` has `[features].default_mode_request_user_input = true`; Cursor uses an `alwaysApply` project rule to trigger a chat decision card plus `preToolUse failClosed` for tool gating; OpenClaw uses workspace/chat cards unless a plugin approval hook is explicitly installed.
+
 ### Four-layer repository structure
 
 | Layer | Location | Purpose |
@@ -748,6 +750,7 @@ The three memory layers work together toward two core goals:
 | Meta-theory skill | `canonical/skills/meta-theory/SKILL.md` |
 | Meta-theory details | `canonical/skills/meta-theory/references/` |
 | Cursor declarative backup rule | `canonical/runtime-assets/cursor/rules/meta-enforcement.mdc` |
+| Cursor choice-surface fallback rule | `canonical/runtime-assets/cursor/rules/meta-choice-surface.mdc` |
 | Runtime mirrors | `.claude/`, `.codex/`, `.cursor/`, `openclaw/` after `npm run meta:sync` |
 
 When in doubt, edit canonical sources first, then run `npm run meta:sync` and `npm run meta:check`.

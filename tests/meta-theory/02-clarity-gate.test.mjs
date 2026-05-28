@@ -313,6 +313,30 @@ describe("Clarity Gate unified execution confirmation", async () => {
     assert.equal(codexPolicy.claudeNativeChoiceSurfaceUnchanged, true);
   });
 
+  test("Cursor choice surface uses stable alwaysApply chat-card fallback", async () => {
+    const cursorSurface =
+      workflowContractJson.runDiscipline?.runtimeNativeChoiceSurfaces?.cursor;
+    assert.ok(cursorSurface, "Cursor choice surface policy must exist");
+    assert.equal(cursorSurface.primarySurface, "alwaysApply_rule_chat_card");
+    assert.ok(
+      cursorSurface.fallbackSurfaces?.includes("conversation_fallback"),
+      "Cursor must fall back to conversation cards",
+    );
+    const cursorPolicyText = `${cursorSurface.triggerDescription} ${cursorSurface.implementation}`;
+    assert.match(cursorPolicyText, /alwaysApply/i);
+    assert.match(cursorPolicyText, /chat decision card/i);
+    assert.match(cursorPolicyText, /preToolUse/i);
+    assert.match(cursorPolicyText, /failClosed/i);
+    assert.match(cursorPolicyText, /native modal|popup/i);
+
+    const cursorRule = await readFile(
+      "canonical/runtime-assets/cursor/rules/meta-choice-surface.mdc",
+    );
+    assert.match(cursorRule, /alwaysApply: true/);
+    assert.match(cursorRule, /Do not call this a popup/i);
+    assert.match(cursorRule, /conversation_fallback/);
+  });
+
   test("Choice Surface Gate forbids premature popup or execution confirmation", () => {
     const combined = `${skillContent}\n${workflowContract}\n${devGov}`;
     const gate =

@@ -670,10 +670,10 @@
         "implementation": "Workspace-per-agent model; requires proper workspace configuration."
       },
       "cursor": {
-        "primarySurface": "native_mode_picker",
+        "primarySurface": "alwaysApply_rule_chat_card",
         "fallbackSurfaces": ["conversation_fallback"],
-        "triggerDescription": "Use Cursor native custom modes/mode picker and project rules for Critical, Fetch, Thinking, and Review selection; dynamic popup support is runtime-dependent.",
-        "implementation": "Custom Modes / mode picker UI; fallback to conversation card."
+        "triggerDescription": "Use Cursor alwaysApply project rules as the stable trigger for Meta_Kim choice behavior: when a branch-changing decision is required, render a localized chat decision card and wait for the user. Cursor preToolUse with failClosed is the stable hard tool gate, while beforeSubmitPrompt can support prompt adapters. Do not claim an arbitrary Cursor-native modal/question popup unless the active host exposes one.",
+        "implementation": "Sync canonical/runtime-assets/cursor/rules/meta-choice-surface.mdc to .cursor/rules/meta-choice-surface.mdc during install/update; sync .cursor/hooks.json with preToolUse failClosed for execution gating. Record normal choices as conversation_fallback unless a verified Cursor-native question surface is present."
       }
     },
     "silencePolicy": {
