@@ -51,16 +51,40 @@ Important: Architecture Type Distinction. Meta Architecture means agent governan
 
 ## Stage map
 
-| # | Stage | Action |
+| # | Stage | Action | Interaction |
+|---|---|---|---|
+| 1 | Critical | clarify intent first, lock user pain, value, success criteria, non-goals, permissions, and Architecture Type | If a required intent dimension is missing and the answer changes route, scope, risk, or non-goal, set `choiceSurfaceState = critical_clarification_allowed` and ask before proceeding. Do not present execution options during Critical. |
+| 2 | Fetch | gather online/web and local evidence, confirm the problem, extract material claims, run targeted read-only baseline verification when it changes the route, and list candidate solutions with sources | If evidence suggests multiple valid paths with different trade-offs, surface the options in the user's language before Thinking. |
+| 3 | Thinking | determine needed execution capabilities across agents, skills, commands, MCP capabilities, and tools; match existing capabilities; create or upgrade only for gaps; plan DAG/parallel/serial lanes with `mergeOwner` | Present at least 2 candidate paths with a recommended default. Ask the user to confirm the chosen path before Execution. |
+| 4 | Execution | run multi-agent work using skills, commands, MCP capabilities, and tools from Thinking artifacts | No interaction unless route-changing discovery occurs mid-execution — then pause and inform. |
+| 5 | Review | meta-prism checks upstream Critical, Fetch, Thinking, and result quality | If review finds issues that require user preference (quality vs speed trade-off), ask before proceeding. |
+| 6 | Meta-Review | meta-warden verifies Review standard and public-ready gate | No interaction. Internal governance check. |
+| 7 | Verification | run real tests with fresh evidence and `verificationPacket.fixEvidence` | No interaction. Run checks and record evidence. |
+| 8 | Evolution | after Warden approval, directly edit the target agent definition or SOUL.md for meta-agent lessons; execution-agent gaps use `capabilityGapPacket` + Type B pipeline | No interaction. Record writeback decision. |
+
+## User Interaction
+
+**MANDATORY**: Use the current runtime's native choice surface (AskUserQuestion in Claude Code, request_user_input in Codex) at key decision points. If the native tool is unavailable or returns empty, fall back to a localized chat decision card and wait for the user's explicit reply.
+
+**When to ask:**
+
+| Stage | When to Ask | Example |
 |---|---|---|
-| 1 | Critical | clarify intent first, lock user pain, value, success criteria, non-goals, permissions, and Architecture Type |
-| 2 | Fetch | gather online/web and local evidence, confirm the problem, extract material claims, run targeted read-only baseline verification when it changes the route, and list candidate solutions with sources |
-| 3 | Thinking | determine needed execution capabilities across agents, skills, commands, MCP capabilities, and tools; match existing capabilities; create or upgrade only for gaps; plan DAG/parallel/serial lanes with `mergeOwner` |
-| 4 | Execution | run multi-agent work using skills, commands, MCP capabilities, and tools from Thinking artifacts |
-| 5 | Review | meta-prism checks upstream Critical, Fetch, Thinking, and result quality |
-| 6 | Meta-Review | meta-warden verifies Review standard and public-ready gate |
-| 7 | Verification | run real tests with fresh evidence and `verificationPacket.fixEvidence` |
-| 8 | Evolution | after Warden approval, directly edit the target agent definition or SOUL.md for meta-agent lessons; execution-agent gaps use `capabilityGapPacket` + Type B pipeline |
+| Critical | Intent dimension missing, answer changes route/scope/risk/non-goal | "This could be a quick fix or a full rewrite. Which direction?" |
+| Fetch | Evidence shows multiple paths with different trade-offs | "I found approach A (faster) and B (more thorough). Which?" |
+| Thinking | Choosing between solution paths with different scope/cost | "Minimal fix: 2 hours. Ten-x shift: 2 days. Your call?" |
+| Review | Issues found that need user preference to resolve | "Quality concern: rebuild or patch?" |
+
+**Question format:**
+- 2–4 meaningful options with clear trade-offs
+- One recommended default labeled clearly
+- User's language, not internal packet field names
+- Stop and wait — do not proceed until the user answers
+
+**Do not ask:**
+- Ritual questions that do not change the route
+- Stage-by-stage confirmation spam
+- Questions during Meta-Review, Verification, or Evolution (these are mechanical checks)
 
 ## Type A: Prompt / Reference / Contract Hardening
 

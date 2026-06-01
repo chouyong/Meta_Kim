@@ -1064,7 +1064,7 @@ async function validatePortableSkill() {
       `Portable skill is missing station-deliverable marker ${marker}.`,
     );
   }
-  assertNoForbiddenMarkers(skillSource, skillSourcePath, ["AskUserQuestion"]);
+  assertNoForbiddenMarkers(skillSource, skillSourcePath, []);
   const frontmatterValidation = validateSkillFrontmatter(skillSource);
   assert(
     frontmatterValidation.ok,
