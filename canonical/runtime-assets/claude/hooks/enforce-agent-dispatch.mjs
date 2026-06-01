@@ -102,7 +102,6 @@ import {
   checkChoiceSurfaceGate,
   STAGE_META_AGENT_MAP,
   extractMetaAgentName,
-  setSimpleMode,
   recordSkippedHook,
   getGovernanceFlow,
 } from "./spine-state.mjs";
@@ -647,16 +646,7 @@ function shouldSkipHook(state, userPrompt) {
     };
   }
 
-  // Priority 2: Simple mode flag in spine state
-  if (state?.simpleMode) {
-    return {
-      shouldSkip: true,
-      reason: formatSkipReason("simple_mode"),
-      source: "simple_mode",
-    };
-  }
-
-  // Priority 3: Auto-detect simple keywords in prompt
+  // Priority 2: Auto-detect simple keywords in prompt
   if (hasSimpleKeyword(userPrompt)) {
     return {
       shouldSkip: true,
@@ -745,7 +735,6 @@ if (isAgentDispatchTool(toolName)) {
 
   if (
     !state.queryBypass &&
-    !state.simpleMode &&
     ["critical", "fetch", "thinking"].includes(state.currentStage) &&
     isExecutionDispatchIntent(toolInput, metaName)
   ) {
@@ -779,9 +768,9 @@ if (isAgentDispatchTool(toolName)) {
   // Capability-first gate: at or after the execution stage, dispatching an
   // Agent requires evidence that a capability search was performed. Discovery
   // happens during critical / fetch / thinking, so those stages are exempt.
-  // queryBypass and simpleMode runs are also exempt because they intentionally
+  // queryBypass runs are also exempt because they intentionally
   // skip the regulated dispatch flow.
-  if (!state.queryBypass && !state.simpleMode) {
+  if (!state.queryBypass) {
     const stage = state.currentStage;
     const discoveryStages = new Set(["critical", "fetch", "thinking"]);
     const capabilityGateModeRaw = (
@@ -980,8 +969,7 @@ if (isExecutionTool(toolName)) {
   // incomplete; otherwise the operator cannot inspect state to return upstream.
   if (
     toolName === "Bash" &&
-    !state.queryBypass &&
-    !state.simpleMode
+    !state.queryBypass
   ) {
     const stageConfig = STAGE_META_AGENT_MAP[stage];
     const cmd = (toolInput?.command || "").trim();
@@ -1001,8 +989,7 @@ if (isExecutionTool(toolName)) {
 
   if (
     currentIdx >= execIdx &&
-    !state.queryBypass &&
-    !state.simpleMode
+    !state.queryBypass
   ) {
     const nodeBindingGate = checkCapabilityNodeBindings(state);
     if (!nodeBindingGate.met) {

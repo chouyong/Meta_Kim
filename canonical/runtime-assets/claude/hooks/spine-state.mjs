@@ -323,8 +323,6 @@ export function createInitialState({ taskClassification, triggerReason }) {
     choiceSurfaceState: "not_allowed",
     queryBypass: false,
     executionStarted: false,
-    // Simple mode: allows hook skipping for lightweight tasks
-    simpleMode: false,
     // Audit trail for skipped hooks
     skippedHooks: [],
   };
@@ -691,7 +689,7 @@ function collectPreExecutionReadinessGaps(state) {
 }
 
 export function checkPreExecutionReadiness(state) {
-  if (!state || state.queryBypass || state.simpleMode) {
+  if (!state || state.queryBypass) {
     return {
       met: true,
       missing: [],
@@ -931,7 +929,7 @@ function collectCapabilityNodeBindingGaps(state) {
 }
 
 export function checkCapabilityNodeBindings(state) {
-  if (!state || state.queryBypass || state.simpleMode) {
+  if (!state || state.queryBypass) {
     return { met: true, missing: [], reason: "capability node binding gate bypassed" };
   }
 
@@ -1078,7 +1076,7 @@ function hasChoiceGateSkip(state) {
 }
 
 export function checkChoiceSurfaceGate(state) {
-  if (!state || state.queryBypass || state.simpleMode) {
+  if (!state || state.queryBypass) {
     return { met: true, missing: [], reason: "choice surface gate bypassed" };
   }
 
@@ -1183,14 +1181,6 @@ export function isReadOnlyTool(toolName) {
     "ReadMcpResourceTool",
   ];
   return readOnlyTools.includes(toolName);
-}
-
-/**
- * Enable or disable simple mode in spine state
- * Simple mode allows selective hook skipping for lightweight tasks
- */
-export function setSimpleMode(state, enabled) {
-  return { ...state, simpleMode: !!enabled };
 }
 
 /**
