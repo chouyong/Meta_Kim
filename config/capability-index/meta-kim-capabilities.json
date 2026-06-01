@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-06-01T20:10:21.535Z",
+  "generatedAt": "2026-06-01T22:02:34.595Z",
   "registryName": "meta-kim-capabilities",
   "scope": "repo-canonical",
   "canonicalProjection": "config/capability-index/meta-kim-capabilities.json",
@@ -23,7 +23,7 @@
     "totalHooks": 22,
     "totalMcpServers": 1,
     "totalMcpTools": 3,
-    "totalPlugins": 0,
+    "totalPlugins": 4,
     "totalCommands": 2
   },
   "abstractCapabilitySlots": [
@@ -526,7 +526,7 @@
         "namespace": "repo-mcp",
         "path": ".mcp.json",
         "size": 220,
-        "modified": "2026-06-01T20:09:22.462Z"
+        "modified": "2026-06-01T20:36:57.603Z"
       }
     },
     "mcpTools": {
@@ -536,7 +536,7 @@
         "namespace": "repo-mcp",
         "path": ".mcp.json",
         "size": 220,
-        "modified": "2026-06-01T20:09:22.462Z"
+        "modified": "2026-06-01T20:36:57.603Z"
       },
       "repo:repo-mcp:meta-kim-runtime:get_meta_agent": {
         "id": "meta-kim-runtime:get_meta_agent",
@@ -544,7 +544,7 @@
         "namespace": "repo-mcp",
         "path": ".mcp.json",
         "size": 220,
-        "modified": "2026-06-01T20:09:22.462Z"
+        "modified": "2026-06-01T20:36:57.603Z"
       },
       "repo:repo-mcp:meta-kim-runtime:get_meta_runtime_capabilities": {
         "id": "meta-kim-runtime:get_meta_runtime_capabilities",
@@ -552,10 +552,88 @@
         "namespace": "repo-mcp",
         "path": ".mcp.json",
         "size": 220,
-        "modified": "2026-06-01T20:09:22.462Z"
+        "modified": "2026-06-01T20:36:57.603Z"
       }
     },
-    "plugins": {},
+    "plugins": {
+      "manifest:plugin-marketplace:superpowers": {
+        "id": "superpowers",
+        "type": "plugins",
+        "namespace": "plugin-marketplace",
+        "path": "config/skills.json",
+        "runtimeTargets": [
+          "claude",
+          "codex",
+          "openclaw",
+          "cursor",
+          "opencode"
+        ],
+        "installMethod": "pluginMarketplace",
+        "providerRegistryId": "plugin-marketplace-superpowers",
+        "pluginIds": [
+          "superpowers@superpowers-marketplace",
+          "superpowers",
+          "superpowers"
+        ],
+        "evidence": "config/skills.json skills[id=superpowers]"
+      },
+      "manifest:plugin-marketplace:ecc": {
+        "id": "ecc",
+        "type": "plugins",
+        "namespace": "plugin-marketplace",
+        "path": "config/skills.json",
+        "runtimeTargets": [
+          "claude",
+          "codex",
+          "cursor",
+          "opencode",
+          "qwen",
+          "zed",
+          "gemini",
+          "codebuddy",
+          "antigravity",
+          "joycode"
+        ],
+        "installMethod": "upstreamCli",
+        "providerRegistryId": "plugin-marketplace-ecc",
+        "pluginIds": [
+          "ecc@ecc"
+        ],
+        "evidence": "config/skills.json skills[id=ecc]"
+      },
+      "manifest:plugin-bundle:planning-with-files": {
+        "id": "planning-with-files",
+        "type": "pluginBundles",
+        "namespace": "plugin-bundle",
+        "path": "config/skills.json",
+        "runtimeTargets": [
+          "claude",
+          "codex",
+          "openclaw",
+          "cursor"
+        ],
+        "installMethod": "subdirExtraction",
+        "providerRegistryId": "plugin-bundle-planning-with-files",
+        "pluginIds": [],
+        "evidence": "config/skills.json skills[id=planning-with-files]"
+      },
+      "manifest:plugin-marketplace:cli-anything": {
+        "id": "cli-anything",
+        "type": "plugins",
+        "namespace": "plugin-marketplace",
+        "path": "config/skills.json",
+        "runtimeTargets": [
+          "claude",
+          "codex",
+          "openclaw",
+          "cursor"
+        ],
+        "installMethod": "pluginMarketplace",
+        "providerRegistryId": "plugin-marketplace-cli-anything",
+        "pluginIds": [],
+        "evidence": "config/skills.json skills[id=cli-anything]"
+      }
+    },
     "rules": {},
     "prompts": {},
     "commands": {

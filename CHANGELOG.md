@@ -6,6 +6,35 @@ All notable changes to Meta_Kim are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 When you tag a release, add a new **`## [version] - YYYY-MM-DD`** section at the top (above older entries) and list changes there.
 
+## [2.8.3] - 2026-06-02
+
+### Added
+
+- **Capability Provider Contract** — Added a provider-level contract and registry for auditing `runtime_native`, canonical/external skills, agents, hooks, commands, rules, plugins, MCP servers, dependency projects, memory providers, and graph providers across runtime, OS, and install layer.
+- **Provider lifecycle state model** — Providers now track `unknown -> declared -> projected -> installed -> trusted -> discoverable -> invokable -> context_effective / enforcement_effective -> verified`, plus concrete failure states such as `missing_global_install`, `output_not_consumed`, `degraded`, and `blocked_for_execution`.
+- **Provider validator** — Added `npm run meta:providers:validate` to report exact provider/runtime/OS/install-layer gaps, including strict global Codex HookPrompt checks.
+
+### Fixed
+
+- **Codex global HookPrompt chain repaired** — The global Codex `UserPromptSubmit` hook now includes `hookprompt-adapter.mjs` additively, preserving existing planning hooks while ensuring HookPrompt output is consumed as model context.
+- **Plugin providers are no longer invisible** — `superpowers`, `ecc`, and `cli-anything` are now represented in the capability index and provider registry; inventory output reports non-zero plugin/plugin-bundle counts.
+
+### Changed
+
+- **Dependency registry stays dependency-scoped** — Provider availability, install state, trust state, output contracts, and degradation now live in `provider-registry.json`; dependency registry remains focused on reusable project scoring and routing eligibility.
+- **OpenClaw capability honesty preserved** — OpenClaw remains degraded/partial where only workspace instructions or lifecycle hooks exist; no typed plugin tool-blocking adapter is claimed.
+- Version bump: 2.8.2 -> 2.8.3.
+
+### Verification
+
+- `npm run meta:check:runtimes`
+- `npm run meta:deps:check`
+- `npm run meta:deps:compat`
+- `npm run meta:providers:validate`
+- `node scripts/validate-provider-capabilities.mjs --strict-global-hooks`
+- `npm run meta:test:governance`
+- `npm run meta:graphify:rebuild` / `npm run meta:graphify:check`
+
 ## [2.8.2] - 2026-06-02
 
 ### Fixed

@@ -6,6 +6,35 @@
 格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 发布新版本时，请在顶部（旧版本之前）添加新的 **`## [版本号] - YYYY-MM-DD`** 部分。
 
+## [2.8.3] - 2026-06-02
+
+### 新增
+
+- **Capability Provider Contract** — 新增 provider 级合约与注册表，用于按 runtime、OS、install layer 审计 `runtime_native`、canonical/external skill、agent、hook、command、rule、plugin、MCP server、dependency project、memory provider、graph provider。
+- **Provider 生命周期状态机** — Provider 现在记录 `unknown -> declared -> projected -> installed -> trusted -> discoverable -> invokable -> context_effective / enforcement_effective -> verified`，并记录 `missing_global_install`、`output_not_consumed`、`degraded`、`blocked_for_execution` 等失败状态。
+- **Provider validator** — 新增 `npm run meta:providers:validate`，失败时会指出具体 provider / runtime / OS / install layer 缺口，并支持严格检查 Codex 全局 HookPrompt 链路。
+
+### 修复
+
+- **修复 Codex 全局 HookPrompt 链路** — 全局 Codex `UserPromptSubmit` hook 已 add-only 接入 `hookprompt-adapter.mjs`，保留现有 planning hooks，同时确保 HookPrompt 输出进入模型上下文。
+- **Plugin provider 不再隐形** — `superpowers`、`ecc`、`cli-anything` 已进入 capability index 和 provider registry；inventory 输出现在能报告非零 plugin / plugin-bundle 数量。
+
+### 变更
+
+- **Dependency registry 保持依赖职责** — Provider 可用性、安装状态、信任状态、输出合约和降级信息进入 `provider-registry.json`；dependency registry 继续只负责可复用项目评分与路由资格。
+- **保留 OpenClaw 能力真实性** — OpenClaw 在只有 workspace instruction 或 lifecycle hooks 的位置继续标记为 degraded/partial；未声称已具备 typed plugin tool-blocking adapter。
+- 版本升级：2.8.2 -> 2.8.3。
+
+### 验证
+
+- `npm run meta:check:runtimes`
+- `npm run meta:deps:check`
+- `npm run meta:deps:compat`
+- `npm run meta:providers:validate`
+- `node scripts/validate-provider-capabilities.mjs --strict-global-hooks`
+- `npm run meta:test:governance`
+- `npm run meta:graphify:rebuild` / `npm run meta:graphify:check`
+
 ## [2.8.2] - 2026-06-02
 
 ### 修复
