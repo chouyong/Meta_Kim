@@ -1,6 +1,6 @@
 {
   "name": "meta-kim",
-  "version": "2.8.4",
+  "version": "2.8.5",
   "description": "Governance layer for AI coding: meta agents, workflow contract, meta-theory; canonical in canonical/, with generated Claude/Codex/OpenClaw/Cursor projections.",
   "private": true,
   "type": "module",
@@ -44,6 +44,7 @@
     "meta:probe:clis": "node scripts/eval-meta-agents.mjs --probe-clis-only",
     "meta:test:setup": "node scripts/run-node-tests.mjs \"tests/setup/*.test.mjs\"",
     "meta:test:meta-theory": "node scripts/run-node-tests.mjs \"tests/meta-theory/*.test.mjs\"",
+    "meta:release:smoke": "npm run meta:sync && npm run meta:capabilities:smoke && npm run meta:test:meta-theory",
     "meta:graphify:check": "node scripts/graphify-cli.mjs check",
     "meta:graphify:install": "node scripts/graphify-cli.mjs install",
     "meta:graphify:update": "node scripts/graphify-cli.mjs update",

@@ -6,6 +6,34 @@
 格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 发布新版本时，请在顶部（旧版本之前）添加新的 **`## [版本号] - YYYY-MM-DD`** 部分。
 
+## [2.8.5] - 2026-06-03
+
+### 新增
+
+- **发布模式合约** — 新增低风险 prompt/doc/governance 迭代的快速常规发布路径；完整 release-grade 验证只保留给 install、runtime、hook、provider、dependency、package、安全或用户明确要求 live evidence 的改动。
+- **默认执行需求证明** — meta-theory 现在要求 release-grade 工作在 mutation 或 release 前，由自然的 Fetch -> Thinking 路线证明已经选择 execution owner、agent creation provider、skill discovery/creation provider、MCP provider、command/runtime tool 和 verification owner/path。
+- **Live 证据分类** — verification references 现在明确区分 structural smoke、UI/systemMessage warning 输出、skipped/needsAuth 状态和真正的 runtime live pass。
+
+### 变更
+
+- **澄清 validators 和 hooks 是保护，不是主引擎** — Prompt contracts 现在明确：validators、gates、hooks 可以拒绝空路线或危险路线，但默认路径本身必须发现并绑定 owner、skill、MCP、tool、runtime、OS 和 verification choices。
+- **保留 meta-theory progressive disclosure 硬线** — `SKILL.md` 继续限制在 320 行以内；发布模式细节放到 references，不膨胀入口文件。
+- 版本升级：2.8.4 -> 2.8.5。
+
+### 验证
+
+- `npm run meta:sync`
+- `node scripts/install-global-skills-all-runtimes.mjs --update --targets claude,codex,openclaw,cursor`
+- `npm run meta:sync:global`
+- `npm run meta:check:global:release`
+- `npm run meta:capabilities:smoke`
+- `npm run meta:runtime:probe`
+- `npm run meta:providers:validate`
+- `node scripts/validate-provider-capabilities.mjs --strict-global-hooks`
+- `npm run meta:deps:compat`
+- `npm run meta:release:smoke`
+- `git diff --check`
+
 ## [2.8.4] - 2026-06-02
 
 ### 新增
@@ -239,6 +267,7 @@
 - `npm run meta:intent:validate -- --template`
 - `npm run meta:intent:validate -- --strict --input tests/fixtures/run-artifacts/valid-run.json`
 - `npm run meta:prompt:validate`
+- `npm run meta:test:meta-theory`
 - `npm run meta:foundational:validate`
 - `npm run meta:test:governance`
 - `npm run meta:verify:governance`

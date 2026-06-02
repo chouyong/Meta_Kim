@@ -6,6 +6,34 @@ All notable changes to Meta_Kim are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 When you tag a release, add a new **`## [version] - YYYY-MM-DD`** section at the top (above older entries) and list changes there.
 
+## [2.8.5] - 2026-06-03
+
+### Added
+
+- **Release modes contract** — Added a fast routine release path for low-risk prompt/doc/governance iterations and kept full release-grade verification only for install, runtime, hook, provider, dependency, package, security, or explicit live-evidence changes.
+- **Default execution-demand proof** — Meta-theory now requires release-grade work to prove the natural Fetch -> Thinking route selects execution owner, agent creation provider, skill discovery/creation provider, MCP provider, command/runtime tool, and verification owner/path before mutation or release.
+- **Live evidence classification** — Verification references now distinguish structural smoke, UI/systemMessage warning output, skipped/needsAuth states, and true runtime live passes.
+
+### Changed
+
+- **Validators and hooks clarified as protection, not the engine** — Prompt contracts now state that validators, gates, and hooks may reject empty or unsafe routes, but the default path itself must discover and bind owner, skill, MCP, tool, runtime, OS, and verification choices.
+- **Meta-theory progressive disclosure preserved** — `SKILL.md` remains capped at 320 lines; release-mode detail moved into references instead of bloating the entrypoint.
+- Version bump: 2.8.4 -> 2.8.5.
+
+### Verification
+
+- `npm run meta:sync`
+- `node scripts/install-global-skills-all-runtimes.mjs --update --targets claude,codex,openclaw,cursor`
+- `npm run meta:sync:global`
+- `npm run meta:check:global:release`
+- `npm run meta:capabilities:smoke`
+- `npm run meta:runtime:probe`
+- `npm run meta:providers:validate`
+- `node scripts/validate-provider-capabilities.mjs --strict-global-hooks`
+- `npm run meta:deps:compat`
+- `npm run meta:release:smoke`
+- `git diff --check`
+
 ## [2.8.4] - 2026-06-02
 
 ### Added
@@ -264,6 +292,7 @@ When you tag a release, add a new **`## [version] - YYYY-MM-DD`** section at the
 - `npm run meta:intent:validate -- --template`
 - `npm run meta:intent:validate -- --strict --input tests/fixtures/run-artifacts/valid-run.json`
 - `npm run meta:prompt:validate`
+- `npm run meta:test:meta-theory`
 - `npm run meta:foundational:validate`
 - `npm run meta:test:governance`
 - `npm run meta:verify:governance`
