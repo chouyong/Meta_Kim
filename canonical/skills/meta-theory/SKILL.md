@@ -132,7 +132,7 @@ Capability scan UX: full global scans happen on install, update, explicit refres
 
 ## Product Reasoning Contract
 
-Translate the surface request into the real product problem. Compare minimal fix against ten-x path challenge and path shift. Final user-facing closure states chosen rationale, why changed / why change, what changed, where changed, user impact, and verification.
+Translate the surface request into the real product problem. Compare minimal fix against ten-x path challenge and path shift. Final user-facing closure states the root goal, what this run did, whether it still fits the root direction, whether delivery is complete or partial, chosen rationale, why changed / why change, what changed, where changed, user impact, verification, complexity added or avoided, remaining limits, deferred work, and next action.
 
 ## Decision Cross-Validation Gate
 
