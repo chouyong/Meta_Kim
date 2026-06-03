@@ -801,6 +801,7 @@ node scripts/run-node-tests.mjs "tests/meta-theory/22-capability-gap-mvp.test.mj
 node scripts/run-node-tests.mjs "tests/meta-theory/21-generated-agent-quality.test.mjs"
 node scripts/run-node-tests.mjs "tests/meta-theory/23-capability-gap-route-integration.test.mjs"
 npm run meta:route:validate
+npm run meta:gap:codex-real-test
 ```
 
 ## Review Checklist

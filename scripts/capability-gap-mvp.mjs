@@ -54,17 +54,52 @@ function includesAny(text, terms) {
 
 function inferDecision(input) {
   const text = String(input ?? "").toLowerCase();
+  const mcpProviderSignal = includesAny(text, [
+    "internal knowledge base",
+    "knowledge base",
+    "company internal",
+    "权限边界",
+    "凭证隔离",
+    "credential boundary",
+    "external system capability",
+    "mcp provider",
+    "create mcp",
+    "内部知识库",
+  ]);
+  const hardBlockSignal = includesAny(text, [
+    "paid job",
+    "publish",
+    "external write",
+    "third-party write",
+    "unauthorized",
+    "modify credentials",
+    "修改 credentials",
+    "修改凭证",
+    "第三方写",
+    "发布",
+    "付费",
+    "外部写",
+    "remote label",
+    "github pr",
+    "missing dependency",
+    "imaginary provider",
+    "unknown provider",
+    "no provider",
+    "证据不足",
+    "缺证据",
+    "不存在的 provider",
+  ]);
+  if (mcpProviderSignal && !hardBlockSignal) {
+    return "create_mcp_provider";
+  }
   if (
     includesAny(text, [
       "paid job",
-      "credential",
-      "credentials",
       "publish",
       "external write",
       "third-party",
       "第三方",
       "发布",
-      "凭证",
       "付费",
       "外部写",
       "remote label",
