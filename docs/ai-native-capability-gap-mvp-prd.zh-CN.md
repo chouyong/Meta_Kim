@@ -877,7 +877,7 @@ npm run meta:gap:isolated-report
 报告产物：
 
 - 本地状态 JSON：`.meta-kim/state/default/capability-gap-isolated-task-report.json`
-- 可读报告：`docs/capability-gap-isolated-task-report.zh-CN.md`
+- 可读报告：`.meta-kim/state/default/capability-gap-isolated-task-report.zh-CN.md`
 
 ## Review Checklist
 

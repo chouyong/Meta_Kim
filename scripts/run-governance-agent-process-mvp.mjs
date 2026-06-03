@@ -35,7 +35,9 @@ const DEFAULT_DB_PATH = path.join(
 );
 const DEFAULT_MARKDOWN_PATH = path.join(
   REPO_ROOT,
-  "docs",
+  ".meta-kim",
+  "state",
+  "default",
   "governance-agent-process-mvp-report.zh-CN.md"
 );
 

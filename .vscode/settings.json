@@ -10,7 +10,11 @@
     "**/openclaw": true,
     "**/codex": true,
     "**/memory": true,
-    "**/pip": true
+    "**/pip": true,
+    "**/docs/architecture.zh-CN.md": true,
+    "**/docs/governance": true,
+    "**/docs/protocols": true,
+    "**/docs/meta-kim-current-settings-zh": true
   },
   "search.exclude": {
     "**/.meta-kim": true,
@@ -23,6 +27,10 @@
     "**/openclaw": true,
     "**/codex": true,
     "**/memory": true,
-    "**/pip": true
+    "**/pip": true,
+    "**/docs/architecture.zh-CN.md": true,
+    "**/docs/governance": true,
+    "**/docs/protocols": true,
+    "**/docs/meta-kim-current-settings-zh": true
   }
 }

@@ -298,7 +298,10 @@ async function main() {
     ),
   );
   const markdownPath = path.resolve(
-    argValue("--markdown-out", "docs/capability-gap-isolated-task-report.zh-CN.md"),
+    argValue(
+      "--markdown-out",
+      ".meta-kim/state/default/capability-gap-isolated-task-report.zh-CN.md",
+    ),
   );
 
   const routeCommand = runCommand({

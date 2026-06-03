@@ -87,3 +87,10 @@ docs/architecture.zh-CN.md
 docs/governance/
 docs/protocols/
 docs/meta-kim-current-settings-zh/
+
+# ========== Generated reports ==========
+docs/agent-design-quality-eval-report.zh-CN.md
+docs/capability-gap-codex-real-test-report.zh-CN.md
+docs/capability-gap-isolated-task-report.zh-CN.md
+docs/governance-agent-benchmark-review.zh-CN.md
+docs/governance-agent-process-mvp-report.zh-CN.md

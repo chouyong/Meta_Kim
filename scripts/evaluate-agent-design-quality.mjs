@@ -29,7 +29,9 @@ const JSON_REPORT_PATH = path.join(
 );
 const MARKDOWN_REPORT_PATH = path.join(
   REPO_ROOT,
-  "docs",
+  ".meta-kim",
+  "state",
+  "default",
   "agent-design-quality-eval-report.zh-CN.md"
 );
 

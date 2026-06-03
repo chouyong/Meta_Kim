@@ -318,7 +318,7 @@ async function main() {
   const jsonPath = path.join(stateDir, "capability-gap-codex-real-test.json");
   await fs.writeFile(jsonPath, JSON.stringify(report, null, 2));
 
-  const markdownPath = path.resolve("docs/capability-gap-codex-real-test-report.zh-CN.md");
+  const markdownPath = path.join(stateDir, "capability-gap-codex-real-test-report.zh-CN.md");
   await fs.writeFile(markdownPath, markdownReport(report));
 
   console.log(JSON.stringify({

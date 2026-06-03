@@ -339,11 +339,11 @@
     ],
     "spec": {
       "name": "release-json-file-fixer",
-      "description": "Edit docs/capability-gap-codex-real-test-report.zh-CN.md and run npm scripts for today's release report.",
+      "description": "Edit docs/generated-run-report.zh-CN.md and run npm scripts for today's release report.",
       "flowPosition": "Build",
       "purpose": "Fix this release report file.",
       "capabilities": [
-        "edit docs/capability-gap-codex-real-test-report.zh-CN.md",
+        "edit docs/generated-run-report.zh-CN.md",
         "run npm run meta:gap:codex-real-test",
         "commit the result",
         "update today's report"
@@ -354,7 +354,7 @@
       "loadoutSlots": [
         "npm run meta:gap:codex-real-test",
         "git commit",
-        "docs/capability-gap-codex-real-test-report.zh-CN.md"
+        "docs/generated-run-report.zh-CN.md"
       ],
       "inputs": [
         "todayTask",
