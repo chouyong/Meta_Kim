@@ -629,6 +629,7 @@ const capabilityGapDecision = capabilityGapDetected
         decision: result.gapDecision.decision,
         gapDecision: result.gapDecision,
         decisionEvidence: result.decisionEvidence,
+        decisionOutput: result.decisionOutput,
         candidateWriteback: result.candidateWriteback,
         generatedAgentSpec: result.generatedAgentSpec,
         workerTaskPacket: result.workerTaskPacket,

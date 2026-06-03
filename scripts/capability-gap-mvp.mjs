@@ -10,6 +10,8 @@ import { importDatabaseSync } from "./sqlite-runtime.mjs";
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const contractPath = path.resolve(scriptDir, "../config/contracts/capability-gap-decision-contract.json");
 export const CAPABILITY_GAP_DECISION_CONTRACT = JSON.parse(readFileSync(contractPath, "utf8"));
+const outputContractPath = path.resolve(scriptDir, "../config/contracts/capability-gap-output-contract.json");
+export const CAPABILITY_GAP_OUTPUT_CONTRACT = JSON.parse(readFileSync(outputContractPath, "utf8"));
 export const GAP_DECISIONS = Object.keys(CAPABILITY_GAP_DECISION_CONTRACT.decisions);
 
 const DEFAULT_PROVIDERS_CHECKED = [
@@ -368,6 +370,147 @@ function makeBlockedReason(decision) {
   };
 }
 
+function makeDecisionOutput({
+  decision,
+  input,
+  capabilityGap,
+  gapDecision,
+  decisionEvidence,
+  candidateWriteback,
+  generatedAgentSpec,
+  workerTaskPacket,
+  blockedReason,
+}) {
+  const spec = CAPABILITY_GAP_OUTPUT_CONTRACT.outputs[decision];
+  const outputId = stableId("gap-output", `${capabilityGap.gapId}-${decision}`);
+  const common = {
+    outputId,
+    decision,
+    kind: spec.kind,
+    owner: spec.owner,
+    scope: spec.scope,
+    sourceGapId: capabilityGap.gapId,
+    sourceDecisionId: gapDecision.decisionId,
+    inputs: spec.requiredInputs,
+    forbidden: spec.forbidden,
+    verification: spec.verification,
+    contractRef: "config/contracts/capability-gap-output-contract.json",
+  };
+
+  const payloadByDecision = {
+    create_skill: {
+      skillName: stableId("skill", input).replace(/^skill-/, ""),
+      purpose: "把重复出现的 Critical / Fetch / Thinking / Review 判断流程沉淀为可复用方法。",
+      triggerConditions: [
+        "同类评审或判断流程重复出现",
+        "已有 owner 可执行单次任务但缺少可复用步骤包",
+      ],
+      procedure: [
+        "锁定真实目标和非目标",
+        "读取现有能力与证据",
+        "按 decision rule 选择路线",
+        "记录 rejected alternatives",
+        "输出 verification owner 和 candidate writeback",
+      ],
+      nonGoals: [
+        "不创建长期 agent identity",
+        "不自动写 canonical",
+        "不绑定单次文件路径",
+      ],
+      verification: [
+        "triggerConditions are reusable",
+        "procedure is reviewable",
+        "no automatic canonical write",
+      ],
+      candidateWriteback,
+    },
+    create_agent: {
+      GeneratedAgentSpec: generatedAgentSpec,
+      candidateWriteback,
+      identityCleanliness: generatedAgentSpec?.identityCleanliness,
+      qualityScorecard: generatedAgentSpec?.qualityScorecard,
+      installProjection: generatedAgentSpec?.installProjection,
+    },
+    create_script: {
+      scriptName: stableId("script", input).replace(/^script-/, ""),
+      deterministicInputs: [
+        "source artifact path or inline artifact JSON",
+        "normalization schema",
+      ],
+      deterministicOutputs: [
+        "normalized JSON report",
+        "validation error list when input is invalid",
+      ],
+      testEntry: "node scripts/run-node-tests.mjs <script-candidate-test>",
+      failureMode: "invalid_input_or_schema_mismatch",
+      candidateWriteback,
+    },
+    create_mcp_provider: {
+      providerName: stableId("mcp-provider", input).replace(/^mcp-provider-/, ""),
+      capabilities: [
+        "query stable external or internal knowledge source",
+        "declare read and write operations separately",
+        "emit audit events for provider calls",
+      ],
+      permissionBoundary: "No call without declared read/write permission and user-approved scope.",
+      credentialBoundary: "Credentials stay in provider configuration and are never exposed to normal worker tasks.",
+      auditEvents: [
+        "provider_call_requested",
+        "provider_permission_checked",
+        "provider_call_completed_or_blocked",
+      ],
+      readWritePolicy: {
+        read: "allowed only after provider configuration and permission check",
+        write: "blocked until explicit user approval",
+      },
+      candidateWriteback,
+    },
+    worker_task_only: {
+      taskId: workerTaskPacket?.taskId,
+      owner: spec.owner,
+      scope: "run_scoped",
+      work: String(input),
+      verify: [
+        "declared task output exists",
+        "no CandidateWriteback created",
+        "no durable identity change",
+      ],
+      workerTaskPacket,
+    },
+    blocked_or_needs_approval: {
+      reason: blockedReason?.reason,
+      requestedApproval: "请用户明确批准外部写动作、凭证修改、付费任务或缺证据路线。",
+      allowedNextAction: blockedReason?.allowedNextAction,
+      forbiddenAction: blockedReason?.forbiddenAction,
+      returnToStage: "Thinking",
+      blockedReason,
+    },
+  };
+
+  const payload = payloadByDecision[decision];
+  const outputs = spec.requiredOutputs;
+  const missingFields = [
+    ...CAPABILITY_GAP_OUTPUT_CONTRACT.requiredFields.filter((field) => {
+      if (field === "outputs") return !Array.isArray(outputs) || outputs.length === 0;
+      return common[field] === undefined || common[field] === null;
+    }),
+    ...outputs.filter((field) => payload?.[field] === undefined || payload?.[field] === null),
+  ];
+
+  return {
+    ...common,
+    outputs,
+    payload,
+    acceptance: {
+      status: missingFields.length === 0 ? "pass" : "fail",
+      missingFields,
+      noAutomaticCanonicalWrite: true,
+      noExternalWriteWithoutApproval: true,
+      reviewable: true,
+    },
+  };
+}
+
 function makeDecisionEvidence({
   decision,
   input,
@@ -584,6 +727,17 @@ export function decideCapabilityGap(input, options = {}) {
     requiredEvidence: options.requiredEvidence,
     forbidden: options.forbidden,
   });
+  const decisionOutput = makeDecisionOutput({
+    decision,
+    input,
+    capabilityGap,
+    gapDecision,
+    decisionEvidence,
+    candidateWriteback,
+    generatedAgentSpec,
+    workerTaskPacket,
+    blockedReason,
+  });
   const graphPath = [
     "critical_intent",
     "fetch_capabilities",
@@ -617,6 +771,7 @@ export function decideCapabilityGap(input, options = {}) {
     ...(blockedReason
       ? [["blocked_or_approval_required", "execution", blockedReason]]
       : []),
+    ["decision_output_created", "execution", { kind: decisionOutput.kind, status: decisionOutput.acceptance.status }],
     ["review_score_recorded", "review", { status: "pass" }],
     ["warden_gate_decided", "meta_review", { status: "candidate_only_or_run_scoped" }],
     ["fixture_replayed", "verification", { decision }],
@@ -641,6 +796,7 @@ export function decideCapabilityGap(input, options = {}) {
     capabilityGap,
     gapDecision,
     decisionEvidence,
+    decisionOutput,
     candidateWriteback,
     generatedAgentSpec,
     workerTaskPacket,

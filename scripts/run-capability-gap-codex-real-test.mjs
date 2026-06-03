@@ -143,6 +143,16 @@ function compactStageOutputs(routeOutput) {
       routeOsIsWindows: routeOutput.osFilterResult?.applied === "windows",
     },
     evolution: {
+      decisionOutput: decision?.decisionOutput
+        ? {
+            kind: decision.decisionOutput.kind,
+            owner: decision.decisionOutput.owner,
+            scope: decision.decisionOutput.scope,
+            outputFields: decision.decisionOutput.outputs,
+            acceptanceStatus: decision.decisionOutput.acceptance?.status,
+            missingFields: decision.decisionOutput.acceptance?.missingFields ?? [],
+          }
+        : null,
       candidateWriteback: decision?.candidateWriteback
         ? {
             candidateType: decision.candidateWriteback.candidateType,
@@ -184,6 +194,12 @@ function validateCase(testCase, routeOutput, stageOutputs) {
   if (!rule?.branchOwner) failures.push("branch owner missing");
   if (!rule?.verifier) failures.push("verifier missing");
   if (!rule?.forbiddenBehaviors?.length) failures.push("forbidden behaviors missing");
+  if (!decision?.decisionOutput) failures.push("decisionOutput missing");
+  if (decision?.decisionOutput?.acceptance?.status !== "pass") failures.push("decisionOutput acceptance must pass");
+  if ((decision?.decisionOutput?.acceptance?.missingFields ?? []).length !== 0) failures.push("decisionOutput missingFields must be empty");
+  if (!decision?.decisionOutput?.owner) failures.push("decisionOutput owner missing");
+  if (!decision?.decisionOutput?.scope) failures.push("decisionOutput scope missing");
+  if (!decision?.decisionOutput?.verification?.owner) failures.push("decisionOutput verification owner missing");
   if ((evidence?.responsibilityChain ?? []).length < 7) failures.push("responsibility chain incomplete");
   if (!Array.isArray(stageOutputs.fetch.searchOrder) || stageOutputs.fetch.searchOrder.length < 5) {
     failures.push("Fetch searchOrder incomplete");
@@ -195,6 +211,7 @@ function validateCase(testCase, routeOutput, stageOutputs) {
     if (!routeOutput.routeExecutionGate?.blockedBy?.includes("capability_gap_decision_blocks_execution")) {
       failures.push("Execution gate must name capability_gap_decision_blocks_execution");
     }
+    if (decision?.decisionOutput?.kind !== "approval_request") failures.push("blocked decision must produce approval_request");
   }
   if (testCase.expectedDecision === "create_agent") {
     if (decision?.generatedAgentSpec?.identityCleanliness?.status !== "pass") {
@@ -203,10 +220,12 @@ function validateCase(testCase, routeOutput, stageOutputs) {
     if (rule?.branchOwnerRole === "execution_worker") {
       failures.push("governance branch owner must not become execution worker");
     }
+    if (decision?.decisionOutput?.kind !== "agent_candidate_spec") failures.push("create_agent must produce agent_candidate_spec");
   }
   if (testCase.expectedDecision === "worker_task_only") {
     if (!decision?.workerTaskPacket) failures.push("worker_task_only must produce workerTaskPacket");
     if (decision?.candidateWriteback) failures.push("worker_task_only must not produce candidateWriteback");
+    if (decision?.decisionOutput?.kind !== "worker_task_packet") failures.push("worker_task_only must produce worker_task_packet output");
   }
 
   return {
@@ -249,7 +268,7 @@ function markdownReport(report) {
     lines.push(`| Execution Gate | returnToStage=\`${s.executionGate.returnToStage ?? "none"}\`; reason=${s.executionGate.reason} |`);
     lines.push(`| Review | evidenceStatus=\`${s.review.evidenceStatus}\`; missingEvidence=${s.review.missingEvidence?.length ?? 0}; checklist=${s.review.checklist?.length ?? 0} |`);
     lines.push(`| Verification | evidenceCovered=\`${s.verification.evidenceCovered}\`; routeRuntimeIsCodex=\`${s.verification.routeRuntimeIsCodex}\` |`);
-    lines.push(`| Evolution | candidate=\`${s.evolution.candidateWriteback?.candidateType ?? "none"}\`; generatedAgent=\`${s.evolution.generatedAgentSpec?.name ?? "none"}\`; workerTask=\`${s.evolution.workerTaskPacket?.scope ?? "none"}\`; blocked=\`${s.evolution.blockedReason ? "yes" : "no"}\` |`);
+    lines.push(`| Evolution | output=\`${s.evolution.decisionOutput?.kind ?? "none"}\`; outputStatus=\`${s.evolution.decisionOutput?.acceptanceStatus ?? "missing"}\`; candidate=\`${s.evolution.candidateWriteback?.candidateType ?? "none"}\`; generatedAgent=\`${s.evolution.generatedAgentSpec?.name ?? "none"}\`; workerTask=\`${s.evolution.workerTaskPacket?.scope ?? "none"}\`; blocked=\`${s.evolution.blockedReason ? "yes" : "no"}\` |`);
     if (result.failures.length) {
       lines.push("");
       lines.push(`失败原因：${result.failures.join("; ")}`);

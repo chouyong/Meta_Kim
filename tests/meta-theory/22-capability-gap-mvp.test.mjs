@@ -6,6 +6,7 @@ import path from "node:path";
 import process from "node:process";
 import {
   CAPABILITY_GAP_DECISION_CONTRACT,
+  CAPABILITY_GAP_OUTPUT_CONTRACT,
   DECISION_RULES,
   GAP_DECISIONS,
   decideCapabilityGap,
@@ -25,6 +26,10 @@ describe("22 — Capability Gap MVP policy and RunStateStore", async () => {
     );
     assert.deepEqual(
       Object.keys(CAPABILITY_GAP_DECISION_CONTRACT.decisions).sort(),
+      [...GAP_DECISIONS].sort()
+    );
+    assert.deepEqual(
+      Object.keys(CAPABILITY_GAP_OUTPUT_CONTRACT.outputs).sort(),
       [...GAP_DECISIONS].sort()
     );
   });
@@ -81,6 +86,29 @@ describe("22 — Capability Gap MVP policy and RunStateStore", async () => {
           evidence.decisionRule.forbiddenBehaviors.includes(forbidden),
           `${fixture.id} must preserve forbidden behavior ${forbidden}`
         );
+      }
+    }
+  });
+
+  test("every decision produces a complete next-step output artifact", () => {
+    for (const fixture of fixtures) {
+      const result = decideCapabilityGap(fixture.input, {
+        expectedDecision: fixture.expectedDecision,
+        requiredEvidence: fixture.requiredEvidence,
+        forbidden: fixture.forbidden,
+      });
+      const output = result.decisionOutput;
+      const outputRule = CAPABILITY_GAP_OUTPUT_CONTRACT.outputs[fixture.expectedDecision];
+      assert.equal(output.kind, outputRule.kind);
+      assert.equal(output.owner, outputRule.owner);
+      assert.equal(output.scope, outputRule.scope);
+      assert.equal(output.acceptance.status, "pass", `${fixture.id} output must pass`);
+      assert.deepEqual(output.acceptance.missingFields, []);
+      for (const field of CAPABILITY_GAP_OUTPUT_CONTRACT.requiredFields) {
+        assert.ok(output[field] !== undefined && output[field] !== null, `${fixture.id} missing ${field}`);
+      }
+      for (const field of outputRule.requiredOutputs) {
+        assert.ok(output.payload[field] !== undefined && output.payload[field] !== null, `${fixture.id} missing payload.${field}`);
       }
     }
   });

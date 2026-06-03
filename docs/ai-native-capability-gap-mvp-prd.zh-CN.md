@@ -2,8 +2,8 @@
 
 ## 文档控制
 
-- 版本：v0.2
-- 状态：Draft for review
+- 版本：v0.3
+- 状态：Implemented locally; waiting user review
 - Owner：meta-conductor 负责 PRD 与执行节奏，meta-warden 负责最终边界门禁
 - 建议目标版本：v2.9.0-alpha.1 先做 fixture 和决策策略验证；价值成立后再进入 v2.9.0
 - 产物类型：MVP PRD / 执行计划
@@ -97,7 +97,8 @@ MVP 原则：
 输入任务
 -> 识别 CapabilityGap
 -> 产出 GapDecision
--> 按 decision 分支生成 candidate / workerTask / blocked reason
+-> 按 decision 分支生成 DecisionOutput
+-> DecisionOutput 内含 candidate / workerTask / approval request
 -> Review + Verification
 -> 记录埋点和反馈
 ```
@@ -105,6 +106,7 @@ MVP 原则：
 目标完成必须同时满足：
 
 - 6 类 GapDecision fixture 全部通过。
+- 每类 GapDecision 都产出一个可验收的 DecisionOutput，缺字段即失败。
 - `create_agent` 分支能生成完整 `GeneratedAgentSpec`，并通过 10/10 scorecard。
 - 所有 decision 都有数据库或等价持久化记录，可回放。
 - 外部写动作未授权时进入 blocked，不执行。
@@ -182,6 +184,7 @@ RunStateStore
 | `capability_gap_detected` | 识别出 CapabilityGap |
 | `providers_checked` | Fetch 完成 provider 搜索 |
 | `gap_decision_made` | 产出 GapDecision |
+| `decision_output_created` | 根据 GapDecision 生成下一步交付物 |
 | `alternative_rejected` | 拒绝某个替代路线 |
 | `generated_agent_spec_created` | create_agent 分支产出 GeneratedAgentSpec |
 | `worker_task_only_selected` | 选择一次性 workerTask |
@@ -208,6 +211,7 @@ RunStateStore
 |---|---|
 | `CapabilityGap` | state 字段 |
 | `GapDecision` | conditional edge 的路由依据 |
+| `DecisionOutput` | 分支节点的下一步交付物 |
 | `GeneratedAgentSpec` | create_agent 分支节点输出 |
 | `CandidateWriteback` | evolution 节点输出 |
 | `RunStateStore` | persistence / checkpoint / event log adapter |
@@ -333,12 +337,12 @@ critical_intent
 
 | Decision | 选择依据 | 分支交付物 | 禁止行为 | 验收 |
 |---|---|---|---|---|
-| `create_skill` | 重复出现的方法、流程、评审套路；不需要长期身份 | skill CandidateWriteback | 创建新 agent；自动写 canonical | 解释复用价值，候选不落地 |
-| `create_agent` | 缺稳定长期 owner；需要专业身份、拒绝项、输入输出、记忆和验收政策 | GeneratedAgentSpec + agent CandidateWriteback | 把今日任务、路径、ticket 写进 identity | 10/10 scorecard，identity pollution 0 |
-| `create_script` | 稳定、机械、可测试、本地可重复 | script CandidateWriteback | 让 agent 做机械脚本活 | 有测试入口和 verifier |
-| `create_mcp_provider` | 稳定外部系统能力，需要权限、凭证、审计边界 | MCP provider CandidateWriteback | 一次性 curl、未授权凭证、外部写 | provider 边界清楚，写动作未授权即 blocked |
-| `worker_task_only` | 单次 run 内可完成；已有 owner/loadout 足够；无复用证据 | workerTaskPacket | 写 CandidateWriteback；污染长期 identity | 无长期候选，run-scoped 输出 |
-| `blocked_or_needs_approval` | 缺权限、缺凭证、外部写、付费任务、证据不足或高风险 | blocked reason / approval request | 绕授权执行；validator 当完成 | 无外部状态改变，给出最小授权请求 |
+| `create_skill` | 重复出现的方法、流程、评审套路；不需要长期身份 | skill candidate spec + CandidateWriteback | 创建新 agent；自动写 canonical | 解释复用价值，候选不落地，DecisionOutput pass |
+| `create_agent` | 缺稳定长期 owner；需要专业身份、拒绝项、输入输出、记忆和验收政策 | agent candidate spec + GeneratedAgentSpec + CandidateWriteback | 把今日任务、路径、ticket 写进 identity | 10/10 scorecard，identity pollution 0，DecisionOutput pass |
+| `create_script` | 稳定、机械、可测试、本地可重复 | script candidate spec + CandidateWriteback | 让 agent 做机械脚本活 | 有测试入口和 verifier，DecisionOutput pass |
+| `create_mcp_provider` | 稳定外部系统能力，需要权限、凭证、审计边界 | MCP provider candidate spec + CandidateWriteback | 一次性 curl、未授权凭证、外部写 | provider 边界清楚，写动作未授权即 blocked，DecisionOutput pass |
+| `worker_task_only` | 单次 run 内可完成；已有 owner/loadout 足够；无复用证据 | workerTaskPacket | 写 CandidateWriteback；污染长期 identity | 无长期候选，run-scoped 输出，DecisionOutput pass |
+| `blocked_or_needs_approval` | 缺权限、缺凭证、外部写、付费任务、证据不足或高风险 | approval request | 绕授权执行；validator 当完成 | 无外部状态改变，给出最小授权请求，DecisionOutput pass |
 
 每条 fixture 必须带 `requiredEvidence`，至少覆盖：
 
@@ -477,6 +481,52 @@ config/contracts/capability-gap-decision-contract.json
 - `scripts/select-execution-route.mjs` 在检测到显式能力缺口时，必须输出 `capabilityGapDecision`。
 - 普通 route 可以继续预览，但如果 `capabilityGapDecision.decision = blocked_or_needs_approval`，Execution gate 必须关闭。
 - route 不能用高分普通路线吞掉 missing dependency、imaginary provider、缺证据或未授权外部写动作。
+
+### DecisionOutput：下一步交付物合同
+
+`DecisionOutput` 不是新的长期能力模型，也不是完整 graph schema。它只回答一个落地问题：GapDecision 做完后，下一步到底交付什么、谁负责、怎么验收。
+
+机器可读合同：
+
+```text
+config/contracts/capability-gap-output-contract.json
+```
+
+每个 `DecisionOutput` 必须包含：
+
+```json
+{
+  "outputId": "gap-output-001",
+  "decision": "create_skill",
+  "kind": "skill_candidate_spec",
+  "owner": "meta-artisan",
+  "scope": "candidate_only",
+  "inputs": ["CapabilityGap", "GapDecision", "DecisionEvidenceContract"],
+  "outputs": ["skillName", "purpose", "triggerConditions", "procedure", "nonGoals", "verification"],
+  "forbidden": ["automatic_canonical_write", "one_run_file_path", "new_agent_identity"],
+  "verification": {"owner": "verify", "passCondition": "Skill candidate is reusable and does not write canonical."},
+  "acceptance": {"status": "pass", "missingFields": []}
+}
+```
+
+六类输出类型：
+
+| Decision | DecisionOutput.kind | Owner | Scope |
+|---|---|---|---|
+| `create_skill` | `skill_candidate_spec` | `meta-artisan` | `candidate_only` |
+| `create_agent` | `agent_candidate_spec` | `meta-genesis` | `candidate_only` |
+| `create_script` | `script_candidate_spec` | `script-provider` | `candidate_only` |
+| `create_mcp_provider` | `mcp_provider_candidate_spec` | `mcp-provider-capability` | `candidate_only` |
+| `worker_task_only` | `worker_task_packet` | `existing_execution_owner` | `run_scoped` |
+| `blocked_or_needs_approval` | `approval_request` | `meta-sentinel` | `blocked_until_user_approval` |
+
+验收规则：
+
+- 缺少 `outputId`、`decision`、`kind`、`owner`、`scope`、`inputs`、`outputs`、`forbidden`、`verification` 任一字段即失败。
+- 缺少对应 decision 的 payload 字段即失败，例如 `create_agent` 必须有 `GeneratedAgentSpec`，`blocked_or_needs_approval` 必须有 `requestedApproval`。
+- `worker_task_only` 不能产生 CandidateWriteback。
+- `blocked_or_needs_approval` 只能给出最小授权请求，不能执行外部写动作。
+- 所有输出都必须 reviewable，并且 `noAutomaticCanonicalWrite = true`。
 
 ### CandidateWriteback
 
@@ -634,6 +684,20 @@ Validator 只负责拒绝危险或空路线，不负责规划路线。
 - fixture 的 forbidden behaviors 必须进入 contract。
 - governance agent 不能以 `execution_worker` 身份出现在 branch owner。
 
+### FR-011 下一步交付物合同
+
+系统必须为每个 GapDecision 产出 `DecisionOutput`，证明判断之后有具体、可审查、可验收的下一步结果。
+
+验收：
+
+- 六类 fixture 都有 `decisionOutput`。
+- `decisionOutput.kind`、`owner`、`scope` 必须匹配 `capability-gap-output-contract.json`。
+- `decisionOutput.acceptance.status = pass`。
+- `decisionOutput.acceptance.missingFields = []`。
+- `create_agent` 必须产出 `agent_candidate_spec` 和 `GeneratedAgentSpec`。
+- `worker_task_only` 必须产出 `worker_task_packet`，且不产出 CandidateWriteback。
+- `blocked_or_needs_approval` 必须产出 `approval_request`，且 Execution gate 关闭。
+
 ## Quantitative Acceptance
 
 | 指标 | 目标 |
@@ -657,6 +721,9 @@ Validator 只负责拒绝危险或空路线，不负责规划路线。
 | Database-as-planner count | 0 |
 | Direct canonical write from graph node | 0 |
 | Decision evidence contract coverage | 100%，每个 fixture 的 requiredEvidence 全部命中 |
+| Decision output coverage | 100%，每个 fixture 都有 DecisionOutput |
+| Missing DecisionOutput field count | 0 |
+| DecisionOutput acceptance pass rate | 100% |
 | Governance-agent-as-worker count | 0 |
 | User feedback persistence | 100%，每个 fixture 写入 user_feedback |
 

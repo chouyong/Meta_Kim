@@ -26,7 +26,7 @@
 | Execution Gate | returnToStage=`none`; reason=Cached provider evidence is fresh enough and the route has execution-grade owner/provider/verification binding. |
 | Review | evidenceStatus=`pass`; missingEvidence=0; checklist=8 |
 | Verification | evidenceCovered=`true`; routeRuntimeIsCodex=`true` |
-| Evolution | candidate=`skill`; generatedAgent=`none`; workerTask=`none`; blocked=`no` |
+| Evolution | output=`skill_candidate_spec`; outputStatus=`pass`; candidate=`skill`; generatedAgent=`none`; workerTask=`none`; blocked=`no` |
 
 ## CGRT-02 create_agent
 
@@ -43,7 +43,7 @@
 | Execution Gate | returnToStage=`none`; reason=Cached provider evidence is fresh enough and the route has execution-grade owner/provider/verification binding. |
 | Review | evidenceStatus=`pass`; missingEvidence=0; checklist=9 |
 | Verification | evidenceCovered=`true`; routeRuntimeIsCodex=`true` |
-| Evolution | candidate=`agent`; generatedAgent=`test-coverage-specialist`; workerTask=`none`; blocked=`no` |
+| Evolution | output=`agent_candidate_spec`; outputStatus=`pass`; candidate=`agent`; generatedAgent=`test-coverage-specialist`; workerTask=`none`; blocked=`no` |
 
 ## CGRT-03 create_script
 
@@ -60,7 +60,7 @@
 | Execution Gate | returnToStage=`none`; reason=Cached provider evidence is fresh enough and the route has execution-grade owner/provider/verification binding. |
 | Review | evidenceStatus=`pass`; missingEvidence=0; checklist=8 |
 | Verification | evidenceCovered=`true`; routeRuntimeIsCodex=`true` |
-| Evolution | candidate=`script`; generatedAgent=`none`; workerTask=`none`; blocked=`no` |
+| Evolution | output=`script_candidate_spec`; outputStatus=`pass`; candidate=`script`; generatedAgent=`none`; workerTask=`none`; blocked=`no` |
 
 ## CGRT-04 create_mcp_provider
 
@@ -77,7 +77,7 @@
 | Execution Gate | returnToStage=`none`; reason=Cached provider evidence is fresh enough and the route has execution-grade owner/provider/verification binding. |
 | Review | evidenceStatus=`pass`; missingEvidence=0; checklist=8 |
 | Verification | evidenceCovered=`true`; routeRuntimeIsCodex=`true` |
-| Evolution | candidate=`mcp_provider`; generatedAgent=`none`; workerTask=`none`; blocked=`no` |
+| Evolution | output=`mcp_provider_candidate_spec`; outputStatus=`pass`; candidate=`mcp_provider`; generatedAgent=`none`; workerTask=`none`; blocked=`no` |
 
 ## CGRT-05 worker_task_only
 
@@ -94,7 +94,7 @@
 | Execution Gate | returnToStage=`none`; reason=Cached provider evidence is fresh enough and the route has execution-grade owner/provider/verification binding. |
 | Review | evidenceStatus=`pass`; missingEvidence=0; checklist=8 |
 | Verification | evidenceCovered=`true`; routeRuntimeIsCodex=`true` |
-| Evolution | candidate=`none`; generatedAgent=`none`; workerTask=`run_scoped`; blocked=`no` |
+| Evolution | output=`worker_task_packet`; outputStatus=`pass`; candidate=`none`; generatedAgent=`none`; workerTask=`run_scoped`; blocked=`no` |
 
 ## CGRT-06 blocked_or_needs_approval
 
@@ -111,4 +111,4 @@
 | Execution Gate | returnToStage=`Thinking`; reason=Capability-gap decision requires approval, stronger evidence, or return to Thinking before Execution. |
 | Review | evidenceStatus=`pass`; missingEvidence=0; checklist=9 |
 | Verification | evidenceCovered=`true`; routeRuntimeIsCodex=`true` |
-| Evolution | candidate=`none`; generatedAgent=`none`; workerTask=`none`; blocked=`yes` |
+| Evolution | output=`approval_request`; outputStatus=`pass`; candidate=`none`; generatedAgent=`none`; workerTask=`none`; blocked=`yes` |
