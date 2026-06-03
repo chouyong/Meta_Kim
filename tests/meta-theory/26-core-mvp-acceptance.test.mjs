@@ -41,9 +41,27 @@ describe("26 — Core MVP acceptance report", async () => {
       assert.equal(report.summary.agentDesignEvaluation, "pass");
       assert.equal(report.summary.governanceProcessMvp, "pass");
       assert.equal(report.summary.stationPacketsCovered, 5);
+      assert.equal(report.summary.completeProductMvp, "pass");
+      assert.equal(report.summary.analyticsMetrics, 6);
       assert.ok(
         report.evidence.commands.includes("npm run meta:core:mvp:acceptance")
       );
+      assert.ok(
+        report.evidence.commands.includes("npm run meta:gap:complete-product:acceptance")
+      );
+      for (const metricId of [
+        "complete_product_mvp_pass",
+        "analytics_decision_distribution",
+        "analytics_user_corrections",
+        "analytics_candidate_acceptance",
+        "analytics_repeat_keys",
+        "analytics_owner_failure_rate",
+      ]) {
+        assert.ok(
+          report.metricChecks.some((check) => check.id === metricId),
+          `${metricId} metric missing`
+        );
+      }
 
       const markdown = await readFile(markdownPath, "utf8");
       assert.match(markdown, /# Meta_Kim Core MVP 验收报告/);

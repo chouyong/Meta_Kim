@@ -13,6 +13,7 @@ import {
 import { runEvaluation } from "./evaluate-agent-design-quality.mjs";
 import { runGovernanceAgentProcessMvp } from "./run-governance-agent-process-mvp.mjs";
 import { runCapabilityGapRealInputReplay } from "./run-capability-gap-real-input-replay.mjs";
+import { runCapabilityGapCompleteProduct } from "./run-capability-gap-complete-product.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..");
@@ -230,7 +231,15 @@ function buildFrChecks({ fixtures, decisionSummary, storeSummary, agentEvaluatio
   ];
 }
 
-function buildMetricChecks({ fixtures, decisionSummary, storeSummary, agentEvaluation, processReport, realInputReplay }) {
+function buildMetricChecks({
+  fixtures,
+  decisionSummary,
+  storeSummary,
+  agentEvaluation,
+  processReport,
+  realInputReplay,
+  completeProduct,
+}) {
   const stationPackets = processReport.stationPackets ?? {};
   const stationPacketNames = Object.keys(stationPackets);
   const stationSourceLeakCount = /gstack|gbrain|wshobson|anthropic|skill-creator/i.test(
@@ -356,6 +365,48 @@ function buildMetricChecks({ fixtures, decisionSummary, storeSummary, agentEvalu
       `${realInputReplay.cases.length}/6`,
       "100%"
     ),
+    check(
+      "complete_product_mvp_pass",
+      "完整产品 MVP 验收入口通过",
+      completeProduct.status === "pass",
+      completeProduct.status,
+      "pass"
+    ),
+    check(
+      "analytics_decision_distribution",
+      "Analytics 可查询 decision 分布",
+      completeProduct.analytics.decisionDistribution.length === 6,
+      `${completeProduct.analytics.decisionDistribution.length}/6`,
+      "100%"
+    ),
+    check(
+      "analytics_user_corrections",
+      "Analytics 可查询用户纠错分布",
+      completeProduct.analytics.userCorrectionDistribution.length >= 2,
+      `${completeProduct.analytics.userCorrectionDistribution.length}`,
+      ">=2"
+    ),
+    check(
+      "analytics_candidate_acceptance",
+      "Analytics 可查询 candidate 接受率",
+      completeProduct.analytics.candidateAcceptance.length >= 2,
+      `${completeProduct.analytics.candidateAcceptance.length}`,
+      ">=2"
+    ),
+    check(
+      "analytics_repeat_keys",
+      "Analytics 可查询 repeatKey top list",
+      completeProduct.analytics.repeatKeyTopList.length > 0,
+      `${completeProduct.analytics.repeatKeyTopList.length}`,
+      ">0"
+    ),
+    check(
+      "analytics_owner_failure_rate",
+      "Analytics 可查询 owner 失败率",
+      completeProduct.analytics.ownerFailureRate.length > 0,
+      `${completeProduct.analytics.ownerFailureRate.length}`,
+      ">0"
+    ),
   ];
 }
 
@@ -422,6 +473,11 @@ export async function runCoreMvpAcceptance({
     markdownPath: path.join(tempDir, "real-input-replay.md"),
     dbPath: path.join(tempDir, "real-input-replay.sqlite"),
   });
+  const completeProduct = await runCapabilityGapCompleteProduct({
+    jsonPath: path.join(tempDir, "complete-product.json"),
+    markdownPath: path.join(tempDir, "complete-product.md"),
+    dbPath: path.join(tempDir, "complete-product.sqlite"),
+  });
   await fs.rm(tempDir, { recursive: true, force: true });
 
   const frChecks = buildFrChecks({
@@ -431,6 +487,7 @@ export async function runCoreMvpAcceptance({
     agentEvaluation,
     processReport,
     realInputReplay,
+    completeProduct,
   });
   const metricChecks = buildMetricChecks({
     fixtures,
@@ -439,6 +496,7 @@ export async function runCoreMvpAcceptance({
     agentEvaluation,
     processReport,
     realInputReplay,
+    completeProduct,
   });
   const checks = [...frChecks, ...metricChecks];
   const status = statusFrom(checks);
@@ -463,6 +521,8 @@ export async function runCoreMvpAcceptance({
       governanceProcessMvp: processReport.status,
       stationPacketsCovered: Object.keys(processReport.stationPackets ?? {}).length,
       realInputReplay: realInputReplay.status,
+      completeProductMvp: completeProduct.status,
+      analyticsMetrics: completeProduct.analytics.metricCount,
     },
     frChecks,
     metricChecks,
@@ -481,6 +541,7 @@ export async function runCoreMvpAcceptance({
         "npm run meta:test:meta-theory",
         "npm run meta:agent-process:mvp",
         "npm run meta:gap:real-input-replay",
+        "npm run meta:gap:complete-product:acceptance",
       ],
       generatedReports: {
         json: relative(jsonPath),

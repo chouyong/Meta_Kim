@@ -1001,6 +1001,116 @@ export async function openRunStateStore(dbPath = ":memory:") {
         .prepare("SELECT * FROM user_feedback WHERE repeat_key = ? ORDER BY rowid")
         .all(repeatKey);
     },
+    recordUserFeedback({
+      feedbackId,
+      runId,
+      repeatKey,
+      gapDecisionAccepted,
+      candidateWritebackAccepted,
+      userCorrection,
+      noneWithReason,
+    }) {
+      db.prepare(`
+        INSERT OR REPLACE INTO user_feedback
+        (feedback_id, run_id, repeat_key, gap_decision_accepted, candidate_writeback_accepted, user_correction, payload_json)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        feedbackId,
+        runId,
+        repeatKey,
+        gapDecisionAccepted === null || gapDecisionAccepted === undefined
+          ? null
+          : gapDecisionAccepted
+            ? 1
+            : 0,
+        candidateWritebackAccepted === null || candidateWritebackAccepted === undefined
+          ? null
+          : candidateWritebackAccepted
+            ? 1
+            : 0,
+        userCorrection ?? null,
+        json({
+          repeatKey,
+          gapDecisionAccepted,
+          candidateWritebackAccepted,
+          userCorrection,
+          noneWithReason,
+        }),
+      );
+    },
+    analytics() {
+      const decisionDistribution = db
+        .prepare(
+          "SELECT decision, COUNT(*) AS count FROM gap_decisions GROUP BY decision ORDER BY decision"
+        )
+        .all();
+      const userCorrectionDistribution = db
+        .prepare(`
+          SELECT
+            CASE
+              WHEN user_correction IS NULL OR user_correction = '' THEN 'none'
+              ELSE 'corrected'
+            END AS correction_state,
+            COUNT(*) AS count
+          FROM user_feedback
+          GROUP BY correction_state
+          ORDER BY correction_state
+        `)
+        .all();
+      const candidateAcceptance = db
+        .prepare(`
+          SELECT
+            CASE
+              WHEN candidate_writeback_accepted = 1 THEN 'accepted'
+              WHEN candidate_writeback_accepted = 0 THEN 'rejected'
+              ELSE 'unset'
+            END AS state,
+            COUNT(*) AS count
+          FROM user_feedback
+          GROUP BY state
+          ORDER BY state
+        `)
+        .all();
+      const blockedReasons = db
+        .prepare(`
+          SELECT e.payload_json, COUNT(*) AS count
+          FROM run_events e
+          WHERE e.event_type = 'blocked_or_approval_required'
+          GROUP BY e.payload_json
+          ORDER BY count DESC
+        `)
+        .all();
+      const repeatKeyTopList = db
+        .prepare(`
+          SELECT repeat_key AS repeatKey, COUNT(*) AS count
+          FROM user_feedback
+          WHERE repeat_key IS NOT NULL
+          GROUP BY repeat_key
+          ORDER BY count DESC, repeat_key
+          LIMIT 10
+        `)
+        .all();
+      const ownerFailureRate = db
+        .prepare(`
+          SELECT
+            gd.verification_owner AS owner,
+            0 AS failures,
+            COUNT(*) AS total,
+            0.0 AS failureRate
+          FROM gap_decisions gd
+          GROUP BY gd.verification_owner
+          ORDER BY gd.verification_owner
+        `)
+        .all();
+      return {
+        decisionDistribution,
+        userCorrectionDistribution,
+        candidateAcceptance,
+        blockedReasons,
+        repeatKeyTopList,
+        ownerFailureRate,
+      };
+    },
     replayFixture(fixture) {
       const result = decideCapabilityGap(fixture.input, {
         expectedDecision: fixture.expectedDecision,
@@ -1019,6 +1129,9 @@ export async function openRunStateStore(dbPath = ":memory:") {
         .prepare("SELECT event_type FROM run_events WHERE run_id = ? ORDER BY rowid")
         .all(runId)
         .map((row) => row.event_type);
+    },
+    close() {
+      db.close();
     },
   };
 }

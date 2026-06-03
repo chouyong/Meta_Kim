@@ -70,6 +70,8 @@
     "meta:gap:codex-real-test": "node scripts/run-capability-gap-codex-real-test.mjs",
     "meta:gap:isolated-report": "node scripts/run-capability-gap-isolated-report.mjs",
     "meta:gap:real-input-replay": "node scripts/run-capability-gap-real-input-replay.mjs",
+    "meta:gap:complete-product": "node scripts/run-capability-gap-complete-product.mjs",
+    "meta:gap:complete-product:acceptance": "node scripts/run-capability-gap-complete-product.mjs --acceptance",
     "meta:agent-design:eval": "node scripts/evaluate-agent-design-quality.mjs",
     "meta:agent-process:mvp": "node scripts/run-governance-agent-process-mvp.mjs",
     "meta:core:mvp:acceptance": "node scripts/run-core-mvp-acceptance.mjs",
