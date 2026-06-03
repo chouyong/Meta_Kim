@@ -2,8 +2,8 @@
 
 ## 文档控制
 
-- 版本：v0.3
-- 状态：Implemented locally; waiting user review
+- 版本：v0.4
+- 状态：Core MVP implemented locally; complete product scope still open
 - Owner：meta-conductor 负责 PRD 与执行节奏，meta-warden 负责最终边界门禁
 - 建议目标版本：v2.9.0-alpha.1 先做 fixture 和决策策略验证；价值成立后再进入 v2.9.0
 - 产物类型：MVP PRD / 执行计划
@@ -12,6 +12,34 @@
 ## Executive Summary
 
 本期只证明一件事：当 Meta_Kim 发现缺能力时，默认路径能自然判断该创建 skill、agent、script、MCP-provider、只发 workerTask，还是阻塞等待授权，而不是让主线程硬做、万能 owner 硬接，或靠 validator 事后补救。
+
+## 当前完成状态
+
+这部分用于防止后续目标跑偏。它不是说产品已经完整，而是标明哪些已经有本地证据，哪些只是部分完成，哪些还不能算完成。
+
+状态标记：
+
+- 已测通：已有本地测试或报告证明，且可重复运行。
+- 部分完成：已有结构或样例，但还没有覆盖完整产品闭环。
+- 未完成：还没有足够的可执行证据，不能宣称交付。
+
+| 模块 | 状态 | 当前证据 | 还缺什么 |
+|---|---|---|---|
+| 六类 GapDecision 判断 | 已测通 | `tests/meta-theory/22-capability-gap-mvp.test.mjs`、`npm run meta:gap:real-input-replay` | 增加更多真实输入样本，覆盖更复杂组合任务 |
+| DecisionOutput 合同 | 已测通 | `config/contracts/capability-gap-output-contract.json`、FR-011 | 把每个分支的候选产物做成更细的质量 scorecard |
+| RunStateStore / SQLite 记录 | 已测通 | `runs`、`run_events`、`capability_gaps`、`gap_decisions`、`user_feedback` 写入 | 增加查询和分析入口，支持按 repeatKey、decision、owner 聚合 |
+| LangGraph-style state / edge | 部分完成 | `langGraphTrace`、6 类 conditional branch 覆盖 | 固化可执行 graph contract，明确节点输入输出、失败回退和 checkpoint adapter |
+| create_agent 治理站点 | 已测通 | Genesis / Artisan / Librarian / Prism / Warden 五站点产物，station coverage 100% | 把同样的站点质量门扩展到 skill/script/MCP-provider 候选 |
+| 真实输入新进程回放 | 已测通 | `docs/capability-gap-real-input-replay-report.zh-CN.md`，6/6 pass | 扩展到多轮用户纠错和组合任务 |
+| 用户反馈闭环 | 部分完成 | 每个 fixture 写入 `user_feedback`，有 baseline replay | 还没证明用户纠错会改变下次 decision，也没证明重复 3 次触发 promotion review |
+| 默认产品入口 | 部分完成 | 已有 `meta:gap:mvp`、`meta:agent-process:mvp`、`meta:core:mvp:acceptance` | 还缺一条命令从自然输入跑完整链路并输出统一交付报告 |
+| 运行数据分析 | 未完成 | SQLite 中已有可分析事件 | 还缺 run analytics CLI/report，不能回答“哪里常错、哪里该升级” |
+| 完整产品验收 | 未完成 | Core MVP acceptance 已 pass | 还缺端到端产品验收：输入 -> 判断 -> 分支产物 -> review -> verify -> feedback -> evolve |
+
+当前可以宣称的结论：
+
+- Core MVP 已经证明“系统能判断走哪条能力缺口路线”，并且有 fixture、真实输入、SQLite 和核心验收证据。
+- 还不能宣称“完整产品已经可用于万物制作”，因为反馈进化、可执行 graph contract、分析入口和完整端到端产品入口还没做完。
 
 ## Problem
 
@@ -839,6 +867,113 @@ Validator 只负责拒绝危险或空路线，不负责规划路线。
 - 同一 repeatKey 重复 3 次以上，且用户接受决策方向，才进入长期能力评审。
 - 如果用户连续纠正同一类 decision，下一轮 fixture replay 必须覆盖该纠正。
 - 如果能力只在单次任务中出现，不进入长期 identity。
+
+## 完整产品剩余范围
+
+完整产品不是多造 agent，也不是把 schema 做大。完整产品的意思是：任何制作任务进入 Meta_Kim 后，都能留下可判断、可执行、可验收、可反馈、可复盘的证据链；当能力不够时，系统知道该补 skill、agent、script、MCP-provider、workerTask，还是阻塞。
+
+### R-001 分支产物质量门
+
+目标：
+
+- 不只判断 decision 对不对，还要判断每条 decision 产出的下一步东西是否专业、可复用、可审查。
+
+量化验收：
+
+- 6 类 decision 都有独立 scorecard。
+- 每个 scorecard 至少包含 `completeness`、`boundary_fit`、`verification_readiness`、`least_privilege`、`reuse_or_run_scope_fit`。
+- create_skill / create_agent / create_script / create_mcp_provider 的 candidate spec 通过率 100%。
+- worker_task_only 的长期写回数量为 0。
+- blocked_or_needs_approval 的外部状态改变数量为 0。
+- 任何 candidate 缺少 owner、scope、inputs、outputs、forbidden、verification 时失败。
+
+### R-002 用户纠错回放与进化门
+
+目标：
+
+- 用户纠正不是聊天记忆，而是下一次判断可用的训练信号。
+
+量化验收：
+
+- 每次 run 都记录 `userCorrection`、`gapDecisionAccepted`、`candidateWritebackAccepted`、`none-with-reason`、`repeatKey`。
+- 至少 6 个 replay case 覆盖：接受 decision、拒绝 decision、纠正 decision、拒绝 candidate、接受 candidate、无写回原因。
+- 同一 `repeatKey` 重复 3 次以上时，必须生成 promotion review candidate。
+- promotion review candidate 仍不能自动写 canonical。
+- 用户纠正 replay 后，同类错误重复数相对基线下降，首版目标为 30%。
+
+### R-003 可执行 Graph Contract
+
+目标：
+
+- 把 LangGraph-style 证据固化为可执行控制图合同，而不是只在报告里描述流程。
+
+量化验收：
+
+- 固定节点至少包含 `critical_intent`、`fetch_capabilities`、`detect_gap`、`decide_gap_route`、6 个 branch node、`review_quality`、`warden_gate`、`verify_result`、`record_feedback`、`evolve_or_none`。
+- 6 类 GapDecision 必须对应 6 条 conditional edge，branch coverage 100%。
+- 每个 node 定义 input state、output state、owner、failure return stage、events。
+- 数据库只做 checkpoint / event log，`database_as_planner_count = 0`。
+- graph node 自动写 canonical 的数量为 0。
+
+### R-004 Run Analytics
+
+目标：
+
+- 让数据库不仅能存，还能帮助判断系统哪里常错、哪里该升级。
+
+量化验收：
+
+- 提供 CLI 或报告入口，至少能查询：decision 分布、用户纠错分布、candidate 接受率、blocked 原因、repeatKey top list、owner 失败率。
+- 每个查询都有测试 fixture。
+- 查询结果必须来自 RunStateStore，不从 markdown 报告里反解析。
+- 至少 5 个 analytics 指标进入核心验收报告。
+
+### R-005 默认产品入口
+
+目标：
+
+- 用户给一条自然语言任务，系统能一条命令跑完整链路，而不是人工分别跑多个脚本。
+
+量化验收：
+
+- 单一入口接受自然语言 input，并输出 JSON artifact、中文报告、SQLite run record。
+- 输出必须包含 Critical summary、Fetch evidence、GapDecision、DecisionOutput、Review result、Verification result、Feedback placeholder、Evolution decision。
+- 真实输入至少 12 条，6 类 decision 每类至少 2 条。
+- 所有真实输入在独立进程中回放，pass rate 100%。
+- 报告中不能泄露本机绝对路径、依赖项目名称或外部参考来源名。
+
+### R-006 完整产品验收命令
+
+目标：
+
+- 用一个验收命令回答“它是否跑对、跑完善、质量高、可交付”。
+
+量化验收：
+
+- 命令输出 `status = pass|fail`，不能只输出说明文字。
+- FR pass rate 100%。
+- Quantitative acceptance pass rate 100%。
+- 所有 fail 项必须有 `returnToStage` 和 owner。
+- `meta:test:meta-theory`、完整产品验收命令、`git diff --check` 必须通过后，才能声明本轮交付完成。
+
+## 完整产品 Definition of Done
+
+完整产品 MVP 完成必须同时满足：
+
+| 维度 | 完成标准 |
+|---|---|
+| 跑对 | 6 类 GapDecision、12 条真实输入、所有 fixture 决策 100% 正确 |
+| 跑完善 | 每次 run 都有 Critical / Fetch / Thinking / branch / Review / Verification / Evolution 证据 |
+| 质量高 | 每类 DecisionOutput scorecard 100% pass，create_agent 保持 10/10 |
+| 可交付 | 单一入口生成 JSON、中文报告、SQLite 记录，且报告可给用户阅读 |
+| 可复盘 | RunStateStore 能按 runId、decision、repeatKey、owner 查询 |
+| 可进化 | 用户纠错能 replay，重复 3 次以上触发 promotion review candidate |
+| 不污染 | fake owner 0，治理 agent 当 worker 0，长期身份污染 0，自动写 canonical 0 |
+| 安全 | 未授权外部写动作 0，blocked bypass 0，credential leak 0 |
+| LangGraph 对齐 | node/edge/state/event/checkpoint 都有合同，branch coverage 100% |
+| 开源安全 | 公开产物不暴露参考来源名、本机路径、credentials、私有状态 |
+
+如果以上任一项没有可执行证据，状态只能是 `partial`，不能写成 `complete`。
 
 ## Local Executable MVP Slice
 
