@@ -2,7 +2,7 @@
 
 ## 文档控制
 
-- 版本：v0.5
+- 版本：v0.6
 - 状态：Core MVP implemented locally; complete product scope still open
 - Owner：meta-conductor 负责 PRD 与执行节奏，meta-warden 负责最终边界门禁
 - 建议目标版本：v2.9.0-alpha.1 先做 fixture 和决策策略验证；价值成立后再进入 v2.9.0
@@ -67,6 +67,21 @@
 | 部分完成 | 有局部入口或样例证据，但未覆盖默认路径或端到端 | 只能说“局部可用” |
 | 已测通 | 有可重复命令、测试或子窗口证据 | 可以说“该局部完成” |
 | 阻塞 | 缺权限、缺 runtime 支持、缺用户决策或外部条件 | 必须写明阻塞原因和返回阶段 |
+
+能力口径：
+
+这里的“能力”不是 skill-only。Skill 只是可复用流程能力的一种。每次 Fetch / Thinking 都必须按多类型功能栈盘点：
+
+- governance / execution agent：长期责任 owner、拒绝项、输入输出、记忆和验收政策。
+- skill：可复用方法、流程、知识包、评审套路。
+- script / command：稳定、机械、可测试的本地动作。
+- MCP provider / MCP tool：外部系统能力、权限、凭证、审计边界和调用接口。
+- runtime tool / plugin / connector：当前宿主可调用的运行时能力。
+- retrieval capability：`web_search`、`url_fetch`、`docs_lookup`、`browser_open`、`mcp_search`、`plugin_search`、`local_only`、用户提供来源等研究取证能力。
+- dependency / external tool package：可被采用或试点的外部工具、库、服务或生态能力。
+- workerTask：本次 run 的一次性执行能力，不进入长期 identity。
+
+Fetch 结论必须说明这些能力类型哪些已覆盖、哪些不足、哪些需要创新、哪些因为权限/风险而阻塞。Thinking 再根据这些证据决定是复用、创建、升级、阻塞，还是只发 run-scoped workerTask。
 
 后续四条产品轨道：
 
@@ -357,7 +372,7 @@ critical_intent
 | MCP provider | 外部系统能力、权限、凭证、审计边界 | 不代表一次性外部写动作已获授权 | 外部能力优先 create_mcp_provider 或 blocked |
 | workerTask | 本次 run 的具体工作单 | 不进入长期 identity | 一次性任务优先 worker_task_only |
 
-配套说明见 `docs/meta-kim-capability-governance-langgraph-plan.zh-CN.md`。该文档把这些角色映射成 LangGraph 风格的 state、node 和 conditional edge；本 PRD 不先做完整 CapabilityGraph。
+这些角色和 LangGraph 风格的 state、node、conditional edge 关系全部以本 PRD 为单一产品源；不要再维护第二份 Capability Gap / LangGraph 产品设定文档。
 
 ## Owner Responsibility Matrix
 
@@ -1001,10 +1016,13 @@ Validator 只负责拒绝危险或空路线，不负责规划路线。
 量化验收：
 
 - `/meta-theory` 触发后必须记录 `meta-theory-skill-adapter -> meta-warden-entry-gate -> meta-conductor-orchestration -> capability-gap-decision-kernel`。
+- orchestration board 生成前必须完成 multi-type capability inventory，至少覆盖 agent、skill、script、command、MCP provider / tool、runtime tool、plugin / connector、retrieval capability、dependency / external tool package、workerTask。
+- Fetch 必须记录 `researchCapabilityDiscovery` 和 `deepResearchPlan`：如果任务依赖当前事实、联网搜索、API/平台状态、外部生态或能力候选，必须先由 `meta-scout` 或等价 evidence owner 完成 source-backed research，再进入 Thinking。
+- `meta-artisan` 的能力类型判断必须基于 Fetch 证据，而不是只看 skill catalog；如果现有能力不足，Thinking 才能提出 create_skill / create_agent / create_script / create_mcp_provider / workerTask-only / blocked 等创新或阻塞路线。
 - 默认路径必须生成 `orchestrationTaskBoardPacket`，且 `synthesisOwner = meta-conductor`。
 - 多 CapabilityGap 输入必须为每个 gap 生成独立 `workerTaskPacket`。
 - 同类型同 repeatKey 的需求必须分组，但不能折叠掉 worker 实例。
-- skill 只能是 trigger adapter，不能成为 planner 或 capability-gap owner。
+- `meta-theory` skill 只能是 trigger adapter，不能成为 planner 或 capability-gap owner；具体功能能力必须来自 multi-type capability inventory。
 - 显式 CLI 可以保留为调试入口，但不能是唯一产品入口。
 
 ### R-008 跨 runtime 真实投影验证

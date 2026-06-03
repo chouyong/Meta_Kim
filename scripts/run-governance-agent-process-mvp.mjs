@@ -204,7 +204,7 @@ export function buildProcessTrace(spec) {
         "canonical/agents/meta-artisan.md",
         "canonical/agents/meta-prism.md",
         "config/contracts/agent-design-quality-contract.json",
-        "docs/meta-kim-capability-governance-langgraph-plan.zh-CN.md",
+        "docs/ai-native-capability-gap-mvp-prd.zh-CN.md",
       ],
       dependencyEvidence: [
         {
@@ -347,7 +347,6 @@ function buildStationPackets({ spec, intelligenceTrace, evaluation }) {
     "config/contracts/governance-agent-design-station-contract.json",
     "config/contracts/agent-design-quality-contract.json",
     "docs/ai-native-capability-gap-mvp-prd.zh-CN.md",
-    "docs/meta-kim-capability-governance-langgraph-plan.zh-CN.md",
   ];
   const agentBoundaryDecision = {
     coreProblem: intelligenceTrace.coreProblem.durableProblem,

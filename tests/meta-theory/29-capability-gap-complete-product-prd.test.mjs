@@ -1,6 +1,6 @@
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -86,6 +86,35 @@ describe("29 — Capability Gap complete product PRD", () => {
       "按 runId 查看",
     ]) {
       assert.match(prd, new RegExp(marker), `missing target marker ${marker}`);
+    }
+  });
+
+  test("keeps Capability Gap product settings in a single PRD source", () => {
+    assert.equal(
+      existsSync(path.join(REPO_ROOT, "docs", "meta-kim-capability-governance-langgraph-plan.zh-CN.md")),
+      false,
+      "Capability Gap / LangGraph product settings must not live in a second plan"
+    );
+    assert.match(prd, /单一产品源/);
+    assert.match(prd, /不要再维护第二份 Capability Gap \/ LangGraph 产品设定文档/);
+  });
+
+  test("defines capability as a multi-type function stack, not skill-only", () => {
+    for (const marker of [
+      "能力口径",
+      "不是 skill-only",
+      "governance / execution agent",
+      "script / command",
+      "MCP provider / MCP tool",
+      "runtime tool / plugin / connector",
+      "retrieval capability",
+      "dependency / external tool package",
+      "workerTask",
+      "multi-type capability inventory",
+      "researchCapabilityDiscovery",
+      "deepResearchPlan",
+    ]) {
+      assert.match(prd, new RegExp(marker), `missing multi-capability marker ${marker}`);
     }
   });
 

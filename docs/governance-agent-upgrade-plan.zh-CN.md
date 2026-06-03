@@ -3,9 +3,10 @@
 ## 文档控制
 
 - 版本：v0.1
-- 状态：Draft for implementation
+- 状态：Implementation memo; not a PRD source
 - Owner：Meta_Kim / meta-warden
 - 目标：说明治理层 agent 应该参考什么、吸收什么、拒绝什么，以及下一步怎么改。
+- 单一产品源：Capability Gap / LangGraph / orchestration 的产品设定只以 `docs/ai-native-capability-gap-mvp-prd.zh-CN.md` 为准；本文只记录治理 agent 升级实现备忘。
 
 ## Critical：真实目标
 
@@ -107,7 +108,6 @@
 当前 Meta_Kim 已经有：
 
 - `docs/ai-native-capability-gap-mvp-prd.zh-CN.md`
-- `docs/meta-kim-capability-governance-langgraph-plan.zh-CN.md`
 - `config/contracts/agent-design-quality-contract.json`
 - `scripts/run-core-mvp-acceptance.mjs`
 - 6 类 GapDecision fixtures

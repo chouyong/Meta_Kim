@@ -529,7 +529,6 @@ export async function runCoreMvpAcceptance({
     evidence: {
       files: [
         "docs/ai-native-capability-gap-mvp-prd.zh-CN.md",
-        "docs/meta-kim-capability-governance-langgraph-plan.zh-CN.md",
         "config/contracts/capability-gap-decision-contract.json",
         "config/contracts/capability-gap-output-contract.json",
         "config/contracts/agent-design-quality-contract.json",

@@ -1,5 +1,6 @@
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
+import { existsSync } from "node:fs";
 import { readJson, readFile } from "./_helpers.mjs";
 
 const REQUIRED_SPEC_FIELDS = [
@@ -40,9 +41,6 @@ describe("21 — Generated Agent Quality and LangGraph boundary", async () => {
   );
   const createAgentReference = await readFile(
     "canonical/skills/meta-theory/references/create-agent.md"
-  );
-  const langGraphPlan = await readFile(
-    "docs/meta-kim-capability-governance-langgraph-plan.zh-CN.md"
   );
   const capabilityGapPrd = await readFile(
     "docs/ai-native-capability-gap-mvp-prd.zh-CN.md"
@@ -111,13 +109,21 @@ describe("21 — Generated Agent Quality and LangGraph boundary", async () => {
     assert.match(createAgentReference, /GapDecision.*conditional edge/is);
   });
 
-  test("LangGraph plan separates skills, governance agents, execution agents, and worker tasks", () => {
+  test("single Capability Gap PRD separates all capability/function types", () => {
+    assert.equal(
+      existsSync("docs/meta-kim-capability-governance-langgraph-plan.zh-CN.md"),
+      false,
+      "Capability Gap / LangGraph product settings must live in the single PRD"
+    );
     for (const term of [
       "治理 agent",
       "执行 agent",
       "skill",
       "script",
       "MCP provider",
+      "runtime tool",
+      "retrieval capability",
+      "dependency / external tool package",
       "workerTask",
       "StateGraph",
       "conditional edge",
@@ -126,7 +132,7 @@ describe("21 — Generated Agent Quality and LangGraph boundary", async () => {
       "GeneratedAgentSpec",
       "CandidateWriteback",
     ]) {
-      assert.match(langGraphPlan, new RegExp(term, "i"), `Missing ${term}`);
+      assert.match(capabilityGapPrd, new RegExp(term, "i"), `Missing ${term}`);
     }
   });
 
