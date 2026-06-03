@@ -19,6 +19,12 @@ const CONTRACT_PATH = path.join(
   "contracts",
   "agent-design-quality-contract.json"
 );
+const STATION_CONTRACT_PATH = path.join(
+  REPO_ROOT,
+  "config",
+  "contracts",
+  "governance-agent-design-station-contract.json"
+);
 const DEFAULT_STATE_PATH = path.join(
   REPO_ROOT,
   ".meta-kim",
@@ -174,7 +180,11 @@ export function buildGeneratedSpec() {
         "scoped memory policy",
       ],
       architectureCopied: false,
-      sourceIds: ["wshobson-agents-style", "gstack", "gbrain"],
+      sourceIds: [
+        "professional-role-benchmark",
+        "flow-handoff-benchmark",
+        "memory-boundary-benchmark",
+      ],
     },
   };
 }
@@ -198,17 +208,17 @@ export function buildProcessTrace(spec) {
       ],
       dependencyEvidence: [
         {
-          sourceId: "wshobson-agents-style",
+          sourceId: "professional-role-benchmark",
           usedFor: "professional role naming and concise trigger",
           architectureCopied: false,
         },
         {
-          sourceId: "gstack",
+          sourceId: "flow-handoff-benchmark",
           usedFor: "product-flow position and handoff clarity",
           architectureCopied: false,
         },
         {
-          sourceId: "gbrain",
+          sourceId: "memory-boundary-benchmark",
           usedFor: "scoped memory and evaluation readiness",
           architectureCopied: false,
         },
@@ -266,6 +276,10 @@ export function buildProcessTrace(spec) {
       prism: {
         judgment:
           "Reject designs that pass final spec shape but lack core-problem capture, path comparison, weak-path rejection, or adversarial review.",
+      },
+      librarian: {
+        judgment:
+          "Keep reusable governance patterns project-scoped, keep replay evidence in RunStateStore, and deny cross-project writeback without Warden approval.",
       },
     },
     loadoutReasoning: {
@@ -328,7 +342,114 @@ export function buildProcessTrace(spec) {
   };
 }
 
-function buildLangGraphTrace({ runId, spec, intelligenceTrace }) {
+function buildStationPackets({ spec, intelligenceTrace, evaluation }) {
+  const sharedEvidence = [
+    "config/contracts/governance-agent-design-station-contract.json",
+    "config/contracts/agent-design-quality-contract.json",
+    "docs/ai-native-capability-gap-mvp-prd.zh-CN.md",
+    "docs/meta-kim-capability-governance-langgraph-plan.zh-CN.md",
+  ];
+  const agentBoundaryDecision = {
+    coreProblem: intelligenceTrace.coreProblem.durableProblem,
+    durableOwnerJustification:
+      "The missing capability is a recurring professional owner for governance-agent reasoning evaluation, not one run of commentary.",
+    domainBoundary:
+      "Governance-agent intelligence evaluation for create_agent routes.",
+    nonCapabilities: spec.nonCapabilities,
+    replaceabilityTest: {
+      genericNameBreaksLogic: true,
+      reason:
+        "A generic agent would not own governance-agent reasoning traces, LangGraph state evidence, or RunStateStore replay.",
+    },
+    rejectedPaths: intelligenceTrace.rejectedWeakPaths,
+    identityPollutionCheck: spec.identityCleanliness,
+  };
+  const agentLoadoutDecision = {
+    coreProblem:
+      "Select the smallest abstract capability stack that can evaluate governance-agent reasoning without binding provider-specific commands into durable identity.",
+    capabilitySlots: spec.loadoutSlots,
+    runScopedBindings: [
+      "agent design quality evaluator",
+      "governance process trace runner",
+      "RunStateStore replay evidence",
+    ],
+    providerRejections: intelligenceTrace.loadoutReasoning.candidates
+      .filter((candidate) => candidate.decision === "reject")
+      .map((candidate) => ({
+        slot: candidate.slot,
+        reason: "Low ROI for this MVP; keep out of durable identity.",
+      })),
+    roiReasoning: intelligenceTrace.loadoutReasoning,
+    handoffContract: spec.handoff,
+    verificationMethod: "npm run meta:agent-process:mvp",
+  };
+  const agentMemoryDecision = {
+    coreProblem:
+      "Separate reusable governance learning from run-scoped evidence so memory helps future design without polluting identity.",
+    memoryScope: spec.memoryPolicy.scope,
+    allowedMemory: spec.memoryPolicy.allowed,
+    forbiddenMemory: spec.memoryPolicy.forbidden,
+    retentionPolicy: {
+      acceptedPatterns: "permanent with periodic compression",
+      runEvidence: "RunStateStore replay, not durable identity",
+      externalComparisons: "research material only; re-verify before reuse",
+    },
+    replaySource: "RunStateStore event log plus generated process report",
+    crossProjectAccess: "denied unless explicitly approved as readonly evidence",
+    writebackGate: "meta-warden approval required before CandidateWriteback promotion",
+  };
+  const agentDesignReview = {
+    coreProblem:
+      "Judge whether the candidate proves upstream reasoning quality, not just final spec shape.",
+    assertions: intelligenceTrace.prismReview.assertions,
+    evidenceRefs: sharedEvidence,
+    failedDimensions: [
+      ...evaluation.specEvaluation.failedDimensions,
+      ...evaluation.intelligenceEvaluation.failedIntelligenceDimensions,
+    ],
+    copyRiskCheck: {
+      status: "pass",
+      sourceNeutral: true,
+      architectureCopied: false,
+    },
+    upstreamReadiness: {
+      critical: "pass",
+      fetch: "pass",
+      thinking: "pass",
+    },
+    returnToStage:
+      evaluation.status === "pass" ? "none" : "earliest_failed_station",
+  };
+  const agentCandidateGateDecision = {
+    coreProblem:
+      "Decide whether the source-neutral station outputs are complete enough to allow a candidate writeback record.",
+    stationPacketsChecked: [
+      "agentBoundaryDecision",
+      "agentLoadoutDecision",
+      "agentMemoryDecision",
+      "agentDesignReview",
+    ],
+    gateDecision: evaluation.status === "pass" ? "pass" : "return_to_stage",
+    blockedReasons: evaluation.status === "pass" ? [] : agentDesignReview.failedDimensions,
+    candidateWritebackPermission:
+      evaluation.status === "pass" ? "candidate_only" : "blocked",
+    publicReadyStatus: evaluation.status === "pass" ? "internal_ready" : "blocked",
+    evolutionSignal: {
+      decision: "none-with-reason",
+      reason:
+        "One MVP run is enough for acceptance evidence but not enough to promote a new long-term agent automatically.",
+    },
+  };
+  return {
+    agentBoundaryDecision,
+    agentLoadoutDecision,
+    agentMemoryDecision,
+    agentDesignReview,
+    agentCandidateGateDecision,
+  };
+}
+
+function buildLangGraphTrace({ runId, spec, intelligenceTrace, stationPackets }) {
   return {
     graphKind: "langgraph_control_graph_mvp",
     stateShape: {
@@ -338,6 +459,7 @@ function buildLangGraphTrace({ runId, spec, intelligenceTrace }) {
       gapDecision: "create_agent",
       selectedPath: intelligenceTrace.selectedPath,
       generatedAgentSpecName: spec.name,
+      stationPackets: Object.keys(stationPackets),
       evaluationStatus: "pending",
     },
     nodes: [
@@ -362,9 +484,19 @@ function buildLangGraphTrace({ runId, spec, intelligenceTrace }) {
         output: "abstract loadout and ROI reasoning",
       },
       {
+        id: "librarian_memory",
+        owner: "meta-librarian",
+        output: "memory scope, replay source, and writeback boundary",
+      },
+      {
         id: "prism_review",
         owner: "meta-prism",
         output: "adversarial review assertions",
+      },
+      {
+        id: "warden_gate",
+        owner: "meta-warden",
+        output: "candidate writeback gate decision",
       },
       {
         id: "evaluator",
@@ -381,8 +513,10 @@ function buildLangGraphTrace({ runId, spec, intelligenceTrace }) {
         condition: "GapDecision.decision == create_agent",
       },
       { from: "genesis_boundary", to: "artisan_loadout", type: "normal" },
-      { from: "artisan_loadout", to: "prism_review", type: "normal" },
-      { from: "prism_review", to: "evaluator", type: "normal" },
+      { from: "artisan_loadout", to: "librarian_memory", type: "normal" },
+      { from: "librarian_memory", to: "prism_review", type: "normal" },
+      { from: "prism_review", to: "warden_gate", type: "normal" },
+      { from: "warden_gate", to: "evaluator", type: "normal" },
     ],
     forbiddenEdges: [
       "gap_decision -> batch_agent_factory",
@@ -392,7 +526,7 @@ function buildLangGraphTrace({ runId, spec, intelligenceTrace }) {
   };
 }
 
-function buildEvents({ runId, graphTrace, spec, intelligenceTrace, evaluation }) {
+function buildEvents({ runId, graphTrace, spec, intelligenceTrace, evaluation, stationPackets }) {
   const base = [
     {
       stage: "Critical",
@@ -412,20 +546,27 @@ function buildEvents({ runId, graphTrace, spec, intelligenceTrace, evaluation })
     {
       stage: "Execution",
       eventType: "genesis_boundary_output",
-      payload: intelligenceTrace.stationReasoning.genesis,
+      payload: stationPackets.agentBoundaryDecision,
     },
     {
       stage: "Execution",
       eventType: "artisan_loadout_output",
-      payload: {
-        station: intelligenceTrace.stationReasoning.artisan,
-        loadoutReasoning: intelligenceTrace.loadoutReasoning,
-      },
+      payload: stationPackets.agentLoadoutDecision,
+    },
+    {
+      stage: "Execution",
+      eventType: "librarian_memory_output",
+      payload: stationPackets.agentMemoryDecision,
     },
     {
       stage: "Review",
       eventType: "prism_adversarial_review_output",
-      payload: intelligenceTrace.prismReview,
+      payload: stationPackets.agentDesignReview,
+    },
+    {
+      stage: "Meta-Review",
+      eventType: "warden_candidate_gate_output",
+      payload: stationPackets.agentCandidateGateDecision,
     },
     {
       stage: "Verification",
@@ -464,6 +605,7 @@ function markdownReport(report) {
     `- 总体：${report.status}`,
     `- GapDecision：${report.gapDecision}`,
     `- GeneratedAgentSpec：${report.generatedAgentSpec.name}`,
+    `- Station packets：${Object.keys(report.stationPackets).length}`,
     `- LangGraph conditional edge：${report.langGraphTrace.edges.find((edge) => edge.type === "conditional")?.condition}`,
     `- SQLite events：${report.database.events}`,
     "",
@@ -479,7 +621,9 @@ function markdownReport(report) {
     "|---|---|---|",
     "| Genesis | meta-genesis | 长期身份和边界，不把本次任务写进 identity |",
     "| Artisan | meta-artisan | 抽象 loadout slots、ROI、拒绝 full graph database first |",
+    "| Librarian | meta-librarian | 记忆范围、回放来源、跨项目边界、写回门禁 |",
     "| Prism | meta-prism | claim 检查、反证审查、标准强度自查 |",
+    "| Warden | meta-warden | 候选写回许可、public-ready 状态、evolution signal |",
     "",
     "## 复杂度边界",
     "",
@@ -494,7 +638,18 @@ function markdownReport(report) {
   return lines.join("\n");
 }
 
-function acceptanceChecks({ specEvaluation, intelligenceEvaluation, graphTrace, dbCounts }) {
+function acceptanceChecks({ specEvaluation, intelligenceEvaluation, graphTrace, dbCounts, stationPackets, stationContract }) {
+  const expectedPackets = stationContract.stations.map((station) => station.outputPacket);
+  const stationOutputCoverage = expectedPackets.every((packet) =>
+    Object.hasOwn(stationPackets, packet)
+  );
+  const missingReturnToStageCount =
+    stationPackets.agentDesignReview?.returnToStage === undefined ? 1 : 0;
+  const sourceLeakCount = /gstack|gbrain|wshobson|anthropic|skill-creator/i.test(
+    JSON.stringify(stationPackets)
+  )
+    ? 1
+    : 0;
   return [
     {
       id: "spec_quality_pass",
@@ -515,7 +670,26 @@ function acceptanceChecks({ specEvaluation, intelligenceEvaluation, graphTrace, 
     },
     {
       id: "run_state_store_events_persisted",
-      passed: dbCounts.events >= 8,
+      passed: dbCounts.events >= 10,
+    },
+    {
+      id: "station_output_coverage",
+      passed: stationOutputCoverage,
+    },
+    {
+      id: "station_source_neutral",
+      passed: sourceLeakCount === 0,
+    },
+    {
+      id: "missing_return_to_stage_count_zero",
+      passed: missingReturnToStageCount === 0,
+    },
+    {
+      id: "memory_writeback_bypass_zero",
+      passed:
+        stationPackets.agentMemoryDecision?.writebackGate?.includes("meta-warden") &&
+        stationPackets.agentCandidateGateDecision?.candidateWritebackPermission ===
+          "candidate_only",
     },
     {
       id: "no_batch_agent_creation",
@@ -558,14 +732,10 @@ export async function runGovernanceAgentProcessMvp({
   dbPath = DEFAULT_DB_PATH,
 } = {}) {
   const contract = await readJson(CONTRACT_PATH);
+  const stationContract = await readJson(STATION_CONTRACT_PATH);
   const runId = stableId("governance-agent-process-mvp", REAL_NEED);
   const generatedAgentSpec = buildGeneratedSpec();
   const intelligenceTrace = buildProcessTrace(generatedAgentSpec);
-  const langGraphTrace = buildLangGraphTrace({
-    runId,
-    spec: generatedAgentSpec,
-    intelligenceTrace,
-  });
   const specEvaluation = evaluateSpec(generatedAgentSpec, contract);
   const intelligenceEvaluation = evaluateIntelligenceTrace(
     intelligenceTrace,
@@ -580,12 +750,24 @@ export async function runGovernanceAgentProcessMvp({
         ? "pass"
         : "fail",
   };
+  const stationPackets = buildStationPackets({
+    spec: generatedAgentSpec,
+    intelligenceTrace,
+    evaluation,
+  });
+  const langGraphTrace = buildLangGraphTrace({
+    runId,
+    spec: generatedAgentSpec,
+    intelligenceTrace,
+    stationPackets,
+  });
   const events = buildEvents({
     runId,
     graphTrace: langGraphTrace,
     spec: generatedAgentSpec,
     intelligenceTrace,
     evaluation,
+    stationPackets,
   });
 
   const partialReport = {
@@ -596,6 +778,7 @@ export async function runGovernanceAgentProcessMvp({
     status: evaluation.status,
     gapDecision: "create_agent",
     generatedAgentSpec,
+    stationPackets,
     intelligenceTrace,
     langGraphTrace: {
       ...langGraphTrace,
@@ -617,6 +800,8 @@ export async function runGovernanceAgentProcessMvp({
     intelligenceEvaluation,
     graphTrace: partialReport.langGraphTrace,
     dbCounts: database,
+    stationPackets,
+    stationContract,
   });
   const report = {
     ...partialReport,

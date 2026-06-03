@@ -572,9 +572,9 @@ config/contracts/capability-gap-output-contract.json
 
 验收重点：
 
-- 学 `wshobson/agents`：专业领域明确，不是万能人格。
-- 学 `gstack`：流程位置和上下游交接明确。
-- 学 `gbrain`：记忆、缺口、评估、权限边界明确。
+- 专业领域明确，不是万能人格。
+- 流程位置和上下游交接明确。
+- 记忆、缺口、评估、权限边界明确。
 - 保留 Meta_Kim 自己的硬边界：provider-first、agent-last、workerTask 分离、CandidateWriteback 不自动写 canonical。
 
 ## Functional Requirements

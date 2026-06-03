@@ -133,13 +133,13 @@ flowchart TD
   M --> N["Evolution: writeback or none-with-reason"]
 ```
 
-## gstack / gbrain 怎么接进来
+## 外部优势怎么转译
 
-| 来源 | 吸收什么 | 放在 Meta_Kim 哪一层 |
+| 标准类型 | 吸收什么 | 放在 Meta_Kim 哪一层 |
 |---|---|---|
-| gstack | Think / Plan / Build / Review / Test / Ship / Reflect 的产品流程感 | `flowPosition`、handoff、上下游节点 |
-| gbrain | scoped memory、gap analysis、schema packs、evals | `memoryPolicy`、`gapPolicy`、`verificationPolicy` |
-| wshobson/agents | 专业岗位 spec、跨 runtime 投影、工具意识 | `GeneratedAgentSpec`、`installProjection`、agent quality scorecard |
+| 流程交接标准 | Think / Plan / Build / Review / Test / Ship / Reflect 的产品流程感 | `flowPosition`、handoff、上下游节点 |
+| 记忆边界标准 | scoped memory、gap analysis、schema packs、evals | `memoryPolicy`、`gapPolicy`、`verificationPolicy` |
+| 专业角色标准 | 专业岗位 spec、跨 runtime 投影、工具意识 | `GeneratedAgentSpec`、`installProjection`、agent quality scorecard |
 
 ## 最小落地顺序
 
@@ -163,6 +163,3 @@ flowchart TD
 ## Sources
 
 - LangGraph `StateGraph`、node、edge、conditional edge 官方示例：https://github.com/langchain-ai/langgraph
-- gstack：https://github.com/garrytan/gstack
-- gbrain：https://github.com/garrytan/gbrain
-- wshobson agents：https://github.com/wshobson/agents

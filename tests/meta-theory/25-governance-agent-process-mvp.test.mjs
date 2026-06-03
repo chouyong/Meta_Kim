@@ -23,6 +23,22 @@ describe("25 — Real governance agent process MVP", async () => {
       );
       assert.equal(report.evaluation.specEvaluation.status, "pass");
       assert.equal(report.evaluation.intelligenceEvaluation.status, "pass");
+      assert.deepEqual(Object.keys(report.stationPackets), [
+        "agentBoundaryDecision",
+        "agentLoadoutDecision",
+        "agentMemoryDecision",
+        "agentDesignReview",
+        "agentCandidateGateDecision",
+      ]);
+      assert.equal(
+        report.stationPackets.agentDesignReview.copyRiskCheck.sourceNeutral,
+        true
+      );
+      assert.equal(report.stationPackets.agentDesignReview.returnToStage, "none");
+      assert.match(
+        report.stationPackets.agentMemoryDecision.writebackGate,
+        /meta-warden/
+      );
 
       assert.ok(
         report.langGraphTrace.edges.some(
@@ -40,7 +56,9 @@ describe("25 — Real governance agent process MVP", async () => {
         "langgraph_state_created",
         "genesis_boundary_output",
         "artisan_loadout_output",
+        "librarian_memory_output",
         "prism_adversarial_review_output",
+        "warden_candidate_gate_output",
         "agent_design_quality_evaluated",
         "none_with_reason",
       ]) {
@@ -52,6 +70,17 @@ describe("25 — Real governance agent process MVP", async () => {
 
       for (const check of report.acceptanceChecks) {
         assert.equal(check.passed, true, `${check.id} must pass`);
+      }
+      for (const checkId of [
+        "station_output_coverage",
+        "station_source_neutral",
+        "missing_return_to_stage_count_zero",
+        "memory_writeback_bypass_zero",
+      ]) {
+        assert.ok(
+          report.acceptanceChecks.some((check) => check.id === checkId),
+          `${checkId} acceptance check missing`
+        );
       }
     } finally {
       await rm(tempDir, { recursive: true, force: true });

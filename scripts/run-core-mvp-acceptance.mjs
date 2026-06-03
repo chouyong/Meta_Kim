@@ -229,6 +229,13 @@ function buildFrChecks({ fixtures, decisionSummary, storeSummary, agentEvaluatio
 }
 
 function buildMetricChecks({ fixtures, decisionSummary, storeSummary, agentEvaluation, processReport }) {
+  const stationPackets = processReport.stationPackets ?? {};
+  const stationPacketNames = Object.keys(stationPackets);
+  const stationSourceLeakCount = /gstack|gbrain|wshobson|anthropic|skill-creator/i.test(
+    JSON.stringify(stationPackets)
+  )
+    ? 1
+    : 0;
   return [
     check(
       "gap_decision_explainability",
@@ -290,6 +297,53 @@ function buildMetricChecks({ fixtures, decisionSummary, storeSummary, agentEvalu
       storeSummary.userFeedback === fixtures.length,
       `${storeSummary.userFeedback}/${fixtures.length}`,
       "tracked baseline"
+    ),
+    check(
+      "station_output_coverage",
+      "create_agent 五个治理站点都有产物",
+      stationPacketNames.length === 5 &&
+        [
+          "agentBoundaryDecision",
+          "agentLoadoutDecision",
+          "agentMemoryDecision",
+          "agentDesignReview",
+          "agentCandidateGateDecision",
+        ].every((name) => Object.hasOwn(stationPackets, name)),
+      `${stationPacketNames.length}/5`,
+      "100%"
+    ),
+    check(
+      "external_source_wording_leak",
+      "公开 station 产物不暴露参考来源名",
+      stationSourceLeakCount === 0,
+      String(stationSourceLeakCount),
+      "0"
+    ),
+    check(
+      "run_scoped_binding_leak",
+      "run-scoped 绑定不进入长期身份",
+      processReport.generatedAgentSpec.identityCleanliness?.status === "pass" &&
+        processReport.evaluation.specEvaluation.failedDimensions.includes(
+          "identity_cleanliness"
+        ) === false,
+      "0",
+      "0"
+    ),
+    check(
+      "memory_writeback_bypass",
+      "记忆写回不能绕过 Warden",
+      String(stationPackets.agentMemoryDecision?.writebackGate ?? "").includes(
+        "meta-warden"
+      ),
+      "0",
+      "0"
+    ),
+    check(
+      "missing_return_to_stage",
+      "Review station 必须给出 returnToStage",
+      stationPackets.agentDesignReview?.returnToStage !== undefined,
+      "0",
+      "0"
     ),
   ];
 }
@@ -389,6 +443,7 @@ export async function runCoreMvpAcceptance({
       candidateWritebacks: storeSummary.candidateWritebacks,
       agentDesignEvaluation: agentEvaluation.acceptance.status,
       governanceProcessMvp: processReport.status,
+      stationPacketsCovered: Object.keys(processReport.stationPackets ?? {}).length,
     },
     frChecks,
     metricChecks,
@@ -399,6 +454,7 @@ export async function runCoreMvpAcceptance({
         "config/contracts/capability-gap-decision-contract.json",
         "config/contracts/capability-gap-output-contract.json",
         "config/contracts/agent-design-quality-contract.json",
+        "config/contracts/governance-agent-design-station-contract.json",
         "tests/meta-theory/scenarios/capability-gap-decision-fixtures.json",
       ],
       commands: [

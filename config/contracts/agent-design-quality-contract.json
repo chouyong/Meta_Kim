@@ -29,7 +29,7 @@
   },
   "dependencyContentEvidence": [
     {
-      "sourceId": "wshobson-agents-style",
+      "sourceId": "professional-role-benchmark",
       "allowedAbsorption": [
         "professional role naming",
         "concise trigger language",
@@ -43,7 +43,7 @@
       ]
     },
     {
-      "sourceId": "gstack",
+      "sourceId": "flow-handoff-benchmark",
       "allowedAbsorption": [
         "product-flow position",
         "upstream/downstream handoff clarity",
@@ -56,7 +56,7 @@
       ]
     },
     {
-      "sourceId": "gbrain",
+      "sourceId": "memory-boundary-benchmark",
       "allowedAbsorption": [
         "scoped memory policy",
         "gap analysis behavior",

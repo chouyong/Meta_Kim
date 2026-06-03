@@ -166,7 +166,7 @@ Concrete work belongs in `workerTaskPacket`: file lists, shard scope, current ta
 
 Before creating or upgrading an execution agent, Fetch must produce checked-owner evidence from repo canonical capability index, runtime mirrors, project runtime agents, local global inventory, skills, commands, hooks, rules/prompts, tools, plugins, and MCP capabilities. The factory may proceed only when `capabilityGapPacket.currentAgentsChecked` and `currentProvidersChecked` list those candidates and explain why reuse is insufficient.
 
-Reference pattern from `gstack`: a large reusable capability surface can be represented as generated `SKILL.md` providers with host-specific projection metadata, not as many durable execution-agent identities. `agents/openai.yaml`-style metadata is an interface card for discovery, not a worker identity. Meta_Kim should therefore prefer provider reuse or provider projection before creating a new execution agent; create the agent only when the missing thing is a recurring owner boundary that cannot be represented by an existing agent, skill, command, MCP tool, runtime tool, or plugin.
+A reusable capability surface can be represented as provider records with host-specific projection metadata, not as many durable execution-agent identities. Interface metadata is a discovery card, not a worker identity. Meta_Kim should therefore prefer provider reuse or provider projection before creating a new execution agent; create the agent only when the missing thing is a recurring owner boundary that cannot be represented by an existing agent, skill, command, MCP tool, runtime tool, or plugin.
 
 ### Generated Agent Spec Quality Contract
 
@@ -198,9 +198,9 @@ Quality bar:
 |---|---|
 | `identity_clarity` | A maintainer can tell when to call the agent from the name and description alone. |
 | `domain_specificity` | Replacing the agent name with `generic-agent` breaks the core logic. |
-| `flow_fit` | The agent has a clear upstream and downstream position, inspired by gstack-style product flow. |
+| `flow_fit` | The agent has a clear upstream and downstream position inside Meta_Kim's product flow. |
 | `tool_least_privilege` | Loadout slots are the minimum needed for the capability class. |
-| `memory_fit` | Memory policy follows gbrain-style scoped access and does not leak user/project history into identity. |
+| `memory_fit` | Memory policy uses scoped access and does not leak user/project history into identity. |
 | `gap_honesty` | The agent names what it cannot know or do and routes gaps to `GapDecision`. |
 | `handoff_readiness` | Outputs can be consumed by another owner without oral explanation. |
 | `verification_readiness` | At least one fixture or replay check can fail the agent design. |
@@ -209,11 +209,11 @@ Quality bar:
 
 Pass threshold: all ten dimensions must pass for direct creation. One soft miss returns to Genesis or Artisan for revision. Any miss in `identity_cleanliness`, `gap_honesty`, `tool_least_privilege`, or `memory_fit` blocks creation and returns to Thinking.
 
-Reference absorption:
+Reference translation:
 
-- `wshobson/agents` style: use a professional domain role, concise trigger, tool awareness, examples, and cross-runtime packaging discipline.
-- `gstack` style: place the agent inside a real product flow and make upstream/downstream handoff explicit.
-- `gbrain` style: give the agent scoped memory, gap analysis, schema/eval thinking, and access boundaries.
+- Professional role standard: use a domain role, concise trigger, tool awareness, examples, and cross-runtime packaging discipline.
+- Flow standard: place the agent inside a real product flow and make upstream/downstream handoff explicit.
+- Memory standard: give the agent scoped memory, gap analysis, schema/eval thinking, and access boundaries.
 
 Do not copy:
 

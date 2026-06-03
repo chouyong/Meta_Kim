@@ -105,8 +105,9 @@ describe("21 — Generated Agent Quality and LangGraph boundary", async () => {
   test("create-agent reference documents quality contract and LangGraph projection", () => {
     assert.match(createAgentReference, /Generated Agent Spec Quality Contract/);
     assert.match(createAgentReference, /LangGraph Projection Boundary/);
-    assert.match(createAgentReference, /gstack/i);
-    assert.match(createAgentReference, /gbrain/i);
+    assert.match(createAgentReference, /Professional role standard/i);
+    assert.match(createAgentReference, /Flow standard/i);
+    assert.match(createAgentReference, /Memory standard/i);
     assert.match(createAgentReference, /GapDecision.*conditional edge/is);
   });
 

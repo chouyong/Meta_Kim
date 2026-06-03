@@ -40,6 +40,7 @@ describe("26 — Core MVP acceptance report", async () => {
       assert.equal(report.summary.branchesCovered, 6);
       assert.equal(report.summary.agentDesignEvaluation, "pass");
       assert.equal(report.summary.governanceProcessMvp, "pass");
+      assert.equal(report.summary.stationPacketsCovered, 5);
       assert.ok(
         report.evidence.commands.includes("npm run meta:core:mvp:acceptance")
       );
@@ -48,6 +49,7 @@ describe("26 — Core MVP acceptance report", async () => {
       assert.match(markdown, /# Meta_Kim Core MVP 验收报告/);
       assert.match(markdown, /FR-009/);
       assert.match(markdown, /langgraph_branch_coverage/);
+      assert.match(markdown, /station_output_coverage/);
     } finally {
       await rm(tempDir, { recursive: true, force: true });
     }

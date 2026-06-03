@@ -97,9 +97,9 @@
         ],
         "architectureCopied": false,
         "sourceIds": [
-          "wshobson-agents-style",
-          "gstack",
-          "gbrain"
+          "professional-role-benchmark",
+          "flow-handoff-benchmark",
+          "memory-boundary-benchmark"
         ]
       }
     },
@@ -118,17 +118,17 @@
         ],
         "dependencyEvidence": [
           {
-            "sourceId": "wshobson-agents-style",
+            "sourceId": "professional-role-benchmark",
             "usedFor": "professional role naming and concise trigger",
             "architectureCopied": false
           },
           {
-            "sourceId": "gstack",
+            "sourceId": "flow-handoff-benchmark",
             "usedFor": "product-flow handoff clarity",
             "architectureCopied": false
           },
           {
-            "sourceId": "gbrain",
+            "sourceId": "memory-boundary-benchmark",
             "usedFor": "scoped memory and gap analysis behavior",
             "architectureCopied": false
           }
@@ -410,8 +410,8 @@
       "dependency_content_boundary"
     ],
     "spec": {
-      "name": "gstack-architecture-agent",
-      "description": "Own agent design by adopting the gstack skill catalog architecture and provider packaging shape.",
+      "name": "copied-architecture-agent",
+      "description": "Own agent design by adopting a dependency skill catalog architecture and provider packaging shape.",
       "flowPosition": "Plan",
       "purpose": "Use dependency project architecture as the durable Meta_Kim agent architecture.",
       "capabilities": [
@@ -484,7 +484,7 @@
         ],
         "architectureCopied": true,
         "sourceIds": [
-          "gstack"
+          "flow-handoff-benchmark"
         ]
       }
     }

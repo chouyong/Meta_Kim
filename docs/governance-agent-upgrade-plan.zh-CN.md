@@ -25,108 +25,78 @@
 - `create_agent` 分支必须产出可评测的 `GeneratedAgentSpec`。
 - 每个治理站点必须有固定输出包，能被测试读取。
 - 长期 agent identity 不写单次文件路径、ticket、今日任务、临时验收步骤。
-- 修改后不能把 gstack、gbrain、wshobson/agents 的架构搬进 Meta_Kim。
+- 修改后不能把任何参考系统的架构、目录、prompt wording 或 owner 层级搬进 Meta_Kim。
 
-## Fetch：参考什么最好
+## Fetch：抽象成什么标准
 
-### 1. `wshobson/agents`：专业 agent 设定参考
+### 1. 专业角色标准
 
-参考价值：
+可吸收的判断：
 
-- 公开 GitHub 仓库，当前 README 显示约 84 plugins、192 agents、156 skills、102 commands。
-- 它的强项是“专业岗位 agent”的命名、触发、职责边界、能力列表、工作流位置、与其他 agent 的区别。
-- 它还强调一个 source-of-truth 生成多 runtime 原生投影，这和 Meta_Kim 的跨 runtime 投影方向相近。
-
-Meta_Kim 可以吸收：
-
-- 专业 role naming：agent 名称应该像专业岗位，不像一次性任务。
+- agent 名称应该像专业岗位，不像一次性任务。
 - 描述里明确“什么时候用”，不要只写“这个 agent 很强”。
-- Key Distinctions：说清楚和相邻 agent 的区别。
-- Workflow Position：说清楚在上游/下游哪个位置工作。
-- Output Examples：说清楚好输出应该包含哪些部分。
+- 说清楚和相邻 agent 的区别。
+- 说清楚在上游/下游哪个位置工作。
+- 说清楚好输出应该包含哪些部分。
 
-Meta_Kim 不能吸收：
+拒绝：
 
-- 不能复制它的 plugin marketplace 架构。
-- 不能复制它的 agent 数量路线。
-- 不能把“多 agent catalog”当作当前核心目标。
-- 不能照搬它的 runtime adapter 结构。
+- 不能复制任何 marketplace、catalog、runtime adapter 或批量 agent 数量路线。
+- 不能把“agent 多”当作当前核心目标。
 
-### 2. Anthropic `skill-creator`：技能与评测方法参考
+### 2. 能力设计与评测标准
 
-参考价值：
-
-- Anthropic 官方 `skills` 仓库说明 skill 是带 `SKILL.md` 的自包含目录，用于让 Claude 动态加载专业任务能力。
-- `skill-creator` 明确强调：先问边界、输入输出、成功标准、依赖；再写 skill；客观可验证任务要配测试；迭代时看测试运行结果。
-- 它强调 progressive disclosure：入口保持小，细节放到 references / scripts / assets。
-- 它强调“解释为什么”，而不是堆 ALWAYS / NEVER。
-
-Meta_Kim 可以吸收：
+可吸收的判断：
 
 - 技能/agent 设计前必须先锁定 edge cases、I/O、成功标准、依赖。
 - 能被测试的能力必须有测试。
 - 重复出现的机械步骤才沉淀脚本。
 - 把大段细节放进 reference，不要把每个 meta agent 都写成百科全书。
+- 解释为什么，而不是堆命令式口号。
 
-Meta_Kim 不能吸收：
+拒绝：
 
 - 不能把治理 agent 当成 skill 来写。
-- 不能因为 skill-creator 强调 skill，就把 create_agent 缺口改成 create_skill。
-- 不能照搬 Anthropic 的 Skill 文件结构作为 Meta_Kim agent identity 结构。
+- 不能因为某个参考标准强调 skill，就把 `create_agent` 缺口强行改成 `create_skill`。
+- 不能照搬外部 skill 文件结构作为 Meta_Kim agent identity 结构。
 
-### 3. gstack：产品流程和交付节奏参考
+### 3. 产品流程与交付节奏标准
 
-参考价值：
-
-- 本地已安装 gstack 技能集，覆盖 QA、review、ship、benchmark、design、devex、context 等开发流程。
-- gstack 的强项不是 agent identity，而是把工作放在产品流程位置里：什么时候 plan、什么时候 review、什么时候 ship、什么时候 retro。
-
-Meta_Kim 可以吸收：
+可吸收的判断：
 
 - `flowPosition`：每个 agent 设计要知道自己处在 Critical / Fetch / Thinking / Review / Verification / Evolution 哪个位置。
 - handoff：上游给什么，下游拿什么。
 - 不同阶段输出不同，不要把所有内容塞进一个 agent。
 
-Meta_Kim 不能吸收：
+拒绝：
 
-- 不能复制 gstack 的 skill catalog。
-- 不能把 gstack 的工具流当作 Meta_Kim 的治理架构。
-- 不能让 gstack 技能长期绑定进某个治理 agent identity。
+- 不能复制任何工具流、skill catalog 或命令目录。
+- 不能让某个工具包长期绑定进治理 agent identity。
 
-### 4. gbrain：记忆、信任策略、回放参考
+### 4. 记忆、信任策略、回放标准
 
-参考价值：
-
-- 本地 gstack 文档把 gbrain 描述为 agent 的持久知识库，支持跨会话记忆、代码搜索、MCP 注册、repo trust policy。
-- gbrain 的强项是：记忆可查、写入有策略、不同 repo 有 read-write / read-only / deny 边界、同步过程可重跑。
-
-Meta_Kim 可以吸收：
+可吸收的判断：
 
 - `memoryPolicy` 必须写允许记什么、禁止记什么。
 - repo / project 级信任策略必须清楚，避免跨项目污染。
 - 运行证据要能回放，而不是靠上下文记忆。
 - 同步/写回要可重跑、可拒绝、可审计。
 
-Meta_Kim 不能吸收：
+拒绝：
 
-- 不能复制 gbrain 的数据库/图/同步架构。
+- 不能复制外部数据库/图/同步架构。
 - 不能把长期记忆系统等同于治理 agent。
 - 不能让 memory provider 绕过 Warden 的 writeback gate。
 
-### 5. Anthropic Claude Code Advanced Patterns：subagent 使用边界参考
+### 5. 子 agent 使用边界标准
 
-参考价值：
-
-- Anthropic 资料强调 subagent 适合清晰、专业、工具权限明确、有成功标准的角色。
-- subagent 更适合轻量返回结论、并行探索和上下文管理，不适合主线程失去监督的复杂不清任务。
-
-Meta_Kim 可以吸收：
+可吸收的判断：
 
 - agent 创建前必须证明角色清晰、专业、成功标准明确。
 - 工具权限和完成标准必须一起定义。
 - 并行 agent 只用于可拆分的独立工作流。
 
-Meta_Kim 不能吸收：
+拒绝：
 
 - 不能把 subagent 当作万能执行者。
 - 不能让 meta agent 变成 implementation worker。
@@ -143,7 +113,9 @@ Meta_Kim 不能吸收：
 - 6 类 GapDecision fixtures
 - RunStateStore / LangGraph 风格 trace / core MVP 验收报告
 
-真正缺口不是“没有 PRD”，而是治理 agent 的站点输出还不够产品化。下一步应该补一个统一的 agent-design station contract，然后小范围改四个核心治理 agent。
+真正缺口不是“没有 PRD”，而是治理 agent 的站点输出还不够产品化。下一步应该补一个统一的 agent-design station contract，然后小范围改五个核心治理 agent。
+
+吸收外部优秀项目时要先做冲突判断：如果外部参考和 Meta_Kim 已有流程、三层记忆、RunStateStore、LangGraph 控制图重叠，保留 Meta_Kim 的结构，只吸收它背后的判断标准。也就是说，不能把参考项目的目录、图、数据库、agent 层级或 prompt wording 搬进来；只能把它们转译成 Meta_Kim 自己的 station output。
 
 ### 要新增的统一合同
 
@@ -151,14 +123,15 @@ Meta_Kim 不能吸收：
 
 `config/contracts/governance-agent-design-station-contract.json`
 
-它定义四个站点输出：
+它定义五个站点输出：
 
 | 站点 | Owner | 输出包 | 负责判断 |
 |---|---|---|---|
 | Boundary Station | `meta-genesis` | `agentBoundaryDecision` | 这是不是长期 agent；边界是否抽象专业；拒绝项是否清楚 |
 | Loadout Station | `meta-artisan` | `agentLoadoutDecision` | 需要哪些抽象能力槽；哪些能力 run-scoped；哪些 provider 被拒绝 |
-| Review Station | `meta-prism` | `agentDesignReview` | 是否假专业、假 owner、身份污染、缺 verifier、弱路径未拒绝 |
-| Gate Station | `meta-warden` | `agentCandidateGateDecision` | 是否允许进入 CandidateWriteback；是否需要退回 Thinking / Genesis / Artisan / Prism |
+| Memory Station | `meta-librarian` | `agentMemoryDecision` | 允许记什么、禁止记什么、证据归 RunStateStore 还是长期记忆 |
+| Review Station | `meta-prism` | `agentDesignReview` | 是否假专业、假 owner、身份污染、缺 verifier、弱路径未拒绝、外部参考是否被转译而非复制 |
+| Gate Station | `meta-warden` | `agentCandidateGateDecision` | 是否允许进入 CandidateWriteback；是否需要退回 Thinking / Genesis / Artisan / Librarian / Prism |
 
 ### 要改的 agent
 
@@ -180,7 +153,17 @@ Meta_Kim 不能吸收：
 - durable vs run-scoped 分离：长期只写抽象 capability slots，具体 skill/tool 本轮绑定。
 - provider rejection：为什么不用某个 skill / script / MCP。
 
-#### 3. meta-prism
+#### 3. meta-librarian
+
+新增或强化：
+
+- `agentMemoryDecision` 输出格式。
+- memory scope：none、run-scoped、project-scoped、cross-project-readonly / denied / approved。
+- allowed / forbidden memory：长期能记什么，哪些一律只能留在 run packet 或 RunStateStore。
+- replay source：判断证据归数据库事件、记忆文件还是源文档。
+- writeback gate：任何长期记忆写回必须经过 Warden。
+
+#### 4. meta-prism
 
 新增或强化：
 
@@ -189,7 +172,7 @@ Meta_Kim 不能吸收：
 - 必须能失败：generic agent、task-bound identity、dependency architecture copy、missing verifier、single-path reasoning。
 - Review 先查上游 Critical / Fetch / Thinking 是否够，不只看最终文字。
 
-#### 4. meta-warden
+#### 5. meta-warden
 
 新增或强化：
 
@@ -204,7 +187,7 @@ Meta_Kim 不能吸收：
 - 不先建图数据库。
 - 不批量创建 agent。
 - 不把 9 个 meta agent 全部大改。
-- 不把 gstack/gbrain/wshobson 的目录结构搬进来。
+- 不把任何参考系统的目录结构搬进来。
 - 不把 `GeneratedAgentSpec` 直接自动写入 canonical agent 文件。
 
 ## Review：为什么这是最好的下一步
@@ -213,7 +196,7 @@ Meta_Kim 不能吸收：
 
 1. 你的核心问题是“治理层能不能设计出抽象但专业的 agent”，不是“有没有更多 agent”。
 2. 现在验收门已经能证明核心 MVP 通过，但还缺对治理 agent 内部站点产物的强约束。
-3. 外部优秀项目的共同点不是“架构更大”，而是：
+3. 可吸收标准的共同点不是“架构更大”，而是：
    - 专业角色清楚；
    - 触发条件清楚；
    - 输入输出清楚；
@@ -222,7 +205,7 @@ Meta_Kim 不能吸收：
    - memory / writeback 有边界。
 4. 用 station contract 能保持简单、可控、可扩展、解耦、分层：
    - 简单：只加一个合同。
-   - 可控：四个输出包都有验收。
+   - 可控：五个输出包都有验收。
    - 可扩展：以后可以加 station，不必重写架构。
    - 解耦：Genesis / Artisan / Prism / Warden 各管一段。
    - 有数据：RunStateStore 可以记录每个 station output。
@@ -230,21 +213,14 @@ Meta_Kim 不能吸收：
 ## 下一步执行顺序
 
 1. 新增 `governance-agent-design-station-contract.json`。
-2. 新增测试：合同必须包含四个 station、必填字段、失败条件。
-3. 小范围修改 `meta-genesis`、`meta-artisan`、`meta-prism`、`meta-warden`，只补 station output，不重写整篇。
-4. 扩展 `run-core-mvp-acceptance.mjs`，检查 station contract 存在且四站点可映射。
+2. 新增测试：合同必须包含五个 station、必填字段、失败条件。
+3. 小范围修改 `meta-genesis`、`meta-artisan`、`meta-librarian`、`meta-prism`、`meta-warden`，只补 station output，不重写整篇。
+4. 扩展 `run-core-mvp-acceptance.mjs`，检查 station contract 存在且五站点可映射。
 5. 跑：
    - `npm run meta:core:mvp:acceptance`
    - `npm run meta:test:meta-theory`
    - `git diff --check`
 
-## 参考源
+## Source Boundary
 
-- wshobson/agents：https://github.com/wshobson/agents
-- wshobson authoring guide：https://github.com/wshobson/agents/blob/main/docs/authoring.md
-- wshobson plugin eval：https://github.com/wshobson/agents/blob/main/docs/plugin-eval.md
-- Anthropic skills：https://github.com/anthropics/skills
-- Anthropic skill-creator：https://github.com/anthropics/skills/blob/main/skills/skill-creator/SKILL.md
-- Anthropic Claude Code Advanced Patterns：https://resources.anthropic.com/hubfs/Claude%20Code%20Advanced%20Patterns_%20Subagents%2C%20MCP%2C%20and%20Scaling%20to%20Real%20Codebases.pdf
-- gstack：https://github.com/garrytan/gstack
-- gbrain：https://github.com/garrytan/gbrain
+公开治理文件只保留 Meta_Kim 自己的标准。具体调研来源、仓库名、链接和对照笔记只能放在研究材料或依赖注册中，不能进入长期 agent identity、PRD 主体、station contract 或 public-ready prompt。
