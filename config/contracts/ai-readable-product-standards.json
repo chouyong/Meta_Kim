@@ -1,9 +1,9 @@
 {
   "schemaVersion": 1,
-  "contractId": "ai-course-product-standards",
+  "contractId": "ai-readable-product-standards",
   "owner": "meta-conductor",
-  "purpose": "Plain-language product standards for AI course style review. They explain how a Capability Gap run proves design, execution, acceptance, feedback, and deliverable quality without relying on hidden protocol knowledge.",
-  "audience": "AI course learner and reviewer",
+  "purpose": "Plain-language product standards for AI-readable product review. They explain how a Capability Gap run proves design, execution, acceptance, feedback, and deliverable quality without relying on hidden protocol knowledge.",
+  "audience": "external product reviewer and AI reviewer",
   "standards": [
     {
       "id": "design",

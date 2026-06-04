@@ -132,13 +132,13 @@ describe("30 — Capability Gap complete product MVP", () => {
         )
       );
 
-      assert.equal(report.aiCourseStandards.status, "pass");
-      assert.equal(report.aiCourseStandards.audience, "AI course learner and reviewer");
+      assert.equal(report.aiReadableStandards.status, "pass");
+      assert.equal(report.aiReadableStandards.audience, "external product reviewer and AI reviewer");
       assert.deepEqual(
-        report.aiCourseStandards.standards.map((standard) => standard.id),
+        report.aiReadableStandards.standards.map((standard) => standard.id),
         ["design", "execution", "acceptance", "feedback", "deliverables"]
       );
-      for (const standard of report.aiCourseStandards.standards) {
+      for (const standard of report.aiReadableStandards.standards) {
         assert.equal(standard.status, "pass", `${standard.id} standard must pass`);
         assert.ok(standard.plainLanguageQuestion);
         assert.ok(standard.passStandard);
@@ -171,7 +171,7 @@ describe("30 — Capability Gap complete product MVP", () => {
       assert.match(markdown, /Capability Gap Complete Product MVP Report/);
       assert.match(markdown, /R-006/);
       assert.match(markdown, /R-011/);
-      assert.match(markdown, /AI 课可理解标准/);
+      assert.match(markdown, /AI 可读标准/);
       assert.match(markdown, /设计标准/);
       assert.match(markdown, /执行标准/);
       assert.match(markdown, /验收标准/);
@@ -205,7 +205,7 @@ describe("30 — Capability Gap complete product MVP", () => {
       assert.equal(report.graphValidation.branchExecutionCoverage, 1);
       assert.equal(report.summary.frPassRate, 1);
       assert.equal(report.summary.quantitativePassRate, 1);
-      assert.equal(report.aiCourseStandards.status, "pass");
+      assert.equal(report.aiReadableStandards.status, "pass");
 
       for (const targetPath of [jsonPath, markdownPath, dbPath]) {
         const file = await stat(targetPath);

@@ -36,11 +36,11 @@ const RUN_REPORT_PANEL_CONTRACT_PATH = path.join(
   "contracts",
   "run-report-panel-contract.json"
 );
-const AI_COURSE_PRODUCT_STANDARDS_PATH = path.join(
+const AI_READABLE_PRODUCT_STANDARDS_PATH = path.join(
   REPO_ROOT,
   "config",
   "contracts",
-  "ai-course-product-standards.json"
+  "ai-readable-product-standards.json"
 );
 const RUNTIME_TARGETS = ["claude", "codex", "cursor", "openclaw"];
 const WARDEN_APPROVAL_PACKET_SCHEMA_VERSION = "warden-approval-v0.1";
@@ -639,7 +639,7 @@ function buildUserReadableRunReport({ runId, task, orchestrationReport, decision
 
 function buildRunReportPanelContract({
   contractDefinition,
-  aiCourseStandards,
+  aiReadableStandards,
   runId,
   task,
   status,
@@ -649,7 +649,7 @@ function buildRunReportPanelContract({
   paths,
 }) {
   const blockedGaps = orchestrationReport.capabilityGaps.filter((gap) => gap.blocked);
-  const courseRubric = aiCourseStandards.standards.map((standard) => ({
+  const aiReadableRubric = aiReadableStandards.standards.map((standard) => ({
     id: standard.id,
     label: standard.label,
     plainLanguageQuestion: standard.plainLanguageQuestion,
@@ -674,9 +674,9 @@ function buildRunReportPanelContract({
     schemaVersion: contractDefinition.schemaVersion,
     contractId: "run-report-panel-contract",
     status:
-      courseRubric.length ===
-        contractDefinition.sectionRules.courseRubric.requiredStandardCount &&
-      courseRubric.every((standard) => standard.status === "pass") &&
+      aiReadableRubric.length ===
+        contractDefinition.sectionRules.aiReadableRubric.requiredStandardCount &&
+      aiReadableRubric.every((standard) => standard.status === "pass") &&
       runtimeRows.every((row) =>
         row.failureClass === RUNTIME_FAILURE_TAXONOMY.pass
           ? row.strictReleasePass === true || row.evidenceKind === "live"
@@ -729,7 +729,7 @@ function buildRunReportPanelContract({
         ? "Warden approval packet is required before canonical writeback."
         : "No approval action required for this run.",
     },
-    courseRubric,
+    aiReadableRubric,
     deliverables: {
       json: relative(paths.json),
       markdown: relative(paths.markdown),
@@ -849,7 +849,7 @@ export async function runMetaTheoryGovernedExecution({
   const markdownPath = path.join(stateDir, `${effectiveRunId}.zh-CN.md`);
   const latestPath = path.join(stateDir, "latest.json");
   const panelContractDefinition = await readJson(RUN_REPORT_PANEL_CONTRACT_PATH);
-  const aiCourseStandards = await readJson(AI_COURSE_PRODUCT_STANDARDS_PATH);
+  const aiReadableStandards = await readJson(AI_READABLE_PRODUCT_STANDARDS_PATH);
   const artifactStatus =
     orchestrationReport.status === "pass" &&
     runtimeEvidence.status === "pass" &&
@@ -858,7 +858,7 @@ export async function runMetaTheoryGovernedExecution({
       : "partial";
   const runReportPanelContract = buildRunReportPanelContract({
     contractDefinition: panelContractDefinition,
-    aiCourseStandards,
+    aiReadableStandards,
     runId: effectiveRunId,
     task: normalizedTask,
     status: artifactStatus,

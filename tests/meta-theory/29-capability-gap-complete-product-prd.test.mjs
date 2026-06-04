@@ -35,7 +35,7 @@ describe("29 — Capability Gap complete product PRD", () => {
       "R-008 跨 runtime 真实投影验证",
       "R-009 Warden 审批后的真实长期 writeback 流程",
       "R-010 用户可读 UI / 报告层",
-      "R-011 AI 课可理解产品标准",
+      "R-011 AI 可读产品标准",
       "完整产品 Definition of Done",
     ]) {
       assert.match(prd, new RegExp(section), `missing ${section}`);
@@ -85,7 +85,7 @@ describe("29 — Capability Gap complete product PRD", () => {
       "T-004",
       "用户可读 UI / 报告层",
       "T-005",
-      "AI 课可理解产品标准",
+      "AI 可读产品标准",
       "Definition of Done",
       "orchestrationTaskBoardPacket",
       "workerTaskPackets",
@@ -141,7 +141,7 @@ describe("29 — Capability Gap complete product PRD", () => {
       "P-013",
       "报告可读性 review",
       "P-014",
-      "AI 课评分表导出",
+      "AI 可读评分表导出",
       "P-015",
       "多 gap 混合需求 fixture",
       "P-016",
@@ -164,7 +164,7 @@ describe("29 — Capability Gap complete product PRD", () => {
       "config/contracts/run-report-panel-contract.json",
       "runReportPanelContract",
       "P-023",
-      "AI 课案例包",
+      "AI 可读案例包",
       "P-024",
       "Cursor native live pass 解阻",
       "当前主干闭合顺序",
@@ -201,7 +201,7 @@ describe("29 — Capability Gap complete product PRD", () => {
       "blocked reason",
       "runtime evidence",
       "approval request",
-      "course rubric",
+      "readable rubric",
       "deliverables",
       "P-012 / P-013 / P-014 / P-023",
       "不能把某一类交付物冒充另一类",
@@ -215,14 +215,14 @@ describe("29 — Capability Gap complete product PRD", () => {
       "npm run meta:theory:deliverables",
       "run-panel.html",
       "readability-review.zh-CN.md",
-      "ai-course-rubric.zh-CN.md",
-      "ai-course-rubric.json",
-      "ai-course-case-pack.zh-CN.md",
+      "ai-readable-rubric.zh-CN.md",
+      "ai-readable-rubric.json",
+      "ai-readable-case-pack.zh-CN.md",
       "tests/meta-theory/34-run-deliverables.test.mjs",
       "P-012 / P-013 / P-014 / P-023 用户交付轨",
       "P-024 Cursor native live pass 解阻",
-      "用户交付轨已有面板数据合同、静态 Web/UI、可读性 review、AI 课评分表和课程案例包",
-      "后续只能扩展真实课程样本，不能把某一类交付物冒充另一类",
+      "用户交付轨已有面板数据合同、静态 Web/UI、可读性 review、AI 可读评分表和案例包",
+      "后续只能扩展真实 reviewer 样本，不能把某一类交付物冒充另一类",
     ]) {
       assert.match(prd, new RegExp(marker), `missing deliverable marker ${marker}`);
     }
@@ -265,7 +265,7 @@ describe("29 — Capability Gap complete product PRD", () => {
 
   test("records expanded unfinished parallel backlog instead of collapsing to one blocker", () => {
     for (const marker of [
-      "版本：v0.22",
+      "版本：v0.34",
       "未完成但可并行推进的扩展 / 解阻队列",
       "P-025",
       "Cursor WSL live 安装与只读验收子窗口",
@@ -278,7 +278,7 @@ describe("29 — Capability Gap complete product PRD", () => {
       "P-029",
       "跨 run 趋势服务化面板",
       "P-030",
-      "AI 课真实 reviewer 样本回放",
+      "AI 可读 reviewer 样本回放",
       "P-031",
       "真实 Warden approved canonical writeback",
       "P-032",
@@ -291,6 +291,54 @@ describe("29 — Capability Gap complete product PRD", () => {
       "真实复杂输入扩展集",
       "P-036",
       "PRD 状态完整性守卫",
+      "P-037",
+      "深度研究准备层产品化",
+      "P-038",
+      "多类型能力库存浏览器",
+      "P-039",
+      "编排 DAG 可视化与依赖模拟",
+      "P-040",
+      "workerTask 输出合同与返工策略",
+      "P-041",
+      "真实用户纠错 replay 池",
+      "P-042",
+      "反馈入口与状态闭环",
+      "P-043",
+      "Warden 审批体验面板",
+      "P-044",
+      "runtime 解阻安装/验收手册",
+      "P-045",
+      "产品交付包打包",
+      "P-046",
+      "reviewer 校准样本",
+      "P-047",
+      "真实联网研究执行层",
+      "P-048",
+      "研究证据缓存与新鲜度策略",
+      "P-049",
+      "能力创新候选沙箱",
+      "P-050",
+      "DAG 串行依赖样本扩展",
+      "P-051",
+      "DAG 调度仿真与关键路径",
+      "P-052",
+      "workerTask 输出 schema registry",
+      "P-053",
+      "workerTask 返工 runner",
+      "P-054",
+      "Review / Meta-Review 双层接收门",
+      "P-055",
+      "用户反馈动作合同",
+      "P-056",
+      "反馈 replay 指标面板",
+      "P-057",
+      "Warden 审批 diff 预览与回滚演练",
+      "P-058",
+      "runtime probe 变体矩阵",
+      "P-059",
+      "产品交付 bundle CLI",
+      "P-060",
+      "reviewer 评分校准与反例库",
       "这些任务不会让当前 MVP 重新变成未完成",
     ]) {
       assert.match(prd, new RegExp(marker), `missing expanded backlog marker ${marker}`);
@@ -319,6 +367,295 @@ describe("29 — Capability Gap complete product PRD", () => {
     }
   });
 
+  test("records v0.23 runtime matrix and complex input closure", () => {
+    for (const marker of [
+      "P-033 \\| R-008 \\| runtime live shard 自动化矩阵[\\s\\S]*?\\| 已测通 \\|",
+      "npm run meta:runtime:shard-matrix",
+      ".meta-kim/state/default/runtime-live-shard-matrix/latest.json",
+      "Claude / Codex / OpenClaw / Cursor",
+      "releaseGradeCandidate",
+      "Cursor blocked 与 fixture-only 边界",
+      "P-035 \\| R-001/R-007/R-011 \\| 真实复杂输入扩展集[\\s\\S]*?\\| 已测通 \\|",
+      "npm run meta:gap:complex-inputs",
+      ".meta-kim/state/default/complex-capability-gap-inputs/latest.json",
+      "10/10 pass",
+      "research-first、multi-capability、approval-blocked、workerTask-only",
+      "P-033 / P-035",
+      "P-025 / P-031 需要外部条件或人工批准",
+    ]) {
+      assert.match(prd, new RegExp(marker), `missing v0.23 marker ${marker}`);
+    }
+  });
+
+  test("records v0.24 external product reviewer replay closure", () => {
+    for (const marker of [
+      "P-030 \\| R-011 \\| AI 可读 reviewer 样本回放[\\s\\S]*?\\| 已测通 \\|",
+      "npm run meta:reviewer:replay",
+      ".meta-kim/state/default/product-reviewer-replay/latest.json",
+      "3 个 reviewer 样本",
+      "五维评分",
+      "6 条误解点与修订建议",
+      "fixture pass、release-grade、GitHub complete、Warden approval",
+      "P-026 / P-027 / P-028 / P-029 / P-030 / P-032 / P-033 / P-034 / P-035 / P-036 / P-037 / P-038 / P-039 / P-040 / P-041 / P-042 / P-043 / P-044 / P-045 / P-046 / P-047 / P-048 / P-049 / P-050 / P-051 / P-052 / P-053 / P-054 / P-055 / P-056 / P-057 / P-058 / P-059 / P-060 已测通",
+      "P-025 / P-031 需要外部条件或人工批准",
+    ]) {
+      assert.match(prd, new RegExp(marker), `missing v0.24 marker ${marker}`);
+    }
+  });
+
+  test("records v0.25 wider parallel product backlog", () => {
+    for (const marker of [
+      "P-025 到 P-060 并行扩展队列",
+      "本 PRD v0.34 的状态更新",
+      "P-025 到 P-060 队列",
+      "researchPreparationPacket",
+      "研究完才编排",
+      "避免把 capability 简化成 skill",
+      "fake parallelism 计数为 0",
+      "schema 不合格",
+      "至少 12 条 correction replay",
+      "反馈是否影响下一轮 route",
+      "未提供审批包时必须生成 `approvalRequest`",
+      "runtime 解阻安装/验收手册",
+      "一条命令生成 bundle manifest",
+      "能力不等于 skill",
+      "真实联网研究、反馈闭环、审批体验、runtime probe 变体、交付打包、reviewer 校准",
+      "P-024 解阻前不能宣称全 runtime release-grade 完成",
+    ]) {
+      assert.match(prd, new RegExp(marker), `missing v0.25 marker ${marker}`);
+    }
+  });
+
+  test("records v0.26 research preparation closure", () => {
+    for (const marker of [
+      "P-037 \\| R-007/R-010 \\| 深度研究准备层产品化[\\s\\S]*?\\| 已测通 \\|",
+      "npm run meta:research:prepare",
+      ".meta-kim/state/default/research-preparation/latest.json",
+      "4/4 case pass",
+      "current-fact、official docs、external MCP provider、local-only、blocked paid/credential boundary",
+      "searchAngles、sourceList、freshness、credibility、blockedReason、decisionImpactMap、thinkingHandoff",
+      "研究完才编排",
+      "已完成 P-037",
+    ]) {
+      assert.match(prd, new RegExp(marker), `missing v0.26 marker ${marker}`);
+    }
+  });
+
+  test("records v0.27 multi-type capability browser closure", () => {
+    for (const marker of [
+      "本 PRD v0.34 的状态更新",
+      "P-038 \\| R-007/R-010 \\| 多类型能力库存浏览器[\\s\\S]*?\\| 已测通 \\|",
+      "npm run meta:capabilities:browser",
+      ".meta-kim/state/default/multi-type-capability-browser/latest.json",
+      "10/10 capability types covered",
+      "237 个候选",
+      "skillOnly = false",
+      "count、topCandidates、unavailableReasons、innovationNeeded",
+      "skill 只是能力类型之一",
+      "已完成 P-038",
+      "P-025 / P-031 需要外部条件或人工批准",
+    ]) {
+      assert.match(prd, new RegExp(marker), `missing v0.27 marker ${marker}`);
+    }
+  });
+
+  test("records v0.28 orchestration DAG closure and wider parallel product lanes", () => {
+    for (const marker of [
+      "版本：v0.34",
+      "P-039 \\| R-003/R-007 \\| 编排 DAG 可视化与依赖模拟[\\s\\S]*?\\| 已测通 \\|",
+      "npm run meta:orchestration:dag",
+      ".meta-kim/state/default/orchestration-dag/latest.json",
+      "3 个 DAG case pass",
+      "fakeParallelismCount = 0",
+      "blocked node 可见",
+      "Mermaid preview 可读",
+      "已完成 P-039",
+      "P-047 \\| R-007 \\| 真实联网研究执行层[\\s\\S]*?\\| 已测通 \\|",
+      "P-048 \\| R-007/R-010 \\| 研究证据缓存与新鲜度策略[\\s\\S]*?\\| 已测通 \\|",
+      "P-049 \\| R-007/R-009 \\| 能力创新候选沙箱[\\s\\S]*?\\| 已测通 \\|",
+      "P-050 \\| R-003/R-007 \\| DAG 串行依赖样本扩展[\\s\\S]*?\\| 已测通 \\|",
+      "P-051 \\| R-003/R-007 \\| DAG 调度仿真与关键路径[\\s\\S]*?\\| 已测通 \\|",
+      "P-052 \\| R-001/R-007 \\| workerTask 输出 schema registry[\\s\\S]*?\\| 已测通 \\|",
+      "P-053 \\| R-001/R-007 \\| workerTask 返工 runner[\\s\\S]*?\\| 已测通 \\|",
+      "P-054 \\| R-008/R-011 \\| Review / Meta-Review 双层接收门[\\s\\S]*?\\| 已测通 \\|",
+      "P-055 \\| R-002/R-010 \\| 用户反馈动作合同[\\s\\S]*?\\| 已测通 \\|",
+      "P-056 \\| R-002/R-010/R-011 \\| 反馈 replay 指标面板[\\s\\S]*?\\| 已测通 \\|",
+      "P-057 \\| R-009/R-010 \\| Warden 审批 diff 预览与回滚演练[\\s\\S]*?\\| 已测通 \\|",
+      "P-058 \\| R-008 \\| runtime probe 变体矩阵[\\s\\S]*?\\| 已测通 \\|",
+      "P-059 \\| R-010/R-011 \\| 产品交付 bundle CLI[\\s\\S]*?\\| 已测通 \\|",
+      "P-060 \\| R-011 \\| reviewer 评分校准与反例库[\\s\\S]*?\\| 已测通 \\|",
+      "P-025 / P-031 需要外部条件或人工批准",
+    ]) {
+      assert.match(prd, new RegExp(marker), `missing v0.28 marker ${marker}`);
+    }
+  });
+
+  test("records v0.29 orchestration scheduler closure", () => {
+    for (const marker of [
+      "版本：v0.34",
+      "P-050 \\| R-003/R-007 \\| DAG 串行依赖样本扩展[\\s\\S]*?\\| 已测通 \\|",
+      "P-051 \\| R-003/R-007 \\| DAG 调度仿真与关键路径[\\s\\S]*?\\| 已测通 \\|",
+      "npm run meta:orchestration:schedule",
+      ".meta-kim/state/default/orchestration-scheduler/latest.json",
+      ".meta-kim/state/default/orchestration-scheduler/latest.zh-CN.md",
+      "5 个 DAG case",
+      "3 个有非空 dependsOn",
+      "9 条 edge",
+      "orphanDependencyCount = 0",
+      "cycleCount = 0",
+      "blockedDependencyViolationCount = 0",
+      "criticalPath",
+      "parallelUtilization",
+      "serialBottleneck",
+      "blockedWaitReason",
+      "research -> capability -> execution -> review",
+      "fanout-then-merge",
+      "approval blocked wait reason",
+      "已完成 P-050 / P-051",
+      "P-025 / P-031 需要外部条件或人工批准",
+    ]) {
+      assert.match(prd, new RegExp(marker), `missing v0.29 marker ${marker}`);
+    }
+  });
+
+  test("records v0.30 workerTask output contract and retry closure", () => {
+    for (const marker of [
+      "版本：v0.34",
+      "P-040 \\| R-001/R-007 \\| workerTask 输出合同与返工策略[\\s\\S]*?\\| 已测通 \\|",
+      "P-052 \\| R-001/R-007 \\| workerTask 输出 schema registry[\\s\\S]*?\\| 已测通 \\|",
+      "P-053 \\| R-001/R-007 \\| workerTask 返工 runner[\\s\\S]*?\\| 已测通 \\|",
+      "config/contracts/worker-task-output-contract.json",
+      "npm run meta:worker:outputs",
+      ".meta-kim/state/default/worker-task-output/latest.json",
+      ".meta-kim/state/default/worker-task-output/latest.zh-CN.md",
+      "6 类 worker output schema",
+      "required evidence",
+      "failureClass",
+      "returnToStage",
+      "maxRetries",
+      "Review 接收条件",
+      "9 个 replay 样本全部 pass",
+      "6 accept",
+      "1 retry",
+      "1 return_to_stage",
+      "1 blocked",
+      "缺 evidence",
+      "owner 越界",
+      "schema 不合格",
+      "Review 不接收无 owner/evidence/schema 的输出",
+      "已完成 P-040 / P-052 / P-053",
+      "P-025 / P-031 需要外部条件或人工批准",
+    ]) {
+      assert.match(prd, new RegExp(marker), `missing v0.30 marker ${marker}`);
+    }
+  });
+
+  test("records v0.31 feedback loop and Review Meta-Review gate closure", () => {
+    for (const marker of [
+      "版本：v0.34",
+      "P-041 \\| R-002/R-011 \\| 真实用户纠错 replay 池[\\s\\S]*?\\| 已测通 \\|",
+      "P-042 \\| R-002/R-010 \\| 反馈入口与状态闭环[\\s\\S]*?\\| 已测通 \\|",
+      "P-054 \\| R-008/R-011 \\| Review / Meta-Review 双层接收门[\\s\\S]*?\\| 已测通 \\|",
+      "P-055 \\| R-002/R-010 \\| 用户反馈动作合同[\\s\\S]*?\\| 已测通 \\|",
+      "P-056 \\| R-002/R-010/R-011 \\| 反馈 replay 指标面板[\\s\\S]*?\\| 已测通 \\|",
+      "config/contracts/feedback-action-contract.json",
+      "npm run meta:feedback:loop",
+      ".meta-kim/state/default/feedback-loop/latest.json",
+      ".meta-kim/state/default/feedback-loop/latest.zh-CN.md",
+      "12 条 correction replay",
+      "accept / correct / reject / promote_to_long_term / keep_one_time",
+      "changedDecisionCount = 12",
+      "repeatGapCount = 11",
+      "reviewerConfusionReduced = 12",
+      "reviewRejectedCount = 3",
+      "polish-only review 返回 Review",
+      "缺 Fetch 返回 Fetch",
+      "缺 writeback boundary 置 blocked",
+      "canonicalWritesWithoutApproval = 0",
+      "已完成 P-041 / P-042 / P-054 / P-055 / P-056",
+      "P-025 / P-031 需要外部条件或人工批准",
+    ]) {
+      assert.match(prd, new RegExp(marker), `missing v0.31 marker ${marker}`);
+    }
+  });
+
+  test("records v0.34 product delivery bundle and reviewer calibration closure", () => {
+    for (const marker of [
+      "版本：v0.34",
+      "P-045 \\| R-010/R-011 \\| 产品交付包打包[\\s\\S]*?\\| 已测通 \\|",
+      "P-046 \\| R-011 \\| reviewer 校准样本[\\s\\S]*?\\| 已测通 \\|",
+      "P-059 \\| R-010/R-011 \\| 产品交付 bundle CLI[\\s\\S]*?\\| 已测通 \\|",
+      "P-060 \\| R-011 \\| reviewer 评分校准与反例库[\\s\\S]*?\\| 已测通 \\|",
+      "config/contracts/product-delivery-bundle-contract.json",
+      "npm run meta:delivery:bundle",
+      ".meta-kim/state/default/product-delivery-bundle/latest.json",
+      ".meta-kim/state/default/product-delivery-bundle/latest.zh-CN.md",
+      "fileCount = 12",
+      "panel、readability review、rubric、case pack、GitHub gap、runtime matrix、DAG report、research report、feedback report",
+      "tests/meta-theory/scenarios/reviewer-calibration-samples.json",
+      "8 个 reviewer 评分样本",
+      "research-before-orchestration、skill-only capability、fake parallelism、fixture pass as live、unauthorized writeback、GitHub gap overclaim、Warden approval confusion、mixed deliverables",
+      "privacyStatus = \"pass\"",
+      "missingPitfalls = \\[\\]",
+      "已完成 P-045 / P-046 / P-059 / P-060",
+      "P-025 / P-031 需要外部条件或人工批准",
+    ]) {
+      assert.match(prd, new RegExp(marker), `missing v0.34 marker ${marker}`);
+    }
+  });
+
+  test("records v0.34 live research execution, freshness, and innovation sandbox closure", () => {
+    for (const marker of [
+      "版本：v0.34",
+      "P-047 \\| R-007 \\| 真实联网研究执行层[\\s\\S]*?\\| 已测通 \\|",
+      "P-048 \\| R-007/R-010 \\| 研究证据缓存与新鲜度策略[\\s\\S]*?\\| 已测通 \\|",
+      "P-049 \\| R-007/R-009 \\| 能力创新候选沙箱[\\s\\S]*?\\| 已测通 \\|",
+      "config/contracts/research-execution-contract.json",
+      "npm run meta:research:execute",
+      ".meta-kim/state/default/research-execution/latest.json",
+      ".meta-kim/state/default/research-execution/latest.zh-CN.md",
+      "6 条研究样本",
+      "4 条 live fetch",
+      "2 条 blocked",
+      "staleRefreshCount = 1",
+      "2 个 innovationCandidatePacket",
+      "canonicalWrites = 0",
+      "已完成 P-047 / P-048 / P-049",
+      "P-025 / P-031 需要外部条件或人工批准",
+    ]) {
+      assert.match(prd, new RegExp(marker), `missing v0.34 research marker ${marker}`);
+    }
+  });
+
+  test("records v0.34 remaining backlog closure without clearing true blockers", () => {
+    for (const marker of [
+      "版本：v0.34",
+      "P-029 \\| R-010 \\| 跨 run 趋势服务化面板[\\s\\S]*?\\| 已测通 \\|",
+      "npm run meta:trend:panel",
+      ".meta-kim/state/default/run-trend-panel/latest.json",
+      "5 类 filter",
+      "4 个 panel",
+      "P-032 \\| R-008 \\| OpenClaw batch live 稳定性改进[\\s\\S]*?\\| 已测通 \\|",
+      "npm run meta:openclaw:batch-stability",
+      "expectedFailureClass = \"timeout\"",
+      "releaseGradeCandidate = false",
+      "P-043 \\| R-009/R-010 \\| Warden 审批体验面板[\\s\\S]*?\\| 已测通 \\|",
+      "P-044 \\| R-008 \\| runtime 解阻安装/验收手册[\\s\\S]*?\\| 已测通 \\|",
+      "P-057 \\| R-009/R-010 \\| Warden 审批 diff 预览与回滚演练[\\s\\S]*?\\| 已测通 \\|",
+      "P-058 \\| R-008 \\| runtime probe 变体矩阵[\\s\\S]*?\\| 已测通 \\|",
+      "npm run meta:warden:approval-panel",
+      "currentRepoCanonicalWrites = 0",
+      "rollbackVerified = true",
+      "npm run meta:runtime:probe-playbook",
+      "至少 12 个 runtime/environment variant",
+      "18. 已完成 P-029 / P-032 / P-043 / P-044 / P-057 / P-058",
+      "P-025 / P-031 需要外部条件或人工批准",
+      "P-024 解阻前不能宣称全 runtime release-grade 完成",
+    ]) {
+      assert.match(prd, new RegExp(marker), `missing v0.34 remaining backlog marker ${marker}`);
+    }
+  });
+
   test("records current live runtime evidence without overclaiming release-grade completion", () => {
     for (const marker of [
       "当前 live evidence matrix",
@@ -340,9 +677,9 @@ describe("29 — Capability Gap complete product PRD", () => {
     }
   });
 
-  test("defines AI-course understandable standards for product outputs", () => {
+  test("defines AI-readable standards for product outputs", () => {
     for (const marker of [
-      "AI 课可理解产品标准",
+      "AI 可读产品标准",
       "设计标准",
       "执行标准",
       "验收标准",
@@ -352,9 +689,9 @@ describe("29 — Capability Gap complete product PRD", () => {
       "通过标准",
       "失败标准",
       "requiredEvidence",
-      "config/contracts/ai-course-product-standards.json",
+      "config/contracts/ai-readable-product-standards.json",
     ]) {
-      assert.match(prd, new RegExp(marker), `missing AI-course standard ${marker}`);
+      assert.match(prd, new RegExp(marker), `missing AI-readable standard ${marker}`);
     }
   });
 

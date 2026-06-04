@@ -100,7 +100,7 @@ function buildPanelHtml({ run, contract, manifest }) {
       </tr>`
     )
     .join("\n");
-  const rubricItems = contract.courseRubric
+  const rubricItems = contract.aiReadableRubric
     .map(
       (item) => `<li>
         <strong>${escapeHtml(item.label)}</strong>
@@ -240,16 +240,16 @@ function buildPanelHtml({ run, contract, manifest }) {
       </table>
     </section>
     <section>
-      <h2>AI 课评分标准</h2>
+      <h2>AI 可读评分标准</h2>
       <ul>${rubricItems}</ul>
     </section>
     <section>
       <h2>交付内容</h2>
       <div class="deliverables">
         <a href="${escapeHtml(path.basename(manifest.files.readabilityReview))}">可读性 review</a>
-        <a href="${escapeHtml(path.basename(manifest.files.rubricMarkdown))}">课程评分表 Markdown</a>
-        <a href="${escapeHtml(path.basename(manifest.files.rubricJson))}">课程评分表 JSON</a>
-        <a href="${escapeHtml(path.basename(manifest.files.casePack))}">AI 课案例包</a>
+        <a href="${escapeHtml(path.basename(manifest.files.rubricMarkdown))}">AI 可读评分表 Markdown</a>
+        <a href="${escapeHtml(path.basename(manifest.files.rubricJson))}">AI 可读评分表 JSON</a>
+        <a href="${escapeHtml(path.basename(manifest.files.casePack))}">AI 可读案例包</a>
       </div>
     </section>
   </main>
@@ -265,7 +265,7 @@ function buildReadabilityReview({ run, contract }) {
     ["blockedReasons", "阻塞原因", "告诉用户哪里不能继续，以及要回到哪个阶段补证据。"],
     ["runtimeEvidence", "Runtime 证据", "区分 live、smoke、unsupported 和 release-grade。"],
     ["approvalRequest", "审批请求", "说明 canonical 写回是否需要 Warden 批准。"],
-    ["courseRubric", "AI 课评分标准", "把设计、执行、验收、反馈、交付内容变成可打分问题。"],
+    ["aiReadableRubric", "AI 可读评分标准", "把设计、执行、验收、反馈、交付内容变成可打分问题。"],
     ["deliverables", "交付内容", "列出用户和系统能复查的文件。"],
   ];
   const rows = labels
@@ -292,7 +292,7 @@ ${rows}
 
 原始合同入口：\`artifact.runReportPanelContract\`
 
-用户看到的入口：\`判定摘要\`、\`下一步交给谁\`、\`阻塞与审批\`、\`Runtime 证据\`、\`AI 课评分标准\`、\`交付内容\`。
+用户看到的入口：\`判定摘要\`、\`下一步交给谁\`、\`阻塞与审批\`、\`Runtime 证据\`、\`AI 可读评分标准\`、\`交付内容\`。
 
 ## 验收说明
 
@@ -306,7 +306,7 @@ ${rows}
 }
 
 function buildRubric({ run, contract }) {
-  const criteria = contract.courseRubric.map((item) => ({
+  const criteria = contract.aiReadableRubric.map((item) => ({
     id: item.id,
     label: item.label,
     question: item.plainLanguageQuestion,
@@ -322,11 +322,11 @@ function buildRubric({ run, contract }) {
     reviewerNotes: "",
   }));
   return {
-    schemaVersion: "ai-course-run-rubric-v0.1",
+    schemaVersion: "ai-readable-run-rubric-v0.1",
     runId: run.runId,
     status: criteria.length === 5 ? "pass" : "fail",
     scoringScale: {
-      pass: "证据足够，AI 课 reviewer 可以复述判断和验收依据。",
+      pass: "证据足够，外部 reviewer 可以复述判断和验收依据。",
       retry: "证据存在但不完整，需要补报告、owner 或验证字段。",
       fail: "没有可复查证据，或把聊天总结冒充产品交付。",
     },
@@ -348,7 +348,7 @@ function buildRubricMarkdown(rubric) {
 `
     )
     .join("\n");
-  return `# Meta_Kim AI 课评分表
+  return `# Meta_Kim AI 可读评分表
 
 Run ID：\`${rubric.runId}\`
 
@@ -370,19 +370,19 @@ function buildCasePack({ run, contract, manifest }) {
         `| ${markdownEscape(row.runtime)} | ${markdownEscape(row.evidenceKind)} | ${markdownEscape(row.failureClass)} | ${markdownEscape(row.remainingAction)} |`
     )
     .join("\n");
-  return `# Meta_Kim AI 课案例包
+  return `# Meta_Kim AI 可读案例包
 
 Run ID：\`${run.runId}\`
 
-## 学员该看到什么
+## reviewer 该看到什么
 
-学员应该能先看到一句话目标：${contract.decisionSummary.plainLanguageSummary}
+reviewer 应该能先看到一句话目标：${contract.decisionSummary.plainLanguageSummary}
 
 然后看到这次任务是什么、缺几个能力、拆成几个 worker、每个 worker 交给谁、哪些 runtime 证据还只是 smoke 或 blocked。
 
-## 老师怎么评分
+## reviewer 怎么评分
 
-老师按五维评分：设计、执行、验收、反馈、交付内容。评分表见 \`${path.basename(manifest.files.rubricMarkdown)}\` 和 \`${path.basename(manifest.files.rubricJson)}\`。
+reviewer 按五维评分：设计、执行、验收、反馈、交付内容。评分表见 \`${path.basename(manifest.files.rubricMarkdown)}\` 和 \`${path.basename(manifest.files.rubricJson)}\`。
 
 ## 设计证据
 
@@ -439,9 +439,9 @@ export async function generateRunDeliverables({
   const files = {
     panelHtml: path.join(baseOutDir, "run-panel.html"),
     readabilityReview: path.join(baseOutDir, "readability-review.zh-CN.md"),
-    rubricMarkdown: path.join(baseOutDir, "ai-course-rubric.zh-CN.md"),
-    rubricJson: path.join(baseOutDir, "ai-course-rubric.json"),
-    casePack: path.join(baseOutDir, "ai-course-case-pack.zh-CN.md"),
+    rubricMarkdown: path.join(baseOutDir, "ai-readable-rubric.zh-CN.md"),
+    rubricJson: path.join(baseOutDir, "ai-readable-rubric.json"),
+    casePack: path.join(baseOutDir, "ai-readable-case-pack.zh-CN.md"),
     manifest: path.join(baseOutDir, "deliverables-manifest.json"),
   };
   const manifest = {
@@ -463,15 +463,15 @@ export async function generateRunDeliverables({
       },
       {
         id: "P-014",
-        label: "AI 课评分表导出",
+        label: "AI 可读评分表导出",
         status: "pass",
-        evidence: "ai-course-rubric.zh-CN.md and ai-course-rubric.json export five criteria.",
+        evidence: "ai-readable-rubric.zh-CN.md and ai-readable-rubric.json export five criteria.",
       },
       {
         id: "P-023",
-        label: "AI 课案例包",
+        label: "AI 可读案例包",
         status: "pass",
-        evidence: "ai-course-case-pack.zh-CN.md shows learner view, teacher scoring, pass/fail evidence.",
+        evidence: "ai-readable-case-pack.zh-CN.md shows reviewer view, reviewer scoring, pass/fail evidence.",
       },
     ],
     files: Object.fromEntries(

@@ -195,7 +195,7 @@ describe("32 — Meta-theory four product targets", () => {
         0
       );
       assert.deepEqual(
-        readBack.artifact.runReportPanelContract.courseRubric.map((item) => item.id),
+        readBack.artifact.runReportPanelContract.aiReadableRubric.map((item) => item.id),
         ["design", "execution", "acceptance", "feedback", "deliverables"]
       );
       assert.equal(

@@ -59,7 +59,7 @@ describe("34 — Meta-theory run deliverables", () => {
       assert.match(panel, /判定摘要/);
       assert.match(panel, /下一步交给谁/);
       assert.match(panel, /Runtime 证据/);
-      assert.match(panel, /AI 课评分标准/);
+      assert.match(panel, /AI 可读评分标准/);
       assert.equal(hasLocalAbsolutePath(panel), false);
 
       const readability = await readFile(filePaths.readabilityReview, "utf8");
@@ -69,7 +69,7 @@ describe("34 — Meta-theory run deliverables", () => {
       assert.equal(hasLocalAbsolutePath(readability), false);
 
       const rubricJson = JSON.parse(await readFile(filePaths.rubricJson, "utf8"));
-      assert.equal(rubricJson.schemaVersion, "ai-course-run-rubric-v0.1");
+      assert.equal(rubricJson.schemaVersion, "ai-readable-run-rubric-v0.1");
       assert.deepEqual(
         rubricJson.criteria.map((item) => item.id),
         ["design", "execution", "acceptance", "feedback", "deliverables"]
@@ -84,8 +84,8 @@ describe("34 — Meta-theory run deliverables", () => {
       assert.match(rubricMarkdown, /交付内容标准/);
 
       const casePack = await readFile(filePaths.casePack, "utf8");
-      assert.match(casePack, /学员该看到什么/);
-      assert.match(casePack, /老师怎么评分/);
+      assert.match(casePack, /reviewer 该看到什么/);
+      assert.match(casePack, /reviewer 怎么评分/);
       assert.match(casePack, /通过 \/ 失败样例/);
       assert.equal(hasLocalAbsolutePath(casePack), false);
     } finally {

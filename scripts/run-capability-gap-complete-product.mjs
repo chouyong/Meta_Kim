@@ -42,11 +42,11 @@ const GRAPH_CONTRACT_PATH = path.join(
   "contracts",
   "capability-gap-executable-graph-contract.json"
 );
-const AI_COURSE_STANDARDS_PATH = path.join(
+const AI_READABLE_STANDARDS_PATH = path.join(
   REPO_ROOT,
   "config",
   "contracts",
-  "ai-course-product-standards.json"
+  "ai-readable-product-standards.json"
 );
 const SOURCE_LEAK_PATTERN = new RegExp(
   [
@@ -246,8 +246,8 @@ function loadGraphContract() {
   return JSON.parse(readFileSync(GRAPH_CONTRACT_PATH, "utf8"));
 }
 
-function loadAiCourseStandards() {
-  return JSON.parse(readFileSync(AI_COURSE_STANDARDS_PATH, "utf8"));
+function loadAiReadableStandards() {
+  return JSON.parse(readFileSync(AI_READABLE_STANDARDS_PATH, "utf8"));
 }
 
 function validateGraphContract(graphContract, results = []) {
@@ -346,7 +346,7 @@ async function buildGovernedExecutionEvidence() {
   }
 }
 
-function buildAiCourseStandardsEvidence({
+function buildAiReadableStandardsEvidence({
   standardsContract,
   productArtifacts,
   scorecards,
@@ -900,11 +900,11 @@ function renderMarkdown(report) {
         `| ${item.id} | ${item.label} | ${item.target} | ${item.evidence} | ${item.passed ? "pass" : "fail"} |`
     ),
     "",
-    "## AI 课可理解标准",
+    "## AI 可读标准",
     "",
     "| 维度 | 人话问题 | 通过标准 | 结果 |",
     "|---|---|---|---|",
-    ...report.aiCourseStandards.standards.map(
+    ...report.aiReadableStandards.standards.map(
       (item) =>
         `| ${item.label} | ${item.plainLanguageQuestion} | ${item.passStandard} | ${item.status} |`
     ),
@@ -972,7 +972,7 @@ export async function runCapabilityGapCompleteProduct({
     markdown: relative(markdownPath),
     sqlite: relative(dbPath),
     graphContract: relative(GRAPH_CONTRACT_PATH),
-    aiCourseStandards: relative(AI_COURSE_STANDARDS_PATH),
+    aiReadableStandards: relative(AI_READABLE_STANDARDS_PATH),
   };
   const evidenceCommands = [
     "node scripts/capability-gap-mvp.mjs --fixture <temp-fixture> --db <state-sqlite> --json",
@@ -1000,8 +1000,8 @@ export async function runCapabilityGapCompleteProduct({
     expectedDecisions,
     requireFullFixtureSet,
   });
-  const finalAiCourseStandards = buildAiCourseStandardsEvidence({
-    standardsContract: loadAiCourseStandards(),
+  const finalAiReadableStandards = buildAiReadableStandardsEvidence({
+    standardsContract: loadAiReadableStandards(),
     productArtifacts,
     scorecards,
     graphValidation,
@@ -1017,11 +1017,11 @@ export async function runCapabilityGapCompleteProduct({
   requirementChecks.push(
     check(
       "R-011",
-      "AI 课可理解产品标准",
-      finalAiCourseStandards.status === "pass" &&
-        finalAiCourseStandards.standards.length === 5 &&
-        finalAiCourseStandards.standards.every((standard) => standard.status === "pass"),
-      `standards=${finalAiCourseStandards.standards
+      "AI 可读产品标准",
+      finalAiReadableStandards.status === "pass" &&
+        finalAiReadableStandards.standards.length === 5 &&
+        finalAiReadableStandards.standards.every((standard) => standard.status === "pass"),
+      `standards=${finalAiReadableStandards.standards
         .map((standard) => `${standard.id}:${standard.status}`)
         .join(",")}`
     )
@@ -1061,7 +1061,7 @@ export async function runCapabilityGapCompleteProduct({
     graphValidation,
     governedExecutionEvidence,
     analytics,
-    aiCourseStandards: finalAiCourseStandards,
+    aiReadableStandards: finalAiReadableStandards,
     requirementChecks,
     quantitativeChecks,
     evidence: {

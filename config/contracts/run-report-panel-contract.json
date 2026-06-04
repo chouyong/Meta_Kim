@@ -9,7 +9,7 @@
     "blockedReasons",
     "runtimeEvidence",
     "approvalRequest",
-    "courseRubric",
+    "aiReadableRubric",
     "deliverables"
   ],
   "sectionRules": {
@@ -62,7 +62,7 @@
       ],
       "canonicalWritesBeforeApproval": 0
     },
-    "courseRubric": {
+    "aiReadableRubric": {
       "requiredFields": [
         "id",
         "label",
@@ -93,7 +93,7 @@
   ],
   "acceptance": {
     "allRequiredSectionsPresent": true,
-    "courseRubricStatusPass": true,
+    "aiReadableRubricStatusPass": true,
     "blockedRuntimeRemainsVisible": true,
     "approvalBoundaryVisible": true,
     "panelReadsSingleContract": true
