@@ -17,10 +17,10 @@ describe("29 — Capability Gap complete product PRD", () => {
     assert.match(prd, /已测通/);
     assert.match(prd, /Complete product MVP 已经在本地证明/);
     assert.match(prd, /还不能宣称“发布级 live\/native 全 runtime 完成”/);
-    assert.match(prd, /Cursor 还没有 native live-turn harness/);
+    assert.match(prd, /Cursor Agent CLI 尚未在本机安装或暴露/);
     assert.match(prd, /Claude 和 OpenClaw 全九个 meta agents shard live evidence 已闭合/);
     assert.match(prd, /Codex \| live pass/);
-    assert.match(prd, /Cursor 还没有 native live-turn harness/);
+    assert.match(prd, /Cursor native live 仍返回 structured blocked/);
   });
 
   test("defines remaining complete-product scope with measurable acceptance", () => {
@@ -265,7 +265,7 @@ describe("29 — Capability Gap complete product PRD", () => {
 
   test("records expanded unfinished parallel backlog instead of collapsing to one blocker", () => {
     for (const marker of [
-      "版本：v0.34",
+      "版本：v0.35",
       "未完成但可并行推进的扩展 / 解阻队列",
       "P-025",
       "Cursor WSL live 安装与只读验收子窗口",
@@ -348,8 +348,9 @@ describe("29 — Capability Gap complete product PRD", () => {
   test("records v0.22 closure for non-blocked parallel backlog items", () => {
     for (const marker of [
       "P-026 \\| R-008 \\| Cursor 官方文档 source-backed refresh[\\s\\S]*?\\| 已测通 \\|",
-      "officialEvidenceRefreshedAt = 2026-06-04",
-      "output-format URL",
+      "2026-06-05 官方文档复核",
+      "cursor-agent",
+      "--output-format json",
       "P-027 \\| R-008 \\| Cursor native success fixture[\\s\\S]*?\\| 已测通 \\|",
       "\\$env:META_KIM_CURSOR_LIVE_SUCCESS_FIXTURE='1'; node scripts/eval-meta-agents.mjs --runtime=cursor --live",
       "strictReleasePass = true",
@@ -381,7 +382,7 @@ describe("29 — Capability Gap complete product PRD", () => {
       "10/10 pass",
       "research-first、multi-capability、approval-blocked、workerTask-only",
       "P-033 / P-035",
-      "P-025 / P-031 需要外部条件或人工批准",
+      "P-025 需要安装或暴露 Cursor Agent CLI",
     ]) {
       assert.match(prd, new RegExp(marker), `missing v0.23 marker ${marker}`);
     }
@@ -396,8 +397,8 @@ describe("29 — Capability Gap complete product PRD", () => {
       "五维评分",
       "6 条误解点与修订建议",
       "fixture pass、release-grade、GitHub complete、Warden approval",
-      "P-026 / P-027 / P-028 / P-029 / P-030 / P-032 / P-033 / P-034 / P-035 / P-036 / P-037 / P-038 / P-039 / P-040 / P-041 / P-042 / P-043 / P-044 / P-045 / P-046 / P-047 / P-048 / P-049 / P-050 / P-051 / P-052 / P-053 / P-054 / P-055 / P-056 / P-057 / P-058 / P-059 / P-060 已测通",
-      "P-025 / P-031 需要外部条件或人工批准",
+      "P-026 / P-027 / P-028 / P-029 / P-030 / P-031 / P-032 / P-033 / P-034 / P-035 / P-036 / P-037 / P-038 / P-039 / P-040 / P-041 / P-042 / P-043 / P-044 / P-045 / P-046 / P-047 / P-048 / P-049 / P-050 / P-051 / P-052 / P-053 / P-054 / P-055 / P-056 / P-057 / P-058 / P-059 / P-060 已测通",
+      "P-025 需要安装或暴露 Cursor Agent CLI",
     ]) {
       assert.match(prd, new RegExp(marker), `missing v0.24 marker ${marker}`);
     }
@@ -406,7 +407,7 @@ describe("29 — Capability Gap complete product PRD", () => {
   test("records v0.25 wider parallel product backlog", () => {
     for (const marker of [
       "P-025 到 P-060 并行扩展队列",
-      "本 PRD v0.34 的状态更新",
+      "本 PRD v0.35 的状态更新",
       "P-025 到 P-060 队列",
       "researchPreparationPacket",
       "研究完才编排",
@@ -443,7 +444,7 @@ describe("29 — Capability Gap complete product PRD", () => {
 
   test("records v0.27 multi-type capability browser closure", () => {
     for (const marker of [
-      "本 PRD v0.34 的状态更新",
+      "本 PRD v0.35 的状态更新",
       "P-038 \\| R-007/R-010 \\| 多类型能力库存浏览器[\\s\\S]*?\\| 已测通 \\|",
       "npm run meta:capabilities:browser",
       ".meta-kim/state/default/multi-type-capability-browser/latest.json",
@@ -453,7 +454,7 @@ describe("29 — Capability Gap complete product PRD", () => {
       "count、topCandidates、unavailableReasons、innovationNeeded",
       "skill 只是能力类型之一",
       "已完成 P-038",
-      "P-025 / P-031 需要外部条件或人工批准",
+      "P-025 需要安装或暴露 Cursor Agent CLI",
     ]) {
       assert.match(prd, new RegExp(marker), `missing v0.27 marker ${marker}`);
     }
@@ -461,7 +462,7 @@ describe("29 — Capability Gap complete product PRD", () => {
 
   test("records v0.28 orchestration DAG closure and wider parallel product lanes", () => {
     for (const marker of [
-      "版本：v0.34",
+      "版本：v0.35",
       "P-039 \\| R-003/R-007 \\| 编排 DAG 可视化与依赖模拟[\\s\\S]*?\\| 已测通 \\|",
       "npm run meta:orchestration:dag",
       ".meta-kim/state/default/orchestration-dag/latest.json",
@@ -484,7 +485,7 @@ describe("29 — Capability Gap complete product PRD", () => {
       "P-058 \\| R-008 \\| runtime probe 变体矩阵[\\s\\S]*?\\| 已测通 \\|",
       "P-059 \\| R-010/R-011 \\| 产品交付 bundle CLI[\\s\\S]*?\\| 已测通 \\|",
       "P-060 \\| R-011 \\| reviewer 评分校准与反例库[\\s\\S]*?\\| 已测通 \\|",
-      "P-025 / P-031 需要外部条件或人工批准",
+      "P-025 需要安装或暴露 Cursor Agent CLI",
     ]) {
       assert.match(prd, new RegExp(marker), `missing v0.28 marker ${marker}`);
     }
@@ -492,7 +493,7 @@ describe("29 — Capability Gap complete product PRD", () => {
 
   test("records v0.29 orchestration scheduler closure", () => {
     for (const marker of [
-      "版本：v0.34",
+      "版本：v0.35",
       "P-050 \\| R-003/R-007 \\| DAG 串行依赖样本扩展[\\s\\S]*?\\| 已测通 \\|",
       "P-051 \\| R-003/R-007 \\| DAG 调度仿真与关键路径[\\s\\S]*?\\| 已测通 \\|",
       "npm run meta:orchestration:schedule",
@@ -512,7 +513,7 @@ describe("29 — Capability Gap complete product PRD", () => {
       "fanout-then-merge",
       "approval blocked wait reason",
       "已完成 P-050 / P-051",
-      "P-025 / P-031 需要外部条件或人工批准",
+      "P-025 需要安装或暴露 Cursor Agent CLI",
     ]) {
       assert.match(prd, new RegExp(marker), `missing v0.29 marker ${marker}`);
     }
@@ -520,7 +521,7 @@ describe("29 — Capability Gap complete product PRD", () => {
 
   test("records v0.30 workerTask output contract and retry closure", () => {
     for (const marker of [
-      "版本：v0.34",
+      "版本：v0.35",
       "P-040 \\| R-001/R-007 \\| workerTask 输出合同与返工策略[\\s\\S]*?\\| 已测通 \\|",
       "P-052 \\| R-001/R-007 \\| workerTask 输出 schema registry[\\s\\S]*?\\| 已测通 \\|",
       "P-053 \\| R-001/R-007 \\| workerTask 返工 runner[\\s\\S]*?\\| 已测通 \\|",
@@ -544,7 +545,7 @@ describe("29 — Capability Gap complete product PRD", () => {
       "schema 不合格",
       "Review 不接收无 owner/evidence/schema 的输出",
       "已完成 P-040 / P-052 / P-053",
-      "P-025 / P-031 需要外部条件或人工批准",
+      "P-025 需要安装或暴露 Cursor Agent CLI",
     ]) {
       assert.match(prd, new RegExp(marker), `missing v0.30 marker ${marker}`);
     }
@@ -552,7 +553,7 @@ describe("29 — Capability Gap complete product PRD", () => {
 
   test("records v0.31 feedback loop and Review Meta-Review gate closure", () => {
     for (const marker of [
-      "版本：v0.34",
+      "版本：v0.35",
       "P-041 \\| R-002/R-011 \\| 真实用户纠错 replay 池[\\s\\S]*?\\| 已测通 \\|",
       "P-042 \\| R-002/R-010 \\| 反馈入口与状态闭环[\\s\\S]*?\\| 已测通 \\|",
       "P-054 \\| R-008/R-011 \\| Review / Meta-Review 双层接收门[\\s\\S]*?\\| 已测通 \\|",
@@ -573,15 +574,15 @@ describe("29 — Capability Gap complete product PRD", () => {
       "缺 writeback boundary 置 blocked",
       "canonicalWritesWithoutApproval = 0",
       "已完成 P-041 / P-042 / P-054 / P-055 / P-056",
-      "P-025 / P-031 需要外部条件或人工批准",
+      "P-025 需要安装或暴露 Cursor Agent CLI",
     ]) {
       assert.match(prd, new RegExp(marker), `missing v0.31 marker ${marker}`);
     }
   });
 
-  test("records v0.34 product delivery bundle and reviewer calibration closure", () => {
+  test("records v0.35 product delivery bundle and reviewer calibration closure", () => {
     for (const marker of [
-      "版本：v0.34",
+      "版本：v0.35",
       "P-045 \\| R-010/R-011 \\| 产品交付包打包[\\s\\S]*?\\| 已测通 \\|",
       "P-046 \\| R-011 \\| reviewer 校准样本[\\s\\S]*?\\| 已测通 \\|",
       "P-059 \\| R-010/R-011 \\| 产品交付 bundle CLI[\\s\\S]*?\\| 已测通 \\|",
@@ -598,15 +599,15 @@ describe("29 — Capability Gap complete product PRD", () => {
       "privacyStatus = \"pass\"",
       "missingPitfalls = \\[\\]",
       "已完成 P-045 / P-046 / P-059 / P-060",
-      "P-025 / P-031 需要外部条件或人工批准",
+      "P-025 需要安装或暴露 Cursor Agent CLI",
     ]) {
-      assert.match(prd, new RegExp(marker), `missing v0.34 marker ${marker}`);
+      assert.match(prd, new RegExp(marker), `missing v0.35 marker ${marker}`);
     }
   });
 
-  test("records v0.34 live research execution, freshness, and innovation sandbox closure", () => {
+  test("records v0.35 live research execution, freshness, and innovation sandbox closure", () => {
     for (const marker of [
-      "版本：v0.34",
+      "版本：v0.35",
       "P-047 \\| R-007 \\| 真实联网研究执行层[\\s\\S]*?\\| 已测通 \\|",
       "P-048 \\| R-007/R-010 \\| 研究证据缓存与新鲜度策略[\\s\\S]*?\\| 已测通 \\|",
       "P-049 \\| R-007/R-009 \\| 能力创新候选沙箱[\\s\\S]*?\\| 已测通 \\|",
@@ -621,21 +622,26 @@ describe("29 — Capability Gap complete product PRD", () => {
       "2 个 innovationCandidatePacket",
       "canonicalWrites = 0",
       "已完成 P-047 / P-048 / P-049",
-      "P-025 / P-031 需要外部条件或人工批准",
+      "P-025 需要安装或暴露 Cursor Agent CLI",
     ]) {
-      assert.match(prd, new RegExp(marker), `missing v0.34 research marker ${marker}`);
+      assert.match(prd, new RegExp(marker), `missing v0.35 research marker ${marker}`);
     }
   });
 
-  test("records v0.34 remaining backlog closure without clearing true blockers", () => {
+  test("records v0.35 remaining backlog closure without clearing true blockers", () => {
     for (const marker of [
-      "版本：v0.34",
+      "版本：v0.35",
       "P-029 \\| R-010 \\| 跨 run 趋势服务化面板[\\s\\S]*?\\| 已测通 \\|",
       "npm run meta:trend:panel",
       ".meta-kim/state/default/run-trend-panel/latest.json",
       "5 类 filter",
       "4 个 panel",
       "P-032 \\| R-008 \\| OpenClaw batch live 稳定性改进[\\s\\S]*?\\| 已测通 \\|",
+      "P-031 \\| R-009 \\| 真实 Warden approved canonical writeback[\\s\\S]*?\\| 已测通 \\|",
+      "file-inventory-skill-approved-writeback",
+      "warden-approved-file-inventory-skill-2026-06-05",
+      "canonicalWrites = 1",
+      "canonical/skills/same-set-reusable-flow-for-project-file-inventor/SKILL.md",
       "npm run meta:openclaw:batch-stability",
       "expectedFailureClass = \"timeout\"",
       "releaseGradeCandidate = false",
@@ -649,10 +655,11 @@ describe("29 — Capability Gap complete product PRD", () => {
       "npm run meta:runtime:probe-playbook",
       "至少 12 个 runtime/environment variant",
       "18. 已完成 P-029 / P-032 / P-043 / P-044 / P-057 / P-058",
-      "P-025 / P-031 需要外部条件或人工批准",
+      "19. 已完成 P-031",
+      "P-025 需要安装或暴露 Cursor Agent CLI",
       "P-024 解阻前不能宣称全 runtime release-grade 完成",
     ]) {
-      assert.match(prd, new RegExp(marker), `missing v0.34 remaining backlog marker ${marker}`);
+      assert.match(prd, new RegExp(marker), `missing v0.35 remaining backlog marker ${marker}`);
     }
   });
 
