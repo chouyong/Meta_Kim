@@ -11,6 +11,7 @@ import {
   decideCapabilityGap,
   openRunStateStore,
 } from "./capability-gap-mvp.mjs";
+import { runMetaTheoryGovernedExecution } from "./run-meta-theory-governed-execution.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..");
@@ -40,6 +41,12 @@ const GRAPH_CONTRACT_PATH = path.join(
   "config",
   "contracts",
   "capability-gap-executable-graph-contract.json"
+);
+const AI_COURSE_STANDARDS_PATH = path.join(
+  REPO_ROOT,
+  "config",
+  "contracts",
+  "ai-course-product-standards.json"
 );
 const SOURCE_LEAK_PATTERN = new RegExp(
   [
@@ -239,6 +246,10 @@ function loadGraphContract() {
   return JSON.parse(readFileSync(GRAPH_CONTRACT_PATH, "utf8"));
 }
 
+function loadAiCourseStandards() {
+  return JSON.parse(readFileSync(AI_COURSE_STANDARDS_PATH, "utf8"));
+}
+
 function validateGraphContract(graphContract, results = []) {
   const branchTargets = new Set(graphContract.conditionalEdges.map((edge) => edge.to));
   const nodeIds = new Set(graphContract.nodes.map((node) => node.id));
@@ -281,6 +292,110 @@ function validateGraphContract(graphContract, results = []) {
     missingBranchTargets,
     databaseAsPlannerCount: 0,
     directCanonicalWriteFromGraphNode: 0,
+  };
+}
+
+async function buildGovernedExecutionEvidence() {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "meta-kim-governed-product-"));
+  try {
+    const smokeRun = await runMetaTheoryGovernedExecution({
+      task: [
+        "同一套 PRD review standard 需要 skill。",
+        "长期 test coverage owner 需要 agent。",
+        "release summary JSON 需要脚本。",
+        "内部知识库需要 MCP provider 边界。",
+      ].join("\n"),
+      runId: "complete-product-governed-smoke",
+      stateDir: path.join(tempDir, "smoke"),
+      dbPath: path.join(tempDir, "smoke.sqlite"),
+    });
+    const approvedRun = await runMetaTheoryGovernedExecution({
+      task: "同一套 PRD review standard 需要 skill。",
+      runId: "complete-product-warden-approved-proof",
+      stateDir: path.join(tempDir, "approved"),
+      dbPath: path.join(tempDir, "approved.sqlite"),
+      canonicalRoot: path.join(tempDir, "canonical"),
+      approvalEvidence: "complete-product-warden-approval-test",
+      applyWriteback: true,
+    });
+    return {
+      status:
+        smokeRun.defaultRuntimePath.status === "pass" &&
+        smokeRun.runtimeProjectionEvidence.status === "pass" &&
+        approvedRun.wardenWritebackFlow.status === "approved-for-writeback" &&
+        smokeRun.runReport.status === "pass"
+          ? "pass"
+          : "fail",
+      defaultRuntimePath: smokeRun.defaultRuntimePath,
+      runtimeProjectionEvidence: smokeRun.runtimeProjectionEvidence,
+      approvedWriteback: approvedRun.wardenWritebackFlow,
+      runReport: smokeRun.runReport,
+      noRealCanonicalPollution: true,
+    };
+  } finally {
+    await fs.rm(tempDir, { recursive: true, force: true });
+  }
+}
+
+function buildAiCourseStandardsEvidence({
+  standardsContract,
+  productArtifacts,
+  scorecards,
+  graphValidation,
+  requirementChecks,
+  quantitativeChecks,
+  feedbackReplay,
+  analytics,
+  evidence,
+}) {
+  const evidenceByStandard = {
+    design:
+      productArtifacts.every(
+        (artifact) =>
+          artifact.criticalSummary &&
+          artifact.fetchEvidence &&
+          artifact.gapDecision &&
+          artifact.decisionOutput
+      ) && graphValidation.executedBranches.length > 0,
+    execution:
+      productArtifacts.every((artifact) => artifact.decisionOutput) &&
+      scorecards.every(
+        (scorecard) =>
+          scorecard.dimensions.boundary_fit &&
+          scorecard.dimensions.reuse_or_run_scope_fit
+      ),
+    acceptance:
+      requirementChecks.length >= 10 &&
+      quantitativeChecks.length >= 8 &&
+      [...requirementChecks, ...quantitativeChecks].every(
+        (item) => item.owner && item.returnToStage && typeof item.passed === "boolean"
+      ),
+    feedback:
+      feedbackReplay.cases.length >= 1 &&
+      feedbackReplay.correctionInfluence.decisionChangedByCorrection === true &&
+      feedbackReplay.promotionCandidates.some(
+        (item) =>
+          item.status === "promotion_review_candidate" &&
+          item.noAutomaticCanonicalWrite === true
+      ),
+    deliverables:
+      Boolean(evidence.files.json) &&
+      Boolean(evidence.files.markdown) &&
+      Boolean(evidence.files.sqlite) &&
+      productArtifacts.length > 0 &&
+      analytics.metricCount >= 5 &&
+      graphValidation.status === "pass",
+  };
+  const standards = standardsContract.standards.map((standard) => ({
+    ...standard,
+    status: evidenceByStandard[standard.id] ? "pass" : "fail",
+  }));
+  return {
+    schemaVersion: standardsContract.schemaVersion,
+    contractId: standardsContract.contractId,
+    audience: standardsContract.audience,
+    status: standards.every((standard) => standard.status === "pass") ? "pass" : "fail",
+    standards,
   };
 }
 
@@ -509,6 +624,7 @@ function buildAcceptanceChecks({
   analytics,
   feedbackReplay,
   productArtifacts,
+  governedExecutionEvidence,
   requireFullFixtureSet,
 }) {
   const decisions = results.map((result) => result.gapDecision.decision);
@@ -595,6 +711,45 @@ function buildAcceptanceChecks({
       `inputs=${results.length}, perDecision=${JSON.stringify(decisionCounts)}`
     ),
   ];
+  checks.push(
+    check(
+      "R-007",
+      "默认 meta-theory orchestration runtime path",
+      governedExecutionEvidence.defaultRuntimePath.status === "pass" &&
+        governedExecutionEvidence.defaultRuntimePath.entry === "meta:theory:run" &&
+        governedExecutionEvidence.defaultRuntimePath.workerTaskPackets.length >= 4,
+      `entry=${governedExecutionEvidence.defaultRuntimePath.entry}, workers=${governedExecutionEvidence.defaultRuntimePath.workerTaskPackets.length}`
+    ),
+    check(
+      "R-008",
+      "跨 runtime 真实投影验证",
+      governedExecutionEvidence.runtimeProjectionEvidence.status === "pass" &&
+        governedExecutionEvidence.runtimeProjectionEvidence.results.length === 4,
+      `runtimes=${governedExecutionEvidence.runtimeProjectionEvidence.results
+        .map((item) => `${item.runtime}:${item.status}`)
+        .join(",")}`
+    ),
+    check(
+      "R-009",
+      "Warden 审批后的真实长期 writeback 流程",
+      governedExecutionEvidence.approvedWriteback.status === "approved-for-writeback" &&
+        governedExecutionEvidence.approvedWriteback.candidates.some(
+          (item) =>
+            item.writebackDecision === "approved-for-writeback" &&
+            item.verificationResult.status === "pass"
+        ) &&
+        governedExecutionEvidence.noRealCanonicalPollution === true,
+      `status=${governedExecutionEvidence.approvedWriteback.status}, noRealCanonicalPollution=${governedExecutionEvidence.noRealCanonicalPollution}`
+    ),
+    check(
+      "R-010",
+      "用户可读 UI / 报告层",
+      governedExecutionEvidence.runReport.status === "pass" &&
+        governedExecutionEvidence.runReport.sections.includes("判定摘要") &&
+        governedExecutionEvidence.runReport.sections.includes("长期能力升级建议"),
+      `sections=${governedExecutionEvidence.runReport.sections.join(",")}`
+    )
+  );
   const checksAreAuditable = checks.every(
     (item) =>
       typeof item.passed === "boolean" &&
@@ -736,6 +891,15 @@ function renderMarkdown(report) {
         `| ${item.id} | ${item.label} | ${item.target} | ${item.evidence} | ${item.passed ? "pass" : "fail"} |`
     ),
     "",
+    "## AI 课可理解标准",
+    "",
+    "| 维度 | 人话问题 | 通过标准 | 结果 |",
+    "|---|---|---|---|",
+    ...report.aiCourseStandards.standards.map(
+      (item) =>
+        `| ${item.label} | ${item.plainLanguageQuestion} | ${item.passStandard} | ${item.status} |`
+    ),
+    "",
     "## 每条输入",
     "",
     "| ID | Decision | Output | Review | Verify | Evolution |",
@@ -793,6 +957,21 @@ export async function runCapabilityGapCompleteProduct({
   const productArtifacts = results.map((result, index) =>
     makeProductArtifact(result, scorecards[index])
   );
+  const governedExecutionEvidence = await buildGovernedExecutionEvidence();
+  const evidenceFiles = {
+    json: relative(jsonPath),
+    markdown: relative(markdownPath),
+    sqlite: relative(dbPath),
+    graphContract: relative(GRAPH_CONTRACT_PATH),
+    aiCourseStandards: relative(AI_COURSE_STANDARDS_PATH),
+  };
+  const evidenceCommands = [
+    "node scripts/capability-gap-mvp.mjs --fixture <temp-fixture> --db <state-sqlite> --json",
+    "npm run meta:gap:complete-product",
+    "npm run meta:gap:complete-product:acceptance",
+    "npm run meta:theory:run -- <task>",
+    "npm run meta:theory:report -- <runId>",
+  ];
   const requirementChecks = buildAcceptanceChecks({
     results,
     scorecards,
@@ -800,6 +979,7 @@ export async function runCapabilityGapCompleteProduct({
     analytics,
     feedbackReplay,
     productArtifacts,
+    governedExecutionEvidence,
     requireFullFixtureSet,
   });
   const quantitativeChecks = buildQuantitativeChecks({
@@ -811,6 +991,32 @@ export async function runCapabilityGapCompleteProduct({
     expectedDecisions,
     requireFullFixtureSet,
   });
+  const finalAiCourseStandards = buildAiCourseStandardsEvidence({
+    standardsContract: loadAiCourseStandards(),
+    productArtifacts,
+    scorecards,
+    graphValidation,
+    requirementChecks,
+    quantitativeChecks,
+    feedbackReplay,
+    analytics,
+    evidence: {
+      commands: evidenceCommands,
+      files: evidenceFiles,
+    },
+  });
+  requirementChecks.push(
+    check(
+      "R-011",
+      "AI 课可理解产品标准",
+      finalAiCourseStandards.status === "pass" &&
+        finalAiCourseStandards.standards.length === 5 &&
+        finalAiCourseStandards.standards.every((standard) => standard.status === "pass"),
+      `standards=${finalAiCourseStandards.standards
+        .map((standard) => `${standard.id}:${standard.status}`)
+        .join(",")}`
+    )
+  );
   const status = statusFrom([...requirementChecks, ...quantitativeChecks]);
   const decisionsCovered = new Set(results.map((result) => result.gapDecision.decision)).size;
   const report = {
@@ -844,21 +1050,14 @@ export async function runCapabilityGapCompleteProduct({
     scorecards,
     feedbackReplay,
     graphValidation,
+    governedExecutionEvidence,
     analytics,
+    aiCourseStandards: finalAiCourseStandards,
     requirementChecks,
     quantitativeChecks,
     evidence: {
-      commands: [
-        "node scripts/capability-gap-mvp.mjs --fixture <temp-fixture> --db <state-sqlite> --json",
-        "npm run meta:gap:complete-product",
-        "npm run meta:gap:complete-product:acceptance",
-      ],
-      files: {
-        json: relative(jsonPath),
-        markdown: relative(markdownPath),
-        sqlite: relative(dbPath),
-        graphContract: relative(GRAPH_CONTRACT_PATH),
-      },
+      commands: evidenceCommands,
+      files: evidenceFiles,
     },
   };
 

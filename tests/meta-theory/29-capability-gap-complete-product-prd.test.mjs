@@ -12,12 +12,12 @@ const prd = readFileSync(
 );
 
 describe("29 — Capability Gap complete product PRD", () => {
-  test("marks current completion state without claiming complete product delivery", () => {
+  test("marks local complete-product state with live/native release boundary", () => {
     assert.match(prd, /## 当前完成状态/);
     assert.match(prd, /已测通/);
-    assert.match(prd, /部分完成/);
-    assert.match(prd, /未完成/);
-    assert.match(prd, /还不能宣称“完整产品已经可用于万物制作”/);
+    assert.match(prd, /Complete product MVP 已经在本地证明/);
+    assert.match(prd, /还不能宣称“发布级 live\/native 全 runtime 完成”/);
+    assert.match(prd, /Cursor \/ OpenClaw 仍是 smoke 证据/);
   });
 
   test("defines remaining complete-product scope with measurable acceptance", () => {
@@ -32,6 +32,7 @@ describe("29 — Capability Gap complete product PRD", () => {
       "R-008 跨 runtime 真实投影验证",
       "R-009 Warden 审批后的真实长期 writeback 流程",
       "R-010 用户可读 UI / 报告层",
+      "R-011 AI 课可理解产品标准",
       "完整产品 Definition of Done",
     ]) {
       assert.match(prd, new RegExp(section), `missing ${section}`);
@@ -48,6 +49,7 @@ describe("29 — Capability Gap complete product PRD", () => {
       "fake owner 0",
       "自动写 canonical 0",
       "未授权外部写动作 0",
+      "requiredEvidence",
     ]) {
       assert.match(prd, new RegExp(metric), `missing metric ${metric}`);
     }
@@ -79,13 +81,34 @@ describe("29 — Capability Gap complete product PRD", () => {
       "Warden 审批后的真实长期 writeback 流程",
       "T-004",
       "用户可读 UI / 报告层",
+      "T-005",
+      "AI 课可理解产品标准",
       "Definition of Done",
       "orchestrationTaskBoardPacket",
       "workerTaskPackets",
       "approved-for-writeback",
       "按 runId 查看",
+      "设计、执行、验收、反馈、交付内容",
     ]) {
       assert.match(prd, new RegExp(marker), `missing target marker ${marker}`);
+    }
+  });
+
+  test("defines AI-course understandable standards for product outputs", () => {
+    for (const marker of [
+      "AI 课可理解产品标准",
+      "设计标准",
+      "执行标准",
+      "验收标准",
+      "反馈标准",
+      "交付内容标准",
+      "人话问题",
+      "通过标准",
+      "失败标准",
+      "requiredEvidence",
+      "config/contracts/ai-course-product-standards.json",
+    ]) {
+      assert.match(prd, new RegExp(marker), `missing AI-course standard ${marker}`);
     }
   });
 

@@ -46,7 +46,19 @@ describe("30 — Capability Gap complete product MVP", () => {
         COMPLETE_PRODUCT_INPUTS.map((item) => item.expectedDecision)
       );
 
-      for (const id of ["R-001", "R-002", "R-003", "R-004", "R-005", "R-006"]) {
+      for (const id of [
+        "R-001",
+        "R-002",
+        "R-003",
+        "R-004",
+        "R-005",
+        "R-006",
+        "R-007",
+        "R-008",
+        "R-009",
+        "R-010",
+        "R-011",
+      ]) {
         const check = report.requirementChecks.find((item) => item.id === id);
         assert.ok(check, `${id} check missing`);
         assert.equal(check.passed, true, `${id} must pass`);
@@ -72,6 +84,17 @@ describe("30 — Capability Gap complete product MVP", () => {
       assert.equal(report.graphValidation.branchExecutionCoverage, 6);
       assert.equal(report.graphValidation.databaseAsPlannerCount, 0);
       assert.equal(report.graphValidation.directCanonicalWriteFromGraphNode, 0);
+      assert.equal(report.governedExecutionEvidence.status, "pass");
+      assert.equal(
+        report.governedExecutionEvidence.defaultRuntimePath.entry,
+        "meta:theory:run"
+      );
+      assert.equal(report.governedExecutionEvidence.runtimeProjectionEvidence.results.length, 4);
+      assert.equal(
+        report.governedExecutionEvidence.approvedWriteback.status,
+        "approved-for-writeback"
+      );
+      assert.equal(report.governedExecutionEvidence.noRealCanonicalPollution, true);
 
       assert.equal(report.feedbackReplay.cases.length, 6);
       assert.equal(report.feedbackReplay.reductionPercent, 30);
@@ -109,6 +132,20 @@ describe("30 — Capability Gap complete product MVP", () => {
         )
       );
 
+      assert.equal(report.aiCourseStandards.status, "pass");
+      assert.equal(report.aiCourseStandards.audience, "AI course learner and reviewer");
+      assert.deepEqual(
+        report.aiCourseStandards.standards.map((standard) => standard.id),
+        ["design", "execution", "acceptance", "feedback", "deliverables"]
+      );
+      for (const standard of report.aiCourseStandards.standards) {
+        assert.equal(standard.status, "pass", `${standard.id} standard must pass`);
+        assert.ok(standard.plainLanguageQuestion);
+        assert.ok(standard.passStandard);
+        assert.ok(standard.failStandard);
+        assert.ok(standard.requiredEvidence.length > 0);
+      }
+
       const r006 = report.requirementChecks.find((item) => item.id === "R-006");
       assert.match(r006.evidence, /auditableChecks=true/);
       assert.doesNotMatch(r006.evidence, /本命令输出 status/);
@@ -133,6 +170,13 @@ describe("30 — Capability Gap complete product MVP", () => {
       const markdown = await readFile(markdownPath, "utf8");
       assert.match(markdown, /Capability Gap Complete Product MVP Report/);
       assert.match(markdown, /R-006/);
+      assert.match(markdown, /R-011/);
+      assert.match(markdown, /AI 课可理解标准/);
+      assert.match(markdown, /设计标准/);
+      assert.match(markdown, /执行标准/);
+      assert.match(markdown, /验收标准/);
+      assert.match(markdown, /反馈标准/);
+      assert.match(markdown, /交付内容标准/);
       assert.match(markdown, /Analytics/);
     } finally {
       await rm(tempDir, { recursive: true, force: true });
@@ -161,6 +205,7 @@ describe("30 — Capability Gap complete product MVP", () => {
       assert.equal(report.graphValidation.branchExecutionCoverage, 1);
       assert.equal(report.summary.frPassRate, 1);
       assert.equal(report.summary.quantitativePassRate, 1);
+      assert.equal(report.aiCourseStandards.status, "pass");
 
       for (const targetPath of [jsonPath, markdownPath, dbPath]) {
         const file = await stat(targetPath);
