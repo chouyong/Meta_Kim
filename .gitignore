@@ -9,6 +9,7 @@ canonical/skills/commit-review/
 
 # ========== Runtime Projections (Generated from canonical/) ==========
 # These are DERIVED assets, NOT source. Edit canonical/ instead.
+/.vscode/
 /.claude/
 /.mcp.json
 /.codex/
