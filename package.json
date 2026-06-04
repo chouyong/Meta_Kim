@@ -123,7 +123,7 @@
     "scripts/**/*.mjs",
     "bin/",
     "config/",
-    "docs/",
+    "docs/images/",
     "setup.mjs",
     "install-deps.sh",
     "CHANGELOG.md",
