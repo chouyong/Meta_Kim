@@ -402,6 +402,52 @@ async function probeClisOnly() {
   process.exitCode = allFound ? 0 : 1;
 }
 
+function shellQuoteForBash(value) {
+  return `'${String(value ?? "").replaceAll("'", "'\"'\"'")}'`;
+}
+
+function windowsPathToWslPath(filePath) {
+  const normalized = String(filePath ?? "").replaceAll("\\", "/");
+  const match = /^([A-Za-z]):\/(.*)$/.exec(normalized);
+  if (!match) {
+    return normalized;
+  }
+  return `/mnt/${match[1].toLowerCase()}/${match[2]}`;
+}
+
+function shouldProbeCursorWsl() {
+  return process.platform === "win32" && process.env.META_KIM_CURSOR_SKIP_WSL !== "1";
+}
+
+async function resolveWslCursorAgentCandidate() {
+  if (!shouldProbeCursorWsl()) {
+    throw new Error("Cursor WSL probe skipped by host policy or non-Windows platform.");
+  }
+  const probe = await runCommandWithIgnoredStdin(
+    "wsl.exe",
+    ["bash", "-lc", "command -v cursor-agent"],
+    {
+      cwd: repoRoot,
+      timeout: 30_000,
+      env: { ...process.env, NO_COLOR: "1" },
+    },
+  );
+  if (!probe.stdout.trim()) {
+    throw new Error("cursor-agent was not found on the WSL PATH.");
+  }
+  const wslRepoRoot = windowsPathToWslPath(repoRoot);
+  return {
+    file: "wsl.exe",
+    toArgs: (args) => [
+      "bash",
+      "-lc",
+      `cd ${shellQuoteForBash(wslRepoRoot)} && cursor-agent ${args
+        .map(shellQuoteForBash)
+        .join(" ")}`,
+    ],
+  };
+}
+
 let resolvedClaudeCmdPromise = null;
 function getResolvedClaudeCommand() {
   if (!resolvedClaudeCmdPromise) {
@@ -468,6 +514,21 @@ async function getResolvedCursorAgentCandidates() {
       } catch (error) {
         candidates.push({
           id: "cursor-agent-subcommand",
+          unavailable: true,
+          error: error.message,
+        });
+      }
+
+      try {
+        const wsl = await resolveWslCursorAgentCandidate();
+        candidates.push({
+          id: "cursor-agent-wsl",
+          command: wsl,
+          toArgs: wsl.toArgs,
+        });
+      } catch (error) {
+        candidates.push({
+          id: "cursor-agent-wsl",
           unavailable: true,
           error: error.message,
         });
@@ -1967,7 +2028,8 @@ function buildRuntimeEvidenceRecord(runtimeName, report, mode) {
       RUNTIME_EVIDENCE_COMMANDS[runtimeName]?.[mode] ??
       `node scripts/eval-meta-agents.mjs --runtime=${runtimeName}`,
     artifact: `report.${runtimeName}`,
-    remainingAction: runtimeRemainingAction(runtimeName, failureClass, mode),
+    remainingAction:
+      report?.remainingAction ?? runtimeRemainingAction(runtimeName, failureClass, mode),
     strictReleasePass,
     blockedFromRelease:
       !strictReleasePass ||
@@ -3326,7 +3388,7 @@ async function runCursorLive() {
         candidates: harnessProbe.probes,
       },
       remainingAction:
-        "Install or expose Cursor Agent CLI (`cursor-agent`) or a `cursor agent` subcommand with -p/--print and --output-format support, authenticate it, then rerun `node scripts/eval-meta-agents.mjs --runtime=cursor --live`.",
+        "Install or expose Cursor Agent CLI (`cursor-agent`) on the host or official Windows WSL path, or expose a `cursor agent` subcommand with -p/--print and --output-format support, authenticate it, then rerun `node scripts/eval-meta-agents.mjs --runtime=cursor --live`.",
       smoke,
     };
   }

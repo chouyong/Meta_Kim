@@ -19,6 +19,11 @@
       "source": "Cursor CLI parameters",
       "url": "https://docs.cursor.com/en/cli/reference/parameters",
       "claim": "Cursor Agent CLI documents -p/--print and --output-format json or stream-json."
+    },
+    {
+      "source": "Cursor CLI installation",
+      "url": "https://docs.cursor.com/en/cli/installation",
+      "claim": "Cursor Agent CLI installation is documented for macOS, Linux, and Windows WSL, and verifies with cursor-agent --version."
     }
   ],
   "nativeHarnessCandidates": [
@@ -33,6 +38,13 @@
       "command": "cursor agent",
       "requiredHelpPatterns": ["--print", "--output-format"],
       "runArgs": ["-p", "--output-format", "json"]
+    },
+    {
+      "id": "cursor-agent-wsl",
+      "command": "wsl.exe bash -lc 'cursor-agent'",
+      "requiredHelpPatterns": ["--print", "--output-format"],
+      "runArgs": ["-p", "--output-format", "json"],
+      "hostBoundary": "Windows host invoking the official Windows WSL Cursor Agent CLI installation path."
     }
   ],
   "livePromptContract": {
@@ -64,6 +76,7 @@
   ],
   "blockedCriteria": [
     "Only the Cursor IDE launcher is present.",
+    "WSL is present but cursor-agent is not installed or not on the WSL PATH.",
     "The local command accepts agent arguments but does not expose -p/--print and --output-format.",
     "The local command opens UI, emits only launcher help, or returns no parseable agent JSON.",
     "Authentication is missing or the CLI requests interactive login.",

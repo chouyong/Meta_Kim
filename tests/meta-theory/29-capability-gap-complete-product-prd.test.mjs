@@ -228,9 +228,8 @@ describe("29 — Capability Gap complete product PRD", () => {
     }
   });
 
-  test("records v0.19 all meta agents shard evidence with only Cursor native still blocked", () => {
+  test("records all meta agents shard evidence with only Cursor native still blocked", () => {
     for (const marker of [
-      "版本：v0.19",
       "P-006 / P-007 全 meta agents shard live evidence",
       "仍未完成且不能对 GitHub 宣称完成：P-024 Cursor native live pass 解阻",
       "Claude 和 OpenClaw 全九个 meta agents shard live evidence 已闭合",
@@ -246,6 +245,55 @@ describe("29 — Capability Gap complete product PRD", () => {
       "无 OpenClaw shard 剩余动作；保留批量 timeout 作为稳定性改进信号",
     ]) {
       assert.match(prd, new RegExp(marker), `missing v0.19 runtime shard marker ${marker}`);
+    }
+  });
+
+  test("records v0.20 Cursor WSL candidate while preserving native-live blocker", () => {
+    for (const marker of [
+      "P-024 官方 WSL candidate probe",
+      "官方 Windows WSL `cursor-agent`",
+      "cursor-agent-wsl",
+      "WSL Ubuntu 存在但 `command -v cursor-agent` 为空",
+      "Windows native、Cursor IDE subcommand、官方 Windows WSL `cursor-agent` 三个候选",
+      "Cursor CLI installation 文档声明 macOS / Linux / Windows WSL 可用 `cursor-agent --version` 验证",
+      "failureClass = \"native_harness_missing\"",
+      "不能对 GitHub 宣称完成：P-024 Cursor native live pass 解阻",
+    ]) {
+      assert.match(prd, new RegExp(marker), `missing v0.20 Cursor marker ${marker}`);
+    }
+  });
+
+  test("records expanded unfinished parallel backlog instead of collapsing to one blocker", () => {
+    for (const marker of [
+      "版本：v0.21",
+      "未完成但可并行推进的扩展 / 解阻队列",
+      "P-025",
+      "Cursor WSL live 安装与只读验收子窗口",
+      "P-026",
+      "Cursor 官方文档 source-backed refresh",
+      "P-027",
+      "Cursor native success fixture",
+      "P-028",
+      "GitHub 差距自动报告",
+      "P-029",
+      "跨 run 趋势服务化面板",
+      "P-030",
+      "AI 课真实 reviewer 样本回放",
+      "P-031",
+      "真实 Warden approved canonical writeback",
+      "P-032",
+      "OpenClaw batch live 稳定性改进",
+      "P-033",
+      "runtime live shard 自动化矩阵",
+      "P-034",
+      "子窗口验收包模板",
+      "P-035",
+      "真实复杂输入扩展集",
+      "P-036",
+      "PRD 状态完整性守卫",
+      "这些任务不会让当前 MVP 重新变成未完成",
+    ]) {
+      assert.match(prd, new RegExp(marker), `missing expanded backlog marker ${marker}`);
     }
   });
 

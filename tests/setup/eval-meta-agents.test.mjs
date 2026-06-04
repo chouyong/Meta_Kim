@@ -241,6 +241,10 @@ describe("eval-meta-agents Claude smoke", () => {
     assert.match(source, /function cursorLivePayloadOk/);
     assert.match(source, /META_KIM_CURSOR_AGENT_BIN/);
     assert.match(source, /META_KIM_CURSOR_BIN/);
+    assert.match(source, /cursor-agent-wsl/);
+    assert.match(source, /wsl\.exe/);
+    assert.match(source, /function windowsPathToWslPath/);
+    assert.match(source, /META_KIM_CURSOR_SKIP_WSL/);
     assert.match(source, /cursor-live-turn-harness-contract\.json/);
     assert.match(source, /"skills",\s*"meta-theory"/);
     assert.match(source, /"hooks\.json"/);
@@ -261,6 +265,9 @@ describe("eval-meta-agents Claude smoke", () => {
         item.requiredHelpPatterns.includes("--output-format"),
       ),
     );
+    assert.ok(
+      contract.nativeHarnessCandidates.some((item) => item.id === "cursor-agent-wsl"),
+    );
   });
 
   test("Cursor live with missing native agent reports structured blocked boundary", () => {
@@ -273,6 +280,7 @@ describe("eval-meta-agents Claude smoke", () => {
           ...process.env,
           META_KIM_CURSOR_AGENT_BIN: path.join(repoRoot, ".missing-cursor-agent.exe"),
           META_KIM_CURSOR_BIN: path.join(repoRoot, ".missing-cursor.exe"),
+          META_KIM_CURSOR_SKIP_WSL: "1",
           NO_COLOR: "1",
         },
         encoding: "utf8",
@@ -294,6 +302,10 @@ describe("eval-meta-agents Claude smoke", () => {
       "native_harness_missing",
     );
     assert.equal(report.runtimeEvidencePacket.records[0].evidenceKind, "unsupported");
+    assert.match(
+      report.runtimeEvidencePacket.records[0].remainingAction,
+      /Cursor Agent CLI \(`cursor-agent`\)/,
+    );
     assert.equal(report.summary.releaseGrade, false);
   });
 
