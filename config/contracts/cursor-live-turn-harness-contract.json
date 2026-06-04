@@ -4,6 +4,8 @@
   "reviewOwner": "meta-prism",
   "verificationOwner": "verify",
   "purpose": "Define when Cursor runtime evidence may be promoted from projection smoke to native live-turn evidence.",
+  "officialEvidenceRefreshedAt": "2026-06-04",
+  "officialEvidenceRefreshOwner": "meta-scout",
   "officialEvidence": [
     {
       "source": "Cursor CLI overview",
@@ -19,6 +21,11 @@
       "source": "Cursor CLI parameters",
       "url": "https://docs.cursor.com/en/cli/reference/parameters",
       "claim": "Cursor Agent CLI documents -p/--print and --output-format json or stream-json."
+    },
+    {
+      "source": "Cursor CLI output format",
+      "url": "https://docs.cursor.com/en/cli/reference/output-format",
+      "claim": "Cursor Agent CLI emits a single JSON object for --output-format json on successful --print runs, and failures exit non-zero without well-formed JSON."
     },
     {
       "source": "Cursor CLI installation",

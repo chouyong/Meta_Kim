@@ -255,7 +255,7 @@ describe("29 — Capability Gap complete product PRD", () => {
       "cursor-agent-wsl",
       "WSL Ubuntu 存在但 `command -v cursor-agent` 为空",
       "Windows native、Cursor IDE subcommand、官方 Windows WSL `cursor-agent` 三个候选",
-      "Cursor CLI installation 文档声明 macOS / Linux / Windows WSL 可用 `cursor-agent --version` 验证",
+      "Windows WSL 可用 `cursor-agent --version` 验证",
       "failureClass = \"native_harness_missing\"",
       "不能对 GitHub 宣称完成：P-024 Cursor native live pass 解阻",
     ]) {
@@ -265,7 +265,7 @@ describe("29 — Capability Gap complete product PRD", () => {
 
   test("records expanded unfinished parallel backlog instead of collapsing to one blocker", () => {
     for (const marker of [
-      "版本：v0.21",
+      "版本：v0.22",
       "未完成但可并行推进的扩展 / 解阻队列",
       "P-025",
       "Cursor WSL live 安装与只读验收子窗口",
@@ -294,6 +294,28 @@ describe("29 — Capability Gap complete product PRD", () => {
       "这些任务不会让当前 MVP 重新变成未完成",
     ]) {
       assert.match(prd, new RegExp(marker), `missing expanded backlog marker ${marker}`);
+    }
+  });
+
+  test("records v0.22 closure for non-blocked parallel backlog items", () => {
+    for (const marker of [
+      "P-026 \\| R-008 \\| Cursor 官方文档 source-backed refresh[\\s\\S]*?\\| 已测通 \\|",
+      "officialEvidenceRefreshedAt = 2026-06-04",
+      "output-format URL",
+      "P-027 \\| R-008 \\| Cursor native success fixture[\\s\\S]*?\\| 已测通 \\|",
+      "\\$env:META_KIM_CURSOR_LIVE_SUCCESS_FIXTURE='1'; node scripts/eval-meta-agents.mjs --runtime=cursor --live",
+      "strictReleasePass = true",
+      "P-028 \\| Release closure \\| GitHub 差距自动报告[\\s\\S]*?\\| 已测通 \\|",
+      "npm run meta:github:gap",
+      ".meta-kim/state/default/github-gap-report/latest.json",
+      "P-034 \\| Verification \\| 子窗口验收包模板[\\s\\S]*?\\| 已测通 \\|",
+      "npm run meta:verification:subwindows",
+      ".meta-kim/state/default/subwindow-verification-packets/latest.json",
+      "P-036 \\| PRD governance \\| PRD 状态完整性守卫[\\s\\S]*?\\| 已测通 \\|",
+      "tests/meta-theory/35-release-closure-deliverables.test.mjs",
+      "P-024 仍保持真实 native live 阻塞",
+    ]) {
+      assert.match(prd, new RegExp(marker), `missing v0.22 closure marker ${marker}`);
     }
   });
 

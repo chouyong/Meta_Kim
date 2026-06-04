@@ -78,6 +78,8 @@
     "meta:theory:run": "node scripts/run-meta-theory-governed-execution.mjs",
     "meta:theory:report": "node scripts/run-meta-theory-governed-execution.mjs --read",
     "meta:theory:deliverables": "node scripts/generate-meta-theory-run-deliverables.mjs",
+    "meta:github:gap": "node scripts/generate-github-gap-report.mjs",
+    "meta:verification:subwindows": "node scripts/generate-subwindow-verification-packets.mjs",
     "meta:agent-design:eval": "node scripts/evaluate-agent-design-quality.mjs",
     "meta:agent-process:mvp": "node scripts/run-governance-agent-process-mvp.mjs",
     "meta:core:mvp:acceptance": "node scripts/run-core-mvp-acceptance.mjs",

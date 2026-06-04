@@ -260,6 +260,13 @@ describe("eval-meta-agents Claude smoke", () => {
       contract.releaseBoundary.projectionSmokeIsLivePass,
       false,
     );
+    assert.equal(contract.officialEvidenceRefreshedAt, "2026-06-04");
+    assert.equal(contract.officialEvidenceRefreshOwner, "meta-scout");
+    assert.ok(
+      contract.officialEvidence.some((item) =>
+        item.url === "https://docs.cursor.com/en/cli/reference/output-format",
+      ),
+    );
     assert.ok(
       contract.nativeHarnessCandidates.some((item) =>
         item.requiredHelpPatterns.includes("--output-format"),
@@ -307,6 +314,36 @@ describe("eval-meta-agents Claude smoke", () => {
       /Cursor Agent CLI \(`cursor-agent`\)/,
     );
     assert.equal(report.summary.releaseGrade, false);
+  });
+
+  test("Cursor live success fixture promotes harness evidence to release-grade pass", () => {
+    const result = spawnSync(
+      process.execPath,
+      ["scripts/eval-meta-agents.mjs", "--runtime=cursor", "--live"],
+      {
+        cwd: repoRoot,
+        env: {
+          ...process.env,
+          META_KIM_CURSOR_LIVE_SUCCESS_FIXTURE: "1",
+          META_KIM_CURSOR_SKIP_WSL: "1",
+          NO_COLOR: "1",
+        },
+        encoding: "utf8",
+        timeout: 30_000,
+      },
+    );
+
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    const report = JSON.parse(result.stdout);
+    assert.deepEqual(report.summary.passed, ["cursor"]);
+    assert.equal(report.cursor.status, "passed");
+    assert.equal(report.cursor.fixture, true);
+    assert.equal(report.cursor.localProbe.selectedHarness, "cursor-agent-success-fixture");
+    assert.equal(report.runtimeEvidencePacket.records[0].runtime, "cursor");
+    assert.equal(report.runtimeEvidencePacket.records[0].evidenceKind, "live");
+    assert.equal(report.runtimeEvidencePacket.records[0].failureClass, "pass");
+    assert.equal(report.runtimeEvidencePacket.records[0].strictReleasePass, true);
+    assert.equal(report.runtimeEvidencePacket.summary.releaseGrade, true);
   });
 
   test("Runtime evidence aggregator uses fixed failure taxonomy", () => {

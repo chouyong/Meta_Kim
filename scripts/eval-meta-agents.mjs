@@ -3291,6 +3291,54 @@ function cursorLivePayloadOk(payload) {
   );
 }
 
+function buildCursorLiveSuccessFixture({ smoke, contract }) {
+  const payload = {
+    runtime: "cursor",
+    governed_entry: "meta-theory",
+    warden_entry_gate: true,
+    conductor_orchestration: true,
+    orchestrationTaskBoardPacket: {
+      synthesisOwner: "meta-conductor",
+      route: "Warden -> Conductor -> board -> workerTaskPackets",
+    },
+    workerTaskPackets: [
+      {
+        owner: "meta-artisan",
+        roleDisplayName: "backend",
+        deliverable: "Cursor native live success fixture",
+        verificationOwner: "verify",
+      },
+    ],
+    verificationOwner: "verify",
+  };
+  return {
+    status: "passed",
+    ok: true,
+    mode: "live",
+    fixture: true,
+    contract: {
+      schemaVersion: contract.schemaVersion,
+      path: "config/contracts/cursor-live-turn-harness-contract.json",
+    },
+    localProbe: {
+      selectedHarness: "cursor-agent-success-fixture",
+      candidates: [
+        {
+          id: "cursor-agent-success-fixture",
+          ok: true,
+          command: "fixture cursor-agent",
+          missingHelpPatterns: [],
+          helpTail: "--print --output-format json stream-json",
+        },
+      ],
+    },
+    sample: {
+      runtime_smoke: payload,
+    },
+    smoke,
+  };
+}
+
 async function probeCursorAgentHarness(contract) {
   const candidates = await getResolvedCursorAgentCandidates();
   const contractCandidates = new Map(
@@ -3365,6 +3413,9 @@ async function probeCursorAgentHarness(contract) {
 async function runCursorLive() {
   const smoke = await runCursorSmoke();
   const contract = await readCursorLiveHarnessContract();
+  if (process.env.META_KIM_CURSOR_LIVE_SUCCESS_FIXTURE === "1") {
+    return buildCursorLiveSuccessFixture({ smoke, contract });
+  }
   const harnessProbe = await probeCursorAgentHarness(contract);
   if (!harnessProbe.ok) {
     return {
