@@ -15,6 +15,8 @@ Use `AskUserQuestion` in exactly these cases:
 
 Every `AskUserQuestion` payload must use `questions` with two to four meaningful options. Each option states what changes, what problem it solves, expected result, advantage, disadvantage or risk, and verification impact. No filler questions and no question quota.
 
+Subjective quality or non-measurable adjective requests such as "good", "bad", "beautiful", "ugly", "doesn't look good", "smooth", "not smooth", "professional", "premium", "advanced", "clean", "simple", "fast", "slow", "hard to use", "feels off", or localized equivalents are blocking Critical clarification when the target, quality dimension, acceptance standard, or allowed scope is unclear. Ask through `AskUserQuestion` before Fetch or Execution rather than guessing an aesthetic, UX, quality, or trade-off direction.
+
 ## Dispatch-Not-Execute In Claude Code
 
 In Claude Code, governed Execution is real only when the main thread invokes actual providers selected during Thinking. The main thread scopes, dispatches, reviews, and synthesizes; it must not directly edit, write, or run implementation commands as the worker for non-trivial executable work.
@@ -100,7 +102,8 @@ Do not copy the external hook's wording into durable Meta_Kim instructions. Keep
 
 ## Block conditions
 
-- `AskUserQuestion` called during Critical or Fetch stage (only allowed after Thinking option framing).
+- `AskUserQuestion` called outside blocking Critical clarification or post-Thinking execution confirmation.
+- Critical clarification needed for a subjective quality complaint, but mutation or execution starts without `choiceSurfaceState=critical_clarification_allowed` followed by a completed answer or recorded fallback.
 - Agent dispatch in execution stage without `capabilitySearchPerformed === true` in spine state.
 - `choiceSurfaceState` not `completed` when Execution attempts mutation tools.
 - Same write-time fact gate blocks the same action twice after `fileChangeFactCard` was presented; record `hookFailurePacket` and return to Thinking.
