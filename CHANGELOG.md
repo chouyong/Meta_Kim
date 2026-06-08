@@ -6,6 +6,33 @@ All notable changes to Meta_Kim are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 When you tag a release, add a new **`## [version] - YYYY-MM-DD`** section at the top (above older entries) and list changes there.
 
+## [2.8.8] - 2026-06-09
+
+### Fixed
+
+- **Tool-facing report wording** — Public meta-theory reports now keep `Critical / Fetch / Thinking / Review` protocol labels but pair them with plain-language purpose text.
+- **Formal tool target source** — Report tool names and durable-agent projection targets now come from `config/sync.json` and `config/runtime-compatibility-catalog.json`, avoiding hardcoded Claude/Codex/Cursor/OpenClaw lists in generated report logic.
+- **Durable agent boundary clarity** — Temporary subagents are explicitly treated as factory/review workers, not as the created project agent.
+- **Support wording corrected** — Claude Code and Codex are stated as fully supported, while OpenClaw and Cursor are described as compatible formal projections rather than unsupported or downgraded targets.
+- **OpenClaw/Cursor PR evidence gate** — Improvements for OpenClaw or Cursor now ask contributors to include strict tool-side self-test evidence before merge.
+
+### Changed
+
+- **Chinese public wording** — User-facing Chinese copy now prefers explicit tool names or `工具端` over ambiguous `运行时` when referring to Claude Code, Codex, Cursor, and OpenClaw surfaces.
+- **Meta-theory entrypoint preserved** — `SKILL.md` remains unchanged in content and stays within the accepted 500-line budget.
+- Version bump: 2.8.7 -> 2.8.8.
+
+### Verification
+
+- `npm run meta:sync`
+- `npm run meta:check`
+- `npm run meta:providers:validate`
+- `npm run meta:hook:validate`
+- `npm run meta:route:validate`
+- `npm run meta:runtime:validate`
+- `npm run meta:release:smoke`
+- `git diff --check`
+
 ## [2.8.7] - 2026-06-09
 
 ### Fixed
@@ -77,7 +104,7 @@ When you tag a release, add a new **`## [version] - YYYY-MM-DD`** section at the
 ### Changed
 
 - **Validators and hooks clarified as protection, not the engine** — Prompt contracts now state that validators, gates, and hooks may reject empty or unsafe routes, but the default path itself must discover and bind owner, skill, MCP, tool, runtime, OS, and verification choices.
-- **Meta-theory progressive disclosure preserved** — `SKILL.md` remains capped at 320 lines; release-mode detail moved into references instead of bloating the entrypoint.
+- **Meta-theory progressive disclosure preserved** — `SKILL.md` remains capped at 500 lines; release-mode detail moved into references instead of bloating the entrypoint.
 - Version bump: 2.8.4 -> 2.8.5.
 
 ### Verification
