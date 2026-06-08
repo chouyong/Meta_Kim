@@ -14,7 +14,7 @@ When you tag a release, add a new **`## [version] - YYYY-MM-DD`** section at the
 - **Formal tool target source** — Report tool names and durable-agent projection targets now come from `config/sync.json` and `config/runtime-compatibility-catalog.json`, avoiding hardcoded Claude/Codex/Cursor/OpenClaw lists in generated report logic.
 - **Durable agent boundary clarity** — Temporary subagents are explicitly treated as factory/review workers, not as the created project agent.
 - **Support wording corrected** — Claude Code and Codex are stated as fully supported, while OpenClaw and Cursor are described as compatible formal projections rather than unsupported or downgraded targets.
-- **OpenClaw/Cursor PR evidence gate** — Improvements for OpenClaw or Cursor now ask contributors to include strict tool-side self-test evidence before merge.
+- **OpenClaw/Cursor PR evidence gate** — Improvements for OpenClaw or Cursor ask contributors to complete strict tool-side self-testing and provide evidence; merge is recommended only when the evidence is sufficient.
 
 ### Changed
 

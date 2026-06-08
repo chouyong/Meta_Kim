@@ -14,7 +14,7 @@
 - **正式工具端来源** — 报告里的工具端名称和持久 agent 投影目标改为从 `config/sync.json` 与 `config/runtime-compatibility-catalog.json` 读取，避免在生成逻辑里写死 Claude/Codex/Cursor/OpenClaw 列表。
 - **持久 agent 边界** — 临时 subagent 只作为 factory / review worker，不再被当成创建出来的项目 agent。
 - **支持口径修正** — Claude Code 和 Codex 明确为完整支持；OpenClaw 和 Cursor 表述为兼容的正式投影，不再暗示不支持或降级。
-- **OpenClaw/Cursor PR 证据门** — OpenClaw 或 Cursor 的增强改造欢迎提交 PR，但合并前需要带对应工具端的严格自测证据。
+- **OpenClaw/Cursor PR 证据门** — OpenClaw 或 Cursor 的增强改造欢迎提交 PR；提交者需要先在对应工具端完成严格自测并提供证据，证据充分后才建议合并。
 
 ### 变更
 

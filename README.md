@@ -110,8 +110,8 @@ After global install (`node setup.mjs` or `npx`), what works where:
 | Meta_Kim repo with Claude Code | Full governance via CLAUDE.md (8-stage spine, gates, dispatch rules) | — |
 | Any other project with Claude Code | Hooks (safety, format, memory save) + `/meta-theory` skill | Say "run meta theory" or type `/meta-theory` |
 | Codex | AGENTS.md rules + 9 custom agents + `/meta-theory` command | Type "run meta theory" or `/meta-theory` |
-| OpenClaw | Compatible workspace agents, skills, config, and internal lifecycle hooks | Requires OpenClaw config/auth; PRs must include strict OpenClaw test evidence before merge |
-| Cursor | Compatible official subagents, `.cursor/rules`, hooks, skills, and MCP mirrors | PRs must include strict Cursor test evidence before merge |
+| OpenClaw | Compatible workspace agents, skills, config, and internal lifecycle hooks | Requires OpenClaw config/auth; contributors should complete strict OpenClaw self-testing and provide evidence; merge is recommended only when the evidence is sufficient |
+| Cursor | Compatible official subagents, `.cursor/rules`, hooks, skills, and MCP mirrors | Contributors should complete strict Cursor self-testing and provide evidence; merge is recommended only when the evidence is sufficient |
 
 ### Platform Support Tiers
 
@@ -539,8 +539,8 @@ Meta_Kim currently maps to four tool targets:
 | --- | --- | --- |
 | **Claude Code** | Fully supported | `.claude/agents/*.md` + `SKILL.md` + hooks + MCP |
 | **Codex** | Fully supported | `.codex/agents/*.toml` + `.agents/skills/` + commands + hooks |
-| **OpenClaw** | Compatible formal projection | `openclaw/` workspaces + skills + internal hooks; stricter tool-denial changes need OpenClaw test evidence before merge |
-| **Cursor** | Compatible formal projection | `.cursor/agents/*.md` + `.cursor/rules/*.mdc` + skills + hooks + MCP; Cursor changes need Cursor test evidence before merge |
+| **OpenClaw** | Compatible formal projection | `openclaw/` workspaces + skills + internal hooks; stricter tool-denial changes need contributor-owned OpenClaw self-test evidence, and merge is recommended only when the evidence is sufficient |
+| **Cursor** | Compatible formal projection | `.cursor/agents/*.md` + `.cursor/rules/*.mdc` + skills + hooks + MCP; Cursor changes need contributor-owned Cursor self-test evidence, and merge is recommended only when the evidence is sufficient |
 
 The canonical source layer is `canonical/agents/`, `canonical/skills/meta-theory/`, `config/contracts/`, and `config/capability-index/`. The repository mirrors that layer into platform-specific projections through `npm run meta:sync`.
 
@@ -565,7 +565,7 @@ flowchart TB
 
 You can keep adding platform mappings over time as long as the platform supports agents and agent communication.
 
-The four tool targets are first-class Meta_Kim projections, but their native surfaces differ. Claude Code and Codex are both fully supported. OpenClaw and Cursor are compatible formal projections; PRs that improve either target should include strict self-test evidence from that tool before merge.
+The four tool targets are first-class Meta_Kim projections, but their native surfaces differ. Claude Code and Codex are both fully supported. OpenClaw and Cursor are compatible formal projections; PRs that improve either target should include strict contributor-owned self-test evidence from that tool, and merge is recommended only when the evidence is sufficient.
 
 | Capability surface | Claude Code | Codex | OpenClaw | Cursor |
 | --- | --- | --- | --- | --- |
