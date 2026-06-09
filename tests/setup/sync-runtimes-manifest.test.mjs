@@ -18,6 +18,7 @@ import {
   inferProjectCategory,
   inferProjectPurpose,
 } from "../../scripts/sync-runtimes.mjs";
+import { mergeRepoClaudeSettings } from "../../scripts/claude-settings-merge.mjs";
 import { CATEGORIES } from "../../scripts/install-manifest.mjs";
 
 const REPO = path.resolve("/fake/repo");
@@ -250,6 +251,56 @@ describe("sync-runtimes / Codex project hooks", () => {
     assert.match(command, /node(\.exe)?/);
     assert.match(command, /\.codex\/hooks\/graphify-context\.mjs/);
     assert.doesNotMatch(command, /\[ -f|\|\| true|2>\/dev\/null/);
+  });
+
+  test("repo Claude settings replace retired inline graphify shell hook with Node hook", () => {
+    const retiredInlineHook =
+      'CMD=$(python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get(\'tool_input\',d).get(\'command\',\'\'))" 2>/dev/null || true); case "$CMD" in *rg\\ *) [ -f graphify-out/graph.json ] && echo "{}" || true ;; esac';
+    const canonical = {
+      hooks: {
+        PreToolUse: [
+          {
+            matcher: "Bash",
+            hooks: [
+              {
+                type: "command",
+                command: "node .claude/hooks/graphify-context.mjs",
+              },
+              {
+                type: "command",
+                command: "node .claude/hooks/block-dangerous-bash.mjs",
+              },
+            ],
+          },
+        ],
+      },
+    };
+    const merged = mergeRepoClaudeSettings(
+      {
+        hooks: {
+          PreToolUse: [
+            {
+              matcher: "Bash",
+              hooks: [
+                {
+                  type: "command",
+                  command: retiredInlineHook,
+                },
+              ],
+            },
+          ],
+        },
+      },
+      canonical,
+      REPO
+    );
+    const commands = merged.hooks.PreToolUse.flatMap((block) =>
+      block.hooks.map((hook) => hook.command)
+    );
+
+    assert.ok(commands.includes("node .claude/hooks/graphify-context.mjs"));
+    assert.ok(commands.includes("node .claude/hooks/block-dangerous-bash.mjs"));
+    assert.equal(commands.some((command) => command.includes("CMD=$(python3")), false);
   });
 
   test("wires MCP memory across start, prompt, and stop", () => {
