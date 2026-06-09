@@ -20,6 +20,7 @@ import {
 } from "../../scripts/sync-runtimes.mjs";
 import { mergeRepoClaudeSettings } from "../../scripts/claude-settings-merge.mjs";
 import { CATEGORIES } from "../../scripts/install-manifest.mjs";
+import { buildHookPromptAdapterSource } from "../../scripts/runtime-hook-mapping.mjs";
 
 const REPO = path.resolve("/fake/repo");
 
@@ -329,6 +330,17 @@ describe("sync-runtimes / Codex project hooks", () => {
       config.hooks.UserPromptSubmit[0].hooks[1].command,
       /hookprompt-adapter\.mjs/,
     );
+  });
+
+  test("Codex HookPrompt adapter injects model-visible additionalContext", () => {
+    const codexSource = buildHookPromptAdapterSource("codex");
+    const cursorSource = buildHookPromptAdapterSource("cursor");
+
+    assert.match(codexSource, /hookSpecificOutput/);
+    assert.match(codexSource, /hookEventName:\s*"UserPromptSubmit"/);
+    assert.match(codexSource, /additionalContext/);
+    assert.doesNotMatch(codexSource, /systemMessage:\s*additionalContext/);
+    assert.match(cursorSource, /prompt:\s*additionalContext/);
   });
 
   test("does not emit quoted absolute Node paths that fail in PowerShell", () => {
