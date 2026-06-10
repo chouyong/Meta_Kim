@@ -131,6 +131,19 @@ Override knob (all hook-equipped runtimes): `META_KIM_CAPABILITY_GATE=progressiv
 
 Canonical hook source: `canonical/runtime-assets/claude/hooks/enforce-agent-dispatch.mjs`. The current runtime matrix and limits are documented in this Mechanical Enforcement section; do not add a separate source-of-truth document for the same rule.
 
+#### Local hook extensions (fork-only, non-canonical)
+
+This fork (`chouyong/Meta_Kim`) registers four additional hook entries on top of the canonical enforce-dispatch set. They are local optimizations, not part of upstream `KimYx0207/Meta_Kim`. `npm run meta:doctor:governance` will report them as a hook-set mismatch by design — the diff is expected and not a drift to fix.
+
+| Hook entry | Event | Purpose |
+|---|---|---|
+| `activate-meta-theory-spine.mjs` | `UserPromptSubmit` | Eager-activate the 8-stage spine on natural-language entry, before Critical, so `enforce-agent-dispatch` has spine state to reason about. |
+| `graphify-context.mjs` | `PreToolUse` (Read/Grep/Glob) | Inject `graphify-out/` knowledge-graph context hint into read-tool calls so the answerer prefers `graphify query` over raw scans. |
+| `meta-kim-memory-save.mjs --event session-start` | `SessionStart` | Boot the local MCP Memory Service health banner and seed the session with prior memory tags. |
+| `meta-kim-memory-save.mjs --event user-prompt` | `UserPromptSubmit` | Persist each user prompt as untrusted recalled-memory context for cross-session continuity. |
+
+Codex parity: the same four entries are mirrored in `.codex/hooks/` and read at session start by Codex; behavior is identical with `META_KIM_HOOK_RUNTIME=codex` schema. Cursor and OpenClaw do not yet receive these fork-only hooks. To bring this fork in line with canonical, remove the four entries above from `.claude/settings.json` and `.codex/hooks.json`; to keep them, treat `doctor:governance`'s hook-set "fail" as informational.
+
 ## Meta-Theory Activation
 
 Do not require humans to know or type command words. Treat ordinary natural-language executable requests as the primary entry path when they imply durable planning, execution, review, verification, prioritization, repair suggestions, or a validation checklist. Examples include "帮我整理成优先级、修复建议和验证清单", "这个页面不好看，帮我弄高级一点", "帮我规划并开始处理", or "review this and fix what matters".
