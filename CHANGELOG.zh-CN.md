@@ -6,6 +6,32 @@
 
 更新说明只解释“改了什么、为什么重要”。过细的内部任务编号、低价值 backlog id 和实现流水账不放在这里；需要精确证据时，请看 Git 历史、测试、生成报告和 PRD 产物。
 
+## [2.8.17] - 2026-06-11
+
+### 修复
+
+- **编排任务有真实执行模式** - `workerTaskPacket` 现在会声明 `executionMode`，Meta_Kim 可以区分真正执行 worker、审批门禁，以及只读 Fetch/Review sidecar。只包含 sidecar 或审批步骤的并行组，不能再通过质量门。
+- **Capability Gap 编排验证更严格** - Capability-gap 报告现在会把 execution mode 贯穿到 worker packet、任务板、Review 检查、验证摘要和 run artifact validator。这样“看起来并行、实际没执行”的假并行会被直接暴露并拦下。
+- **ECC 插件更新路径修正** - Claude plugin update 模式在发现已有 ECC 插件记录时，会调用 `claude plugin update ecc@ecc`；更新成功后重新读取插件管理器记录，避免沿用旧路径或旧 SHA。
+- **Graphify Python 发现更稳** - Graphify setup 和 runtime 检查会在普通 `python3` / `python` 之后继续尝试 Homebrew 和 Linuxbrew Python 路径。macOS / Linux 用户即使 Python 没放进 PATH，也更容易完成 Graphify 初始化。
+
+### 验证
+
+- `node --test tests/meta-theory/09-run-artifact-validator.test.mjs`
+- `node --test tests/meta-theory/31-capability-gap-orchestration.test.mjs tests/meta-theory/33-capability-gap-orchestration-quality.test.mjs`
+- `node --test tests/setup/graphify-runtime.test.mjs tests/setup/graphify-wiring-contract.test.mjs tests/setup/install-cross-platform.test.mjs tests/setup/install-plugin-bundles.test.mjs`
+- `node --test tests/integration/agent-teams-playbook-integration.test.mjs tests/meta-theory/39-orchestration-dag-report.test.mjs tests/meta-theory/40-orchestration-scheduler-report.test.mjs`
+- `npm run meta:gap:validate-board`
+- `npm run meta:gap:complex-inputs`
+- `npm run meta:gap:codex-real-test`
+- `npm run meta:test:setup`
+- `npm run meta:test:meta-theory`
+- `npm run meta:check`
+- `npm run meta:graphify:rebuild`
+- `npm run meta:graphify:check`
+- `npm run meta:release:smoke`
+- `git diff --check`
+
 ## [2.8.16] - 2026-06-10
 
 ### 修复

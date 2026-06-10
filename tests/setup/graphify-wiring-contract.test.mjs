@@ -218,6 +218,9 @@ describe("graphify idempotent wiring (contract)", () => {
     assert.match(body, /\["-m", "graphify", "hook", "install"\]/);
     assert.match(body, /\["-m", "graphify", platform, "install"\]/);
     assert.match(body, /\["-m", "graphify", "update", "\."\]/);
+    assert.match(body, /homebrewPythonCandidates/);
+    assert.match(body, /\/opt\/homebrew/);
+    assert.match(body, /\/home\/linuxbrew\/\.linuxbrew/);
     assert.match(body, /process\.argv\.includes\("--auto"\)/);
     assert.match(body, /process\.argv\.includes\("--auto-worker"\)/);
     assert.match(body, /post-copy-init\.json/);

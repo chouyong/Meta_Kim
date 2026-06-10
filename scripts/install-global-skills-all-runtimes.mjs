@@ -2209,7 +2209,8 @@ async function installClaudePlugins() {
       }
     }
     for (const spec of CLAUDE_PLUGIN_SPECS) {
-      console.log(t.dryRun(`claude plugin install ${spec}`));
+      const command = updateMode ? "update" : "install";
+      console.log(t.dryRun(`claude plugin ${command} ${spec}`));
     }
     return true;
   }
@@ -2347,15 +2348,20 @@ async function installClaudePlugins() {
     "plugins",
     "installed_plugins.json",
   );
-  try {
-    if (existsSync(installedPluginsPath)) {
-      const raw = readFileSync(installedPluginsPath, "utf8");
-      installedPluginsFile = JSON.parse(raw);
-      if (!installedPluginsFile.plugins) installedPluginsFile.plugins = {};
+  function readInstalledPluginsFromDisk() {
+    try {
+      if (existsSync(installedPluginsPath)) {
+        const raw = readFileSync(installedPluginsPath, "utf8");
+        const parsed = JSON.parse(raw);
+        if (!parsed.plugins) parsed.plugins = {};
+        return parsed;
+      }
+    } catch {
+      // If file missing or corrupt, fall through with fresh structure.
     }
-  } catch {
-    // If file missing or corrupt, fall through with fresh structure
+    return { version: 2, plugins: {} };
   }
+  installedPluginsFile = readInstalledPluginsFromDisk();
 
   for (const repoSpec of SKILL_REPOS.filter((s) => s.claudePlugin)) {
     const canonicalSpec = repoSpec.claudePlugin;
@@ -2503,8 +2509,15 @@ async function installClaudePlugins() {
       console.log(t.dryRun(`claude plugin install ${spec}`));
       continue;
     }
-    console.log(`${C.cyan}→${C.reset} ${t.installingPlugin(spec)}`);
-    const p = spawnSync("claude", ["plugin", "install", spec], {
+    const pluginCommand = updateMode && localRecord ? "update" : "install";
+    console.log(
+      `${C.cyan}→${C.reset} ${
+        pluginCommand === "update"
+          ? t.updatingPlugin(spec)
+          : t.installingPlugin(spec)
+      }`,
+    );
+    const p = spawnSync("claude", ["plugin", pluginCommand, spec], {
       stdio: "inherit",
       shell: claudeShellOpt,
     });
@@ -2520,6 +2533,14 @@ async function installClaudePlugins() {
     // Record installed version so --update mode can detect future mismatches.
     // Both update-mode reinstalls and first-time installs write here.
     if (p.status === 0) {
+      // Prefer the plugin manager's own updated record. This preserves install
+      // paths and commit SHAs after `claude plugin update`.
+      const refreshedInstalledPluginsFile = readInstalledPluginsFromDisk();
+      if (refreshedInstalledPluginsFile.plugins?.[spec]?.[0]) {
+        installedPluginsFile = refreshedInstalledPluginsFile;
+        continue;
+      }
+
       // Priority: (1) GitHub API version, (2) parse version from installPath dir name.
       // installPath format: ~/.claude/plugins/cache/{marketplace}/{name}/{version}/
       // The directory name IS the version — more reliable than GitHub API rate limits.

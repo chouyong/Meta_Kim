@@ -3024,6 +3024,76 @@ function fail(message, code = 1) {
   process.exit(code);
 }
 
+function pushUniqueCandidate(candidates, seen, command, prefixArgs = []) {
+  const key = command + "\\0" + prefixArgs.join("\\0");
+  if (seen.has(key)) return;
+  seen.add(key);
+  candidates.push({ command, prefixArgs });
+}
+
+function homebrewPythonCandidates() {
+  if (process.platform !== "darwin" && process.platform !== "linux") {
+    return [];
+  }
+
+  const prefixes = [];
+  const addPrefix = (value) => {
+    if (typeof value !== "string") return;
+    const trimmed = value.trim();
+    if (trimmed && !prefixes.includes(trimmed)) {
+      prefixes.push(trimmed);
+    }
+  };
+
+  addPrefix(process.env.HOMEBREW_PREFIX);
+  if (process.platform === "darwin") {
+    addPrefix("/opt/homebrew");
+    addPrefix("/usr/local");
+  } else {
+    addPrefix("/home/linuxbrew/.linuxbrew");
+  }
+
+  const candidates = [];
+  const seen = new Set();
+  const supportedMinors = Array.from({ length: 11 }, (_, index) => 20 - index);
+
+  for (const prefix of prefixes) {
+    pushUniqueCandidate(candidates, seen, join(prefix, "bin", "python3"));
+    pushUniqueCandidate(candidates, seen, join(prefix, "bin", "python"));
+
+    for (const minor of supportedMinors) {
+      const version = "3." + minor;
+      pushUniqueCandidate(
+        candidates,
+        seen,
+        join(prefix, "bin", "python" + version),
+      );
+      pushUniqueCandidate(
+        candidates,
+        seen,
+        join(prefix, "opt", "python@" + version, "bin", "python" + version),
+      );
+      pushUniqueCandidate(
+        candidates,
+        seen,
+        join(prefix, "opt", "python@" + version, "bin", "python3"),
+      );
+      pushUniqueCandidate(
+        candidates,
+        seen,
+        join(prefix, "opt", "python@" + version, "libexec", "bin", "python3"),
+      );
+      pushUniqueCandidate(
+        candidates,
+        seen,
+        join(prefix, "opt", "python@" + version, "libexec", "bin", "python"),
+      );
+    }
+  }
+
+  return candidates;
+}
+
 function pythonCandidates() {
   if (process.platform === "win32") {
     return [
@@ -3035,6 +3105,7 @@ function pythonCandidates() {
   return [
     { command: "python3", prefixArgs: [] },
     { command: "python", prefixArgs: [] },
+    ...homebrewPythonCandidates(),
   ];
 }
 

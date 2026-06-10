@@ -6,6 +6,32 @@ This file is the reader-facing release history for Meta_Kim.
 
 The changelog explains what changed and why it matters. It intentionally avoids long internal task ledgers, low-signal backlog ids, and implementation trivia. When exact evidence is needed, use the repository history, tests, generated reports, and PRD artifacts.
 
+## [2.8.17] - 2026-06-11
+
+### Fixed
+
+- **Real Execution Mode For Orchestration** - Worker task packets now declare `executionMode`, so Meta_Kim can distinguish real execution workers from approval gates and read-only Fetch/Review sidecars. Parallel groups can no longer pass quality gates when they contain only sidecars or approval steps.
+- **Capability Gap Board Validation** - Capability-gap orchestration reports now carry execution mode through the worker packet, task board, review checks, validation summary, and run-artifact validator. This makes fake parallelism visible and testable.
+- **ECC Plugin Update Path** - Claude plugin update mode now calls `claude plugin update ecc@ecc` when an installed ECC plugin record exists, and refreshes the plugin manager record after a successful update instead of relying on stale local metadata.
+- **Graphify Python Discovery** - Graphify setup and runtime checks now try Homebrew and Linuxbrew Python paths after normal `python3` / `python` launchers, improving macOS and Linux setup reliability when Python is installed outside PATH.
+
+### Verification
+
+- `node --test tests/meta-theory/09-run-artifact-validator.test.mjs`
+- `node --test tests/meta-theory/31-capability-gap-orchestration.test.mjs tests/meta-theory/33-capability-gap-orchestration-quality.test.mjs`
+- `node --test tests/setup/graphify-runtime.test.mjs tests/setup/graphify-wiring-contract.test.mjs tests/setup/install-cross-platform.test.mjs tests/setup/install-plugin-bundles.test.mjs`
+- `node --test tests/integration/agent-teams-playbook-integration.test.mjs tests/meta-theory/39-orchestration-dag-report.test.mjs tests/meta-theory/40-orchestration-scheduler-report.test.mjs`
+- `npm run meta:gap:validate-board`
+- `npm run meta:gap:complex-inputs`
+- `npm run meta:gap:codex-real-test`
+- `npm run meta:test:setup`
+- `npm run meta:test:meta-theory`
+- `npm run meta:check`
+- `npm run meta:graphify:rebuild`
+- `npm run meta:graphify:check`
+- `npm run meta:release:smoke`
+- `git diff --check`
+
 ## [2.8.16] - 2026-06-10
 
 ### Fixed

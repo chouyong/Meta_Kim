@@ -101,6 +101,19 @@ describe("installPluginBundlesForNonClaudeRuntimes (dry-run e2e)", () => {
     assert.doesNotMatch(plain, /claude plugin install everything-claude-code@ecc/);
   });
 
+  test("Claude update mode refreshes canonical ECC plugin instead of relying on manual host fixes", () => {
+    const { status, out } = runDryRun(["--update"]);
+    assert.equal(status, 0);
+    const plain = stripAnsi(out);
+    assert.match(
+      plain,
+      /claude plugin update ecc@ecc/,
+      "expected Meta_Kim update path to update the installed ECC plugin",
+    );
+    assert.doesNotMatch(plain, /claude plugin update ecc@everything-claude-code/);
+    assert.doesNotMatch(plain, /claude plugin update everything-claude-code@everything-claude-code/);
+  });
+
   test("ECC non-Claude runtimes use upstream native installer, not skills fallback", () => {
     const { status, out } = runDryRun();
     assert.equal(status, 0);

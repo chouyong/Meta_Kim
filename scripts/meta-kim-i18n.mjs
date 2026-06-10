@@ -139,6 +139,7 @@ const STRINGS = {
     labelCannotCheckGitHub: "cannot reach GitHub — skipping version check",
     labelUsingLocalRecord: (v) => `using local record: ${v}`,
     installingPlugin: (spec) => `Installing plugin: ${spec}`,
+    updatingPlugin: (spec) => `Updating plugin: ${spec}`,
     pluginUpdateVersionMismatch: (spec, installedVer, specVer) =>
       `[UPDATE] ${spec} version mismatch: installed ${installedVer}, manifest ${specVer} — reinstalling`,
     pluginUpdateUnknownVersion: (spec) =>
@@ -394,6 +395,7 @@ const STRINGS = {
     labelCannotCheckGitHub: "无法连接 GitHub — 跳过版本检测",
     labelUsingLocalRecord: (v) => `使用本地记录：${v}`,
     installingPlugin: (spec) => `正在安装插件：${spec}`,
+    updatingPlugin: (spec) => `正在更新插件：${spec}`,
     warnPluginFailed: (spec, code) =>
       `[WARN] 插件安装失败：${spec}（退出码 ${code}）`,
     pluginUpdateVersionMismatch: (spec, installedVer, specVer) =>
@@ -635,6 +637,7 @@ const STRINGS = {
       "GitHub に接続できません — バージョンチェックをスキップ",
     labelUsingLocalRecord: (v) => `ローカルレコードを使用：${v}`,
     installingPlugin: (spec) => `プラグインをインストール中：${spec}`,
+    updatingPlugin: (spec) => `プラグインを更新中：${spec}`,
     warnPluginFailed: (spec, code) =>
       `[WARN] プラグインインストール失敗：${spec}（終了 ${code}）`,
     pluginUpdateVersionMismatch: (spec, installedVer, specVer) =>
@@ -886,6 +889,7 @@ const STRINGS = {
     labelCannotCheckGitHub: "GitHub 연결 불가 — 버전 확인 건너뜀",
     labelUsingLocalRecord: (v) => `로컬 레코드 사용：${v}`,
     installingPlugin: (spec) => `플러그인 설치 중：${spec}`,
+    updatingPlugin: (spec) => `플러그인 업데이트 중：${spec}`,
     warnPluginFailed: (spec, code) =>
       `[WARN] 플러그인 설치 실패：${spec}（종료 코드 ${code}）`,
     pluginUpdateVersionMismatch: (spec, installedVer, specVer) =>
