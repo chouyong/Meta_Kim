@@ -153,7 +153,11 @@ describe("MCP memory cross-runtime hooks", () => {
       assert.match(saved.body.content, /\[REDACTED/);
 
       const output = JSON.parse(result.stdout);
-      assert.match(output.systemMessage, /Untrusted recalled memory context/);
+      assert.equal(output.hookSpecificOutput.hookEventName, "UserPromptSubmit");
+      assert.match(
+        output.hookSpecificOutput.additionalContext,
+        /Untrusted recalled memory context/,
+      );
       assert.equal(Object.hasOwn(output, "message"), false);
       assert.equal(Object.hasOwn(output, "continue"), false);
       assert.match(result.stdout, /Untrusted recalled memory context/);
@@ -265,15 +269,17 @@ describe("MCP memory cross-runtime hooks", () => {
 
       assert.equal(result.status, 0, result.stderr);
       const output = JSON.parse(result.stdout);
+      const context = output.hookSpecificOutput.additionalContext;
+      assert.equal(output.hookSpecificOutput.hookEventName, "UserPromptSubmit");
       assert.match(
-        output.systemMessage,
+        context,
         /MCP Memory Service 8000 recall bug/,
       );
       assert.match(
-        output.systemMessage,
+        context,
         /Buried third layer MCP Memory Service 8000 recall detail/,
       );
-      assert.doesNotMatch(output.systemMessage, /Claude Code 会话启动/);
+      assert.doesNotMatch(context, /Claude Code 会话启动/);
       assert.ok(
         searchQueries.some((query) => /current problems decisions next steps/.test(query)),
         "expected generic project prompts to trigger broader recall queries",
@@ -404,7 +410,14 @@ describe("MCP memory cross-runtime hooks", () => {
 
     try {
       const codex = await runHook("codex");
-      assert.match(codex.systemMessage, /Reusable project context/);
+      assert.equal(
+        codex.hookSpecificOutput.hookEventName,
+        "UserPromptSubmit",
+      );
+      assert.match(
+        codex.hookSpecificOutput.additionalContext,
+        /Reusable project context/,
+      );
       assert.equal(Object.hasOwn(codex, "message"), false);
 
       const claude = await runHook("claude");
@@ -488,9 +501,16 @@ describe("MCP memory cross-runtime hooks", () => {
 
     assert.equal(result.status, 0, result.stderr);
     const output = JSON.parse(result.stdout);
-    assert.match(output.systemMessage, /Layer 3 MCP Memory Service is not healthy/);
-    assert.match(output.systemMessage, /memory server --http/);
-    assert.match(output.systemMessage, /Cross-session recall\/writeback is unavailable/);
+    assert.equal(output.hookSpecificOutput.hookEventName, "SessionStart");
+    assert.match(
+      output.hookSpecificOutput.additionalContext,
+      /Layer 3 MCP Memory Service is not healthy/,
+    );
+    assert.match(output.hookSpecificOutput.additionalContext, /memory server --http/);
+    assert.match(
+      output.hookSpecificOutput.additionalContext,
+      /Cross-session recall\/writeback is unavailable/,
+    );
   });
 
   test("Claude stop memory hook writes correct memory type", () => {
@@ -643,6 +663,125 @@ describe("MCP memory cross-runtime hooks", () => {
     }
   });
 
+  test("Claude stop compaction ignores unstructured finding-like prose from transcripts", () => {
+    const tempDir = mkdtempSync(path.join(os.tmpdir(), "meta-kim-compaction-noise-"));
+    const transcriptPath = path.join(tempDir, "transcript.jsonl");
+    const profile = `test-noise-${process.pid}-${Date.now()}`;
+    const compactionRoot = path.join(tempDir, ".meta-kim", "state", profile);
+
+    try {
+      writeFileSync(
+        transcriptPath,
+        [
+          "Critical and Fetch were mentioned in a long skill description so the session is governed.",
+          "Review text says findings; high to max: broader coverage is useful, but this is not a reviewPacket.",
+          "OpenClaw, and Cursor. This skill should be used when HIGH quality orchestration is needed.",
+          "Thinking mentioned meta-prism and closeFindings as documentation examples, not open findings.",
+        ].join("\n"),
+        "utf8",
+      );
+
+      const hookPath = path.join(
+        repoRoot,
+        "canonical",
+        "runtime-assets",
+        "claude",
+        "hooks",
+        "stop-compaction.mjs",
+      );
+      const result = spawnSync(
+        process.execPath,
+        [hookPath],
+        {
+          input: JSON.stringify({ transcript_path: transcriptPath }),
+          encoding: "utf8",
+          env: { ...process.env, META_KIM_PROFILE: profile },
+          cwd: tempDir,
+        },
+      );
+
+      assert.equal(result.status, 0, result.stderr);
+
+      const latestPath = path.join(compactionRoot, "compaction", "latest.json");
+      const packet = JSON.parse(readFileSync(latestPath, "utf8"));
+
+      assert.deepEqual(packet.openFindings, []);
+      assert.deepEqual(packet.pendingRevisions, []);
+      assert.equal(packet.verifyGateState, "verified");
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+      rmSync(compactionRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("Claude stop compaction preserves structured reviewPacket findings", () => {
+    const tempDir = mkdtempSync(path.join(os.tmpdir(), "meta-kim-compaction-structured-"));
+    const transcriptPath = path.join(tempDir, "transcript.jsonl");
+    const profile = `test-structured-${process.pid}-${Date.now()}`;
+    const compactionRoot = path.join(tempDir, ".meta-kim", "state", profile);
+
+    try {
+      writeFileSync(
+        transcriptPath,
+        [
+          "Critical Fetch Thinking Review governed run with enough transcript text for the hook.",
+          JSON.stringify({
+            reviewPacket: {
+              findings: [
+                {
+                  findingId: "F-structured-1",
+                  severity: "HIGH",
+                  owner: "meta-prism",
+                  sourceProject: "Meta_Kim",
+                  summary: "Structured review finding should survive compaction.",
+                  requiredAction: "Keep only schema-backed open findings.",
+                  fixArtifact: "canonical/runtime-assets/claude/hooks/stop-compaction.mjs",
+                  verifiedBy: "meta-prism",
+                  closeState: "open",
+                },
+              ],
+            },
+          }),
+          "Verification remains pending until closeFindings and fixEvidence exist.",
+        ].join("\n"),
+        "utf8",
+      );
+
+      const hookPath = path.join(
+        repoRoot,
+        "canonical",
+        "runtime-assets",
+        "claude",
+        "hooks",
+        "stop-compaction.mjs",
+      );
+      const result = spawnSync(
+        process.execPath,
+        [hookPath],
+        {
+          input: JSON.stringify({ transcript_path: transcriptPath }),
+          encoding: "utf8",
+          env: { ...process.env, META_KIM_PROFILE: profile },
+          cwd: tempDir,
+        },
+      );
+
+      assert.equal(result.status, 0, result.stderr);
+
+      const latestPath = path.join(compactionRoot, "compaction", "latest.json");
+      const packet = JSON.parse(readFileSync(latestPath, "utf8"));
+
+      assert.equal(packet.openFindings.length, 1);
+      assert.equal(packet.openFindings[0].findingId, "F-structured-1");
+      assert.equal(packet.openFindings[0].sourceProject, "Meta_Kim");
+      assert.equal(packet.openFindings[0].requiredAction, "Keep only schema-backed open findings.");
+      assert.equal(packet.verifyGateState, "pending_verify");
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+      rmSync(compactionRoot, { recursive: true, force: true });
+    }
+  });
+
   test("Claude stop compaction sanitizes META_KIM_PROFILE into repo-local state", () => {
     const tempDir = mkdtempSync(path.join(os.tmpdir(), "meta-kim-profile-"));
     const transcriptPath = path.join(tempDir, "transcript.jsonl");
@@ -769,7 +908,6 @@ describe("MCP memory cross-runtime hooks", () => {
       "post-console-log-warn.mjs",
       "post-format.mjs",
       "post-typecheck.mjs",
-      "pre-git-push-confirm.mjs",
       "stop-compaction.mjs",
       "stop-completion-guard.mjs",
       "stop-console-log-audit.mjs",
@@ -797,6 +935,54 @@ describe("MCP memory cross-runtime hooks", () => {
     assert.match(source, /settings\.hooks\.Stop/);
     assert.match(source, /settings\.hooks\.beforeSubmitPrompt/);
     assert.match(source, /settings\.hooks\.stop/);
+  });
+
+  test("installer honors selected targets without requiring Claude settings", () => {
+    const tempHome = mkdtempSync(path.join(os.tmpdir(), "meta-kim-memory-targets-"));
+    try {
+      const installer = path.join(repoRoot, "scripts", "install-mcp-memory-hooks.mjs");
+      const result = spawnSync(
+        process.execPath,
+        [installer, "--targets", "codex"],
+        {
+          cwd: repoRoot,
+          encoding: "utf8",
+          env: {
+            ...process.env,
+            HOME: tempHome,
+            USERPROFILE: tempHome,
+          },
+          timeout: 10000,
+        },
+      );
+
+      assert.equal(result.status, 0, result.stderr);
+      assert.match(result.stdout, /Targets: codex/);
+      assert.match(result.stdout, /Claude MCP memory hooks skipped/);
+      assert.doesNotMatch(result.stdout, /settings\.json not found/);
+      assert.equal(existsSync(path.join(tempHome, ".claude")), false);
+      assert.equal(
+        existsSync(path.join(tempHome, ".codex", "hooks", "meta-kim-memory-save.mjs")),
+        true,
+      );
+      const codexHooks = JSON.parse(
+        readFileSync(path.join(tempHome, ".codex", "hooks.json"), "utf8"),
+      );
+      assert.ok(codexHooks.hooks.SessionStart);
+      assert.ok(codexHooks.hooks.UserPromptSubmit);
+      assert.ok(codexHooks.hooks.Stop);
+    } finally {
+      rmSync(tempHome, { recursive: true, force: true });
+    }
+  });
+
+  test("setup passes active targets to the MCP memory hook installer", () => {
+    const source = readRepoFile("setup.mjs");
+
+    assert.match(source, /runMcpMemoryHookInstaller\(activeTargets\)/);
+    assert.match(source, /\["--targets", activeTargets\.join\(",\"\)\]/);
+    assert.match(source, /installMcpMemoryServiceStep\(true, activeTargets\)/);
+    assert.match(source, /installMcpMemoryServiceStep\(false, activeTargets\)/);
   });
 
   test("installer uses PATH-resolved node for shell-portable hook commands", () => {

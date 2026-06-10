@@ -1701,7 +1701,8 @@ function buildRuntimeSkillMap(targetId) {
         pattern: /canonical\/agents\//g,
         replacement: "openclaw/workspaces/{workspace}/AGENTS.md#",
       },
-      // Hooks: OpenClaw uses Plugin SDK hooks under openclaw/hooks/
+      // Hooks: OpenClaw internal hooks live under openclaw/hooks/.
+      // Tool-blocking policy requires a typed plugin hook adapter.
       { pattern: /\.claude\/hooks\//g, replacement: "openclaw/hooks/" },
       // Capability index: preserve subdirectory structure
       {
@@ -1748,9 +1749,20 @@ function buildRuntimeSkillMap(targetId) {
  */
 export function applyRuntimePaths(content, targetId) {
   const rules = buildRuntimeSkillMap(targetId);
-  let result = content;
+  const protectedBlocks = [];
+  let result = content.replace(
+    /Fetch discovery minimum checklist: before Thinking, search at least these locations \(even if results are empty\):[\s\S]*?\n(?=Pass condition:)/g,
+    (block) => {
+      const token = `__META_KIM_RUNTIME_LITERAL_BLOCK_${protectedBlocks.length}__`;
+      protectedBlocks.push({ token, block });
+      return token;
+    },
+  );
   for (const { pattern, replacement } of rules) {
     result = result.replace(pattern, replacement);
+  }
+  for (const { token, block } of protectedBlocks) {
+    result = result.replace(token, block);
   }
   return result;
 }
@@ -2614,7 +2626,7 @@ Examples:
       }
       // Sync the dispatch-enforcement gate + its bash-readonly classifier from
       // the Claude canonical hooks directory. deny() output adapts to Cursor's
-      // v1.7+ JSON schema at runtime via META_KIM_HOOK_RUNTIME / argv inspection.
+      // official Cursor hook JSON schema at runtime via META_KIM_HOOK_RUNTIME / argv inspection.
       const cursorEnforceDispatchHookContent = await tryReadCanonical(
         canonicalClaudeEnforceDispatchHookPath,
       );

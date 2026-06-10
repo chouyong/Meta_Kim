@@ -18,6 +18,7 @@ const findskillSkill = skillsManifest.skills.find((skill) => skill.id === "finds
 const planningWithFilesSkill = skillsManifest.skills.find(
   (skill) => skill.id === "planning-with-files",
 );
+const hookPromptSkill = skillsManifest.skills.find((skill) => skill.id === "hookprompt");
 const superpowersSkill = skillsManifest.skills.find(
   (skill) => skill.id === "superpowers",
 );
@@ -76,6 +77,21 @@ describe("install platform config", () => {
     assert.equal(planningWithFilesSkill.installRoot, undefined);
   });
 
+  test("planning-with-files is a project workflow hook, not a Meta_Kim governance hook", () => {
+    assert.deepEqual(planningWithFilesSkill.hookSubdirs, {
+      codex: [".codex/hooks"],
+      cursor: [".cursor/hooks"],
+    });
+    assert.equal(planningWithFilesSkill.platformSupport, undefined);
+  });
+
+  test("HookPrompt declares global-capable Codex and Cursor adapters", () => {
+    assert.equal(hookPromptSkill.platformSupport.codex.adapter, "codex-hookprompt-adapter");
+    assert.equal(hookPromptSkill.platformSupport.cursor.adapter, "cursor-hookprompt-adapter");
+    assert.equal(hookPromptSkill.platformSupport.codex.events[0], "UserPromptSubmit");
+    assert.equal(hookPromptSkill.platformSupport.cursor.events[0], "beforeSubmitPrompt");
+  });
+
   test("superpowers declares native Codex and Cursor plugin flows", () => {
     assert.equal(superpowersSkill.installMethod, "pluginMarketplace");
     assert.equal(superpowersSkill.claudePlugin, "superpowers@superpowers-marketplace");
@@ -98,6 +114,7 @@ describe("install platform config", () => {
     assert.ok(eccSkill.targets.includes("codex"));
     assert.ok(eccSkill.targets.includes("cursor"));
     assert.ok(eccSkill.targets.includes("opencode"));
+    assert.equal(eccSkill.targets.includes("qoder"), false);
   });
 
   test("legacy setup fallback only applies when requested", () => {
@@ -175,6 +192,34 @@ describe("install platform config", () => {
     assert.match(patchFunction, /"check-complete\.ps1"/);
     assert.match(patchFunction, /#\{2,3\}\[\[:space:\]\]\+Phase\\\\b/);
     assert.match(patchFunction, /\(\?m\)\^#\{2,3\}\\\\s\+Phase\\\\b/);
+  });
+
+  test("two-phase global skill installs still deploy prompt and planning hooks", () => {
+    const source = readFileSync(
+      path.join(repoRoot, "scripts", "install-global-skills-all-runtimes.mjs"),
+      "utf8",
+    );
+    const hookSupportFunction = source.match(
+      /async function deployRuntimeHookSupport[\s\S]*?\n}\n/,
+    )?.[0];
+    const twoPhaseFunction = source.match(
+      /async function installSkillsToMultipleRuntimes[\s\S]*?async function main/,
+    )?.[0];
+
+    assert.ok(hookSupportFunction);
+    assert.match(hookSupportFunction, /patchCodexPlanningHooksForPlatform/);
+    assert.match(hookSupportFunction, /patchCodexHookPromptForPlatform/);
+    assert.match(hookSupportFunction, /mergeHookSettings/);
+    assert.match(
+      source,
+      /if \(!\["codex", "cursor"\]\.includes\(runtimeId\) \|\| spec\.id !== "hookprompt"/,
+    );
+    assert.ok(twoPhaseFunction);
+    assert.match(twoPhaseFunction, /deployRuntimeHookSupport\(spec, runtimeHome, runtimeId, skillsRoot\)/);
+    assert.match(
+      twoPhaseFunction,
+      /deployRuntimeHookSupport\(spec, runtimeHome, runtimeId, skillsRoot\);[\s\S]*cleanupDisabledSkillResidue/,
+    );
   });
 });
 

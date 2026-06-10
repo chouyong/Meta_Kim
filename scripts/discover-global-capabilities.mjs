@@ -91,11 +91,22 @@ const PLATFORMS = {
       agents: async (baseDir) =>
         scanMarkdownFiles(path.join(baseDir, "agents")),
       skills: async (baseDir) => scanSkillFiles(path.join(baseDir, "skills")),
-      hooks: async (baseDir) => scanHookFiles(path.join(baseDir, "hooks")),
+      hooks: async (baseDir) =>
+        mergeCapabilityLists(
+          await scanHookFiles(path.join(baseDir, "hooks")),
+          await scanConfigFile(path.join(baseDir, "settings.json"), {
+            id: "settings-json",
+            providerKind: "runtime-settings",
+          }),
+        ),
       plugins: async (baseDir) =>
         scanPluginFiles(path.join(baseDir, "plugins")),
       commands: async (baseDir) =>
         scanCommandFiles(path.join(baseDir, "commands")),
+      mcpServers: async (baseDir) =>
+        scanMcpConfig(path.join(baseDir, "settings.json")).then((result) => result.servers),
+      mcpTools: async (baseDir) =>
+        scanMcpConfig(path.join(baseDir, "settings.json")).then((result) => result.tools),
     },
   },
   openclaw: {
@@ -104,7 +115,14 @@ const PLATFORMS = {
     scanners: {
       agents: async (baseDir) => scanOpenClawAgents(baseDir),
       skills: async (baseDir) => scanOpenClawSkills(baseDir),
-      hooks: async (baseDir) => scanHookFiles(path.join(baseDir, "hooks")),
+      hooks: async (baseDir) =>
+        mergeCapabilityLists(
+          await scanHookFiles(path.join(baseDir, "hooks")),
+          await scanConfigFile(path.join(baseDir, "openclaw.json"), {
+            id: "openclaw-json",
+            providerKind: "runtime-config",
+          }),
+        ),
       commands: async (baseDir) =>
         scanCommandFiles(path.join(baseDir, "commands")),
     },
@@ -115,10 +133,21 @@ const PLATFORMS = {
     scanners: {
       agents: async (baseDir) =>
         scanTomlFilesRecursive(path.join(baseDir, "agents")),
-      skills: async (baseDir) =>
-        scanSkillFilesRecursive(path.join(baseDir, "skills")),
+      skills: async (baseDir) => scanCodexSkills(baseDir),
+      hooks: async (baseDir) =>
+        mergeCapabilityLists(
+          await scanHookFiles(path.join(baseDir, "hooks")),
+          await scanConfigFile(path.join(baseDir, "hooks.json"), {
+            id: "hooks-json",
+            providerKind: "hook-config",
+          }),
+        ),
       commands: async (baseDir) =>
         scanCommandFiles(path.join(baseDir, "commands")),
+      mcpServers: async (baseDir) =>
+        scanCodexTomlMcpServers(path.join(baseDir, "config.toml")),
+      mcpTools: async (baseDir) =>
+        scanCodexTomlMcpTools(path.join(baseDir, "config.toml")),
     },
   },
   cursor: {
@@ -128,6 +157,22 @@ const PLATFORMS = {
       agents: async (baseDir) =>
         scanMarkdownFiles(path.join(baseDir, "agents")),
       skills: async (baseDir) => scanCursorSkills(baseDir),
+      hooks: async (baseDir) =>
+        mergeCapabilityLists(
+          await scanHookFiles(path.join(baseDir, "hooks")),
+          await scanConfigFile(path.join(baseDir, "hooks.json"), {
+            id: "hooks-json",
+            providerKind: "hook-config",
+          }),
+        ),
+      rules: async (baseDir) =>
+        scanMarkdownFilesRecursive(path.join(baseDir, "rules")),
+      prompts: async (baseDir) =>
+        scanMarkdownFilesRecursive(path.join(baseDir, "prompts")),
+      mcpServers: async (baseDir) =>
+        scanMcpConfig(path.join(baseDir, "mcp.json")).then((result) => result.servers),
+      mcpTools: async (baseDir) =>
+        scanMcpConfig(path.join(baseDir, "mcp.json")).then((result) => result.tools),
       plugins: async (baseDir) =>
         scanPluginFiles(path.join(baseDir, "plugins")),
     },
@@ -398,11 +443,40 @@ async function scanOpenClawSkills(baseDir) {
   );
 }
 
+async function scanCodexSkills(baseDir) {
+  return mergeCapabilityLists(
+    await scanSkillFilesRecursive(path.join(baseDir, "skills")),
+    await scanSkillFilesRecursive(path.join(baseDir, ".agents", "skills")),
+    await scanSkillFilesRecursive(path.join(os.homedir(), ".agents", "skills")),
+  );
+}
+
 async function scanCursorSkills(baseDir) {
   return mergeCapabilityLists(
     await scanSkillFilesRecursive(path.join(baseDir, "skills")),
     await scanSkillFilesRecursive(path.join(baseDir, "skills-cursor")),
   );
+}
+
+async function scanConfigFile(filePath, metadata = {}) {
+  try {
+    const stat = await fs.stat(filePath);
+    return [
+      {
+        id: metadata.id ?? path.basename(filePath),
+        path: filePath,
+        relativePath: path.basename(filePath),
+        size: stat.size,
+        modified: stat.mtime,
+        metadata: {
+          providerKind: metadata.providerKind ?? "config",
+          source: "runtime-config",
+        },
+      },
+    ];
+  } catch {
+    return [];
+  }
 }
 
 async function scanHookFiles(dir) {
@@ -629,6 +703,77 @@ async function scanMcpConfig(configPath) {
   return { servers, tools };
 }
 
+async function scanCodexTomlMcpServers(configPath) {
+  let raw;
+  let stat;
+  try {
+    [raw, stat] = await Promise.all([
+      fs.readFile(configPath, "utf8"),
+      fs.stat(configPath),
+    ]);
+  } catch {
+    return [];
+  }
+
+  const servers = [];
+  const serverMatches = raw.matchAll(/^\s*\[mcp_servers\.([^\]\s]+)\]\s*$/gm);
+  for (const match of serverMatches) {
+    const serverId = match[1].replace(/^["']|["']$/g, "");
+    servers.push({
+      id: serverId,
+      path: configPath,
+      relativePath: path.basename(configPath),
+      size: stat.size,
+      modified: stat.mtime,
+      metadata: {
+        name: serverId,
+        description: `Configured Codex MCP server ${serverId}`,
+        providerKind: "mcp-server",
+        source: "codex-config-toml",
+        permissionStatus: "configured_unverified",
+      },
+    });
+  }
+
+  return servers;
+}
+
+async function scanCodexTomlMcpTools(configPath) {
+  let raw;
+  let stat;
+  try {
+    [raw, stat] = await Promise.all([
+      fs.readFile(configPath, "utf8"),
+      fs.stat(configPath),
+    ]);
+  } catch {
+    return [];
+  }
+
+  const tools = [];
+  const serverMatches = raw.matchAll(/^\s*\[mcp_servers\.([^\]\s]+)\]\s*$/gm);
+  for (const match of serverMatches) {
+    const serverId = match[1].replace(/^["']|["']$/g, "");
+    tools.push({
+      id: `${serverId}:tools-unlisted`,
+      path: configPath,
+      relativePath: path.basename(configPath),
+      size: stat.size,
+      modified: stat.mtime,
+      metadata: {
+        name: "tools-unlisted",
+        description: `Codex MCP server ${serverId} is configured, but tool names were not introspected during static discovery.`,
+        providerKind: "mcp-tool-list",
+        serverId,
+        source: "codex-config-toml",
+        permissionStatus: "configured_unverified",
+      },
+    });
+  }
+
+  return tools;
+}
+
 function runKnownMcpSelfTest(command, args) {
   if (!command || !Array.isArray(args)) return null;
   const scriptArg = args.find((arg) =>
@@ -768,6 +913,10 @@ async function scanPlatform(platformId, platform) {
       hooks: [],
       plugins: [],
       commands: [],
+      rules: [],
+      prompts: [],
+      mcpServers: [],
+      mcpTools: [],
     },
     errors: [],
   };
@@ -896,6 +1045,44 @@ async function collectRepoCanonicalCapabilities() {
     path.join(repoRoot, "canonical", "runtime-assets", "codex", "commands"),
   );
   const mcpDiscovery = await scanMcpConfig(path.join(repoRoot, ".mcp.json"));
+  const skillsManifest = await readJsonIfExists(
+    path.join(repoRoot, "config", "skills.json"),
+  );
+  const pluginCapabilities = (skillsManifest?.skills ?? [])
+    .filter((skill) => {
+      const pluginIds = [
+        skill.claudePlugin,
+        skill.codexPlugin,
+        skill.cursorPlugin,
+      ].filter(Boolean);
+      return (
+        skill.installMethod === "pluginMarketplace" ||
+        pluginIds.length > 0 ||
+        skill.pluginHookCompat
+      );
+    })
+    .map((skill) => {
+      const pluginIds = [
+        skill.claudePlugin,
+        skill.codexPlugin,
+        skill.cursorPlugin,
+      ].filter(Boolean);
+      const isPlugin =
+        skill.installMethod === "pluginMarketplace" || pluginIds.length > 0;
+      return {
+        id: skill.id,
+        type: isPlugin ? "plugins" : "pluginBundles",
+        namespace: isPlugin ? "plugin-marketplace" : "plugin-bundle",
+        path: "config/skills.json",
+        runtimeTargets: skill.targets ?? [],
+        installMethod: skill.installMethod ?? "subdirExtraction",
+        providerRegistryId: isPlugin
+          ? `plugin-marketplace-${skill.id}`
+          : `plugin-bundle-${skill.id}`,
+        pluginIds,
+        evidence: `config/skills.json skills[id=${skill.id}]`,
+      };
+    });
 
   // Determine agent layer: meta (governance) vs execution (work)
   function determineAgentLayer(id, namespace) {
@@ -961,7 +1148,9 @@ async function collectRepoCanonicalCapabilities() {
     mcpTools: mcpDiscovery.tools.map((item) =>
       toRepoCapability(item, "mcpTools", "repo-mcp"),
     ),
-    plugins: [],
+    plugins: pluginCapabilities,
+    rules: [],
+    prompts: [],
     commands: [...claudeCommands, ...codexCommands].map((item) =>
       toRepoCapability(item, "commands", "canonical-runtime-assets"),
     ),
@@ -996,7 +1185,7 @@ async function buildRepoCapabilityIndex() {
       totalHooks: capabilities.hooks.length,
       totalMcpServers: capabilities.mcpServers.length,
       totalMcpTools: capabilities.mcpTools.length,
-      totalPlugins: 0,
+      totalPlugins: capabilities.plugins.length,
       totalCommands: capabilities.commands.length,
     },
     ...metaSkillProviderContract,
@@ -1031,7 +1220,14 @@ async function buildRepoCapabilityIndex() {
           cap,
         ]),
       ),
-      plugins: {},
+      plugins: Object.fromEntries(
+        capabilities.plugins.map((cap) => [
+          `manifest:${cap.namespace}:${cap.id}`,
+          cap,
+        ]),
+      ),
+      rules: {},
+      prompts: {},
       commands: Object.fromEntries(
         capabilities.commands.map((cap) => [
           `repo:${cap.namespace}:${cap.id}`,
@@ -1069,6 +1265,7 @@ export function capabilityIndexWithoutVolatileFields(index) {
 
     delete value.generatedAt;
     delete value.modified;
+    delete value.size;
     for (const child of Object.values(value)) {
       stripVolatile(child);
     }
@@ -1116,6 +1313,8 @@ async function buildGlobalCapabilityInventory(scannedResults, profile) {
       totalMcpTools: 0,
       totalPlugins: 0,
       totalCommands: 0,
+      totalRules: 0,
+      totalPrompts: 0,
     },
     byPlatform: {},
     byCapabilityType: {
@@ -1126,6 +1325,8 @@ async function buildGlobalCapabilityInventory(scannedResults, profile) {
       mcpTools: {},
       plugins: {},
       commands: {},
+      rules: {},
+      prompts: {},
     },
   };
 

@@ -21,13 +21,16 @@ describe("Clarity Gate unified execution confirmation", async () => {
   const runtimeCodex = await readFile(
     "canonical/skills/meta-theory/references/runtime-codex.md",
   );
+  const runtimeClaude = await readFile(
+    "canonical/skills/meta-theory/references/runtime-claude.md",
+  );
   const pathSelection = await readFile(
     "canonical/skills/meta-theory/references/path-selection.md",
   );
   const ownerResolution = await readFile(
     "canonical/skills/meta-theory/references/owner-resolution.md",
   );
-  const skillContent = `${skillEntry}\n${runtimeCodex}\n${pathSelection}\n${ownerResolution}`;
+  const skillContent = `${skillEntry}\n${runtimeCodex}\n${runtimeClaude}\n${pathSelection}\n${ownerResolution}`;
   const decisionTemplate = await readFile(
     "canonical/templates/user-interaction/decision-template.md",
   );
@@ -49,7 +52,9 @@ describe("Clarity Gate unified execution confirmation", async () => {
 
   test("Critical clarification is separate from execution confirmation", () => {
     assert.match(skillContent, /Critical clarification/i);
-    assert.match(skillContent, /too unclear or risky to Fetch/i);
+    assert.match(skillContent, /intent completeness framework/i);
+    assert.match(skillContent, /not.*true human intent/i);
+    assert.match(skillContent, /critical_clarification_allowed/i);
     assert.match(skillContent, /before executing a dispatch plan/i);
     assert.doesNotMatch(skillContent, /IMMEDIATELY invoke the native question tool/i);
   });
@@ -116,6 +121,58 @@ describe("Clarity Gate unified execution confirmation", async () => {
     assert.doesNotMatch(
       workflowContract,
       /Critical\/Fetch\/Thinking\/Review confirmation/,
+    );
+  });
+
+  test("subjective quality complaints trigger Critical clarification before Fetch", () => {
+    const frame =
+      workflowContractJson.runDiscipline?.qualityFirstPolicy
+        ?.intentCompletenessFramework;
+    const policy = frame?.subjectiveQualitySignalPolicy;
+    assert.ok(policy, "subjective quality signal policy must exist");
+    assert.equal(policy.required, true);
+    for (const signal of [
+      "good",
+      "bad",
+      "beautiful",
+      "not_beautiful",
+      "does_not_look_good",
+      "ugly",
+      "smooth",
+      "hard_to_use",
+      "feels_off",
+      "not_smooth",
+      "professional",
+      "premium",
+      "advanced",
+      "clean",
+      "simple",
+      "fast",
+      "slow",
+    ]) {
+      assert.ok(policy.triggerSignals?.includes(signal), `missing ${signal}`);
+    }
+    assert.match(policy.nonMeasurableAdjectiveRule, /good\/bad/);
+    assert.match(policy.nonMeasurableAdjectiveRule, /smooth\/not smooth/);
+    assert.match(policy.ambiguityChoiceSurfaceRule, /multiple valid outputs/);
+    assert.match(policy.ambiguityChoiceSurfaceRule, /low-risk assumption/);
+    for (const missing of [
+      "target",
+      "quality_dimension",
+      "acceptance_standard",
+      "allowed_scope",
+    ]) {
+      assert.ok(policy.blockingWhenMissing?.includes(missing), `missing ${missing}`);
+    }
+
+    const combined = `${runtimeCodex}\n${runtimeClaude}\n${workflowContract}`;
+    assert.match(combined, /subjective quality|non-measurable adjective/i);
+    assert.match(combined, /doesn't look good|does_not_look_good|ugly|professional|premium|smooth/i);
+    assert.match(combined, /critical_clarification_allowed/);
+    assert.match(combined, /before Fetch|before.*Fetch/i);
+    assert.doesNotMatch(
+      runtimeClaude,
+      /AskUserQuestion called during Critical or Fetch stage/,
     );
   });
 
@@ -266,6 +323,28 @@ describe("Clarity Gate unified execution confirmation", async () => {
     assert.match(codexPolicyText, /chat card.*popup|popup.*chat card/i);
   });
 
+  test("Claude Code uses native AskUserQuestion for branch-changing decisions", () => {
+    const claudeSurface =
+      workflowContractJson.runDiscipline?.runtimeNativeChoiceSurfaces?.claude;
+    assert.ok(claudeSurface, "Claude native choice surface policy must exist");
+    assert.equal(claudeSurface.primarySurface, "AskUserQuestion_tool");
+    assert.ok(
+      claudeSurface.fallbackSurfaces?.includes("conversation_fallback"),
+      "Claude must allow conversation_fallback when the native tool is unavailable",
+    );
+
+    const claudePolicyText = `${claudeSurface.triggerDescription} ${claudeSurface.implementation}\n${runtimeClaude}`;
+    assert.match(claudePolicyText, /AskUserQuestion/);
+    assert.match(claudePolicyText, /v2\.0\.21/);
+    assert.match(claudePolicyText, /questions array/i);
+    assert.match(claudePolicyText, /popup/i);
+    assert.match(claudePolicyText, /conversation_fallback/i);
+    assert.match(claudePolicyText, /wait.*before Execution|wait.*user.*answer.*Execution/i);
+    assert.match(claudePolicyText, /two to four meaningful options/i);
+    assert.match(claudePolicyText, /No filler questions/i);
+    assert.match(claudePolicyText, /issue #12031/);
+  });
+
   test("Codex meta-theory choice surfaces embed options without exposing protocol logs", () => {
     assert.match(skillContent, /Codex Multi-Option Choice Surface Rule/);
     assert.match(skillContent, /default_mode_request_user_input/);
@@ -311,6 +390,30 @@ describe("Clarity Gate unified execution confirmation", async () => {
     assert.equal(codexPolicy.claudeNativeChoiceSurfaceUnchanged, true);
   });
 
+  test("Cursor choice surface uses stable alwaysApply chat-card fallback", async () => {
+    const cursorSurface =
+      workflowContractJson.runDiscipline?.runtimeNativeChoiceSurfaces?.cursor;
+    assert.ok(cursorSurface, "Cursor choice surface policy must exist");
+    assert.equal(cursorSurface.primarySurface, "alwaysApply_rule_chat_card");
+    assert.ok(
+      cursorSurface.fallbackSurfaces?.includes("conversation_fallback"),
+      "Cursor must fall back to conversation cards",
+    );
+    const cursorPolicyText = `${cursorSurface.triggerDescription} ${cursorSurface.implementation}`;
+    assert.match(cursorPolicyText, /alwaysApply/i);
+    assert.match(cursorPolicyText, /chat decision card/i);
+    assert.match(cursorPolicyText, /preToolUse/i);
+    assert.match(cursorPolicyText, /failClosed/i);
+    assert.match(cursorPolicyText, /native modal|popup/i);
+
+    const cursorRule = await readFile(
+      "canonical/runtime-assets/cursor/rules/meta-choice-surface.mdc",
+    );
+    assert.match(cursorRule, /alwaysApply: true/);
+    assert.match(cursorRule, /Do not call this a popup/i);
+    assert.match(cursorRule, /conversation_fallback/);
+  });
+
   test("Choice Surface Gate forbids premature popup or execution confirmation", () => {
     const combined = `${skillContent}\n${workflowContract}\n${devGov}`;
     const gate =
@@ -333,7 +436,8 @@ describe("Clarity Gate unified execution confirmation", async () => {
     assert.match(combined, /FORBIDDEN: premature choice surface/i);
     assert.match(combined, /test a popup|interactive box|popup_test_request/i);
     assert.match(combined, /Critical[\s\S]*Fetch[\s\S]*Thinking/);
-    assert.match(combined, /Fetch cannot proceed safely/i);
+    assert.match(combined, /intent frame/i);
+    assert.match(combined, /changes route, scope, risk, acceptance, owner, permission, or non-goal/i);
     assert.match(combined, /must not present execution options/i);
     assert.match(combined, /contentEvidencePacket[\s\S]*preDecisionOptionFrame/);
     assert.match(combined, /No candidate paths means no execution confirmation/i);
@@ -372,5 +476,27 @@ describe("Clarity Gate scenario JSON remains valid", async () => {
       assert.equal(typeof scenario.passFailCriteria?.PASS, "string");
       assert.equal(typeof scenario.passFailCriteria?.FAIL, "string");
     }
+  });
+
+  test("subjective design complaint scenario requires native choice before mutation", () => {
+    const scenario = scenarios.find((s) => s.id === "CG-13");
+    assert.ok(scenario, "CG-13 subjective quality scenario must exist");
+    assert.match(scenario.input, /不好看/);
+    assert.ok(scenario.ambiguousDims.includes("Success criteria"));
+    assert.match(scenario.expectedBehavior, /native choice surface|localized fallback|交互式选择|确认卡/i);
+    assert.match(scenario.expectedBehavior, /before Fetch|before.*mutation/i);
+    assert.match(scenario.passFailCriteria.PASS, /澄清审美|体验方向/);
+    assert.match(scenario.passFailCriteria.FAIL, /猜|直接开始改 UI/);
+  });
+
+  test("non-measurable adjective scenario requires user calibration", () => {
+    const scenario = scenarios.find((s) => s.id === "CG-14");
+    assert.ok(scenario, "CG-14 non-measurable adjective scenario must exist");
+    assert.match(scenario.input, /顺畅|高级|好一点/);
+    assert.ok(scenario.ambiguousDims.includes("Success criteria"));
+    assert.match(scenario.expectedBehavior, /不可量化|non-measurable|judgment/i);
+    assert.match(scenario.expectedBehavior, /native choice surface|localized fallback|交互式选择|确认卡/i);
+    assert.match(scenario.passFailCriteria.PASS, /判断标准|验收标准/);
+    assert.match(scenario.passFailCriteria.FAIL, /猜|直接/);
   });
 });

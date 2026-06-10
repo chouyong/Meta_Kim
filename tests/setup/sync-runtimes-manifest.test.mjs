@@ -18,7 +18,9 @@ import {
   inferProjectCategory,
   inferProjectPurpose,
 } from "../../scripts/sync-runtimes.mjs";
+import { mergeRepoClaudeSettings } from "../../scripts/claude-settings-merge.mjs";
 import { CATEGORIES } from "../../scripts/install-manifest.mjs";
+import { buildHookPromptAdapterSource } from "../../scripts/runtime-hook-mapping.mjs";
 
 const REPO = path.resolve("/fake/repo");
 
@@ -252,6 +254,56 @@ describe("sync-runtimes / Codex project hooks", () => {
     assert.doesNotMatch(command, /\[ -f|\|\| true|2>\/dev\/null/);
   });
 
+  test("repo Claude settings replace retired inline graphify shell hook with Node hook", () => {
+    const retiredInlineHook =
+      'CMD=$(python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get(\'tool_input\',d).get(\'command\',\'\'))" 2>/dev/null || true); case "$CMD" in *rg\\ *) [ -f graphify-out/graph.json ] && echo "{}" || true ;; esac';
+    const canonical = {
+      hooks: {
+        PreToolUse: [
+          {
+            matcher: "Bash",
+            hooks: [
+              {
+                type: "command",
+                command: "node .claude/hooks/graphify-context.mjs",
+              },
+              {
+                type: "command",
+                command: "node .claude/hooks/block-dangerous-bash.mjs",
+              },
+            ],
+          },
+        ],
+      },
+    };
+    const merged = mergeRepoClaudeSettings(
+      {
+        hooks: {
+          PreToolUse: [
+            {
+              matcher: "Bash",
+              hooks: [
+                {
+                  type: "command",
+                  command: retiredInlineHook,
+                },
+              ],
+            },
+          ],
+        },
+      },
+      canonical,
+      REPO
+    );
+    const commands = merged.hooks.PreToolUse.flatMap((block) =>
+      block.hooks.map((hook) => hook.command)
+    );
+
+    assert.ok(commands.includes("node .claude/hooks/graphify-context.mjs"));
+    assert.ok(commands.includes("node .claude/hooks/block-dangerous-bash.mjs"));
+    assert.equal(commands.some((command) => command.includes("CMD=$(python3")), false);
+  });
+
   test("wires MCP memory across start, prompt, and stop", () => {
     const config = buildCodexProjectHooksJson();
 
@@ -280,8 +332,19 @@ describe("sync-runtimes / Codex project hooks", () => {
     );
   });
 
+  test("Codex HookPrompt adapter injects model-visible additionalContext", () => {
+    const codexSource = buildHookPromptAdapterSource("codex");
+    const cursorSource = buildHookPromptAdapterSource("cursor");
+
+    assert.match(codexSource, /hookSpecificOutput/);
+    assert.match(codexSource, /hookEventName:\s*"UserPromptSubmit"/);
+    assert.match(codexSource, /additionalContext/);
+    assert.doesNotMatch(codexSource, /systemMessage:\s*additionalContext/);
+    assert.match(cursorSource, /prompt:\s*additionalContext/);
+  });
+
   test("does not emit quoted absolute Node paths that fail in PowerShell", () => {
-    const hookPath = "C:\\Users\\Kim\\Path With Spaces\\meta-kim-memory-save.mjs";
+    const hookPath = "C:\\Users\\Example\\Path With Spaces\\meta-kim-memory-save.mjs";
     const config = buildCodexProjectHooksJson({
       memoryHookPath: hookPath,
     });
@@ -363,6 +426,21 @@ Body content.
       applyRuntimePaths(source, "openclaw"),
       "Agent source: openclaw/workspaces/meta-warden/SOUL.md, openclaw/workspaces/*/SOUL.md, and openclaw/workspaces/{name}/SOUL.md",
     );
+  });
+
+  test("keeps cross-runtime Fetch checklist paths literal in runtime skill mirrors", () => {
+    const source = `Fetch discovery minimum checklist: before Thinking, search at least these locations (even if results are empty):
+- canonical sources and capability indexes: \`canonical/agents/\`, \`canonical/skills/\`, \`canonical/runtime-assets/\`, \`config/capability-index/*.json\`, and runtime capability-index mirrors
+- Claude Code project and global inventories: \`.claude/agents/\`, \`.claude/skills/\`, \`.claude/commands/\`, \`.claude/hooks/\`, \`.claude/settings.json\`, \`~/.claude/agents/\`, \`~/.claude/skills/\`, \`~/.claude/commands/\`, \`~/.claude/hooks/\`, and \`~/.claude/settings.json\`
+- Cursor project and global inventories: \`.cursor/agents/\`, \`.cursor/skills/\`, \`.cursor/rules/\`, \`.cursor/prompts/\`, \`.cursor/hooks/\`, \`.cursor/hooks.json\`, \`.cursor/mcp.json\`, \`~/.cursor/agents/\`, \`~/.cursor/skills/\`, \`~/.cursor/rules/\`, \`~/.cursor/prompts/\`, \`~/.cursor/hooks/\`, and \`~/.cursor/hooks.json\`
+- OpenClaw project and global inventories: \`openclaw/workspaces/\`, \`openclaw/skills/\`, \`openclaw/hooks/\`, \`openclaw/openclaw.template.json\`, \`~/.openclaw/openclaw.json\`, \`~/.openclaw/workspace-*\`, \`~/.openclaw/skills/\`, \`~/.openclaw/hooks/\`, and \`~/.agents/skills/\`
+
+Pass condition: searchLog exists.
+`;
+
+    for (const target of ["claude", "codex", "cursor", "openclaw"]) {
+      assert.equal(applyRuntimePaths(source, target), source);
+    }
   });
 });
 

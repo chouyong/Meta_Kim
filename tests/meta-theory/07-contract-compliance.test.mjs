@@ -407,14 +407,56 @@ describe("workflow-contract.json — schema compliance", async () => {
   test("production correctness policy is source-first and no-quota", () => {
     const policy = contract.runDiscipline?.qualityFirstPolicy ?? {};
     assert.equal(policy.clarificationPolicy?.questionCountPolicy, "no_quota_ask_only_outcome_branching");
+    assert.equal(policy.clarificationPolicy?.evaluateAgainstIntentFrameBeforeAssumption, true);
     assert.equal("maxBlockingQuestions" in (policy.clarificationPolicy ?? {}), false);
     assert.equal(policy.readBeforeEditPolicy?.requiredBeforeMutation, true);
     assert.ok(policy.readBeforeEditPolicy?.allowedDuringCriticalFetch?.includes("git_status"));
     assert.ok(policy.stageRequiredOutputs?.critical?.includes("realIntent"));
+    assert.ok(policy.stageRequiredOutputs?.critical?.includes("intentFrameAssessment"));
     assert.ok(policy.stageRequiredOutputs?.fetch?.includes("decisionImpactMap"));
     assert.ok(policy.stageRequiredOutputs?.thinking?.includes("workerTaskPackets"));
     assert.ok(policy.dependencyPolicy?.criticalDependencyFailureActions?.includes("return_to_stage"));
     assert.ok(policy.dependencyPolicy?.forbiddenActions?.includes("use_fallback"));
+  });
+
+  test("Critical clarification is framework-based instead of mind-reading", () => {
+    const policy = contract.runDiscipline?.qualityFirstPolicy ?? {};
+    const frame = policy.intentCompletenessFramework ?? {};
+
+    assert.equal(frame.required, true);
+    assert.equal(frame.judgmentTarget, "user_expression_completeness_not_true_human_intent");
+    assert.equal(frame.outputPacket, "intentFrameAssessment");
+    assert.equal(frame.onBlockingMissingDimension, "critical_clarification_allowed");
+
+    for (const dimension of [
+      "desiredOutcome",
+      "targetAudienceOrUserValue",
+      "successCriteria",
+      "scopeBoundary",
+      "constraintsPermissionsSafety",
+      "evidenceFreshnessNeeds",
+      "outputFormatOrDeliverySurface",
+    ]) {
+      assert.ok(
+        frame.requiredDimensions?.includes(dimension),
+        `intentCompletenessFramework missing ${dimension}`,
+      );
+    }
+
+    const assessment = frame.intentFrameAssessment ?? {};
+    for (const field of [
+      "dimension",
+      "status",
+      "evidenceFromUserText",
+      "defaultAssumption",
+      "wouldChangeExecution",
+      "clarificationQuestion",
+    ]) {
+      assert.ok(
+        assessment.requiredFields?.includes(field),
+        `intentFrameAssessment missing ${field}`,
+      );
+    }
   });
 
   test("card governance model is explicit", () => {
@@ -516,7 +558,8 @@ describe("workflow-contract.json — schema compliance", async () => {
       "OpenClaw template must not claim an installed before_tool_call gate",
     );
     assert.match(agentsGuide, /OpenClaw[\s\S]*declarative/i);
-    assert.match(heartbeatTemplate, /OpenClaw has no PreToolUse hook surface/i);
+    assert.match(heartbeatTemplate, /typed plugin adapter for tool-call denial/i);
+    assert.match(heartbeatTemplate, /not a hard sandbox/i);
   });
 
   test("silence / skip / interrupt / shell policies are explicit", () => {
@@ -762,6 +805,56 @@ describe("workflow-contract.json — schema compliance", async () => {
         `executionAgentCard missing ${field}`,
       );
     }
+
+    const abstractionPolicy =
+      contract.protocols?.executionAgentCard?.abstractionPolicy ?? {};
+    assert.equal(
+      abstractionPolicy.concreteWorkOrderFieldsForbidden,
+      true,
+      "executionAgentCard must forbid work-order fields in durable identity",
+    );
+    assert.equal(
+      abstractionPolicy.pathLikeBindingsForbidden,
+      true,
+      "executionAgentCard must forbid path-like durable bindings",
+    );
+    assert.equal(
+      abstractionPolicy.providerFirstAgentLast,
+      true,
+      "executionAgentCard must require provider-first, agent-last creation",
+    );
+    for (const field of ["todayTask", "scopeFiles", "deliverableLink", "verifySteps"]) {
+      assert.ok(
+        abstractionPolicy.forbiddenDurableFields?.includes(field),
+        `executionAgentCard abstraction policy must forbid ${field}`,
+      );
+    }
+  });
+
+  test("capability discovery uses cached global inventory plus project light scan", () => {
+    const policy =
+      contract.runDiscipline?.executionOwnership?.capabilityDiscoveryRuntimePolicy ?? {};
+    assert.equal(
+      policy.defaultMode,
+      "cached_global_inventory_plus_project_light_scan",
+    );
+    for (const trigger of [
+      "install",
+      "update",
+      "explicit_user_refresh",
+      "stale_cache",
+      "scheduled_refresh_older_than_14_days",
+      "high_risk_provider_route",
+    ]) {
+      assert.ok(policy.fullScanWhen?.includes(trigger), `missing ${trigger}`);
+    }
+    assert.equal(policy.staleAfterMinutes, 20160);
+    assert.equal(policy.staleAfterDays, 14);
+    assert.match(policy.perRunBehavior ?? "", /must not run a full global filesystem scan on every dispatch/i);
+    assert.match(policy.perRunBehavior ?? "", /older than 14 days/i);
+    assert.match(policy.userPromptPolicy ?? "", /2 weeks/i);
+    assert.match(policy.userPromptPolicy ?? "", /update first/i);
+    assert.match(policy.tokenPolicy ?? "", /must not dump full provider definitions/i);
   });
 
   test("local state + compaction policy are explicit", () => {
@@ -1123,16 +1216,31 @@ describe("workflow-contract.json — schema compliance", async () => {
     const summary = quality.userFacingSummaryContract ?? {};
     assert.equal(summary.required, true);
     for (const field of [
+      "rootGoal",
+      "workDoneThisRun",
+      "directionFit",
+      "deliveryCompleteness",
+      "complexityDelta",
       "whyChanged",
       "whatChanged",
       "userImpact",
       "verificationEvidence",
       "remainingLimits",
+      "deferredOrNotDone",
+      "nextAction",
     ]) {
       assert.ok(
         summary.requiredFields?.includes(field),
         `userFacingSummaryContract missing ${field}`,
       );
+    }
+    for (const rule of [
+      "rootGoalRule",
+      "directionFitRule",
+      "completenessRule",
+      "complexityRule",
+    ]) {
+      assert.equal(typeof summary[rule], "string", `${rule} must be defined`);
     }
   });
 

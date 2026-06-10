@@ -264,6 +264,8 @@ async function validateRequiredFiles() {
     "canonical/runtime-assets/openclaw/openclaw.template.json",
     "config/contracts/sync-manifest.schema.json",
     "config/contracts/runtime-profile.schema.json",
+    "config/contracts/runtime-compatibility-catalog.schema.json",
+    "config/runtime-compatibility-catalog.json",
     "config/contracts/workflow-contract.json",
     CANONICAL_CAPABILITY_INDEX_RELATIVE,
     "scripts/mcp/meta-runtime-server.mjs",
@@ -613,6 +615,78 @@ async function validateWorkflowContract() {
     governanceStagePolicy.skillSelectionScope === "run_scoped",
     "workflow-contract.json governanceStageCoveragePolicy must keep concrete skill selection run-scoped.",
   );
+  const globalReusePolicy = agentBlueprint.globalAgentReusePolicy ?? {};
+  for (const source of [
+    "repo_canonical_capability_index",
+    "runtime_mirror_indexes",
+    "project_runtime_agent_inventory",
+    "local_global_agent_inventory",
+    "available_capability_providers_skills_tools_mcp",
+  ]) {
+    assert(
+      globalReusePolicy.requiredEvidenceOrder?.includes(source),
+      `workflow-contract.json globalAgentReusePolicy must require ${source}.`,
+    );
+  }
+  assert(
+    globalReusePolicy.creationBlockedUntilExistingAgentsChecked === true,
+    "workflow-contract.json globalAgentReusePolicy must block creation until existing agents are checked.",
+  );
+
+  const discoveryPolicy =
+    contract.runDiscipline?.executionOwnership?.capabilityDiscoveryRuntimePolicy ?? {};
+  assert(
+    discoveryPolicy.defaultMode === "cached_global_inventory_plus_project_light_scan",
+    "workflow-contract.json capability discovery must default to cached global inventory plus project light scan.",
+  );
+  assert(
+    discoveryPolicy.fullScanWhen?.includes("explicit_user_refresh") &&
+      discoveryPolicy.fullScanWhen?.includes("stale_cache") &&
+      discoveryPolicy.fullScanWhen?.includes("scheduled_refresh_older_than_14_days") &&
+      discoveryPolicy.fullScanWhen?.includes("high_risk_provider_route"),
+    "workflow-contract.json capability discovery full-scan triggers must be explicit.",
+  );
+  assert(
+    discoveryPolicy.staleAfterMinutes === 20160 && discoveryPolicy.staleAfterDays === 14,
+    "workflow-contract.json capability discovery cache must become stale after 14 days.",
+  );
+  assert(
+    /must not run a full global filesystem scan on every dispatch/i.test(
+      discoveryPolicy.perRunBehavior ?? "",
+    ),
+    "workflow-contract.json capability discovery must forbid per-dispatch full scans.",
+  );
+  assert(
+    /older than 14 days/i.test(discoveryPolicy.perRunBehavior ?? "") &&
+      /2 weeks/i.test(discoveryPolicy.userPromptPolicy ?? "") &&
+      /update first/i.test(discoveryPolicy.userPromptPolicy ?? ""),
+    "workflow-contract.json capability discovery must define the 2-week refresh notice UX.",
+  );
+  assert(
+    /must not dump full provider definitions/i.test(discoveryPolicy.tokenPolicy ?? ""),
+    "workflow-contract.json capability discovery must protect token budget.",
+  );
+
+  const executionAgentCard =
+    contract.protocols?.executionAgentCard?.abstractionPolicy ?? {};
+  assert(
+    executionAgentCard.concreteWorkOrderFieldsForbidden === true,
+    "workflow-contract.json executionAgentCard must forbid work-order fields in durable identity.",
+  );
+  assert(
+    executionAgentCard.pathLikeBindingsForbidden === true,
+    "workflow-contract.json executionAgentCard must forbid path-like durable bindings.",
+  );
+  assert(
+    executionAgentCard.providerFirstAgentLast === true,
+    "workflow-contract.json executionAgentCard must require provider-first, agent-last creation.",
+  );
+  for (const field of ["todayTask", "scopeFiles", "deliverableLink", "verifySteps"]) {
+    assert(
+      executionAgentCard.forbiddenDurableFields?.includes(field),
+      `workflow-contract.json executionAgentCard.abstractionPolicy must forbid ${field}.`,
+    );
+  }
 
   const workerFields = contract.protocols?.workerTaskPacket?.requiredFields ?? [];
   for (const field of [
@@ -990,7 +1064,7 @@ async function validatePortableSkill() {
       `Portable skill is missing station-deliverable marker ${marker}.`,
     );
   }
-  assertNoForbiddenMarkers(skillSource, skillSourcePath, ["AskUserQuestion"]);
+  assertNoForbiddenMarkers(skillSource, skillSourcePath, []);
   const frontmatterValidation = validateSkillFrontmatter(skillSource);
   assert(
     frontmatterValidation.ok,
@@ -1006,9 +1080,15 @@ async function validatePortableSkill() {
       canonicalReferencePath,
       "utf8",
     );
-    assertNoForbiddenMarkers(canonicalReference, canonicalReferencePath, [
-      "AskUserQuestion",
-    ]);
+    const allowedRuntimeMarkers =
+      referenceFile === "runtime-claude.md"
+        ? []
+        : ["AskUserQuestion"];
+    assertNoForbiddenMarkers(
+      canonicalReference,
+      canonicalReferencePath,
+      allowedRuntimeMarkers,
+    );
   }
 }
 
@@ -1081,14 +1161,168 @@ async function validateSyncConfiguration() {
   );
   assert(
     profiles.cursor.projection.assetTypes.includes("hooks") &&
+      profiles.cursor.projection.assetTypes.includes("rules") &&
       profiles.cursor.projection.outputPaths.hooksDir === ".cursor/hooks" &&
-      profiles.cursor.projection.outputPaths.hooksFile === ".cursor/hooks.json",
-    "Cursor runtime profile must declare hook output paths.",
+      profiles.cursor.projection.outputPaths.hooksFile === ".cursor/hooks.json" &&
+      profiles.cursor.projection.outputPaths.rulesDir === ".cursor/rules",
+    "Cursor runtime profile must declare hook and rule output paths.",
   );
   assert(
     (manifest.generatedTargets?.cursor ?? []).includes(".cursor/hooks") &&
-      (manifest.generatedTargets?.cursor ?? []).includes(".cursor/hooks.json"),
-    "config/sync.json must advertise generated Cursor lifecycle hook paths.",
+      (manifest.generatedTargets?.cursor ?? []).includes(".cursor/hooks.json") &&
+      (manifest.generatedTargets?.cursor ?? []).includes(".cursor/rules"),
+    "config/sync.json must advertise generated Cursor lifecycle hook and rule paths.",
+  );
+}
+
+function sortedJson(values) {
+  return JSON.stringify([...values].sort());
+}
+
+async function validateRuntimeCompatibilityCatalog() {
+  const catalog = JSON.parse(
+    await fs.readFile(
+      path.join(repoRoot, "config", "runtime-compatibility-catalog.json"),
+      "utf8",
+    ),
+  );
+  const manifest = await loadSyncManifest();
+  const skillsManifest = JSON.parse(
+    await fs.readFile(path.join(repoRoot, "config", "skills.json"), "utf8"),
+  );
+
+  assert(
+    (catalog.schemaVersion ?? 0) >= 1,
+    "runtime compatibility catalog schemaVersion must be >= 1.",
+  );
+  assert(
+    catalog.decisionBoundary?.noAutoPromotionFromDependencyInstall === true &&
+      catalog.decisionBoundary?.noAutoPromotionFromGenericSkillPath === true,
+    "runtime compatibility catalog must forbid automatic promotion from dependency installs or generic paths.",
+  );
+
+  const products = catalog.products ?? [];
+  assert(
+    Array.isArray(products) && products.length >= 1,
+    "runtime compatibility catalog must declare products.",
+  );
+  const productIds = products.map((product) => product.id);
+  assert(
+    new Set(productIds).size === productIds.length,
+    "runtime compatibility catalog product ids must be unique.",
+  );
+  const byId = new Map(products.map((product) => [product.id, product]));
+  const supportedTargets = new Set(manifest.supportedTargets ?? []);
+  const defaultTargets = new Set(
+    manifest.defaultTargets ?? manifest.supportedTargets ?? [],
+  );
+  const projectionIds = products
+    .filter((product) => product.tier === "runtime_projection")
+    .map((product) => product.id);
+
+  assert(
+    sortedJson(projectionIds) === sortedJson(supportedTargets),
+    "runtime_projection catalog products must exactly match config/sync.json supportedTargets.",
+  );
+
+  for (const product of products) {
+    const formal = product.formalProjection ?? {};
+    if (product.tier === "runtime_projection") {
+      assert(
+        supportedTargets.has(product.id),
+        `runtime_projection ${product.id} must be in config/sync.json supportedTargets.`,
+      );
+      assert(
+        formal.inSyncManifest === true &&
+          formal.hasRuntimeProfile === true &&
+          formal.hasProjectionLayout === true,
+        `runtime_projection ${product.id} must declare formal projection evidence.`,
+      );
+      assert(
+        formal.isDefaultTarget === defaultTargets.has(product.id),
+        `runtime_projection ${product.id} default-target flag must match config/sync.json.`,
+      );
+      continue;
+    }
+
+    assert(
+      !supportedTargets.has(product.id) && !defaultTargets.has(product.id),
+      `${product.id} must not be in config/sync.json until promoted to runtime_projection.`,
+    );
+    assert(
+      formal.inSyncManifest === false &&
+        formal.hasRuntimeProfile === false &&
+        formal.hasProjectionLayout === false &&
+        formal.isDefaultTarget === false,
+      `${product.id} must not claim formal projection fields before promotion.`,
+    );
+  }
+
+  const ecc = skillsManifest.skills?.find((skill) => skill.id === "ecc");
+  assert(ecc, "config/skills.json must declare ecc.");
+  const eccTargets = new Set(ecc.targets ?? []);
+  for (const target of eccTargets) {
+    const product = byId.get(target);
+    assert(
+      product,
+      `runtime compatibility catalog is missing ECC target ${target}.`,
+    );
+    assert(
+      product.dependencyInstall?.ecc?.support === "native",
+      `runtime compatibility catalog must mark ECC target ${target} as native.`,
+    );
+  }
+
+  const qoder = byId.get("qoder");
+  assert(qoder, "runtime compatibility catalog must include qoder.");
+  assert(
+    qoder.tier === "candidate_probe" &&
+      qoder.dependencyInstall?.ecc?.support === "not_supported" &&
+      qoder.genericCompatibility?.status === "verified_current",
+    "qoder must remain a verified generic candidate, not a formal projection or ECC target.",
+  );
+  assert(
+    !eccTargets.has("qoder") && !supportedTargets.has("qoder"),
+    "qoder must not be in ECC targets or sync supportedTargets until promoted.",
+  );
+  assert(
+    (qoder.evidence ?? []).some(
+      (entry) => entry.type === "github_issue" && entry.ref.includes("/issues/7"),
+    ) &&
+      (qoder.evidence ?? []).filter((entry) => entry.type === "official_docs")
+        .length >= 4,
+    "qoder candidate must be anchored to issue #7 and official Qoder docs.",
+  );
+
+  const cursor = byId.get("cursor");
+  assert(cursor, "runtime compatibility catalog must include cursor.");
+  assert(
+    cursor.genericCompatibility?.agentPath === ".cursor/agents/{agent}.md" &&
+      cursor.genericCompatibility?.hookConfig === ".cursor/hooks.json" &&
+      (cursor.evidence ?? []).some(
+        (entry) => entry.type === "official_docs" && entry.ref.includes("cursor.com/docs/subagents"),
+      ) &&
+      (cursor.evidence ?? []).some(
+        (entry) => entry.type === "official_docs" && entry.ref.includes("cursor.com/docs/hooks"),
+      ) &&
+      (cursor.evidence ?? []).some(
+        (entry) => entry.type === "official_docs" && entry.ref.includes("cursor.com/docs/rules"),
+      ),
+    "Cursor runtime projection must cite official subagent, hook, and rule docs.",
+  );
+
+  const openclaw = byId.get("openclaw");
+  assert(openclaw, "runtime compatibility catalog must include openclaw.");
+  assert(
+    openclaw.genericCompatibility?.status === "verified_current" &&
+      /strict OpenClaw self-test evidence/i.test(openclaw.nextAction ?? "") &&
+      (openclaw.evidence ?? []).some(
+        (entry) => entry.type === "official_docs" && entry.ref.includes("docs.openclaw.ai/concepts/agent"),
+      ) &&
+      (openclaw.evidence ?? []).some(
+        (entry) => entry.type === "official_docs" && entry.ref.includes("docs.openclaw.ai/automation/hooks"),
+      ),
+    "OpenClaw runtime projection must preserve official workspace/hook evidence and require strict OpenClaw self-test evidence that passes review before merge.",
   );
 }
 
@@ -1221,6 +1455,7 @@ async function main() {
   // 3. Sync manifest and runtime target catalog
   step(current++, TOTAL, t.val.step03, t.val.step03Detail);
   await validateSyncConfiguration();
+  await validateRuntimeCompatibilityCatalog();
   pass(t.val.step03Pass);
 
   // 4. Canonical agent definitions

@@ -4,65 +4,72 @@ import assert from "node:assert/strict";
 import {
   buildMetaKimHooksTemplate,
   hookCommandNode,
+  mergeGlobalMetaKimHooksIntoSettings,
   mergeRepoClaudeSettings,
-  rewriteRepoHookCommandsToAbsolute,
 } from "../../scripts/claude-settings-merge.mjs";
 
 describe("Claude settings hook command rendering", () => {
   test("normalizes Windows paths to slash form before writing shell commands", () => {
-    const command = hookCommandNode("C:\\Users\\Kim\\.claude\\hooks\\meta-kim\\stop-compaction.mjs");
+    const command = hookCommandNode(
+      "C:\\Users\\Example\\.claude\\hooks\\meta-kim\\stop-compaction.mjs",
+    );
 
-    assert.equal(command, 'node "C:/Users/Kim/.claude/hooks/meta-kim/stop-compaction.mjs"');
+    assert.equal(command, 'node "C:/Users/Example/.claude/hooks/meta-kim/stop-compaction.mjs"');
     assert.doesNotMatch(command, /\\/);
   });
 
   test("global hook template emits slash-normalized absolute paths", () => {
-    const template = buildMetaKimHooksTemplate("C:\\Users\\Kim\\.claude\\hooks\\meta-kim");
+    const template = buildMetaKimHooksTemplate("C:\\Users\\Example\\.claude\\hooks\\meta-kim");
     const command = template.Stop[0].hooks[0].command;
 
-    assert.equal(command, 'node "C:/Users/Kim/.claude/hooks/meta-kim/stop-compaction.mjs"');
+    assert.equal(command, 'node "C:/Users/Example/.claude/hooks/meta-kim/stop-compaction.mjs"');
+    const commands = Object.values(template)
+      .flatMap((blocks) => blocks.flatMap((block) => block.hooks ?? []))
+      .map((hook) => hook.command);
+    assert.equal(
+      commands.some((entry) => entry.includes("pre-git-push-confirm.mjs")),
+      false,
+    );
   });
 
-  test("repo hook rewrite keeps Windows absolute paths shell portable", () => {
-    const settings = {
+  test("global settings merge strips retired git push confirmation hooks", () => {
+    const base = {
       hooks: {
-        SessionStart: [
+        PreToolUse: [
           {
-            matcher: "startup|resume",
+            matcher: "Bash",
             hooks: [
               {
                 type: "command",
-                command: "node .claude/hooks/meta-kim-memory-save.mjs --event session-start",
+                command:
+                  'node "C:/Users/Example/.claude/hooks/pre-git-push-confirm.mjs"',
               },
-            ],
-          },
-        ],
-        Stop: [
-          {
-            hooks: [
               {
                 type: "command",
-                command: "node .claude/hooks/stop-memory-save.mjs",
+                command: 'node "C:/Users/Example/.claude/hooks/custom.mjs"',
               },
             ],
           },
         ],
       },
     };
+    const template = buildMetaKimHooksTemplate(
+      "C:\\Users\\Example\\.claude\\hooks\\meta-kim",
+    );
 
-    rewriteRepoHookCommandsToAbsolute(settings, "D:\\KimProject\\Meta_Kim");
+    const merged = mergeGlobalMetaKimHooksIntoSettings(base, template);
+    const commands = Object.values(merged.hooks)
+      .flatMap((blocks) => blocks.flatMap((block) => block.hooks ?? []))
+      .map((hook) => hook.command);
 
     assert.equal(
-      settings.hooks.SessionStart[0].hooks[0].command,
-      'node "D:/KimProject/Meta_Kim/.claude/hooks/meta-kim-memory-save.mjs" --event session-start',
+      commands.some((entry) => entry.includes("pre-git-push-confirm.mjs")),
+      false,
     );
-    assert.equal(
-      settings.hooks.Stop[0].hooks[0].command,
-      'node "D:/KimProject/Meta_Kim/.claude/hooks/stop-memory-save.mjs"',
-    );
+    assert.ok(commands.includes('node "C:/Users/Example/.claude/hooks/custom.mjs"'));
   });
 
-  test("repo settings merge emits absolute hook paths for any launch cwd", () => {
+  test("repo settings merge keeps project hook commands relative", () => {
     const canonical = {
       hooks: {
         PreToolUse: [
@@ -84,22 +91,18 @@ describe("Claude settings hook command rendering", () => {
 
     assert.equal(
       command,
-      'node "/Users/delphi/work/Finance/.claude/hooks/block-dangerous-bash.mjs"',
+      "node .claude/hooks/block-dangerous-bash.mjs",
     );
-    assert.doesNotMatch(command, /^node \.claude\/hooks\//);
+    assert.doesNotMatch(command, /\/Users\/delphi\/work\/Finance/);
   });
 
-  test("repo settings merge removes legacy relative Meta_Kim hook entries", () => {
+  test("repo settings merge replaces legacy Meta_Kim hook entries with relative commands", () => {
     const base = {
       hooks: {
         PreToolUse: [
           {
             matcher: "Bash",
             hooks: [
-              {
-                type: "command",
-                command: "node .claude/hooks/activate-meta-theory-spine.mjs",
-              },
               {
                 type: "command",
                 command: "node .claude/hooks/enforce-agent-dispatch.mjs",
@@ -113,7 +116,8 @@ describe("Claude settings hook command rendering", () => {
             hooks: [
               {
                 type: "command",
-                command: "node .claude/hooks/stop-spine-cleanup.mjs",
+                command:
+                  'node "D:/Old/Meta_Kim/.claude/hooks/stop-spine-cleanup.mjs"',
               },
             ],
           },
@@ -153,8 +157,8 @@ describe("Claude settings hook command rendering", () => {
       .map((hook) => hook.command);
 
     assert.deepEqual(commands, [
-      'node "/Users/delphi/work/Finance/.claude/hooks/enforce-agent-dispatch.mjs"',
-      'node "/Users/delphi/work/Finance/.claude/hooks/stop-spine-cleanup.mjs"',
+      "node .claude/hooks/enforce-agent-dispatch.mjs",
+      "node .claude/hooks/stop-spine-cleanup.mjs",
     ]);
   });
 });

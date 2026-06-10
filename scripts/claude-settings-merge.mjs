@@ -27,6 +27,18 @@ export function isGlobalMetaKimManagedHookCommand(command) {
   return n.includes("hooks/meta-kim/") || n.includes("hooks\\meta-kim\\");
 }
 
+const RETIRED_META_KIM_HOOK_FILES = new Set(["pre-git-push-confirm.mjs"]);
+
+export function isRetiredMetaKimHookCommand(command) {
+  if (typeof command !== "string") {
+    return false;
+  }
+  const norm = normalizeHookCommand(command).replace(/\\/g, "/");
+  return [...RETIRED_META_KIM_HOOK_FILES].some(
+    (file) => norm.endsWith(file) || norm.includes(`/hooks/${file}`),
+  );
+}
+
 /**
  * Render a `node <path>` hook command.
  *
@@ -54,10 +66,7 @@ export function buildMetaKimHooksTemplate(absHooksDir) {
     PreToolUse: [
       {
         matcher: "Bash",
-        hooks: [
-          cmd("block-dangerous-bash.mjs"),
-          cmd("pre-git-push-confirm.mjs"),
-        ],
+        hooks: [cmd("block-dangerous-bash.mjs")],
       },
     ],
     PostToolUse: [
@@ -94,7 +103,9 @@ export function stripGlobalMetaKimHookEntriesFromBlocks(blocks) {
     .map((block) => ({
       ...block,
       hooks: (block.hooks || []).filter(
-        (h) => !isGlobalMetaKimManagedHookCommand(h.command || ""),
+        (h) =>
+          !isGlobalMetaKimManagedHookCommand(h.command || "") &&
+          !isRetiredMetaKimHookCommand(h.command || ""),
       ),
     }))
     .filter((block) => (block.hooks || []).length > 0);
@@ -106,8 +117,8 @@ const REPO_META_KIM_HOOK_FILES = [
   "activate-meta-theory-spine.mjs",
   "block-dangerous-bash.mjs",
   "enforce-agent-dispatch.mjs",
+  "graphify-context.mjs",
   "meta-kim-memory-save.mjs",
-  "pre-git-push-confirm.mjs",
   "post-format.mjs",
   "post-typecheck.mjs",
   "post-console-log-warn.mjs",
@@ -124,12 +135,20 @@ export function isRepoMetaKimHookCommand(command) {
     return false;
   }
   const norm = normalizeHookCommand(command).replace(/\\/g, "/");
+  if (
+    norm.includes("graphify-out/graph.json") &&
+    (norm.includes("CMD=$(python3") || norm.includes("case \"$CMD\""))
+  ) {
+    return true;
+  }
   if (!norm.includes(".claude/hooks/")) {
     return false;
   }
-  return REPO_META_KIM_HOOK_FILES.some(
-    (f) => norm.endsWith(f) || norm.includes(`/hooks/${f}`),
-  );
+  const managedFiles = [
+    ...REPO_META_KIM_HOOK_FILES,
+    ...RETIRED_META_KIM_HOOK_FILES,
+  ];
+  return managedFiles.some((f) => norm.endsWith(f) || norm.includes(`/hooks/${f}`));
 }
 
 export function stripRepoMetaKimHookEntriesFromBlocks(blocks) {
@@ -225,15 +244,13 @@ export function mergePermissionsDenyUnion(canonicalPerm, basePerm) {
  * Merge canonical Claude settings into existing repo-local settings: keep user keys,
  * union permissions.deny, merge Meta_Kim-managed hooks only.
  * @param {Record<string, unknown>} base - existing ~/.meta or user file (may be {})
- * @param {Record<string, unknown>} canonical - parsed canonical/runtime-assets/claude/settings.json with repo hook paths already resolved (e.g. absolute).
+ * @param {Record<string, unknown>} canonical - parsed canonical/runtime-assets/claude/settings.json with repo-relative hook paths.
  */
 export function mergeRepoClaudeSettings(base, canonical, repoRoot = null) {
   const out = { ...base };
   const canonicalForMerge = structuredClone(canonical);
 
-  if (repoRoot) {
-    rewriteRepoHookCommandsToAbsolute(canonicalForMerge, repoRoot);
-  }
+  void repoRoot;
 
   for (const [k, v] of Object.entries(canonicalForMerge)) {
     if (k === "hooks" || k === "permissions") {
@@ -253,30 +270,4 @@ export function mergeRepoClaudeSettings(base, canonical, repoRoot = null) {
   out.hooks = mergeRepoMetaKimHooksIntoSettings(base, canonHooks).hooks;
 
   return out;
-}
-
-/**
- * Convert canonical relative repo hook commands to absolute paths (repo-local sync).
- * Mutates `settings.hooks` in place.
- */
-export function rewriteRepoHookCommandsToAbsolute(settings, repoRoot) {
-  const relHookRe = /^node \.claude\/hooks\/([^"'\s]+\.mjs)(.*)$/;
-  for (const hookType of Object.keys(settings.hooks ?? {})) {
-    for (const block of settings.hooks[hookType] ?? []) {
-      for (const h of block.hooks ?? []) {
-        if (h.type === "command" && relHookRe.test(h.command)) {
-          const [, hookFile, suffix] = h.command.match(relHookRe);
-          const absPath =
-            repoRoot.replace(/\//g, path.sep) +
-            path.sep +
-            ".claude" +
-            path.sep +
-            "hooks" +
-            path.sep +
-            hookFile;
-          h.command = `${hookCommandNode(absPath)}${suffix || ""}`;
-        }
-      }
-    }
-  }
 }

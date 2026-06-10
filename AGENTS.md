@@ -14,7 +14,7 @@ If you only keep five rules in mind:
 
 ## Codex Output Rules
 
-- On Windows, do not output raw Windows paths in normal Markdown text. Wrap paths in backticks and prefer forward slashes, for example `D:/KimProject/Meta_Kim`.
+- On Windows, do not output raw Windows paths in normal Markdown text. Wrap paths in backticks and prefer forward slashes, for example `D:/path/to/project`.
 - Do not paste full diffs or patches into chat after GitHub submit.
 - After GitHub submit, report only the branch name, commit hash, PR URL when present, and a short summary.
 
@@ -55,6 +55,7 @@ Treat these as generated mirrors or runtime adapters unless the task explicitly 
 - `.claude/capability-index/`
 - `.codex/agents/*.toml`
 - `.agents/skills/`
+- `.codex/skills/` legacy compatibility mirrors, when present for cleanup
 - `.codex/capability-index/`
 - `.cursor/agents/*.md`
 - `.cursor/skills/meta-theory/`
@@ -73,7 +74,7 @@ When this repository is opened in Codex:
 
 - `AGENTS.md` is this resident project guide.
 - `.codex/agents/*.toml` contains Codex custom-agent mirrors for the Meta_Kim team. Codex is the only target here that uses agent TOML; `worker.toml` and `explorer.toml` are fallback adapters for built-in Codex roles, and `frontend.toml`, `backend.toml`, `test.toml`, `review.toml`, `analysis.toml`, `verify.toml`, and `docs.toml` are business-role adapters for hosts that honor named custom agents. None of these adapters become durable Meta_Kim owners.
-- `.agents/skills/meta-theory/` is the Codex project skill mirror. Project-local `.codex/skills/meta-theory/` was a legacy compatibility mirror and should be removed by sync when present. The canonical source is `canonical/skills/meta-theory/SKILL.md`.
+- `.agents/skills/meta-theory/SKILL.md` is the Codex project skill mirror. Project-local `.codex/skills/meta-theory/` was a legacy compatibility mirror and should be removed by sync when present. The canonical source is `canonical/skills/meta-theory/SKILL.md`.
 - `.codex/hooks.json` and `.codex/hooks/` carry Codex-compatible project hook wiring.
 - `codex/config.toml.example` is generated from `canonical/runtime-assets/codex/config.toml.example`.
 
@@ -89,6 +90,8 @@ Cross-runtime format boundary:
 ## Capability-First Dispatch
 
 Meta_Kim does not start with "call agent X". It starts with "what capability is needed?"
+
+For every non-query governed task, run capability search before execution. If the task touches runtime behavior, inspect `config/runtime-capability-matrix.json`. If it touches macOS, Windows, or WSL2, inspect `config/os-compatibility-matrix.json`. If it touches external reusable capability, inspect `config/capability-index/dependency-project-registry.json`. Reference-only projects are not dependencies; distill useful ideas into Meta_Kim stage data such as `config/governance/decision-pattern-catalog.json`.
 
 Use this order:
 
@@ -113,14 +116,16 @@ config/capability-index/
 
 Hardcoding a specific agent name before discovery is a shortcut, not the canonical method.
 
+For a real execution demand, the default path must prove the whole provider chain before mutation: capability discovery, execution-agent search and selection, execution-agent creation capability search, skill search and selection, skill creation capability search, MCP provider search, command/runtime tool selection, and verification owner/path selection. This must happen as the natural Fetch -> Thinking route, not as a validator or hook rescue after the route is already weak.
+
 ### Mechanical Enforcement (Cross-Runtime)
 
-Capability-first has a mechanical hook path on Claude Code, Codex, and Cursor, but the default mode is progressive. During the grace window it warns unless `META_KIM_CAPABILITY_GATE=block` is set; do not describe the default as immediate hard-deny.
+Capability-first has a mechanical hook path on Claude Code, Codex, and Cursor, but the default mode is progressive. During the grace window it warns unless `META_KIM_CAPABILITY_GATE=block` is set; do not describe the default as immediate hard-deny. Hooks are last-resort fuses for key behavior only. They should block missing intent, missing Fetch evidence, missing capability discovery, missing owner/loadout, known-unsupported runtime/OS, missing memory strategy, or unsafe meta-agent mutation. They should not block merely because optional packet parameters are absent; detailed completeness belongs to validators, Review, and public-ready gates.
 
 - **Claude Code**: enforced via the PreToolUse hook `enforce-agent-dispatch.mjs` (deny payload `{hookSpecificOutput.permissionDecision: "deny"}` when the effective mode is `block`). The gate covers `Agent` dispatches in stages `execution`, `review`, `meta_review`, `verification`, `evolution` unless `fetchRecord.capabilitySearchPerformed === true`. Discovery stages `critical`, `fetch`, `thinking` are exempt except for execution-intent dispatch before design-time readiness.
-- **Codex CLI**: enforced via PreToolUse hook (same `enforce-agent-dispatch.mjs` script projected to `.codex/hooks/`). Matcher includes `"Bash|apply_patch|Edit|Write|MultiEdit|NotebookEdit|Agent|spawn_agent"`. Registered at `scripts/runtime-hook-mapping.mjs:213-219`.
-- **Cursor v1.7+**: mechanically enforced via `preToolUse` hook with `failClosed: true` (crash defaults to deny). Uses exit code 2 + stderr deny reason or stdout JSON `{"permission":"deny",...}`. Registered at `scripts/runtime-hook-mapping.mjs:269-280`.
-- **OpenClaw**: current Meta_Kim template is declarative-only — hard refusal prose in workspace `HEARTBEAT.md` and `SOUL.md` (`executionBlock=true`). OpenClaw plugin hooks can provide `before_tool_call`, but Meta_Kim has not installed a plugin enforcement adapter yet, so current OpenClaw enforcement remains a prompt constraint with an upgrade path.
+- **Codex CLI**: enforced via PreToolUse hook (same `enforce-agent-dispatch.mjs` script projected to `.codex/hooks/`). Matcher includes `"Bash|apply_patch|Edit|Write|MultiEdit|NotebookEdit|Agent|spawn_agent"`, but Codex hook coverage is runtime-version dependent; do not treat it as an all-tool policy engine. Registered at `scripts/runtime-hook-mapping.mjs:213-219`.
+- **Cursor**: mechanically enforced via the official `preToolUse` hook surface with `failClosed: true` (crash defaults to deny). Uses exit code 2 + stderr deny reason or stdout JSON `{"permission":"deny",...}`. Registered at `scripts/runtime-hook-mapping.mjs:269-280`.
+- **OpenClaw**: current Meta_Kim tool-blocking enforcement is declarative-only — hard refusal prose in workspace `HEARTBEAT.md` and `SOUL.md` (`executionBlock=true`). OpenClaw internal hooks cover command/lifecycle automation, and typed plugin hooks are the official blocking/canceling policy surface, but Meta_Kim has not installed a typed plugin enforcement adapter yet.
 
 Override knob (all hook-equipped runtimes): `META_KIM_CAPABILITY_GATE=progressive|block|warn|off` (default `progressive`; set `block` env for immediate hard deny). Set `warn` to emit stderr warnings without denying, or `off` to disable the gate entirely. Runtime-payload schema selector: `META_KIM_HOOK_RUNTIME=claude|codex|cursor`.
 
@@ -128,7 +133,16 @@ Canonical hook source: `canonical/runtime-assets/claude/hooks/enforce-agent-disp
 
 ## Meta-Theory Activation
 
-When `/meta-theory`, `meta-theory`, `meta theory`, `run meta theory`, `execute meta theory`, `元理论`, or an explicit `meta-theory` skill mention appears, treat it as a governance-mode request.
+Do not require humans to know or type command words. Treat ordinary natural-language executable requests as the primary entry path when they imply durable planning, execution, review, verification, prioritization, repair suggestions, or a validation checklist. Examples include "帮我整理成优先级、修复建议和验证清单", "这个页面不好看，帮我弄高级一点", "帮我规划并开始处理", or "review this and fix what matters".
+
+Explicit triggers such as `/meta-theory`, `meta-theory`, `meta theory`, `run meta theory`, `execute meta theory`, `元理论`, or a `meta-theory` skill mention are maintainer shortcuts, not required user behavior.
+
+Use the entry classifier behavior as the user-facing rule:
+
+- plain durable work in natural language enters governed `standard_path`
+- subjective or taste-dependent work enters Critical clarification before Fetch
+- pure read-only questions stay on `fast_path`
+- explicit meta-theory requests enter `regulated_path`
 
 Codex must first run:
 
@@ -165,7 +179,7 @@ Governance-quality fallback is forbidden. Missing intent, evidence, design, owne
 
 ## Business Flow Before Execution
 
-For executable work, plan the business flow before writing code or changing files. A web app, for example, may need separate lanes for:
+For executable work, plan the business flow before writing code or changing files. This is a dynamic workflow step, not a fixed checklist: classify the user's natural-language intent, choose lanes from evidence and dependency signals, and record omitted lanes with reasons. A web app, for example, may need separate lanes for:
 
 - product direction
 - UX flow
@@ -179,7 +193,20 @@ For executable work, plan the business flow before writing code or changing file
 - release / install path
 - feedback and evolution
 
-Not every task needs every lane, but omitted lanes should be intentional. The business-flow blueprint should explain:
+Hard rules before Execution:
+
+- Fuzzy goals require intent amplification and an acceptance record.
+- Multi-path work requires best-path selection.
+- Multi-lens judgment uses dynamic lens discovery; user-mentioned books, people, or theories are seeds/fallbacks, not a fixed list.
+- Execution requires owner + weapon + verification owner.
+- Dependency projects require input/output contracts before use.
+- Codex subagents require explicit request or explicit governed task need, and hooks require trust review.
+- OpenClaw skills require third-party risk and sandbox review.
+- Cursor capabilities remain unknown/partial until verified; do not mark them native from projection files alone.
+- Public-ready requires verification plus intent acceptance; workflow completion alone is not user-goal completion.
+- Evolution must write back or record none-with-reason.
+
+Not every task needs every lane. Do not force every wish-style request through the same lane set; omitted lanes should be intentional. The business-flow blueprint should explain:
 
 - what user pain/value and success standard the run serves
 - what capability is needed
@@ -251,6 +278,8 @@ When `planning-with-files` is installed and the task is not a pure query, create
 - `findings.md`
 - `progress.md`
 
+Do not infer that `planning-with-files` is missing only because it is absent from `.agents/skills/`. It is a core external dependency declared in `config/skills.json` and normally installed into runtime home skill directories such as `~/.codex/skills/planning-with-files/`, `~/.claude/skills/planning-with-files/`, `~/.cursor/skills/planning-with-files/`, or `~/.openclaw/skills/planning-with-files/`. Check the manifest, global runtime homes, and `npm run discover:global` before declaring it unavailable.
+
 These files supplement protocol packets. They do not replace `businessFlowBlueprintPacket`, `dispatchEnvelopePacket`, or verification evidence. The Conductor or the main thread acting as Conductor is the sole writer.
 
 ## The Nine Meta Agents
@@ -297,11 +326,13 @@ This repository has a knowledge graph under `graphify-out/`.
 
 Rules:
 
-- For broad architecture or codebase questions, start with `graphify-out/GRAPH_REPORT.md` when present.
+- For broad architecture or codebase questions, use existing `graphify-out/GRAPH_REPORT.md` and `graphify-out/graph.json` as navigation indexes when present.
+- Do not run a startup freshness gate merely because a graph exists. At the start of a run, check only whether graph artifacts are present and useful enough for navigation.
+- Treat Graphify as a project map, not the final source of truth. Use graph queries or subgraph extraction to find relevant modules, concepts, and file anchors, then verify route-changing claims against the target source files.
+- Agent and worker context should receive only graph slices, short hints, and file anchors relevant to that worker. Do not inject the full `graph.json`, full `GRAPH_REPORT.md`, or broad graph dumps into every worker.
 - If `graphify-out/wiki/index.md` exists, use it for broad navigation instead of raw source browsing.
-- Use graph queries or subgraph extraction when available for focused relationships.
 - Dirty `graphify-out/` files can be expected after hooks or incremental updates; dirty graph files are not a reason to skip graph context.
-- `npm run meta:graphify:check` and `npm run meta:validate` compare the graph's built commit with current `git rev-parse HEAD` and fail when `GRAPH_REPORT.md` is stale.
+- `npm run meta:graphify:check` and `npm run meta:validate` compare the graph's built commit with current `git rev-parse HEAD` and fail when `GRAPH_REPORT.md` is stale. Use this as a verification/release/public-ready gate, not as a routine run-start cost.
 - After modifying code files, run `npm run meta:graphify:rebuild` to keep the graph current across Windows, macOS, and Linux.
 
 ## Maintenance Loop
@@ -312,7 +343,7 @@ After changing canonical behavior, contracts, hooks, or runtime-facing docs:
 2. `npm run discover:global`
 3. `npm run meta:check`
 4. `npm run meta:check:global`
-5. `npm run meta:verify:all` before release or after larger changes
+5. `npm run meta:release:smoke` before routine patch/minor release; use `npm run meta:verify:all` only for larger, risky, runtime, install, hook, dependency, or explicitly release-grade changes
 
 Use these supporting commands as needed:
 
@@ -335,7 +366,30 @@ Use these supporting commands as needed:
 - `npm run meta:sync:global`
 - `npm run prompt:next-iteration`
 
-`npm run meta:verify:all` runs runtime sync checks, project validation, graphify health, global sync checks, smoke-level runtime acceptance, setup tests, and meta-theory tests.
+`npm run meta:release:smoke` is the default maintainer release check for low-risk prompt/doc/governance iterations. It runs projection sync, default capability-discovery smoke, and meta-theory tests. `npm run meta:verify:all` remains the full release-grade suite: runtime sync checks, project validation, graphify health, global sync checks, smoke-level runtime acceptance, setup tests, and meta-theory tests.
+
+## Release Modes
+
+Routine patch/minor releases should stay fast. If the change is prompt text, docs, changelog, version metadata, or narrow governance wording with no runtime wiring change, the default release path is:
+
+1. `npm run meta:sync`
+2. `npm run meta:capabilities:smoke`
+3. `npm run meta:test:meta-theory`
+4. `git diff --check`
+
+This can be run directly as `npm run meta:release:smoke`, followed by `git diff --check`.
+
+Upgrade to full release-grade verification only when the task changes install/update behavior, global sync, hooks, runtime matrix, provider registry, dependency compatibility, runtime probes, package contents, security-sensitive behavior, or when the user explicitly asks for full/live/release-grade evidence.
+
+Release-grade work is stricter than a local green check. In that mode, before commit, push, tag, changelog/release-note update, or publication, the run must have current evidence for:
+
+- all declared runtime install/update targets; if machine-local defaults select only one runtime, use explicit all-runtime target selection
+- project sync, global sync, and global hooks when hooks are in scope
+- runtime matrix, provider registry, dependency compatibility, and runtime probe
+- a real execution-demand route that naturally selects owner, creation providers, skill, MCP provider, command/runtime tool, and verification owner/path
+- live Claude, Codex, and OpenClaw evidence when those live targets are declared
+
+Do not treat structural smoke, systemMessage/UI warning output, auth-present checks, skipped/needsAuth states, or config-only proof as live pass evidence. Those are valid diagnostics, not live completion. Validators and gates protect against empty or dangerous routes; they are not the primary mechanism that makes the default path correct.
 
 ## Install And Packaging Notes
 

@@ -18,7 +18,7 @@
     "stageSemantics": {
       "critical": {
         "primaryAction": "clarify_intent_first",
-        "description": "Clarify true intent, scope, constraints, permissions, safety, and language before Fetch, planning, or execution confirmation."
+        "description": "Evaluate whether the user's expression satisfies the intent completeness framework; clarify missing dimensions that change routing, scope, risk, acceptance, owner, permission, or non-goal before Fetch, planning, or execution confirmation."
       },
       "fetch": {
         "primaryAction": "research_and_confirm_problem_with_candidate_solutions",
@@ -68,13 +68,28 @@
         "description": "Run multi-agent execution through matched agents and their selected skills, commands, MCP capabilities, and tools from the Thinking dispatch plan."
       },
       "review": {
-        "primaryAction": "capability_matched_output_review"
+        "primaryAction": "capability_matched_output_review",
+        "degradedPolicy": {
+          "when": "no Agent dispatch available or no matching review owner",
+          "path": "read meta-agent definition for review criteria, apply same checklist, record degradedFlag=true",
+          "forbidden": ["silently skip", "claim public-ready in degraded mode"]
+        }
       },
       "meta_review": {
-        "primaryAction": "review_standard_verification"
+        "primaryAction": "review_standard_verification",
+        "degradedPolicy": {
+          "when": "no Agent dispatch available or no matching meta-review owner",
+          "path": "read meta-warden criteria, apply same checklist, record degradedFlag=true",
+          "forbidden": ["silently skip", "claim public-ready in degraded mode"]
+        }
       },
       "verification": {
-        "primaryAction": "run_real_tests_with_fresh_evidence"
+        "primaryAction": "run_real_tests_with_fresh_evidence",
+        "degradedPolicy": {
+          "when": "no independent verification owner available",
+          "path": "main-thread runs verifySteps with degradedFlag=true, humanAcceptanceRequired=true",
+          "forbidden": ["claim verified without human acceptance", "claim public-ready in degraded mode"]
+        }
       },
       "evolution": {
         "primaryAction": "writeback_or_explicit_none",
@@ -237,6 +252,7 @@
       "clarificationPolicy": {
         "questionCountPolicy": "no_quota_ask_only_outcome_branching",
         "askOnlyIfAnswerChangesExecution": true,
+        "evaluateAgainstIntentFrameBeforeAssumption": true,
         "forbidQuestionQuotaFilling": true,
         "questionMustTarget": [
           "wrong_goal_risk",
@@ -244,6 +260,72 @@
           "wrong_permission_or_safety_risk",
           "wrong_deliverable_or_scope_risk"
         ]
+      },
+      "intentCompletenessFramework": {
+        "required": true,
+        "judgmentTarget": "user_expression_completeness_not_true_human_intent",
+        "outputPacket": "intentFrameAssessment",
+        "onBlockingMissingDimension": "critical_clarification_allowed",
+        "principle": "Critical does not claim to know true human intent. It checks whether the user's stated expression provides enough information for the next governance decision; low-risk assumptions may be recorded, but blocking gaps must be asked through the native choice surface or localized chat card.",
+        "requiredDimensions": [
+          "desiredOutcome",
+          "targetAudienceOrUserValue",
+          "successCriteria",
+          "scopeBoundary",
+          "constraintsPermissionsSafety",
+          "evidenceFreshnessNeeds",
+          "outputFormatOrDeliverySurface"
+        ],
+        "dimensionStatusEnum": [
+          "stated",
+          "inferred_low_risk",
+          "missing_non_blocking",
+          "missing_blocking"
+        ],
+        "blockingRule": "If a missing or conflicting dimension changes route, scope, risk, acceptance, owner, permission, or non-goal, set choiceSurfaceState=critical_clarification_allowed and ask the fewest outcome-branching questions before Fetch/Thinking/Execution.",
+        "nonBlockingRule": "If the dimension can be inferred without changing route, scope, risk, acceptance, owner, permission, or non-goal, record the defaultAssumption and proceed with correction-friendly wording.",
+        "subjectiveQualitySignalPolicy": {
+          "required": true,
+          "triggerSignals": [
+            "good",
+            "bad",
+            "beautiful",
+            "not_beautiful",
+            "does_not_look_good",
+            "ugly",
+            "smooth",
+            "not_smooth",
+            "hard_to_use",
+            "feels_off",
+            "professional",
+            "premium",
+            "advanced",
+            "clean",
+            "simple",
+            "fast",
+            "slow",
+            "localized_equivalents"
+          ],
+          "nonMeasurableAdjectiveRule": "Words whose acceptance depends on taste, audience, baseline, or trade-off are not executable requirements by themselves. Examples include good/bad, beautiful/ugly, smooth/not smooth, professional, premium, advanced, clean, simple, fast/slow, and localized equivalents.",
+          "ambiguityChoiceSurfaceRule": "If an unclear qualitative word can lead to multiple valid outputs with different user acceptance, ask through the native choice surface or localized fallback before choosing evidence, design direction, scope, or mutation. If the ambiguity cannot change route, scope, risk, acceptance, owner, permission, or non-goal, record a low-risk assumption and proceed.",
+          "blockingWhenMissing": [
+            "target",
+            "quality_dimension",
+            "acceptance_standard",
+            "allowed_scope"
+          ],
+          "requiredAction": "set choiceSurfaceState=critical_clarification_allowed and ask through the native choice surface or localized fallback before Fetch, Thinking, mutation, or execution confirmation"
+        },
+        "intentFrameAssessment": {
+          "requiredFields": [
+            "dimension",
+            "status",
+            "evidenceFromUserText",
+            "defaultAssumption",
+            "wouldChangeExecution",
+            "clarificationQuestion"
+          ]
+        }
       },
       "readBeforeEditPolicy": {
         "requiredBeforeMutation": true,
@@ -272,6 +354,7 @@
           "realIntent",
           "userPainValue",
           "successCriteria",
+          "intentFrameAssessment",
           "undecidedUserChoices",
           "nonGoals",
           "blockingUnknowns",
@@ -309,13 +392,24 @@
       "userFacingSummaryContract": {
         "required": true,
         "requiredFields": [
+          "rootGoal",
+          "workDoneThisRun",
+          "directionFit",
+          "deliveryCompleteness",
+          "complexityDelta",
           "whyChanged",
           "whatChanged",
           "userImpact",
           "verificationEvidence",
-          "remainingLimits"
+          "remainingLimits",
+          "deferredOrNotDone",
+          "nextAction"
         ],
-        "rule": "User-facing closure must explain why the path was chosen or changed, what changed and where, how the user path or product behavior changes, what verification evidence supports it, and what remains limited or deferred. Plain language is not a substitute for product rationale."
+        "rootGoalRule": "Every non-query governed run must close by restating the root goal in plain user language before listing files, tests, or implementation details.",
+        "directionFitRule": "The closure must say whether this run directly serves the root goal. If the answer is partial or no, the run must say so and avoid claiming complete delivery.",
+        "completenessRule": "The closure must distinguish complete delivery, partial foundation, blocked work, and deferred work. Passing commands is not enough.",
+        "complexityRule": "The closure must state whether the run added complexity, and why that complexity is necessary, bounded, or deferred. Do not add artifacts merely because they are possible.",
+        "rule": "User-facing closure must explain the root goal, what this run did, whether it still fits the direction, whether it fully satisfies delivery, why the path was chosen or changed, what changed and where, how the user path or product behavior changes, what verification evidence supports it, what complexity was added or avoided, what remains limited or deferred, and the next action. Plain language is not a substitute for product rationale."
       },
       "userFacingStageFeedbackContract": {
         "required": true,
@@ -616,8 +710,8 @@
       "claude": {
         "primarySurface": "AskUserQuestion_tool",
         "fallbackSurfaces": ["conversation_fallback"],
-        "triggerDescription": "Use AskUserQuestion for blocking Critical clarification only when Fetch cannot proceed, then use it once for Execution confirmation after contentEvidencePacket and preDecisionOptionFrame are complete.",
-        "implementation": "Invoke AskUserQuestion with questions array; platform natively supports modal popup."
+        "triggerDescription": "Use AskUserQuestion (native since v2.0.21) for blocking Critical clarification when Fetch cannot proceed or subjective quality wording is too ambiguous to choose evidence, then use it once for Execution confirmation after contentEvidencePacket and preDecisionOptionFrame are complete. PreToolUse hooks must whitelist AskUserQuestion to avoid stripping return data (issue #12031).",
+        "implementation": "Invoke AskUserQuestion with a questions array; platform renders an interactive Ink popup. If unavailable or returns empty, label the route conversation_fallback, render a localized chat decision card, and wait before Execution."
       },
       "codex": {
         "primarySurface": "request_user_input",
@@ -634,10 +728,10 @@
         "implementation": "Workspace-per-agent model; requires proper workspace configuration."
       },
       "cursor": {
-        "primarySurface": "native_mode_picker",
+        "primarySurface": "alwaysApply_rule_chat_card",
         "fallbackSurfaces": ["conversation_fallback"],
-        "triggerDescription": "Use Cursor native custom modes/mode picker and project rules for Critical, Fetch, Thinking, and Review selection; dynamic popup support is runtime-dependent.",
-        "implementation": "Custom Modes / mode picker UI; fallback to conversation card."
+        "triggerDescription": "Use Cursor alwaysApply project rules as the stable trigger for Meta_Kim choice behavior: when a branch-changing decision is required, render a localized chat decision card and wait for the user. Cursor preToolUse with failClosed is the stable hard tool gate, while beforeSubmitPrompt can support prompt adapters. Do not claim an arbitrary Cursor-native modal/question popup unless the active host exposes one.",
+        "implementation": "Sync canonical/runtime-assets/cursor/rules/meta-choice-surface.mdc to .cursor/rules/meta-choice-surface.mdc during install/update; sync .cursor/hooks.json with preToolUse failClosed for execution gating. Record normal choices as conversation_fallback unless a verified Cursor-native question surface is present."
       }
     },
     "silencePolicy": {
@@ -658,8 +752,10 @@
       "deferRequiresDeadline": true
     },
     "userInteractionPolicy": {
-      "description": "Policy for when to use AskUserQuestion / native choice / fallback decision surfaces versus notice. Non-trivial non-query decisions require Fetch content evidence and Thinking option framing before interruption.",
+      "description": "Policy for when to use AskUserQuestion / native choice / fallback decision surfaces versus notice. Blocking Critical clarification may interrupt before Fetch; non-trivial execution confirmation requires Fetch content evidence and Thinking option framing before interruption.",
       "decisionTriggerEnum": [
+        "blocking_critical_clarification",
+        "subjective_quality_ambiguous_intent",
         "non_trivial_executable_decision",
         "multiple_viable_solutions",
         "product_direction_required",
@@ -722,7 +818,7 @@
           "completed"
         ],
         "defaultState": "not_allowed",
-        "criticalClarificationRule": "Allowed only during Critical when Fetch cannot proceed safely; may clarify intent, scope, permissions, safety, or language; must not present execution options.",
+        "criticalClarificationRule": "Allowed during Critical when the intent frame is missing or conflicting and the answer changes route, scope, risk, acceptance, owner, permission, or non-goal; may clarify outcome, audience/value, success criteria, scope, permissions, safety, evidence freshness, output format, language, or subjective quality terms such as does_not_look_good / ugly / hard_to_use when target, quality dimension, acceptance standard, or allowed scope is unclear; must not present execution options.",
         "executionConfirmationRule": "Allowed only after contentEvidencePacket and preDecisionOptionFrame exist, before Execution; must present evidence-backed candidate paths and a recommended default.",
         "forbiddenPrematureTriggers": [
           "popup_test_request",
@@ -885,6 +981,40 @@
       "executionRequiresAgentOwner": true,
       "anonymousExecutionForbidden": true,
       "existingOwnerPreferred": true,
+      "existingOwnerDiscoveryRequired": true,
+      "discoveryPrinciple": "provider_first_evidence_owner_last_binding",
+      "providerEvidenceOrder": [
+        "available_capability_providers_skills_tools_mcp",
+        "runtime_tool_provider_inventory",
+        "repo_canonical_capability_index",
+        "runtime_mirror_indexes",
+        "project_runtime_agent_inventory",
+        "local_global_agent_inventory"
+      ],
+      "existingOwnerEvidenceOrder": [
+        "repo_canonical_capability_index",
+        "runtime_mirror_indexes",
+        "project_runtime_agent_inventory",
+        "local_global_agent_inventory"
+      ],
+      "capabilityDiscoveryRuntimePolicy": {
+        "defaultMode": "cached_global_inventory_plus_project_light_scan",
+        "fullScanWhen": [
+          "install",
+          "update",
+          "explicit_user_refresh",
+          "missing_required_provider",
+          "stale_cache",
+          "scheduled_refresh_older_than_14_days",
+          "high_risk_provider_route"
+        ],
+        "perRunBehavior": "Every governed execution reads the cached global capability inventory and performs a lightweight project scan for agents, skills, commands, hooks, rules/prompts, MCP config references, and runtime tool evidence. It must not run a full global filesystem scan on every dispatch. It may preview a route with missing cache or cache older than 14 days, but it must not enter Execution until discovery refreshes or returns to Fetch.",
+        "staleAfterMinutes": 20160,
+        "staleAfterDays": 14,
+        "refreshCommand": "npm run discover:global",
+        "userPromptPolicy": "If the cache is missing or older than 14 days, show one compact user notice: because no full scan has run for 2 weeks, this run will update first to match newly added user content and reach the best capability route. If route-changing evidence is absent, show the refresh command and continue only when the current route is still safe. For owner/provider creation, stale or missing cache returns to Fetch before creation.",
+        "tokenPolicy": "Route output may expose counts, top candidates, and source references, but must not dump full provider definitions into chat or worker packets unless selected for the current run."
+      },
       "createOwnerBeforeExecutionWhen": [
         "recurring_capability_gap",
         "project_specific_domain_gap",
@@ -1233,7 +1363,7 @@
       "dispatchArtifactsFinalizedAfterChoice": true,
       "choiceGateSkipAllowedWhen": [
         "trivial",
-        "pure_read_only_queryBypass",
+        "no_branching_choice",
         "explicit_auto_proceed"
       ],
       "capabilityGapPacketRequiredWhenUpgradeReasons": [
@@ -1510,8 +1640,16 @@
         "decisionImpactMap",
         "researchRequired",
         "researchSkipReason",
-        "evidenceLaneValidatedBy"
+        "evidenceLaneValidatedBy",
+        "searchAngles"
       ],
+      "searchAngles": {
+        "description": "Fetch angle decomposition: semantically distinct search angles for research tasks. Required when researchRequired=true.",
+        "requiredWhen": "contentEvidencePacket.researchRequired = true",
+        "angleRequiredFields": ["angle", "keywords", "expectedCoverage"],
+        "defaultCount": 3,
+        "constraint": "angles must be semantically distinct; rephrasing the same angle is forbidden"
+      },
       "evidenceScopeEnum": [
         "local_project",
         "external_research",
@@ -1673,16 +1811,16 @@
       ],
       "choiceGateSkipAllowedWhen": [
         "trivial",
-        "pure_read_only_queryBypass",
+        "no_branching_choice",
         "explicit_auto_proceed"
       ],
       "solutionChoiceStateEnum": [
         "confirmed",
         "trivial",
-        "pure_read_only_queryBypass",
+        "no_branching_choice",
         "explicit_auto_proceed"
       ],
-      "description": "Thinking-stage pre-decision frame for non-trivial executable work before AskUserQuestion, native choice, or fallback. It must list unresolvedQuestions, present contentEvidence-backed candidate solution paths, and record solutionChoiceState before detailed orchestration is locked. A skipped choice must include skipSource and skipSafetyRationale, and may only use strict skip reasons. It contains candidate orchestration paths and trade-offs only; it is not a finalized dispatchEnvelopePacket, dispatchBoard, or workerTaskPacket."
+      "description": "Thinking-stage pre-decision frame for non-trivial executable work before AskUserQuestion, native choice, or fallback. It must list unresolvedQuestions, present contentEvidence-backed candidate solution paths, and record solutionChoiceState before detailed orchestration is locked. A skipped choice must include skipSource and skipSafetyRationale, and may only use strict skip reasons. Read-only/queryBypass is a safety and path-classification boundary, not a choice-surface skip reason by itself; use no_branching_choice only when no user answer would change route, scope, risk, owner, permission, non-goal, or acceptance. It contains candidate orchestration paths and trade-offs only; it is not a finalized dispatchEnvelopePacket, dispatchBoard, or workerTaskPacket."
     },
     "intentPacket": {
       "requiredFields": [
@@ -2197,7 +2335,35 @@
           "Thinking",
           "Review"
         ],
-        "description": "Fetch inventories global agents, skills, tools, and capability indexes as evidence while confirming the problem and candidate solutions. Thinking resolves the owner/loadout from that evidence. A global agent that already satisfies the orchestration node is used directly and is not copied into the user project. Only agents that need project-specific modification, persistent capability changes, or recurring local ownership are copied into the downstream project as project-local agents, under governance review. agentCopyPolicy=copy_to_project_for_modification is valid only with ownerSource=project_local and ownerResolution=upgrade_existing_owner; agentCopyPolicy=create_project_local_agent is valid only with ownerSource=project_local and ownerResolution=create_owner_first."
+        "requiredEvidenceOrder": [
+          "repo_canonical_capability_index",
+          "runtime_mirror_indexes",
+          "project_runtime_agent_inventory",
+          "local_global_agent_inventory",
+          "available_capability_providers_skills_tools_mcp"
+        ],
+        "creationBlockedUntilExistingAgentsChecked": true,
+        "checkedAgentsMustBeNamedInCapabilityGapPacket": true,
+        "description": "Fetch inventories global agents, project/runtime agents, skills, commands, hooks, rules/prompts, MCP capabilities, plugins, runtime tools, and capability indexes as evidence while confirming the problem and candidate solutions. Thinking resolves the owner/loadout from that evidence. Per-run discovery reads the cached global inventory plus lightweight project scans; full global scans are reserved for install, update, explicit refresh, stale/missing cache, or high-risk provider routes. A global agent or provider that already satisfies the orchestration node is used directly and is not copied into the user project. Only agents that need project-specific modification, persistent capability changes, or recurring local ownership are copied into the downstream project as project-local agents, under governance review. When the user explicitly asks to create, iterate, upgrade, or keep an agent in the project, the result must be a durable project-local abstract agent candidate or a blocked capabilityGapPacket; a temporary subagent prompt or runtime nickname cannot satisfy the deliverable. agentCopyPolicy=copy_to_project_for_modification is valid only with ownerSource=project_local and ownerResolution=upgrade_existing_owner; agentCopyPolicy=create_project_local_agent is valid only with ownerSource=project_local and ownerResolution=create_owner_first."
+      },
+      "durableProjectAgentPolicy": {
+        "appliesWhenUserRequestsAgentCreationOrIteration": true,
+        "runtimeTargetsSource": [
+          "config/sync.json supportedTargets",
+          "config/runtime-compatibility-catalog.json genericCompatibility.agentPath"
+        ],
+        "runtimeTargetPolicy": "Every formal tool target with an agentPath must be listed with its compatibility status; do not hardcode a required/optional split in generated artifacts.",
+        "temporarySubagentCanSatisfyDurableAgent": false,
+        "projectRetentionRequired": true,
+        "forbiddenIdentitySources": [
+          "runtimeInstanceAlias",
+          "temporary subagent prompt",
+          "workerTaskPacket todayTask",
+          "scopeFiles",
+          "deliverableLink",
+          "verifySteps"
+        ],
+        "description": "Project-agent creation and iteration produce durable abstract agent definitions kept in the project. Runtime workers may build or review those definitions, but they are not the durable agent."
       },
       "ownerAgentPublicRepoRule": {
         "allowedOwnerAgents": [
@@ -2358,6 +2524,45 @@
         "external_private",
         "project_local"
       ],
+      "abstractionPolicy": {
+        "durableIdentityMustDescribeCapabilityClass": true,
+        "projectRetentionRequiredForCreateOrUpgrade": true,
+        "temporarySubagentAsDefinitionForbidden": true,
+        "projectionTargetsSource": [
+          "config/sync.json supportedTargets",
+          "config/runtime-compatibility-catalog.json genericCompatibility.agentPath"
+        ],
+        "concreteWorkOrderFieldsForbidden": true,
+        "pathLikeBindingsForbidden": true,
+        "singleRunTaskBindingForbidden": true,
+        "forbiddenDurableFields": [
+          "todayTask",
+          "coreProblem",
+          "scopeFiles",
+          "deliverableLink",
+          "verifySteps",
+          "fileCompletionList",
+          "runtimeInstanceAlias",
+          "shardScope",
+          "taskTodoState"
+        ],
+        "concreteDetailsBelongIn": [
+          "workerTaskPackets",
+          "capabilityBindings",
+          "orchestrationTaskBoardPacket"
+        ],
+        "providerFirstAgentLast": true,
+        "providerExamples": [
+          "skills",
+          "commands",
+          "hooks",
+          "rules/prompts",
+          "MCP tools",
+          "runtime tools",
+          "plugins"
+        ],
+        "description": "executionAgentCard may define a reusable capability class, boundaries, abstract dependencies, inputs, and outputs. It must not freeze a repo path, file list, issue/ticket, one-run instruction, temporary subagent prompt, runtime nickname, or worker verification checklist into long-term agent identity. Capability providers such as skills, commands, MCP tools, runtime tools, and plugins must be matched before creating or upgrading an execution agent; agent creation is the last resort for a recurring owner gap or an explicit user request for a durable project agent."
+      },
       "description": "Packet for execution-agent creation or upgrade in user projects and external/private registries. It is not used for direct global reuse. Public Meta_Kim does not use this as durable owner state; public owner creation or upgrade is represented by governance meta-owner decisions plus run-scoped matchedCapabilities / capabilityBindings, with matchedSkills accepted only as legacy compatibility evidence."
     },
     "cardDecision": {
@@ -2464,7 +2669,7 @@
         "userChoiceState",
         "finalizationGate"
       ],
-      "description": "Execution task packet dispatched to a worker agent. It is a complete work order, not a vague assignment: coreProblem, todayTask, nonGoals, output, acceptanceCriteria, qualityBar, expertLensRefs, evidenceRefs, capabilityRequirements, toolRequirements, handoffContract, and verifySteps must be clear before work starts. ownerMode is the worker-task mode and uses existing-owner or create-owner-first; agentBlueprintPacket.roles[].ownerResolution remains the broader owner-resolution field with reuse_existing_owner, upgrade_existing_owner, or create_owner_first. The three core orchestration fields are dependsOn (upstream dependency, see dependencyContract), parallelGroup (parallel grouping), and mergeOwner (merge owner). roleDisplayName is the user-visible short English business role name; runtimeInstanceAlias records only transient host nicknames and must not replace the business role name. verifySteps provides atomic completion criteria for Verification. This packet may not finalize before userChoiceState records a user choice or an explicit auto-proceed / choiceGateSkip allowed by preDecisionOptionFrame. Workers MUST populate fileCompletionList in their output when scopeFiles is declared, listing every promised file with explicit status; this closes EB-001 from v2.2.2 review.",
+      "description": "Execution task packet dispatched to a worker agent. It is a complete work order, not a vague assignment: coreProblem, todayTask, nonGoals, output, acceptanceCriteria, qualityBar, expertLensRefs, evidenceRefs, capabilityRequirements, toolRequirements, handoffContract, and verifySteps must be clear before work starts. ownerMode is the worker-task mode and uses existing-owner or create-owner-first; agentBlueprintPacket.roles[].ownerResolution remains the broader owner-resolution field with reuse_existing_owner, upgrade_existing_owner, or create_owner_first. The three core orchestration fields are dependsOn (upstream dependency, see dependencyContract), parallelGroup (parallel grouping), and mergeOwner (merge owner). roleDisplayName is the user-visible short English business role name; runtimeInstanceAlias records only transient host nicknames and must not replace the business role name. Concrete files, paths, tickets, and one-run work content belong here or in capabilityBindings, never in executionAgentCard durable identity. verifySteps provides atomic completion criteria for Verification. This packet may not finalize before userChoiceState records a user choice or an explicit auto-proceed / choiceGateSkip allowed by preDecisionOptionFrame. Workers MUST populate fileCompletionList in their output when scopeFiles is declared, listing every promised file with explicit status; this closes EB-001 from v2.2.2 review.",
       "ownerModeEnum": [
         "existing-owner",
         "create-owner-first"
@@ -2653,7 +2858,15 @@
         "fixArtifact",
         "verifiedBy",
         "closeState"
-      ]
+      ],
+      "adversarialVotes": {
+        "description": "Per-finding adversarial vote records when adversarial verify is active. Each vote is one skeptic's attempt to refute the finding.",
+        "requiredWhen": "regulated_path or user requests cross-check",
+        "voteRequiredFields": ["lens", "verdict", "refutationEvidence"],
+        "lensEnum": ["correctness", "security", "completeness"],
+        "verdictEnum": ["survived", "refuted"],
+        "survivalRule": "finding survives only if majority (>= ceil(N/2)) of votes have verdict=survived"
+      }
     },
     "revisionResponse": {
       "requiredFields": [

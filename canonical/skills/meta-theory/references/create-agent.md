@@ -75,6 +75,8 @@ When Type B is triggered by a **capability gap in the Meta_Kim repository itself
 
 When Type B is triggered while Meta_Kim is used inside a **user project**, search global agents first. If a global agent already fits, use it directly and do not copy it into the project. Copy a global agent into the user project only when project-specific knowledge, boundary changes, persistent skill/tool additions, or recurring local ownership require modification; that copy must be recorded as project-local upgrade work, not ordinary reuse.
 
+When the user's intent explicitly says the agent should be created, iterated, upgraded, or kept in the project, the route must not collapse into `worker_task_only`. The factory may still reject bad agent design, but it must return a durable project-agent candidate or a blocked `capabilityGapPacket` explaining which evidence is missing. Temporary runtime subagents are allowed only as factory workers or reviewers; they are not the created agent.
+
 Professional role split:
 
 - **Warden** is the **public front door** and approval owner.
@@ -137,6 +139,21 @@ Required fields:
 
 This card is the build contract for an execution-agent factory when an agent must be created or upgraded. It is not used just because a global agent exists; direct global reuse remains a reference, not a local copy. A copied global agent must be modified or upgraded after copy; otherwise it should stay global.
 
+### Durable Project Agent Deliverable
+
+For user-project `create_agent` or `upgrade_existing_owner` routes, the accepted deliverable is a project-retained abstract agent definition, plus projection metadata for required runtimes. It must be suitable for version control and future reuse, not just for the current run.
+
+Required durable deliverables:
+
+- `GeneratedAgentSpec` as the reviewed source of identity truth.
+- Project target policy: `project_local_agent`.
+- Runtime projections: every formal tool target from `config/sync.json` with an agent path in `config/runtime-compatibility-catalog.json`, marked with its catalog status and evidence.
+- Candidate writeback or planned file target showing where the agent will be retained after Warden/user approval.
+
+The durable definition must contain abstract rules: role-family name, trigger conditions, responsibilities, non-capabilities, loadout slots, inputs, outputs, handoff, memory policy, gap policy, and verification policy. It must not contain the current task, current files, ticket names, runtime nickname, or one-run verification steps.
+
+If the run only needs a temporary execution worker, use `workerTaskPacket` and do not create an agent. If the user asks for a persistent project agent, `workerTaskPacket` can describe the factory work, but it cannot be the final deliverable.
+
 ### Sub-agent Identity Carry-over
 
 When the orchestrator dispatches a meta-* agent as a sub-agent (e.g., `Agent(subagent_type: "meta-prism", ...)`):
@@ -157,6 +174,126 @@ Created or upgraded agents inherit durable capability shape, not a frozen tactic
 Concrete choices belong in run artifacts: `capabilitySearchResult`, `matchedCapabilities`, `capabilityBindings`, `orchestrationTaskBoardPacket`, and `workerTaskPacket`; `executionAgentCard` is included only for project-local/external execution-agent creation or upgrade.
 
 Genesis owns the durable boundary. Artisan owns provider compatibility and selection rules. Fetch owns the current-run concrete selection.
+
+### Execution Agent Abstraction Boundary
+
+An execution agent is reusable only when its identity names a capability class, not a one-run address or task. `executionAgentCard` may contain purpose, capabilities, non-capabilities, abstract dependencies, inputs, and outputs. It must not contain concrete repo paths, files, tickets, one-run commands, `todayTask`, `scopeFiles`, `deliverableLink`, `verifySteps`, or worker completion checklists.
+
+Concrete work belongs in `workerTaskPacket`: file lists, shard scope, current task text, acceptance criteria, verification steps, deliverable links, and merge rules. If the only way to describe the agent is "the agent that edits this file / fixes this page / handles this ticket," the factory must stop and return to Thinking. The correct route is usually direct reuse of an existing owner plus a concrete worker task packet, not durable agent creation.
+
+Before creating or upgrading an execution agent, Fetch must produce checked-owner evidence from repo canonical capability index, runtime mirrors, project runtime agents, local global inventory, skills, commands, hooks, rules/prompts, tools, plugins, and MCP capabilities. The factory may proceed only when `capabilityGapPacket.currentAgentsChecked` and `currentProvidersChecked` list those candidates and explain why reuse is insufficient.
+
+A reusable capability surface can be represented as provider records with host-specific projection metadata, not as many durable execution-agent identities. Interface metadata is a discovery card, not a worker identity. Meta_Kim should therefore prefer provider reuse or provider projection before creating a new execution agent; create the agent only when the missing thing is a recurring owner boundary that cannot be represented by an existing agent, skill, command, MCP tool, runtime tool, or plugin.
+
+### Generated Agent Spec Quality Contract
+
+When `GapDecision.decision = create_agent`, the factory must produce a `GeneratedAgentSpec` review artifact before any local or project agent file is written. This artifact proves that the proposed agent is abstract enough to be reusable, professional enough to be useful, and bounded enough to avoid becoming a one-run worker.
+
+`GeneratedAgentSpec` is a review artifact, not a fourth core data model for the Capability Gap MVP. It is required only for create-agent decisions.
+
+Required fields:
+
+- `name`: short, stable, English role-family name; no runtime nickname and no task title.
+- `description`: one high-signal trigger sentence that names the professional capability and the route conditions.
+- `flowPosition`: where the agent belongs in a product flow such as `Think`, `Plan`, `Build`, `Review`, `Test`, `Ship`, or `Reflect`.
+- `purpose`: what durable problem class the agent owns.
+- `capabilities`: 4-8 reusable capability classes with domain-specific nouns.
+- `nonCapabilities`: explicit refusals, including external writes, one-run implementation work, and work better handled by skill/script/provider.
+- `loadoutSlots`: abstract skill, command, MCP, runtime tool, or normal tool slots; concrete providers stay in run-scoped `capabilityBindings`.
+- `inputs`: stable input contract.
+- `outputs`: stable output contract.
+- `handoff`: upstream evidence needed and downstream consumer expectations.
+- `memoryPolicy`: whether memory is `none`, `run_scoped`, `project_scoped`, or `cross_project_readonly`, plus access boundaries.
+- `gapPolicy`: what the agent must report as a capability gap instead of pretending to know.
+- `verificationPolicy`: fixtures, scorecard dimensions, and verification owner.
+- `installProjection`: whether this can be projected to Claude, Codex, Cursor, OpenClaw, or remains reference-only.
+- `projectRetention`: how the agent will be kept in the project, including formal tool projection targets and writeback approval boundary.
+- `identityCleanliness`: explicit proof that no repo path, file list, ticket, today task, deliverable link, or verify step is in durable identity.
+
+Quality bar:
+
+| Dimension | Pass condition |
+|---|---|
+| `identity_clarity` | A maintainer can tell when to call the agent from the name and description alone. |
+| `domain_specificity` | Replacing the agent name with `generic-agent` breaks the core logic. |
+| `flow_fit` | The agent has a clear upstream and downstream position inside Meta_Kim's product flow. |
+| `tool_least_privilege` | Loadout slots are the minimum needed for the capability class. |
+| `memory_fit` | Memory policy uses scoped access and does not leak user/project history into identity. |
+| `gap_honesty` | The agent names what it cannot know or do and routes gaps to `GapDecision`. |
+| `handoff_readiness` | Outputs can be consumed by another owner without oral explanation. |
+| `verification_readiness` | At least one fixture or replay check can fail the agent design. |
+| `install_projection_readiness` | Runtime projection status is explicit: eligible, needs_probe, or reference_only. |
+| `identity_cleanliness` | No one-run work-order fields appear in durable identity. |
+
+Pass threshold: all ten dimensions must pass for direct creation. One soft miss returns to Genesis or Artisan for revision. Any miss in `identity_cleanliness`, `gap_honesty`, `tool_least_privilege`, or `memory_fit` blocks creation and returns to Thinking.
+
+Reference translation:
+
+- Professional role standard: use a domain role, concise trigger, tool awareness, examples, and cross-runtime packaging discipline.
+- Flow standard: place the agent inside a real product flow and make upstream/downstream handoff explicit.
+- Memory standard: give the agent scoped memory, gap analysis, schema/eval thinking, and access boundaries.
+
+Do not copy:
+
+- Do not copy one repository's commands, install scripts, or host-specific preambles into durable identity.
+- Do not create a graph database or full CapabilityGraph before the create-agent fixture proves value.
+- Do not let every agent carry long-term memory; memory is a provider policy, not a personality trait.
+
+Minimal create-agent fixture:
+
+```json
+{
+  "fixtureId": "generated-agent-test-coverage-specialist",
+  "input": "The project repeatedly lacks a stable owner for test coverage strategy, gap diagnosis, and verification planning.",
+  "expectedDecision": "create_agent",
+  "generatedAgentSpec": {
+    "name": "test-coverage-specialist",
+    "flowPosition": "Test",
+    "purpose": "Own reusable test coverage strategy and coverage gap diagnosis across runs.",
+    "nonCapabilities": [
+      "does not become the implementation worker for every failing test",
+      "does not publish coverage reports externally without approval",
+      "does not replace existing test, QA, or release owners when they already fit"
+    ],
+    "loadoutSlots": [
+      "test framework discovery",
+      "coverage report parsing",
+      "risk-based test planning",
+      "regression fixture design"
+    ],
+    "memoryPolicy": "project_scoped repeat patterns and user corrections only",
+    "gapPolicy": "emit GapDecision when the project lacks a test runner, coverage command, fixture harness, or permission to execute tests",
+    "verificationPolicy": "fixture must prove no one-run path or verifySteps appear in durable identity"
+  }
+}
+```
+
+### LangGraph Projection Boundary
+
+When the Capability Gap MVP is projected into a LangGraph-style runtime, keep identity, task, and route state separate:
+
+- `GeneratedAgentSpec` maps to a reusable worker node contract.
+- `workerTaskPacket` maps to the run-scoped task state passed into that node.
+- `GapDecision` maps to conditional edge routing.
+- `CandidateWriteback` maps to the post-run evolution state, not to automatic file writes.
+- Governance agents map to decision, review, and gate nodes; they do not become business execution worker nodes.
+- Skills, scripts, commands, MCP providers, runtime tools, and plugins map to capability/tool nodes or loadout slots.
+
+The first LangGraph target is a control graph, not a knowledge graph:
+
+```text
+critical_intent
+-> fetch_capabilities
+-> detect_gap
+-> decide_gap_route
+-> one of: design_skill_candidate | design_agent_spec | design_script_candidate | design_mcp_provider_candidate | make_worker_task | ask_approval_or_block
+-> review_quality
+-> warden_gate
+-> verify_fixture
+-> evolve_or_none
+```
+
+Do not create `CapabilityGraph`, graph database storage, or edge-builder logic until the `GapDecision` and `GeneratedAgentSpec` fixtures prove value.
 
 ### Phase 4 — Review and Revision
 
@@ -433,3 +570,64 @@ Present a full summary:
 - Five-criteria tables
 
 **Write files only after explicit user confirmation.**
+
+
+## Use when
+
+Use when new owner or agent boundary creation affects route, owner, risk, acceptance, verification, public-ready, or evolution writeback.
+
+## Required inputs
+
+- Latest user request and `intentPacket`
+- `fetchPacket` evidence that changes decision
+- runtime and OS targets when tools or dependencies are involved
+- relevant config, registry, script, or artifact path
+
+## Do
+
+- Assign an owner for each action.
+- Produce a checkable packet or artifact.
+- Bind pass/fail to evidence, threshold, or command output.
+- Preserve existing foundational and native runtime capabilities.
+
+## Do not
+
+- Do not delete skills, dependencies, web/browser/research, shell, filesystem, apply_patch, MCP, memory, graph, hooks, scripts, runtime tools, or native platform abilities.
+- Do not use vague advice without trigger, output, evidence, and writeback.
+- Do not route reference-only or unknown dependencies into execution.
+
+## Required packet
+
+`referenceContractPacket`: `referenceId`, `trigger`, `requiredInputs`, `actions`, `outputs`, `passCriteria`, `failCriteria`, `blockConditions`, `returnStage`, `verification`, `writebackTarget`.
+
+## Pass
+
+- At least one action has owner, input, output, and verification.
+- Pass criteria include numeric threshold, required field list, command, artifact, or human acceptance record.
+- Unsupported, unknown, or partial capability is marked rather than removed.
+
+## Fail
+
+- Instruction is only theory or roleplay.
+- No block condition exists for missing evidence, unsupported runtime/OS, fake owner, or missing verification.
+- Public-ready can be claimed without userGoalDone and evidence.
+
+## Block
+
+Block Execution when owner, weapon, dependency eligibility, runtime support, OS support, verification owner, or rollback boundary is missing. Block public-ready when verification evidence, intent acceptance, writebackDecision, or high/critical closure is missing.
+
+## Return to stage
+
+Return to Critical for intent gaps, Fetch for evidence/support gaps, Thinking for route gaps, Execution for missing artifact, Review for open findings, Verification for missing proof, and Evolution for missing writeback.
+
+## Verification
+
+Run the most specific validator for this reference plus `npm run meta:prompt:validate`. Use command/log/artifact/human acceptance evidence, not a narrative claim.
+
+## Writeback
+
+Write durable improvements to canonical references, governance configs, capability indexes, validators, tests, or scars. If no durable change exists, record `none-with-reason`.
+
+## Preserve
+
+Preserve Skills, WebSearch/browser/research, filesystem, shell, apply_patch, MCP, memory, Graphify, graph, hooks, commands, rules, agents, subagents, approval, sandbox, runtime tools, package scripts, setup, sync, install, uninstall, status, doctor, validators, and runtime projections.

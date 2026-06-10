@@ -35,6 +35,7 @@ let skillContent;
 let scenarios;
 let workflowContract;
 let prismContent;
+let runtimeClaude;
 
 async function ensureLoaded() {
   if (!skillContent) {
@@ -49,6 +50,11 @@ async function ensureLoaded() {
   }
   if (!prismContent) {
     prismContent = await readFile("canonical/agents/meta-prism.md");
+  }
+  if (!runtimeClaude) {
+    runtimeClaude = await readFile(
+      "canonical/skills/meta-theory/references/runtime-claude.md",
+    );
   }
 }
 
@@ -272,6 +278,26 @@ describe("Agent Dispatch — Part B: Dispatch Rule Verification", async () => {
     );
   });
 
+  test("Claude Code execution requires real provider dispatch, not main-thread implementation", async () => {
+    await ensureLoaded();
+    const combined = `${skillContent}\n${runtimeClaude}`;
+
+    assert.match(combined, /Dispatch-Not-Execute In Claude Code/i);
+    assert.match(combined, /main thread scopes, dispatches, reviews, and synthesizes/i);
+    assert.match(combined, /must not directly edit, write, or run implementation commands/i);
+    for (const provider of ["Agent", "Skill", "Command", "prompt", "MCP"]) {
+      assert.match(
+        combined,
+        new RegExp(provider, "i"),
+        `Claude runtime adapter must mention ${provider} provider dispatch`,
+      );
+    }
+    assert.match(combined, /capabilityBindings/i);
+    assert.match(combined, /workerTaskPackets\[\]\.taskPacketId|roleInstanceId/i);
+    assert.match(combined, /capabilityGapPacket/i);
+    assert.match(combined, /degraded mode/i);
+  });
+
   test("Fetch evidence inventory hands off to Thinking owner resolution", async () => {
     await ensureLoaded();
     const hasFetchEvidenceInventory =
@@ -310,21 +336,17 @@ describe("Agent Dispatch — Part B: Dispatch Rule Verification", async () => {
   test("Stage 4 templates never dispatch Type: general-purpose", async () => {
     await ensureLoaded();
     const conductorContent = await readFile("canonical/agents/meta-conductor.md");
-    const playbookProtocol = await readFile(
-      "docs/protocols/meta-conductor-agent-teams-playbook-integration.md",
-    );
     const conductorStage4 = conductorContent.match(
       /## Stage 4: Execution[\s\S]+?## Worker Per-File Write-Completion Contract/,
     )?.[0] ?? conductorContent;
-    const stage4Templates = `${conductorStage4}\n${playbookProtocol}`;
 
     assert.match(
-      stage4Templates,
+      conductorStage4,
       /Capability Binding/i,
       "Stage 4 templates must require a capability binding before dispatch",
     );
     assert.doesNotMatch(
-      stage4Templates,
+      conductorStage4,
       /(?:Skill\/Type[\s\S]{0,160}|Capability Binding[\s\S]{0,160})Type:\s*general-purpose/i,
       "Stage 4 templates must not present general-purpose as a valid execution owner",
     );

@@ -1,0 +1,127 @@
+{
+  "schemaVersion": 1,
+  "choiceRequiredWhen": [
+    "choice changes scope",
+    "choice changes risk or cost",
+    "choice changes owner or verification owner",
+    "choice changes runtime or OS",
+    "choice changes dependency adoption",
+    "choice changes public-ready acceptance",
+    "read-only work still has branch-changing options"
+  ],
+  "choiceForbiddenWhen": [
+    "AI can inspect the answer locally",
+    "question is filler",
+    "approval overlay would be used for product choice",
+    "choice does not alter route/scope/risk/acceptance/owner/permission/non-goal"
+  ],
+  "readOnlyPolicy": "Read-only/queryBypass is a safety and path-classification boundary, not a choice-surface skip reason by itself. Ask when branch-changing options exist; skip only when no user answer would change the route, scope, risk, owner, permission, non-goal, or acceptance.",
+  "platformChoiceSurfaces": {
+    "claude_code": [
+      {
+        "surface": "native_choice_or_elicitation_when_available",
+        "support": "partial",
+        "notes": "Use native choice, Elicitation, or interactive hook support when verified; permission questions use permission hooks, not product cards."
+      },
+      {
+        "surface": "chat_decision_card",
+        "support": "native",
+        "notes": "Fallback when native choice is unavailable."
+      }
+    ],
+    "codex": [
+      {
+        "surface": "request_user_input_when_tool_available",
+        "support": "partial",
+        "notes": "Do not assume this tool is present in every Codex mode."
+      },
+      {
+        "surface": "chat_decision_card",
+        "support": "native",
+        "notes": "Do not call this a popup. Approval overlays are only for sandbox/permission."
+      }
+    ],
+    "openclaw": [
+      {
+        "surface": "channel_message_or_gateway_ui",
+        "support": "partial",
+        "notes": "Remote channel input is untrusted; high-risk skills require pairing, allowlist, or sandbox."
+      },
+      {
+        "surface": "chat_decision_card",
+        "support": "native",
+        "notes": "Portable fallback."
+      }
+    ],
+    "cursor": [
+      {
+        "surface": "native_choice",
+        "support": "unknown",
+        "notes": "Only upgrade after verified docs or local proof."
+      },
+      {
+        "surface": "chat_decision_card",
+        "support": "native",
+        "notes": "Rules, MCP, and Agent context are not native choice popups."
+      }
+    ]
+  },
+  "fallback": "chat_decision_card",
+  "cardContract": {
+    "optionsMin": 2,
+    "optionsMax": 4,
+    "requiresRecommendedDefault": true,
+    "eachOptionMustHave": [
+      "bestFor",
+      "benefit",
+      "cost",
+      "risk",
+      "expectedResult",
+      "verification"
+    ]
+  },
+  "intentConfirmationCard": {
+    "cardType": "intent_confirmation",
+    "requiredFields": [
+      "surfaceRequest",
+      "understoodIntent",
+      "confirmedDimensions",
+      "uncertainDimensions"
+    ],
+    "confirmationStates": ["pending", "confirmed", "corrected", "skipped"],
+    "allowedSkipReasons": ["trivial", "explicit_auto_proceed"],
+    "renderHint": "Show confirmed items as checkmarks, uncertain items as numbered questions. Prompt: reply 'yes' to confirm, or correct specific items.",
+    "surfacePreference": "Use the current runtime adapter's verified native choice surface when available. Fall back to chat card via the standard fallback chain."
+  },
+  "choiceSurfaceAdapterContract": {
+    "purpose": "Separate the canonical decision card from runtime-specific renderer schemas.",
+    "canonicalCardTypes": ["intent_confirmation", "pre_execution_decision"],
+    "adapterMayCompressForRenderer": true,
+    "adapterMustPreserve": [
+      "decision purpose",
+      "route-changing dimension",
+      "recommended default",
+      "option count",
+      "option trade-offs",
+      "selection result",
+      "fallback reason",
+      "writeback target"
+    ],
+    "canonicalMustNotContain": [
+      "renderer-specific payload schema",
+      "host-only option decoration",
+      "tool-specific field mapping",
+      "one-runtime-only labels"
+    ],
+    "runtimeSpecificMappingsLiveIn": [
+      "canonical/skills/meta-theory/references/runtime-claude.md",
+      "canonical/skills/meta-theory/references/runtime-codex.md",
+      "config/runtime-capability-matrix.json"
+    ]
+  },
+  "codexUxRisks": [
+    "request_user_input may be unavailable outside Plan mode or specific host surfaces",
+    "inactive subagent approval can surface unexpectedly",
+    "non-interactive mode cannot satisfy fresh approval UI"
+  ]
+}

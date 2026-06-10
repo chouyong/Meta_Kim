@@ -37,20 +37,23 @@ async function runScript(args, env) {
 describe("sync-global-meta-theory hook policy", () => {
   test("default global sync/check does not require Claude global hooks", async () => {
     await withTempRuntimeHomes(async ({ env }) => {
-      const sync = await runScript([], env);
+      const sync = await runScript(["--targets", "claude"], env);
       assert.match(sync.stdout, /Skipped Claude Code global hooks/);
 
-      const check = await runScript(["--check"], env);
+      const check = await runScript(["--check", "--targets", "claude"], env);
       assert.match(check.stdout, /global hooks skipped/);
     });
   });
 
   test("--with-global-hooks is the explicit hard gate for Claude global hooks", async () => {
     await withTempRuntimeHomes(async ({ env }) => {
-      await runScript([], env);
+      await runScript(["--targets", "claude"], env);
 
       try {
-        await runScript(["--check", "--with-global-hooks"], env);
+        await runScript(
+          ["--check", "--with-global-hooks", "--targets", "claude"],
+          env,
+        );
         assert.fail("--with-global-hooks check should fail when hooks are missing");
       } catch (error) {
         assert.match(error.stdout, /Claude Code global hooks/);
@@ -58,7 +61,7 @@ describe("sync-global-meta-theory hook policy", () => {
     });
   });
 
-  test("release verification uses the global hook hard gate", async () => {
+  test("release verification uses the global hook hard gate without making live eval a full release gate", async () => {
     const pkg = JSON.parse(
       await readFile(path.join(REPO_ROOT, "package.json"), "utf8"),
     );
@@ -67,9 +70,12 @@ describe("sync-global-meta-theory hook policy", () => {
       /--check.*--with-global-hooks|--with-global-hooks.*--check/,
     );
     assert.match(pkg.scripts["meta:verify:all"], /meta:check:global:release/);
-    assert.match(
+    assert.match(pkg.scripts["meta:verify:all:live"], /eval-meta-agents\.mjs/);
+    assert.match(pkg.scripts["meta:verify:all:live"], /--require-all-runtimes/);
+    assert.match(pkg.scripts["meta:verify:all:live"], /--live/);
+    assert.doesNotMatch(
       pkg.scripts["meta:verify:all:live"],
-      /meta:check:global:release/,
+      /meta:check:global:release|meta:test:setup|meta:test:meta-theory/,
     );
   });
 });
