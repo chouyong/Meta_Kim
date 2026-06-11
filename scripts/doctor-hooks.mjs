@@ -129,9 +129,9 @@ function extractCommandPath(command) {
   const quoted = command.match(/"([^"]+)"/);
   if (quoted) return quoted[1];
   const tokens = command.trim().split(/\s+/);
-  for (let i = 1; i < tokens.length; i += 1) {
+  for (let i = 0; i < tokens.length; i += 1) {
     if (
-      /[\\/]/.test(tokens[i]) ||
+      /[\\\/]/.test(tokens[i]) ||
       tokens[i].endsWith(".mjs") ||
       tokens[i].endsWith(".js") ||
       tokens[i].endsWith(".py") ||
