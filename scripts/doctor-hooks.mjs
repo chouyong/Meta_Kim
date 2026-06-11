@@ -124,23 +124,87 @@ function resolveLang(cliLang) {
   );
 }
 
-function extractCommandPath(command) {
-  if (typeof command !== "string") return null;
-  const quoted = command.match(/"([^"]+)"/);
-  if (quoted) return quoted[1];
-  const tokens = command.trim().split(/\s+/);
-  for (let i = 0; i < tokens.length; i += 1) {
-    if (
-      /[\\\/]/.test(tokens[i]) ||
-      tokens[i].endsWith(".mjs") ||
-      tokens[i].endsWith(".js") ||
-      tokens[i].endsWith(".py") ||
-      tokens[i].endsWith(".sh")
-    ) {
-      return tokens[i];
+export function parseCommandTokens(command) {
+  const tokens = [];
+  let current = "";
+  let inQuotes = false;
+  let quoteChar = "";
+
+  for (let i = 0; i < command.length; i++) {
+    const char = command[i];
+    if ((char === '"' || char === "'") && (i === 0 || command[i - 1] !== '\\')) {
+      if (inQuotes && char === quoteChar) {
+        inQuotes = false;
+      } else if (!inQuotes) {
+        inQuotes = true;
+        quoteChar = char;
+      } else {
+        current += char;
+      }
+    } else if (char === " " && !inQuotes) {
+      if (current) {
+        tokens.push(current);
+        current = "";
+      }
+    } else {
+      current += char;
     }
   }
-  return null;
+  if (current) {
+    tokens.push(current);
+  }
+  return tokens;
+}
+
+function customBasename(p) {
+  const lastSlash = Math.max(p.lastIndexOf("/"), p.lastIndexOf("\\"));
+  if (lastSlash === -1) return p;
+  return p.slice(lastSlash + 1);
+}
+
+function isRunner(token) {
+  const baseName = customBasename(token).toLowerCase();
+  const nameWithoutExe = baseName.endsWith(".exe") ? baseName.slice(0, -4) : baseName;
+  const runners = ["node", "python", "python3", "bash", "sh", "pwsh", "powershell"];
+  return runners.includes(nameWithoutExe);
+}
+
+export function extractCommandPath(command) {
+  if (typeof command !== "string") return null;
+  const tokens = parseCommandTokens(command.trim());
+  if (tokens.length === 0) return null;
+
+  const firstToken = tokens[0];
+
+  const isScriptLike = (t) => {
+    if (!t) return false;
+    return (
+      /[\\/]/.test(t) ||
+      t.endsWith(".mjs") ||
+      t.endsWith(".js") ||
+      t.endsWith(".py") ||
+      t.endsWith(".sh")
+    );
+  };
+
+  if (isRunner(firstToken)) {
+    // Return the first script-like target after it
+    for (let i = 1; i < tokens.length; i++) {
+      if (isScriptLike(tokens[i])) {
+        return tokens[i];
+      }
+    }
+    // Fallback if no script-like target is found
+    return tokens[1] || null;
+  }
+
+  // If the command starts directly with a path-like or script-like token, return token 0
+  if (isScriptLike(firstToken)) {
+    return firstToken;
+  }
+
+  // Otherwise, return firstToken as a fallback
+  return firstToken;
 }
 
 function scanSettingsFile(settingsPath) {
@@ -327,9 +391,14 @@ async function main() {
   }
 }
 
-main().catch((err) => {
-  console.error(
-    `${C.red}doctor-hooks failed: ${err?.message ?? err}${C.reset}`,
-  );
-  process.exit(1);
-});
+const isMain = process.argv[1] && (
+  path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))
+);
+if (isMain) {
+  main().catch((err) => {
+    console.error(
+      `${C.red}doctor-hooks failed: ${err?.message ?? err}${C.reset}`,
+    );
+    process.exit(1);
+  });
+}
