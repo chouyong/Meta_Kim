@@ -162,49 +162,83 @@ function customBasename(p) {
   return p.slice(lastSlash + 1);
 }
 
-function isRunner(token) {
-  const baseName = customBasename(token).toLowerCase();
-  const nameWithoutExe = baseName.endsWith(".exe") ? baseName.slice(0, -4) : baseName;
-  const runners = ["node", "python", "python3", "bash", "sh", "pwsh", "powershell"];
-  return runners.includes(nameWithoutExe);
-}
-
 export function extractCommandPath(command) {
   if (typeof command !== "string") return null;
   const tokens = parseCommandTokens(command.trim());
   if (tokens.length === 0) return null;
 
-  const firstToken = tokens[0];
+  const runners = [
+    "node",
+    "python",
+    "python3",
+    "bash",
+    "sh",
+    "pwsh",
+    "powershell",
+    "cmd",
+    "npx",
+    "tsx",
+    "ts-node",
+    "bun",
+    "deno"
+  ];
 
+  // Helper to check if token is a runner
+  const isRunnerToken = (token) => {
+    const base = customBasename(token).toLowerCase();
+    const withoutExe = base.endsWith(".exe") ? base.slice(0, -4) : base;
+    return runners.includes(withoutExe);
+  };
+
+  // Helper to check if token is script-like/path-like
   const isScriptLike = (t) => {
     if (!t) return false;
+    const lower = t.toLowerCase();
     return (
       /[\\/]/.test(t) ||
-      t.endsWith(".mjs") ||
-      t.endsWith(".js") ||
-      t.endsWith(".py") ||
-      t.endsWith(".sh")
+      lower.endsWith(".mjs") ||
+      lower.endsWith(".js") ||
+      lower.endsWith(".py") ||
+      lower.endsWith(".sh") ||
+      lower.endsWith(".ts") ||
+      lower.endsWith(".tsx") ||
+      lower.endsWith(".bat") ||
+      lower.endsWith(".cmd") ||
+      lower.endsWith(".ps1")
     );
   };
 
-  if (isRunner(firstToken)) {
-    // Return the first script-like target after it
-    for (let i = 1; i < tokens.length; i++) {
-      if (isScriptLike(tokens[i])) {
-        return tokens[i];
-      }
+  for (let i = 0; i < tokens.length; i++) {
+    const token = tokens[i];
+
+    // 1. Skip known runners
+    if (isRunnerToken(token)) {
+      continue;
     }
-    // Fallback if no script-like target is found
-    return tokens[1] || null;
+
+    // 2. Skip known options that take a parameter (like -r, -m, --require, --loader, etc.)
+    if (
+      token === "-r" ||
+      token === "--require" ||
+      token === "-m" ||
+      token === "--loader"
+    ) {
+      i++; // Skip the option parameter token
+      continue;
+    }
+
+    // 3. Skip other flags (e.g. -c, --inspect, -v)
+    if (token.startsWith("-") || (token.startsWith("/") && token.length === 2)) {
+      continue;
+    }
+
+    // 4. Check if it's a script/path-like target
+    if (isScriptLike(token)) {
+      return token;
+    }
   }
 
-  // If the command starts directly with a path-like or script-like token, return token 0
-  if (isScriptLike(firstToken)) {
-    return firstToken;
-  }
-
-  // Otherwise, return firstToken as a fallback
-  return firstToken;
+  return null;
 }
 
 function scanSettingsFile(settingsPath) {

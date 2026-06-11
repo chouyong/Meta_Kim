@@ -63,6 +63,37 @@ describe("doctor-hooks extractCommandPath", () => {
     );
   });
 
+  test("should return null for unrecognized/non-script commands (regression/false-positives check)", () => {
+    assert.strictEqual(
+      extractCommandPath("echo hello"),
+      null
+    );
+    assert.strictEqual(
+      extractCommandPath("cmd /c .claude/hooks/foo.mjs"),
+      ".claude/hooks/foo.mjs"
+    );
+    assert.strictEqual(
+      extractCommandPath("cmd.exe /c C:/repo/.claude/hooks/foo.mjs"),
+      "C:/repo/.claude/hooks/foo.mjs"
+    );
+    assert.strictEqual(
+      extractCommandPath("npx tsx .claude/hooks/foo.ts"),
+      ".claude/hooks/foo.ts"
+    );
+    assert.strictEqual(
+      extractCommandPath("node -r ts-node/register .claude/hooks/foo.ts"),
+      ".claude/hooks/foo.ts"
+    );
+    assert.strictEqual(
+      extractCommandPath("python -m pip install"),
+      null
+    );
+    assert.strictEqual(
+      extractCommandPath("python -m my_module.hook"),
+      null
+    );
+  });
+
   test("should fallback to first non-runner token or null appropriately", () => {
     assert.strictEqual(
       extractCommandPath(""),
