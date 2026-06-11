@@ -230,3 +230,62 @@ describe("medusa hook recognition", () => {
     );
   });
 });
+
+describe("global hook template includes medusa entries", () => {
+  test("SessionStart binds medusa-findings-surface --event session-start", () => {
+    const template = buildMetaKimHooksTemplate("/abs/hooks/meta-kim");
+    assert.ok(Array.isArray(template.SessionStart), "SessionStart must be present");
+    const cmds = template.SessionStart[0].hooks.map((h) => h.command);
+    assert.ok(
+      cmds.some((c) => /medusa-findings-surface\.mjs.*session-start/.test(c)),
+      `expected medusa surface session-start, got: ${cmds.join(", ")}`,
+    );
+  });
+
+  test("UserPromptSubmit binds medusa-findings-surface --event user-prompt", () => {
+    const template = buildMetaKimHooksTemplate("/abs/hooks/meta-kim");
+    assert.ok(Array.isArray(template.UserPromptSubmit), "UserPromptSubmit must be present");
+    const cmds = template.UserPromptSubmit[0].hooks.map((h) => h.command);
+    assert.ok(
+      cmds.some((c) => /medusa-findings-surface\.mjs.*user-prompt/.test(c)),
+      `expected medusa surface user-prompt, got: ${cmds.join(", ")}`,
+    );
+  });
+
+  test("PostToolUse has a dedicated medusa enqueue block with full matcher", () => {
+    const template = buildMetaKimHooksTemplate("/abs/hooks/meta-kim");
+    const block = template.PostToolUse.find((b) =>
+      b.hooks?.some((h) => /medusa-postscan-enqueue\.mjs/.test(h.command || "")),
+    );
+    assert.ok(block, "expected a PostToolUse block registering medusa enqueue");
+    assert.match(
+      block.matcher || "",
+      /Edit\|Write\|MultiEdit\|NotebookEdit/,
+      "medusa enqueue must cover all four file-mutation tools",
+    );
+  });
+
+  test("Stop appends medusa-findings-surface --event stop", () => {
+    const template = buildMetaKimHooksTemplate("/abs/hooks/meta-kim");
+    const cmds = template.Stop[0].hooks.map((h) => h.command);
+    assert.ok(
+      cmds.some((c) => /medusa-findings-surface\.mjs.*stop/.test(c)),
+      `expected medusa surface stop, got: ${cmds.join(", ")}`,
+    );
+  });
+
+  test("global template stays fail-open: no failClosed on any medusa entry", () => {
+    const template = buildMetaKimHooksTemplate("/abs/hooks/meta-kim");
+    const allHooks = [];
+    for (const blocks of Object.values(template)) {
+      for (const block of blocks) {
+        for (const h of block.hooks || []) allHooks.push(h);
+      }
+    }
+    const medusa = allHooks.filter((h) => /medusa-/.test(h.command || ""));
+    assert.ok(medusa.length >= 4, `expected at least 4 medusa hook entries, got ${medusa.length}`);
+    for (const h of medusa) {
+      assert.notEqual(h.failClosed, true, `medusa hook must not be failClosed: ${h.command}`);
+    }
+  });
+});

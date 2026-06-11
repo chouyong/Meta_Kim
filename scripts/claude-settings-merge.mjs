@@ -57,12 +57,24 @@ export function hookCommandNode(absScriptPath) {
 
 /** Hook blocks matching Meta_Kim canonical runtime (absolute paths under meta-kim/). */
 export function buildMetaKimHooksTemplate(absHooksDir) {
-  const cmd = (name) => ({
-    type: "command",
-    command: hookCommandNode(path.join(absHooksDir, name)),
-  });
+  const cmd = (name, args = []) => {
+    const base = hookCommandNode(path.join(absHooksDir, name));
+    const command = args.length > 0 ? `${base} ${args.join(" ")}` : base;
+    return { type: "command", command };
+  };
 
   return {
+    SessionStart: [
+      {
+        matcher: "startup|resume",
+        hooks: [cmd("medusa-findings-surface.mjs", ["--event", "session-start"])],
+      },
+    ],
+    UserPromptSubmit: [
+      {
+        hooks: [cmd("medusa-findings-surface.mjs", ["--event", "user-prompt"])],
+      },
+    ],
     PreToolUse: [
       {
         matcher: "Bash",
@@ -78,6 +90,12 @@ export function buildMetaKimHooksTemplate(absHooksDir) {
           cmd("post-console-log-warn.mjs"),
         ],
       },
+      {
+        // Medusa AI-context content scan, enqueue path. Cheap, non-blocking,
+        // fail-open. Worker is spawned detached and writes findings async.
+        matcher: "Edit|Write|MultiEdit|NotebookEdit",
+        hooks: [cmd("medusa-postscan-enqueue.mjs")],
+      },
     ],
     SubagentStart: [
       {
@@ -92,6 +110,7 @@ export function buildMetaKimHooksTemplate(absHooksDir) {
           cmd("stop-compaction.mjs"),
           cmd("stop-console-log-audit.mjs"),
           cmd("stop-completion-guard.mjs"),
+          cmd("medusa-findings-surface.mjs", ["--event", "stop"]),
         ],
       },
     ],

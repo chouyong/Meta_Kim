@@ -301,6 +301,26 @@ async function copyCanonicalHooksToGlobal() {
   await fs.rm(dest, { recursive: true, force: true });
   await fs.cp(repoHooksDir, dest, { recursive: true, force: true });
 
+  // Medusa AI-context scan needs three sibling assets that live outside
+  // claude/hooks/ in canonical (shared/hooks for the surface hook, and
+  // shared/scripts for the worker runner + Python batch helper). Without
+  // them the copied medusa-postscan-enqueue.mjs would be an orphan: the
+  // worker it spawns lives next to it on disk, and the worker imports the
+  // Python helper from its own directory. Mirror them all into the same
+  // ~/.claude/hooks/meta-kim/ directory.
+  const medusaSharedAssets = [
+    [["shared", "hooks", "medusa-findings-surface.mjs"], "medusa-findings-surface.mjs"],
+    [["shared", "scripts", "medusa-worker.mjs"], "medusa-worker.mjs"],
+    [["shared", "scripts", "medusa_batch_scan.py"], "medusa_batch_scan.py"],
+  ];
+  for (const [src, name] of medusaSharedAssets) {
+    const sourcePath = path.join(canonicalRuntimeAssetsDir, ...src);
+    if (!(await pathExists(sourcePath))) continue;
+    const targetPath = path.join(dest, name);
+    assertHomeBound(targetPath);
+    await fs.copyFile(sourcePath, targetPath);
+  }
+
   // Cleanup hooks removed from canonical but still present in older installs.
   for (const retired of RETIRED_HOOK_FILES) {
     const retiredPath = path.join(dest, retired);
