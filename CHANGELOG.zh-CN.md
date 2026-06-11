@@ -6,6 +6,31 @@
 
 更新说明只解释“改了什么、为什么重要”。过细的内部任务编号、低价值 backlog id 和实现流水账不放在这里；需要精确证据时，请看 Git 历史、测试、生成报告和 PRD 产物。
 
+## [2.8.18] - 2026-06-11
+
+### 修复
+
+- **Codex Planning Stop Hook 改为提示模式** - Codex 的 planning-with-files Stop hook 不再把普通进度提醒转成强制继续执行。这样回答已经完成时，不会因为结尾触发旧计划提醒，就把关键答案折叠进 Codex App 的“已处理”区域。
+- **零 Phase 计划不再误判未完成** - Codex planning hook adapter 遇到 `0/0` phase 计数时会安静跳过，不再当成未完成任务；混合 `**Status:**` 与 inline `[status]` 的计划格式，也会与 shell / PowerShell hook 一样稳定计数。
+
+### 变更
+
+- **变更准备合同** - 运行时、hook、setup、sync、provider、删除和发布类 PR 现在有可复用检查清单，覆盖宿主状态影响矩阵、hook/prompt 协议流、删除残留清扫和证据预算。
+- **执行模式分类** - `executionMode` 现在会明确映射到 `real_execution`、`read_only_sidecar`、`approval_gate` 三类。验证器和 Review 可以按语义类别判断执行是否真实发生，而不是只看任务节点数量。
+
+### 验证
+
+- `node --check scripts/install-global-skills-all-runtimes.mjs`
+- `node --check scripts/validate-project.mjs`
+- `node --check scripts/validate-run-artifact.mjs`
+- `node --test tests/setup/release-docs-semantics.test.mjs tests/setup/install-cross-platform.test.mjs`
+- `node --test tests/meta-theory/09-run-artifact-validator.test.mjs tests/meta-theory/31-capability-gap-orchestration.test.mjs tests/meta-theory/33-capability-gap-orchestration-quality.test.mjs`
+- `node scripts/validate-provider-capabilities.mjs --strict-global-hooks --json`
+- `npm --registry=https://registry.npmjs.org audit --audit-level=high`
+- `npm run meta:verify:all`
+- 本机 Windows Codex planning Stop hook smoke：`0/0` phase 计划不再 block；普通未完成计划只返回 `systemMessage`，不返回 `decision:block`。
+- 已安装用户路径 hook 合并 smoke：重新安装 `planning-with-files` 后，Codex 同时保留 `user_prompt_submit.py` 和 `hookprompt-adapter.mjs`；Cursor 的 `beforeSubmitPrompt` 仍保留 `hookprompt-adapter.mjs`。
+
 ## [2.8.17] - 2026-06-11
 
 ### 修复

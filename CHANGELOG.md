@@ -6,6 +6,31 @@ This file is the reader-facing release history for Meta_Kim.
 
 The changelog explains what changed and why it matters. It intentionally avoids long internal task ledgers, low-signal backlog ids, and implementation trivia. When exact evidence is needed, use the repository history, tests, generated reports, and PRD artifacts.
 
+## [2.8.18] - 2026-06-11
+
+### Fixed
+
+- **Codex Planning Stop Hook Advisory Mode** - Codex planning-with-files Stop hooks no longer turn ordinary progress reminders into blocking continuations. This prevents completed answers from being folded into Codex App's processed section just because a stale or advisory plan reminder fired at the end of the turn.
+- **Zero-Phase Plan Handling** - Codex planning hook adapters now ignore `0/0` phase counts instead of treating them as incomplete work. Mixed `**Status:**` and inline `[status]` phase formats are counted consistently with the shell and PowerShell hooks.
+
+### Changed
+
+- **Change Readiness Contract** - Runtime, hook, setup, sync, provider, deletion, and release PRs now have a reusable checklist for host-state impact matrices, hook/prompt protocol flow, deletion residue sweeps, and evidence budgets.
+- **Execution Mode Classes** - `executionMode` values are now explicitly mapped into `real_execution`, `read_only_sidecar`, and `approval_gate` classes so validators and reviews can reason about execution semantics instead of raw task counts.
+
+### Verification
+
+- `node --check scripts/install-global-skills-all-runtimes.mjs`
+- `node --check scripts/validate-project.mjs`
+- `node --check scripts/validate-run-artifact.mjs`
+- `node --test tests/setup/release-docs-semantics.test.mjs tests/setup/install-cross-platform.test.mjs`
+- `node --test tests/meta-theory/09-run-artifact-validator.test.mjs tests/meta-theory/31-capability-gap-orchestration.test.mjs tests/meta-theory/33-capability-gap-orchestration-quality.test.mjs`
+- `node scripts/validate-provider-capabilities.mjs --strict-global-hooks --json`
+- `npm --registry=https://registry.npmjs.org audit --audit-level=high`
+- `npm run meta:verify:all`
+- Codex planning Stop hook smoke on this Windows host: `0/0` phase plans emit no block; normal incomplete plans emit `systemMessage`, not `decision:block`.
+- Installed-user hook merge smoke: after reinstalling `planning-with-files`, Codex keeps both `user_prompt_submit.py` and `hookprompt-adapter.mjs`; Cursor keeps `beforeSubmitPrompt` with `hookprompt-adapter.mjs`.
+
 ## [2.8.17] - 2026-06-11
 
 ### Fixed

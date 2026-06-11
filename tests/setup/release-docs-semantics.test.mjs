@@ -41,4 +41,59 @@ describe("release documentation semantics", () => {
     assert.match(raw, /`\.agents\/skills\/meta-theory\/SKILL\.md`/);
     assert.doesNotMatch(raw, /docs\/runtime-coverage-audit\.md/);
   });
+
+  test("change readiness checklist covers P1 and P2 release review lanes", () => {
+    const checklist = readFileSync(
+      path.join(root, "config", "contracts", "change-readiness-checklist.md"),
+      "utf8",
+    );
+    const pullRequestTemplate = readFileSync(
+      path.join(root, ".github", "pull_request_template.md"),
+      "utf8",
+    );
+    const combined = `${checklist}\n${pullRequestTemplate}`;
+
+    assert.match(combined, /Host State Impact Matrix/);
+    assert.match(combined, /Existing host state/);
+    assert.match(combined, /Rollback path/);
+    assert.match(combined, /Hook \/ Prompt Protocol Flow/);
+    assert.match(combined, /Model-visible field/);
+    assert.match(combined, /Deletion \/ Refactor Residue Sweep/);
+    assert.match(combined, /Evidence Budget/);
+    assert.match(combined, /Host-side or installed-user self-test/);
+    assert.match(combined, /Execution Mode Classification/);
+    assert.match(combined, /real_execution/);
+    assert.match(combined, /read_only_sidecar/);
+    assert.match(combined, /approval_gate/);
+  });
+
+  test("workflow execution modes are mapped into semantic execution classes", () => {
+    const contract = JSON.parse(
+      readFileSync(
+        path.join(root, "config", "contracts", "workflow-contract.json"),
+        "utf8",
+      ),
+    );
+    const policy =
+      contract.protocols.workerTaskPacket.executionModePolicy;
+
+    assert.deepEqual(policy.executionModeClasses, [
+      "real_execution",
+      "read_only_sidecar",
+      "approval_gate",
+    ]);
+    for (const mode of policy.executionWorkerModes) {
+      assert.equal(policy.executionModeClassMap[mode], "real_execution");
+    }
+    for (const mode of policy.sidecarModes) {
+      assert.equal(policy.executionModeClassMap[mode], "read_only_sidecar");
+    }
+    for (const mode of policy.approvalGateModes) {
+      assert.equal(policy.executionModeClassMap[mode], "approval_gate");
+    }
+    assert.deepEqual(
+      Object.keys(policy.executionModeClassMap).sort(),
+      [...policy.executionModeEnum].sort(),
+    );
+  });
 });

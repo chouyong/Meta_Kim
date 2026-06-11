@@ -717,6 +717,43 @@ async function validateWorkflowContract() {
       executionModePolicy.sidecarModes?.includes("readonly_review_sidecar"),
     "workflow-contract.json workerTaskPacket.executionModePolicy must define read-only sidecar modes.",
   );
+  const executionModeEnum = executionModePolicy.executionModeEnum ?? [];
+  const executionModeClasses = new Set(executionModePolicy.executionModeClasses ?? []);
+  const executionModeClassMap = executionModePolicy.executionModeClassMap ?? {};
+  for (const expectedClass of [
+    "real_execution",
+    "read_only_sidecar",
+    "approval_gate",
+  ]) {
+    assert(
+      executionModeClasses.has(expectedClass),
+      `workflow-contract.json workerTaskPacket.executionModePolicy must define ${expectedClass}.`,
+    );
+  }
+  for (const mode of executionModeEnum) {
+    assert(
+      executionModeClasses.has(executionModeClassMap[mode]),
+      `workflow-contract.json workerTaskPacket.executionModePolicy must classify ${mode}.`,
+    );
+  }
+  for (const mode of executionModePolicy.executionWorkerModes ?? []) {
+    assert(
+      executionModeClassMap[mode] === "real_execution",
+      `workflow-contract.json execution worker mode ${mode} must classify as real_execution.`,
+    );
+  }
+  for (const mode of executionModePolicy.sidecarModes ?? []) {
+    assert(
+      executionModeClassMap[mode] === "read_only_sidecar",
+      `workflow-contract.json sidecar mode ${mode} must classify as read_only_sidecar.`,
+    );
+  }
+  for (const mode of executionModePolicy.approvalGateModes ?? []) {
+    assert(
+      executionModeClassMap[mode] === "approval_gate",
+      `workflow-contract.json approval gate mode ${mode} must classify as approval_gate.`,
+    );
+  }
   const verifySteps = contract.protocols?.workerTaskPacket?.verifyStepsField ?? {};
   assert(
     verifySteps.items?.required?.includes("step") &&
