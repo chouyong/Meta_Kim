@@ -87,6 +87,8 @@ docs/**
 !docs/
 !docs/images/
 !docs/images/**
+!docs/runtime/
+!docs/runtime/**
 
 # ========== Generated reports ==========
 docs/agent-design-quality-eval-report.zh-CN.md

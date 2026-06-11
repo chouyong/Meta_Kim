@@ -124,6 +124,7 @@
     "bin/",
     "config/",
     "docs/images/",
+    "docs/runtime/",
     "examples/",
     "llms.txt",
     "setup.mjs",

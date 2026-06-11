@@ -198,10 +198,13 @@ export function buildCodexHooksJson({
   memoryHookPath = ".codex/hooks/meta-kim-memory-save.mjs",
   spineHookPath = ".codex/hooks/activate-meta-theory-spine.mjs",
   enforceAgentDispatchHookPath = ".codex/hooks/enforce-agent-dispatch.mjs",
+  medusaEnqueueHookPath = ".codex/hooks/medusa-postscan-enqueue.mjs",
+  medusaSurfaceHookPath = ".codex/hooks/medusa-findings-surface.mjs",
   hookPromptAdapterPath = null,
 } = {}) {
   const userPromptHooks = [
     hookCommand(nodeHookCommand(memoryHookPath, ["--event", "user-prompt"]), 10),
+    hookCommand(nodeHookCommand(medusaSurfaceHookPath, ["--event", "user-prompt"]), 5),
   ];
   if (hookPromptAdapterPath) {
     userPromptHooks.push(hookCommand(nodeHookCommand(hookPromptAdapterPath), 10));
@@ -216,6 +219,7 @@ export function buildCodexHooksJson({
             hookCommand(nodeHookCommand(memoryHookPath, ["--event", "session-start"]), 10, {
               statusMessage: "Loading Meta_Kim memory",
             }),
+            hookCommand(nodeHookCommand(medusaSurfaceHookPath, ["--event", "session-start"]), 5),
           ],
         },
       ],
@@ -236,6 +240,14 @@ export function buildCodexHooksJson({
           hooks: [hookCommand(nodeHookCommand(graphifyHookPath))],
         },
       ],
+      PostToolUse: [
+        // Medusa AI-context content scan, enqueue path. Cheap, non-blocking;
+        // worker is spawned detached and writes findings asynchronously.
+        {
+          matcher: "Edit|Write|MultiEdit|NotebookEdit|apply_patch",
+          hooks: [hookCommand(nodeHookCommand(medusaEnqueueHookPath), 5)],
+        },
+      ],
       Skill: [
         {
           matcher: "meta-theory",
@@ -244,7 +256,10 @@ export function buildCodexHooksJson({
       ],
       Stop: [
         {
-          hooks: [hookCommand(nodeHookCommand(memoryHookPath, ["--event", "stop"]), 10)],
+          hooks: [
+            hookCommand(nodeHookCommand(memoryHookPath, ["--event", "stop"]), 10),
+            hookCommand(nodeHookCommand(medusaSurfaceHookPath, ["--event", "stop"]), 5),
+          ],
         },
       ],
     },
@@ -255,12 +270,18 @@ export function buildCursorHooksJson({
   graphifyHookPath = ".cursor/hooks/graphify-context.mjs",
   memoryHookPath = ".cursor/hooks/meta-kim-memory-save.mjs",
   enforceAgentDispatchHookPath = ".cursor/hooks/enforce-agent-dispatch.mjs",
+  medusaEnqueueHookPath = ".cursor/hooks/medusa-postscan-enqueue.mjs",
+  medusaSurfaceHookPath = ".cursor/hooks/medusa-findings-surface.mjs",
   hookPromptAdapterPath = null,
 } = {}) {
   const beforeSubmitPromptHooks = [
     {
       command: nodeHookCommand(memoryHookPath, ["--event", "user-prompt"]),
       timeout: 10,
+    },
+    {
+      command: nodeHookCommand(medusaSurfaceHookPath, ["--event", "user-prompt"]),
+      timeout: 5,
     },
   ];
   if (hookPromptAdapterPath) {
@@ -278,6 +299,10 @@ export function buildCursorHooksJson({
           command: nodeHookCommand(memoryHookPath, ["--event", "session-start"]),
           timeout: 10,
         },
+        {
+          command: nodeHookCommand(medusaSurfaceHookPath, ["--event", "session-start"]),
+          timeout: 5,
+        },
       ],
       beforeSubmitPrompt: beforeSubmitPromptHooks,
       preToolUse: [
@@ -292,10 +317,22 @@ export function buildCursorHooksJson({
           command: nodeHookCommand(graphifyHookPath),
         },
       ],
+      // Medusa AI-context content scan, enqueue path. Stays fail-open: no
+      // failClosed flag — a slow/missing Python must never block edits.
+      postToolUse: [
+        {
+          command: nodeHookCommand(medusaEnqueueHookPath),
+          timeout: 5,
+        },
+      ],
       stop: [
         {
           command: nodeHookCommand(memoryHookPath, ["--event", "stop"]),
           timeout: 10,
+        },
+        {
+          command: nodeHookCommand(medusaSurfaceHookPath, ["--event", "stop"]),
+          timeout: 5,
         },
       ],
     },

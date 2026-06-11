@@ -1972,6 +1972,7 @@ async function syncClaudeProjection(
   const sharedClaudeHookDependencies = [
     "activate-meta-theory-spine.mjs",
     "hook-i18n.mjs",
+    "medusa-findings-surface.mjs",
     "meta-kim-memory-save.mjs",
     "skip-reminder.mjs",
   ];
@@ -1989,6 +1990,27 @@ async function syncClaudeProjection(
       ).changed
     ) {
       changedFiles.push(`${displayPaths.claudeHooks}/${hookName}`);
+    }
+  }
+
+  const sharedClaudeScriptDependencies = [
+    "medusa-worker.mjs",
+    "medusa_batch_scan.py",
+  ];
+  for (const scriptName of sharedClaudeScriptDependencies) {
+    const scriptContent = await tryReadCanonical(
+      path.join(canonicalRuntimeAssetsDir, "shared", "scripts", scriptName),
+    );
+    if (
+      scriptContent &&
+      (
+        await writeGeneratedFile(
+          path.join(claudeHooksProjectionDir, scriptName),
+          scriptContent,
+        )
+      ).changed
+    ) {
+      changedFiles.push(`${displayPaths.claudeHooks}/${scriptName}`);
     }
   }
 
@@ -2459,6 +2481,29 @@ Examples:
       ) {
         changedFiles.push(`${dp.codexHooks}/hookprompt-adapter.mjs`);
       }
+      // Medusa AI-context scan: enqueue hook + surface hook + worker + Python helper.
+      const medusaCodexAssets = [
+        ["claude/hooks", "medusa-postscan-enqueue.mjs"],
+        ["shared/hooks", "medusa-findings-surface.mjs"],
+        ["shared/scripts", "medusa-worker.mjs"],
+        ["shared/scripts", "medusa_batch_scan.py"],
+      ];
+      for (const [subdir, fileName] of medusaCodexAssets) {
+        const content = await tryReadCanonical(
+          path.join(canonicalRuntimeAssetsDir, ...subdir.split("/"), fileName),
+        );
+        if (
+          content &&
+          (
+            await writeGeneratedFile(
+              path.join(dirs.codexHooksDir, fileName),
+              content,
+            )
+          ).changed
+        ) {
+          changedFiles.push(`${dp.codexHooks}/${fileName}`);
+        }
+      }
       const graphifyHookPath =
         scope === "global"
           ? path.join(dirs.codexHooksDir, "graphify-context.mjs")
@@ -2723,6 +2768,29 @@ Examples:
         ).changed
       ) {
         changedFiles.push(`${dp.cursorHooks}/hookprompt-adapter.mjs`);
+      }
+      // Medusa AI-context scan: enqueue hook + surface hook + worker + Python helper.
+      const medusaCursorAssets = [
+        ["claude/hooks", "medusa-postscan-enqueue.mjs"],
+        ["shared/hooks", "medusa-findings-surface.mjs"],
+        ["shared/scripts", "medusa-worker.mjs"],
+        ["shared/scripts", "medusa_batch_scan.py"],
+      ];
+      for (const [subdir, fileName] of medusaCursorAssets) {
+        const content = await tryReadCanonical(
+          path.join(canonicalRuntimeAssetsDir, ...subdir.split("/"), fileName),
+        );
+        if (
+          content &&
+          (
+            await writeGeneratedFile(
+              path.join(dirs.cursorHooksDir, fileName),
+              content,
+            )
+          ).changed
+        ) {
+          changedFiles.push(`${dp.cursorHooks}/${fileName}`);
+        }
       }
       const graphifyHookPath =
         scope === "global"

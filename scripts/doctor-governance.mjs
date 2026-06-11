@@ -3,7 +3,10 @@
  * Narrow governance health check: contract readable, Claude hook commands match
  * expected set, runtime mirrors in sync, sample run artifact passes meta:validate:run.
  *
- * Keep EXPECTED_CLAUDE_HOOK_COMMANDS in sync with scripts/validate-project.mjs.
+ * EXPECTED_CLAUDE_HOOK_COMMANDS below is the single source of truth for which
+ * Claude hooks are owned by Meta_Kim canonical settings. validate-project.mjs
+ * does NOT carry an equivalent constant (verified 2026-06-11) — reconcile any
+ * drift here, not by adding a duplicate list elsewhere.
  */
 
 import { promises as fs } from "node:fs";
@@ -26,8 +29,13 @@ const execFileAsync = promisify(execFile);
 
 /** @type {string[]} Same order as validate-project.mjs EXPECTED_CLAUDE_HOOK_COMMANDS */
 const EXPECTED_CLAUDE_HOOK_COMMANDS = [
+  "node .claude/hooks/activate-meta-theory-spine.mjs",
   "node .claude/hooks/block-dangerous-bash.mjs",
   "node .claude/hooks/enforce-agent-dispatch.mjs",
+  "node .claude/hooks/graphify-context.mjs",
+  "node .claude/hooks/medusa-findings-surface.mjs",
+  "node .claude/hooks/medusa-postscan-enqueue.mjs",
+  "node .claude/hooks/meta-kim-memory-save.mjs",
   "node .claude/hooks/post-format.mjs",
   "node .claude/hooks/post-typecheck.mjs",
   "node .claude/hooks/post-console-log-warn.mjs",
@@ -65,8 +73,11 @@ function normalizeHookName(command) {
   const withoutNode = trimmed
     .replace(/^node\s+/, "")
     .replace(/^["']|["']$/g, "");
+  // Drop CLI args (everything after the first whitespace) so commands like
+  // `node .claude/hooks/foo.mjs --event session-start` collapse to `foo`.
+  const scriptOnly = withoutNode.split(/\s+/, 1)[0] || withoutNode;
   // Strip leading dots and slashes, then extract the filename without .mjs
-  const normalized = path.normalize(withoutNode);
+  const normalized = path.normalize(scriptOnly);
   const basename = path.basename(normalized, ".mjs");
   return basename;
 }
@@ -111,14 +122,19 @@ async function checkHooks() {
       ".claude/settings.json: missing PreToolUse or PostToolUse hooks",
     );
   }
-  // Compare by hook name: normalize both relative paths and absolute paths
-  const found = collectClaudeHookCommands(hooks).map(normalizeHookName).sort();
-  const expected = [...EXPECTED_CLAUDE_HOOK_COMMANDS]
-    .map(normalizeHookName)
-    .sort();
+  // Compare by hook name set (de-duplicated). Hooks may legitimately appear
+  // multiple times when wired with different --event flags (e.g. medusa
+  // surface bound to SessionStart / UserPromptSubmit / Stop). What matters is
+  // that the set of registered hook scripts matches the expected list.
+  const foundSet = new Set(collectClaudeHookCommands(hooks).map(normalizeHookName));
+  const expectedSet = new Set(EXPECTED_CLAUDE_HOOK_COMMANDS.map(normalizeHookName));
+  const found = [...foundSet].sort();
+  const expected = [...expectedSet].sort();
   if (JSON.stringify(found) !== JSON.stringify(expected)) {
+    const missing = expected.filter((n) => !foundSet.has(n));
+    const extra = found.filter((n) => !expectedSet.has(n));
     throw new Error(
-      `Hook command set mismatch.\n  expected (${expected.length}): ${expected.join(", ")}\n  found (${found.length}): ${found.join(", ")}`,
+      `Hook command set mismatch.\n  expected (${expected.length}): ${expected.join(", ")}\n  found (${found.length}): ${found.join(", ")}\n  missing: ${missing.join(", ") || "(none)"}\n  extra: ${extra.join(", ") || "(none)"}`,
     );
   }
 }

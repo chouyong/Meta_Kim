@@ -118,6 +118,8 @@ const REPO_META_KIM_HOOK_FILES = [
   "block-dangerous-bash.mjs",
   "enforce-agent-dispatch.mjs",
   "graphify-context.mjs",
+  "medusa-findings-surface.mjs",
+  "medusa-postscan-enqueue.mjs",
   "meta-kim-memory-save.mjs",
   "post-format.mjs",
   "post-typecheck.mjs",

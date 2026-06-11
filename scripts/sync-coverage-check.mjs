@@ -93,6 +93,14 @@ const KNOWN_INTENTIONAL_EXCLUSIONS = [
     reason:
       "v2.2.0 PoC abstraction modules (DeliverableTypeProfile / PolicyRegistry / GateDispatcher / IntentVerbLexicon); not projected to runtime mirrors until v2.3.0 feature-flag rollout (R3/R4 in docs/design-time-gate-redesign.md)",
   },
+  // canonical/runtime-assets/claude/hook-candidates/ is a parking area for
+  // hook designs that are not (yet) safe to register. Files here intentionally
+  // never reach .claude/.codex/.cursor/. See .codex/NOTES_FROM_CLAUDE_CODE.md.
+  {
+    prefix: "claude/hook-candidates/",
+    reason:
+      "Hook candidates intentionally not projected; design parking area",
+  },
 ];
 
 // ── Helpers ───────────────────────────────────────────────────────────

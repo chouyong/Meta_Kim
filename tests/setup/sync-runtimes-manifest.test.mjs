@@ -326,9 +326,10 @@ describe("sync-runtimes / Codex project hooks", () => {
       hookPromptAdapterPath: ".codex/hooks/hookprompt-adapter.mjs",
     });
 
-    assert.match(
-      config.hooks.UserPromptSubmit[0].hooks[1].command,
-      /hookprompt-adapter\.mjs/,
+    const userPromptHooks = config.hooks.UserPromptSubmit[0].hooks;
+    assert.ok(
+      userPromptHooks.some((h) => /hookprompt-adapter\.mjs/.test(h.command)),
+      `expected hookprompt-adapter in UserPromptSubmit, got: ${userPromptHooks.map((h) => h.command).join(", ")}`,
     );
   });
 
@@ -573,9 +574,9 @@ describe("sync-runtimes / Cursor project hooks", () => {
       config.hooks.beforeSubmitPrompt[0].command,
       /meta-kim-memory-save\.mjs.*user-prompt/,
     );
-    assert.match(
-      config.hooks.beforeSubmitPrompt[1].command,
-      /hookprompt-adapter\.mjs/,
+    assert.ok(
+      config.hooks.beforeSubmitPrompt.some((h) => /hookprompt-adapter\.mjs/.test(h.command)),
+      `expected hookprompt-adapter in beforeSubmitPrompt, got: ${config.hooks.beforeSubmitPrompt.map((h) => h.command).join(", ")}`,
     );
 
     const preToolUse = config.hooks.preToolUse;
@@ -603,6 +604,74 @@ describe("sync-runtimes / Cursor project hooks", () => {
     assert.match(
       config.hooks.stop[0].command,
       /meta-kim-memory-save\.mjs.*stop/,
+    );
+  });
+});
+
+describe("sync-runtimes / medusa AI-context scan wiring", () => {
+  test("Codex builder registers PostToolUse enqueue hook", () => {
+    const config = buildCodexProjectHooksJson();
+    const post = config.hooks.PostToolUse;
+    assert.ok(Array.isArray(post) && post.length >= 1, "PostToolUse block missing");
+    const enqueueBlock = post.find((b) => /Edit|Write|MultiEdit|NotebookEdit/.test(b.matcher || ""));
+    assert.ok(enqueueBlock, `expected PostToolUse block matching Edit|Write..., got: ${JSON.stringify(post)}`);
+    assert.ok(
+      enqueueBlock.hooks.some((h) => /medusa-postscan-enqueue\.mjs/.test(h.command)),
+      `expected medusa-postscan-enqueue, got: ${enqueueBlock.hooks.map((h) => h.command).join(", ")}`,
+    );
+  });
+
+  test("Codex builder registers SessionStart + UserPromptSubmit + Stop surface hooks", () => {
+    const config = buildCodexProjectHooksJson();
+    assert.ok(
+      config.hooks.SessionStart[0].hooks.some((h) =>
+        /medusa-findings-surface\.mjs.*session-start/.test(h.command),
+      ),
+      "SessionStart should surface medusa findings",
+    );
+    assert.ok(
+      config.hooks.UserPromptSubmit[0].hooks.some((h) =>
+        /medusa-findings-surface\.mjs.*user-prompt/.test(h.command),
+      ),
+      "UserPromptSubmit should surface medusa findings",
+    );
+    assert.ok(
+      config.hooks.Stop[0].hooks.some((h) =>
+        /medusa-findings-surface\.mjs.*stop/.test(h.command),
+      ),
+      "Stop should surface medusa findings",
+    );
+  });
+
+  test("Cursor builder registers postToolUse enqueue without failClosed", () => {
+    const config = buildCursorProjectHooksJson();
+    const post = config.hooks.postToolUse;
+    assert.ok(Array.isArray(post) && post.length >= 1, "postToolUse missing");
+    const enqueue = post.find((h) => /medusa-postscan-enqueue\.mjs/.test(h.command));
+    assert.ok(enqueue, "expected medusa-postscan-enqueue in Cursor postToolUse");
+    // Medusa must stay fail-open in Cursor — never failClosed.
+    assert.notEqual(enqueue.failClosed, true, "medusa enqueue must not be failClosed");
+  });
+
+  test("Cursor builder surfaces medusa findings at sessionStart, beforeSubmitPrompt, stop", () => {
+    const config = buildCursorProjectHooksJson();
+    assert.ok(
+      config.hooks.sessionStart.some((h) =>
+        /medusa-findings-surface\.mjs.*session-start/.test(h.command),
+      ),
+      "sessionStart should surface medusa findings",
+    );
+    assert.ok(
+      config.hooks.beforeSubmitPrompt.some((h) =>
+        /medusa-findings-surface\.mjs.*user-prompt/.test(h.command),
+      ),
+      "beforeSubmitPrompt should surface medusa findings",
+    );
+    assert.ok(
+      config.hooks.stop.some((h) =>
+        /medusa-findings-surface\.mjs.*stop/.test(h.command),
+      ),
+      "stop should surface medusa findings",
     );
   });
 });

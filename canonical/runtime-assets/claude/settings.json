@@ -18,6 +18,11 @@
             "command": "node .claude/hooks/meta-kim-memory-save.mjs --event session-start",
             "timeout": 10,
             "statusMessage": "Loading Meta_Kim memory"
+          },
+          {
+            "type": "command",
+            "command": "node .claude/hooks/medusa-findings-surface.mjs --event session-start",
+            "timeout": 5
           }
         ]
       }
@@ -29,6 +34,11 @@
             "type": "command",
             "command": "node .claude/hooks/meta-kim-memory-save.mjs --event user-prompt",
             "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "node .claude/hooks/medusa-findings-surface.mjs --event user-prompt",
+            "timeout": 5
           }
         ]
       }
@@ -83,6 +93,16 @@
             "command": "node .claude/hooks/post-console-log-warn.mjs"
           }
         ]
+      },
+      {
+        "matcher": "Edit|Write|MultiEdit|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node .claude/hooks/medusa-postscan-enqueue.mjs",
+            "timeout": 5
+          }
+        ]
       }
     ],
     "SubagentStart": [
@@ -119,6 +139,11 @@
           {
             "type": "command",
             "command": "node .claude/hooks/stop-spine-cleanup.mjs"
+          },
+          {
+            "type": "command",
+            "command": "node .claude/hooks/medusa-findings-surface.mjs --event stop",
+            "timeout": 5
           }
         ]
       }
