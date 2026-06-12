@@ -8,6 +8,30 @@
 
 ## [Unreleased]
 
+## [2.8.24] - 2026-06-12
+
+### 变更
+
+- **Runtime Safety 治理契约** - 新增发布级治理契约，把近期 5 条修复线收进同一个 validator：宿主配置安全合并、跨 runtime HookPrompt 协议建模、删除/重构残留清扫、runtime evidence 模板、安装/更新状态语义。
+- **安装状态语义固定** - 安装和更新文案现在有机器可读状态类：`success`、`skipped`、`manual`、`failed`，并绑定用户下一步动作，避免把预期跳过、手工步骤和真实失败混在一起。
+- **HookPrompt 坏输入回归** - 新增 markdown fence、delegated prompt、internal-goal filter 三类回归样本，并验证 Codex / Cursor adapter 会把优化内容放进模型可见字段，不把 UI 提示误当成策略决策。
+
+### 验证
+
+- 新增 `npm run meta:runtime:safety:validate`，并接入 `meta:verify:governance`。
+- `npm run meta:verify:governance`
+- `npm run meta:test:setup`
+- `npm run meta:sync`
+- `npm run discover:global`
+- `npm run meta:check`
+- `npm run meta:validate`
+- `npm run meta:release:smoke`
+- `npm run meta:setup:check`
+- `npm run meta:validate:run -- tests/fixtures/run-artifacts/valid-core-loop-release-run.json`
+- `npm run meta:graphify:rebuild`
+- `npm run meta:verify:all`
+- `git diff --check`
+
 ## [2.8.23] - 2026-06-12
 
 ### 变更

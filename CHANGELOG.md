@@ -8,6 +8,30 @@ The changelog explains what changed and why it matters. It intentionally avoids 
 
 ## [Unreleased]
 
+## [2.8.24] - 2026-06-12
+
+### Changed
+
+- **Runtime Safety Hardening Contract** - Added a release-grade governance contract that binds the five recent repair lanes into one validator: host config merge safety, cross-runtime HookPrompt protocol modeling, deletion/refactor residue sweep, runtime evidence templates, and install/update status semantics.
+- **Install Status Semantics** - Install and update messages now have machine-readable status classes (`success`, `skipped`, `manual`, `failed`) with next-action semantics, so user-facing setup output can distinguish expected skips, manual host steps, and real failures.
+- **HookPrompt Bad-Input Regression Coverage** - Added regression fixtures for markdown fences, delegated prompts, and internal-goal filtering, and verified Codex/Cursor adapters keep optimized prompt content in model-visible fields without reusing UI notices as policy.
+
+### Verification
+
+- Added `npm run meta:runtime:safety:validate` to `meta:verify:governance`.
+- `npm run meta:verify:governance`
+- `npm run meta:test:setup`
+- `npm run meta:sync`
+- `npm run discover:global`
+- `npm run meta:check`
+- `npm run meta:validate`
+- `npm run meta:release:smoke`
+- `npm run meta:setup:check`
+- `npm run meta:validate:run -- tests/fixtures/run-artifacts/valid-core-loop-release-run.json`
+- `npm run meta:graphify:rebuild`
+- `npm run meta:verify:all`
+- `git diff --check`
+
 ## [2.8.23] - 2026-06-12
 
 ### Changed
