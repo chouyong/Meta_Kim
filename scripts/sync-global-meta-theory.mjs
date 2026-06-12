@@ -12,6 +12,7 @@ import { fileURLToPath } from "node:url";
 import {
   buildMetaKimHooksTemplate,
   isRetiredMetaKimHookCommand,
+  isGlobalMetaKimManagedHookCommand,
   mergeGlobalMetaKimHooksIntoSettings,
 } from "./claude-settings-merge.mjs";
 import {
@@ -451,6 +452,82 @@ async function syncClaudeGlobalSettingsHooks() {
   recordSettingsMerge();
 }
 
+async function readClaudeGlobalSettings(settingsPath) {
+  if (!(await pathExists(settingsPath))) {
+    return {};
+  }
+  const raw = await fs.readFile(settingsPath, "utf8");
+  try {
+    return JSON.parse(raw);
+  } catch {
+    throw new Error(
+      `Invalid JSON in ${settingsPath}; fix or move aside before sync.`,
+    );
+  }
+}
+
+function flattenHookCommands(hooks = {}) {
+  const commands = [];
+  for (const blocks of Object.values(hooks ?? {})) {
+    for (const block of blocks ?? []) {
+      for (const hook of block?.hooks ?? []) {
+        if (hook?.command) {
+          commands.push(hook.command);
+        }
+      }
+    }
+  }
+  return commands;
+}
+
+function hookCommandScriptPath(command) {
+  const trimmed = String(command ?? "").trim();
+  const quoted = trimmed.match(/^node\s+"([^"]+)"/u);
+  if (quoted) {
+    return quoted[1];
+  }
+  const unquoted = trimmed.match(/^node\s+([^\s]+)/u);
+  return unquoted?.[1] ?? null;
+}
+
+async function checkClaudeGlobalSettingsHooks() {
+  const settingsPath = path.join(runtimeHomes.claude.dir, "settings.json");
+  const absHooks = globalMetaKimHooksDir();
+  const template = buildMetaKimHooksTemplate(absHooks);
+  const settings = await readClaudeGlobalSettings(settingsPath);
+  const expected = mergeGlobalMetaKimHooksIntoSettings(settings, template);
+  stripRetiredGlobalHookEntries(expected);
+
+  const actualHooks = JSON.stringify(settings.hooks ?? {});
+  const expectedHooks = JSON.stringify(expected.hooks ?? {});
+  let inSync = actualHooks === expectedHooks;
+  const missingCommands = [];
+
+  for (const command of flattenHookCommands(settings.hooks)) {
+    if (!isGlobalMetaKimManagedHookCommand(command)) {
+      continue;
+    }
+    const scriptPath = hookCommandScriptPath(command);
+    if (!scriptPath || !(await pathExists(scriptPath))) {
+      missingCommands.push(command);
+    }
+  }
+
+  if (missingCommands.length > 0) {
+    inSync = false;
+  }
+
+  console.log(
+    `${inSync ? `${C.green}✓${C.reset}` : `${C.yellow}⊘${C.reset}`} ${C.dim}Claude Code global settings hooks: ${settingsPath}${C.reset}`,
+  );
+  if (!inSync && missingCommands.length > 0) {
+    console.log(
+      `${C.yellow}⊘${C.reset} ${C.dim}Missing registered Meta_Kim hook scripts: ${missingCommands.length}${C.reset}`,
+    );
+  }
+  return inSync;
+}
+
 function stripRetiredGlobalHookEntries(settings) {
   if (!settings.hooks || typeof settings.hooks !== "object") {
     return;
@@ -522,6 +599,10 @@ async function runCheck() {
       `${hooksInSync ? `${C.green}✓${C.reset}` : `${C.yellow}⊘${C.reset}`} ${C.dim}Claude Code global hooks (meta-kim): ${globalHooksPath}${C.reset}`,
     );
     if (!hooksInSync) {
+      failed = true;
+    }
+    const settingsHooksInSync = await checkClaudeGlobalSettingsHooks();
+    if (!settingsHooksInSync) {
       failed = true;
     }
   } else if (selectedTargetIds.includes("claude")) {

@@ -8,6 +8,21 @@ The changelog explains what changed and why it matters. It intentionally avoids 
 
 ## [Unreleased]
 
+## [2.8.25] - 2026-06-12
+
+### Fixed
+
+- **Claude Code Global Hook Cleanup** - Global Meta_Kim sync now validates the Claude Code `settings.json` hook commands, not only the `~/.claude/hooks/meta-kim/` package directory. This catches stale global Meta_Kim hook registrations that point at removed scripts and cause Claude Code `MODULE_NOT_FOUND` Stop hook errors.
+- **Installed-User Recovery Path** - Running the normal setup/update path now cleans stale global Meta_Kim hook entries and leaves only the currently managed global hook command, so existing installations recover without hand-editing Claude settings.
+
+### Verification
+
+- `npm run meta:check:global:release`
+- `npm run meta:test:setup`
+- `npm run meta:verify:governance`
+- `npm run meta:check`
+- `git diff --check`
+
 ## [2.8.24] - 2026-06-12
 
 ### Changed

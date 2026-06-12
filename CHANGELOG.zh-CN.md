@@ -8,6 +8,21 @@
 
 ## [Unreleased]
 
+## [2.8.25] - 2026-06-12
+
+### 修复
+
+- **Claude Code 全局 Hook 清理** - 全局 Meta_Kim 同步现在会校验 Claude Code `settings.json` 里的 hook 命令，不再只检查 `~/.claude/hooks/meta-kim/` 包目录。这样可以抓到指向已删除脚本的旧全局 Meta_Kim hook 注册，避免 Claude Code 在 Stop 阶段反复报 `MODULE_NOT_FOUND`。
+- **已安装用户恢复路径** - 正常 setup/update 路径现在会清理旧的全局 Meta_Kim hook 条目，只保留当前被管理的全局 hook 命令；已有安装不需要手工改 Claude settings 也能恢复。
+
+### 验证
+
+- `npm run meta:check:global:release`
+- `npm run meta:test:setup`
+- `npm run meta:verify:governance`
+- `npm run meta:check`
+- `git diff --check`
+
 ## [2.8.24] - 2026-06-12
 
 ### 变更
