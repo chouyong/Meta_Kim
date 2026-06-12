@@ -16,7 +16,8 @@ describe("29 — Capability Gap complete product PRD", () => {
     assert.match(prd, /## 当前完成状态/);
     assert.match(prd, /已测通/);
     assert.match(prd, /本地 planning\/orchestration MVP 已经证明/);
-    assert.match(prd, /不扩大成默认治理 Agent \+ 执行 Agent 全局实机闭环/);
+    assert.match(prd, /P-068 \/ P-069 \/ P-070 已在默认本地 governed run 证据层闭合/);
+    assert.match(prd, /不等于 Cursor native live 或 all-runtime release-grade 完成/);
     assert.match(prd, /还不能宣称“发布级 live\/native 全 runtime 完成”/);
     assert.match(prd, /Cursor Agent CLI native live 仍未闭合/);
     assert.match(prd, /Claude 和 OpenClaw 全九个 meta agents shard live evidence 已闭合/);
@@ -79,7 +80,7 @@ describe("29 — Capability Gap complete product PRD", () => {
   test("keeps human-readable natural-language entry work in the single PRD source", () => {
     for (const marker of [
       "版本：v0.37",
-      "默认治理 Agent \\+ 执行 Agent 全局 live 链路",
+      "P-068/P-069/P-070 默认治理 \\+ 执行 evidence closure",
       "自然语言入口与用户体验提示",
       "普通自然语言 durable 任务",
       "没有真实 conversation notice emitted 证据时必须标 partial",
@@ -627,8 +628,7 @@ describe("29 — Capability Gap complete product PRD", () => {
       "Prompt eval and regression suite",
       "P-084",
       "Context engineering and prompt sprawl budget",
-      "P-071 / P-081 进行中",
-      "P-072 到 P-080 / P-082 到 P-084 未完成前不能宣称 research-to-native 与 prompt architecture 已产品化",
+      "P-071 到 P-084 队列",
     ]) {
       assert.match(prd, new RegExp(marker), `missing v0.38 research/prompt marker ${marker}`);
     }
@@ -1018,6 +1018,126 @@ describe("29 — Capability Gap complete product PRD", () => {
     ]) {
       assert.match(prd, new RegExp(marker), `missing v0.47 prompt-first live acceptance marker ${marker}`);
     }
+  });
+
+  test("records v0.48 P-068 to P-070 default governance and execution evidence closure", () => {
+    for (const marker of [
+      "版本：v0.48",
+      "v0.48 P-068/P-069/P-070 默认治理 \\+ 执行 evidence closure",
+      "npm run meta:prd:default-execution:validate",
+      "npm run meta:prd:asset-sedimentation:validate",
+      "config/contracts/capability-asset-sedimentation-contract.json",
+      "scripts/validate-default-governed-execution-evidence.mjs",
+      "scripts/validate-capability-asset-sedimentation.mjs",
+      "9 个 `governanceAgentResultPackets\\[\\]`",
+      "Conductor 消费 8 个治理包",
+      "4 个 `workerResultPackets\\[\\]`",
+      "4 个 `workerExecutionEvidence\\[\\]`",
+      "execution agent、skill、script、MCP provider、runtime tool、hook、memory/graph、dependency provider、worker_task_only 九类能力",
+      "canonicalWritesWithoutApproval = 0",
+      "P-068 \\| T-006/R-007[\\s\\S]*?\\| 已测通 \\|",
+      "P-069 \\| T-007/R-007[\\s\\S]*?\\| 已测通（默认 run-scoped local execution） \\|",
+      "P-070 \\| T-008/R-009[\\s\\S]*?\\| 已测通 \\|",
+      "不能把默认本地证据扩大成 Cursor native live",
+      "不等于 Cursor native live 或 all-runtime release-grade",
+    ]) {
+      assert.match(prd, new RegExp(marker), `missing v0.48 default evidence closure marker ${marker}`);
+    }
+  });
+
+  test("records v0.49 P-071 to P-084 research-to-native and prompt architecture productization closure", () => {
+    for (const marker of [
+      "版本：v0.49",
+      "v0.49 P-071 到 P-084 Research-to-native \\+ framework prompt architecture productization closure",
+      "config/contracts/research-to-native-productization-contract.json",
+      "config/contracts/framework-prompt-architecture-contract.json",
+      "scripts/validate-research-to-native-productization.mjs",
+      "scripts/validate-framework-prompt-architecture.mjs",
+      "npm run meta:prd:research-native:validate",
+      "npm run meta:prd:prompt-architecture:validate",
+      "traceEvalControlPlane",
+      "agUiStageEvents",
+      "performanceCostBudget",
+      "contextEngineeringBudget",
+      "source、native insertion point、why、metric、conflict/compat、verification",
+      "A2A remains candidate-only",
+      "MCP provider maturity profiles separate trust/auth/runtime/conformance",
+      "Prompt asset review matrix 已产品化",
+      "Prompt eval and regression suite 已产品化",
+      "Context engineering and prompt sprawl budget 已产品化",
+      "P-071 到 P-080 已测通",
+      "P-081 到 P-084 已测通",
+      "P-071 到 P-084 已测通",
+      "P-071 \\| T-009/R-007[\\s\\S]*?\\| 已测通 \\|",
+      "P-072 \\| T-009/R-011[\\s\\S]*?\\| 已测通 \\|",
+      "P-073 \\| T-009/R-008[\\s\\S]*?\\| 已测通 \\|",
+      "P-074 \\| T-009/R-004[\\s\\S]*?\\| 已测通 \\|",
+      "P-075 \\| T-009/R-001[\\s\\S]*?\\| 已测通 \\|",
+      "P-076 \\| T-009/R-008[\\s\\S]*?\\| 已测通 \\|",
+      "P-077 \\| T-004/T-009[\\s\\S]*?\\| 已测通 \\|",
+      "P-078 \\| T-009/R-007[\\s\\S]*?\\| 已测通（candidate-only） \\|",
+      "P-079 \\| T-004/T-011[\\s\\S]*?\\| 已测通 \\|",
+      "P-080 \\| T-009/R-004[\\s\\S]*?\\| 已测通 \\|",
+      "P-081 \\| T-010/R-007[\\s\\S]*?\\| 已测通 \\|",
+      "P-082 \\| T-010/R-011[\\s\\S]*?\\| 已测通 \\|",
+      "P-083 \\| T-010/R-001[\\s\\S]*?\\| 已测通 \\|",
+      "P-084 \\| T-010/R-004[\\s\\S]*?\\| 已测通 \\|",
+      "仍不能宣称 Cursor native live 或 all-runtime release-grade",
+    ]) {
+      assert.match(prd, new RegExp(marker), `missing v0.49 research/native prompt architecture marker ${marker}`);
+    }
+
+    assert.doesNotMatch(
+      prd,
+      /P-072 到 P-080 \/ P-082 到 P-084 未完成前不能宣称 research-to-native 与 prompt architecture 已产品化/,
+      "old current-unfinished phrase must be removed after v0.49 closure",
+    );
+  });
+
+  test("records v0.50 P-067 P-085 and P-092 capability discovery and runtime priority closure", () => {
+    for (const marker of [
+      "版本：v0.50",
+      "v0.50 P-067/P-085/P-092 Capability Discovery \\+ Runtime Priority Closure",
+      "config/contracts/smooth-capability-discovery-contract.json",
+      "config/contracts/runtime-priority-and-compatibility-contract.json",
+      "scripts/validate-smooth-capability-discovery.mjs",
+      "scripts/validate-runtime-priority-and-compatibility.mjs",
+      "npm run meta:prd:smooth-capability:validate",
+      "npm run meta:prd:runtime-priority:validate",
+      "P-067 已测通",
+      "P-085 已测通",
+      "P-092 已测通",
+      "agent、skill、script、MCP、tool、hook、runtime、OS、memory、graph、external",
+      "workerTaskPackets",
+      "no_expansion_needed",
+      "skill-only",
+      "MCP 与 tools 作为一等能力",
+      "runtime-priority-and-compatibility-contract",
+      "compatibility-priority leak count = 0",
+      "P-024 只阻塞 all-tool compatibility claim",
+      "OpenClaw / Cursor compatibility demotion",
+      "Cursor native live blocked 只能阻塞 all-tool compatibility closure",
+      "P-067/P-085/P-092 已测通，但边界保持不变",
+      "P-067 到 P-085 与 P-092 已测通",
+      "P-085 到 P-092 primary scope 已测通",
+    ]) {
+      assert.match(prd, new RegExp(marker), `missing v0.50 closure marker ${marker}`);
+    }
+
+    for (const marker of [
+      "P-067 \\| T-006/T-008[\\s\\S]*?\\| 已测通 \\|",
+      "P-085 \\| T-011/R-007/R-008[\\s\\S]*?\\| 已测通 \\|",
+      "P-092 \\| T-002/T-011/R-008[\\s\\S]*?\\| 已测通 \\|",
+      "T-009 \\| Research-to-native content loop \\| 已测通 \\|",
+      "T-010 \\| Framework prompt architecture \\| 已测通 \\|",
+    ]) {
+      assert.match(prd, new RegExp(marker), `missing v0.50 status marker ${marker}`);
+    }
+
+    assert.doesNotMatch(prd, /P-067[\s\S]{0,180}\| 进行中 \|/);
+    assert.doesNotMatch(prd, /P-085[\s\S]{0,180}\| 进行中 \|/);
+    assert.doesNotMatch(prd, /P-092[\s\S]{0,180}\| 进行中 \|/);
+    assert.doesNotMatch(prd, /P-067 \/ P-092 进行中/);
   });
 
   test("records v0.28 orchestration DAG closure and wider parallel product lanes", () => {

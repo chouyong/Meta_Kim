@@ -8,6 +8,31 @@
 
 ## [Unreleased]
 
+## [2.8.28] - 2026-06-13
+
+### 新增
+
+- **默认治理执行证据** - 新增 validators 和 run artifact packets，证明默认 Meta-Theory 路径会产出治理 agent result、Conductor consumption evidence、worker result 和 worker execution evidence，同时不会把结构化 board 冒充成 live runtime 证据。
+- **Research-to-native 产品化** - 新增来源化产品合同，覆盖研究采纳矩阵、MCP/provider 成熟度、trace/eval 控制、AG-UI 风格阶段事件、performance/cost budget 和 context engineering。
+- **顺滑能力发现守卫** - 新增 PRD validator，把 agent、skill、script、MCP、tools、hook、runtime、memory、graph、external provider 都保留为一等发现类别，同时允许安全的 `no_expansion_needed`。
+- **Runtime 优先级合同** - 新增机器可读合同和 validator，固定 Claude Code 与 Codex 为 prompt-first 主链路，OpenClaw 与 Cursor 只作为兼容目标保留。
+
+### 变更
+
+- **框架型 Prompt 架构** - Prompt 资产现在按 system/project/agent/skill/contract/runtime-adapter/eval 分层验收，并加入 review dimensions、regression fixtures 和 context-sprawl budget 规则。
+- **治理验证链路** - `meta:verify:governance` 现在纳入 default execution、asset sedimentation、research-native、framework prompt architecture、smooth capability discovery 和 runtime priority validators。
+- **唯一 PRD 源** - local-private PRD 现在把 P-067、P-068 到 P-084、P-085、P-092 标为本地已测通，同时继续保留 Cursor native live 作为 all-tool compatibility 的剩余阻塞。
+
+### 验证
+
+- `npm run meta:prd:smooth-capability:validate`
+- `npm run meta:prd:runtime-priority:validate`
+- `node scripts/run-node-tests.mjs "tests/meta-theory/29-capability-gap-complete-product-prd.test.mjs"`
+- `npm run meta:verify:governance`
+- `npm run meta:release:smoke`
+- `git diff --check`
+- `npm run meta:github:gap`
+
 ## [2.8.27] - 2026-06-13
 
 ### 新增

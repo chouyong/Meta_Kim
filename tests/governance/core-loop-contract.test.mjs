@@ -150,6 +150,12 @@ test("governed execution emits a coreLoop artifact summary", () => {
     "fetchPacket",
     "capabilityInventory",
     "thinkingPacket",
+    "governanceAgentResultPackets",
+    "conductorConsumptionEvidence",
+    "traceEvalControlPlane",
+    "agUiStageEvents",
+    "performanceCostBudget",
+    "contextEngineeringBudget",
     "dispatchBoard",
     "workerTaskPackets",
     "executionResult",
@@ -229,6 +235,9 @@ test("governed execution emits a coreLoop artifact summary", () => {
     assert.ok(dynamicCards.has(label), `dynamic workflow missing ${label}`);
   }
   assert.ok(artifact.coreLoop.thinkingPacket.workerTaskPackets.length > 0);
+  assert.ok(artifact.coreLoop.governanceAgentResultPackets.length > 0);
+  assert.equal(artifact.coreLoop.conductorConsumptionEvidence.status, "pass");
+  assert.ok(artifact.coreLoop.thinkingPacket.governanceInputsConsumed.length > 0);
   assert.equal(artifact.coreLoop.executionResult.mainThreadRole, "scope_delegate_review_synthesize");
   assert.equal(artifact.coreLoop.executionResult.actualWorkerExecution, true);
   assert.ok(artifact.coreLoop.executionResult.workerExecutionEvidence.length > 0);

@@ -8,6 +8,31 @@ The changelog explains what changed and why it matters. It intentionally avoids 
 
 ## [Unreleased]
 
+## [2.8.28] - 2026-06-13
+
+### Added
+
+- **Default Governed Execution Evidence** - Added validators and run artifact packets proving the default Meta-Theory path emits governance agent results, Conductor consumption evidence, worker results, and worker execution evidence without relabeling structural boards as live runtime proof.
+- **Research-to-Native Productization** - Added source-backed productization contracts for research adoption, MCP/provider maturity, trace/eval control, AG-UI-style stage events, performance/cost budgets, and context engineering.
+- **Smooth Capability Discovery Guard** - Added a PRD validator that keeps agents, skills, scripts, MCP, tools, hooks, runtimes, memory, graph, and external providers as first-class discovery categories while allowing safe `no_expansion_needed` cases.
+- **Runtime Priority Contract** - Added a machine-readable contract and validator that keep Claude Code and Codex as primary prompt-first runtimes while preserving OpenClaw and Cursor as compatibility targets only.
+
+### Changed
+
+- **Framework Prompt Architecture** - Prompt assets are now validated across layered system/project/agent/skill/contract/runtime-adapter/eval surfaces, with review dimensions, regression fixtures, and context-sprawl budget rules.
+- **Governance Verification** - `meta:verify:governance` now includes default execution, asset sedimentation, research-native, framework prompt architecture, smooth capability discovery, and runtime priority validators.
+- **Single PRD Source** - The local-private PRD now records P-067, P-068 through P-084, P-085, and P-092 as locally tested while keeping Cursor native live as the remaining all-tool compatibility blocker.
+
+### Verification
+
+- `npm run meta:prd:smooth-capability:validate`
+- `npm run meta:prd:runtime-priority:validate`
+- `node scripts/run-node-tests.mjs "tests/meta-theory/29-capability-gap-complete-product-prd.test.mjs"`
+- `npm run meta:verify:governance`
+- `npm run meta:release:smoke`
+- `git diff --check`
+- `npm run meta:github:gap`
+
 ## [2.8.27] - 2026-06-13
 
 ### Added

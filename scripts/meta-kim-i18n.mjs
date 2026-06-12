@@ -1177,6 +1177,7 @@ const REPORT_STRINGS = {
     blocked: "Blocked",
     workerTask: "WorkerTask",
     candidate: "Candidate",
+    branch: "Branch",
     type: "Type",
     target: "Target",
     dryRunWrites: "Dry-run writes",
