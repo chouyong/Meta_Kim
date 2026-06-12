@@ -8,6 +8,27 @@
 
 ## [Unreleased]
 
+## [2.8.27] - 2026-06-13
+
+### 新增
+
+- **Prompt-first 实机验收** - 新增和 PRD 绑定的 live acceptance contract 与 runner，要求同一套框架型 prompt 在 Claude Code 和 Codex 上都跑通，才能声明 prompt-first 全流程完成。
+- **PRD 来源化门禁** - 新增 PRD source-map 与分类 dossier validators，覆盖产品发现、prompt/runtime、MCP/tools/providers、安全、评测/可观测性、架构/发布等大类。
+
+### 变更
+
+- **抽象 Prompt 能力验收** - `meta:prompt:validate` 和治理验证现在会覆盖能力发现、prompt intake 优化、planning 连续性、runtime 原生能力、MCP/provider、memory/graph、安全 hook、发布证据和 i18n 等抽象能力族。
+- **Prompt-first 发布证据收口** - 治理验证现在纳入 prompt-first stage contract、live acceptance fixture、source-map 校验、PRD 分类 dossier，以及 public docs 图片资产边界。
+- **Codex 实机 runner 稳定性** - Codex live acceptance runner 现在通过 `codex exec -` 从 stdin 传入 prompt，避免 Windows `.cmd` 多行 prompt 卡住，同时保留真实 Codex 执行证据。
+
+### 验证
+
+- `npm run meta:prd:prompt-first-live:run`
+- `npm run meta:prd:prompt-first-live:validate`
+- `npm run meta:verify:governance`
+- `npm run meta:release:smoke`
+- `git diff --check`
+
 ## [2.8.26] - 2026-06-12
 
 ### 修复

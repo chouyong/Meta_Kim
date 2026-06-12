@@ -8,6 +8,27 @@ The changelog explains what changed and why it matters. It intentionally avoids 
 
 ## [Unreleased]
 
+## [2.8.27] - 2026-06-13
+
+### Added
+
+- **Prompt-First Live Acceptance** - Added a PRD-linked live acceptance contract and runner that proves the same framework prompt through Claude Code and Codex before the prompt-first flow can be called complete.
+- **Source-Backed PRD Gates** - Added PRD source-map and dossier validators for product discovery, prompt/runtime, MCP/tools/providers, security, evaluation/observability, and architecture/release categories.
+
+### Changed
+
+- **Abstract Prompt Capability Validation** - `meta:prompt:validate` and governance verification now cover abstract capability families such as capability discovery, prompt intake optimization, planning continuity, runtime-native surfaces, MCP/providers, memory/graph, safety hooks, release evidence, and i18n.
+- **Prompt-First Release Evidence** - Governance verification now includes prompt-first stage contracts, live acceptance fixtures, source-map validation, PRD category dossiers, and public docs image-asset boundaries.
+- **Codex Live Runner Stability** - The Codex live acceptance runner now sends the prompt through stdin with `codex exec -`, avoiding Windows `.cmd` multiline prompt stalls while preserving real Codex execution evidence.
+
+### Verification
+
+- `npm run meta:prd:prompt-first-live:run`
+- `npm run meta:prd:prompt-first-live:validate`
+- `npm run meta:verify:governance`
+- `npm run meta:release:smoke`
+- `git diff --check`
+
 ## [2.8.26] - 2026-06-12
 
 ### Fixed

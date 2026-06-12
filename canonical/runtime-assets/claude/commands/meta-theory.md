@@ -40,3 +40,41 @@ Minimum route:
 If `npm run meta:theory:run` is unavailable in the current directory, say that
 the machine entry is unavailable and list the checked path. Do not continue as
 if governed Fetch happened.
+
+## Prompt Acceptance
+
+This command adapter binds `governance-orchestration`, `capability-discovery-and-retrieval`, `runtime-native-surfaces`, `execution-tools-and-commands`, and `verification-eval-and-release`. It is a runtime entry surface for the shared Meta_Kim dispatcher, not a second governance source.
+
+## Required inputs
+
+- User request from `$ARGUMENTS`.
+- Current project directory with `package.json`.
+- Available Claude Code command and shell capability.
+
+## Pass
+
+- The request is routed through `npm run meta:theory:run -- "$ARGUMENTS"` or a precise blocked reason is returned.
+- Fetch evidence is produced by the machine artifact before route claims.
+- The report is reopened with `npm run meta:theory:report -- latest` or the returned runId when user-readable closure is needed.
+
+## Fail
+
+- The command gives a prose-only answer for non-trivial durable work.
+- It claims governed Fetch happened without a run artifact or checked blocked path.
+- It treats this runtime command file as the canonical source instead of the shared skill and contract.
+
+## Block
+
+Block when the project directory does not contain the expected package script, shell execution is unavailable, or the request requires current external evidence but no retrieval path exists.
+
+## Return to stage
+
+Return to Fetch when local project evidence, Graphify, provider state, or current external facts are missing. Return to Thinking when capability discovery exists but no owner/loadout route is selected.
+
+## Verification
+
+Run `npm run meta:prompt:validate` after editing this command adapter. For live command behavior, verify the produced run artifact and report rather than this prompt text alone.
+
+## Preserve
+
+Preserve Claude Code native slash-command behavior, shell/tool permissions, MCP, hooks, skills, agents, memory, graph, and project rule files. This adapter may add governance routing but must not replace native runtime ability.

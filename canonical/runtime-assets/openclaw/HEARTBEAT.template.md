@@ -50,3 +50,35 @@ Cross-reference: see `AGENTS.md` for the cross-runtime enforcement matrix and `c
 ## Deployment Tasks
 
 - None by default.
+
+## Prompt Acceptance
+
+This heartbeat template binds `governance-orchestration`, `capability-discovery-and-retrieval`, `runtime-native-surfaces`, `safety-hooks-and-permissions`, and `verification-eval-and-release`. It is a declarative OpenClaw workspace contract and compatibility layer, not a substitute for a typed plugin enforcement adapter.
+
+## Pass
+
+- OpenClaw execution is refused until capability discovery is recorded for regulated execution.
+- Project-understanding and meta-theory requests route to the shared governed entry or return `blocked_to_fetch` with the missing capability.
+- Heartbeat behavior stays idle by default and does not invent autonomous work.
+
+## Fail
+
+- The template claims OpenClaw has Meta_Kim mechanical tool-call denial when only declarative workspace instructions are installed.
+- It treats workspace placement as a sandbox or security boundary.
+- It dispatches execution workers without `fetchRecord` evidence.
+
+## Block
+
+Block execution when `fetchRecord.capabilitySearchPerformed` cannot be recorded, required retrieval is unavailable, command execution is unavailable, or a typed plugin enforcement adapter would be required but is missing.
+
+## Return to stage
+
+Return to Fetch for missing capability discovery, retrieval path, local evidence, Graphify navigation, or MCP/runtime config. Return to Thinking when owner/loadout is unresolved after Fetch.
+
+## Verification
+
+Run `npm run meta:prompt:validate` after editing this template and verify generated OpenClaw workspace projections with `npm run meta:check:runtimes` or `npm run meta:sync` followed by targeted diff review.
+
+## Preserve
+
+Preserve OpenClaw native workspaces, skills, internal command/lifecycle hooks, typed plugin hook possibility, MCP config, browser/web, shell, filesystem, memory, and workspace-local context. Meta_Kim may add refusal instructions but must not overclaim enforcement.
