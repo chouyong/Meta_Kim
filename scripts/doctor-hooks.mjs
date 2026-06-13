@@ -124,22 +124,134 @@ function resolveLang(cliLang) {
   );
 }
 
-function extractCommandPath(command) {
-  if (typeof command !== "string") return null;
-  const quoted = command.match(/"([^"]+)"/);
-  if (quoted) return quoted[1];
-  const tokens = command.trim().split(/\s+/);
-  for (let i = 1; i < tokens.length; i += 1) {
-    if (
-      /[\\/]/.test(tokens[i]) ||
-      tokens[i].endsWith(".mjs") ||
-      tokens[i].endsWith(".js") ||
-      tokens[i].endsWith(".py") ||
-      tokens[i].endsWith(".sh")
-    ) {
-      return tokens[i];
+export function parseCommandTokens(command) {
+  const tokens = [];
+  let current = "";
+  let inQuotes = false;
+  let quoteChar = "";
+
+  for (let i = 0; i < command.length; i++) {
+    const char = command[i];
+    if ((char === '"' || char === "'") && (i === 0 || command[i - 1] !== '\\')) {
+      if (inQuotes && char === quoteChar) {
+        inQuotes = false;
+      } else if (!inQuotes) {
+        inQuotes = true;
+        quoteChar = char;
+      } else {
+        current += char;
+      }
+    } else if (char === " " && !inQuotes) {
+      if (current) {
+        tokens.push(current);
+        current = "";
+      }
+    } else {
+      current += char;
     }
   }
+  if (current) {
+    tokens.push(current);
+  }
+  return tokens;
+}
+
+function customBasename(p) {
+  const lastSlash = Math.max(p.lastIndexOf("/"), p.lastIndexOf("\\"));
+  if (lastSlash === -1) return p;
+  return p.slice(lastSlash + 1);
+}
+
+export function extractCommandPath(command) {
+  if (typeof command !== "string") return null;
+  const tokens = parseCommandTokens(command.trim());
+  if (tokens.length === 0) return null;
+
+  const runners = [
+    "node",
+    "python",
+    "python3",
+    "bash",
+    "sh",
+    "pwsh",
+    "powershell",
+    "cmd",
+    "npx",
+    "tsx",
+    "ts-node",
+    "bun",
+    "deno"
+  ];
+
+  // Helper to check if token is a runner
+  const isRunnerToken = (token) => {
+    const base = customBasename(token).toLowerCase();
+    const withoutExe = base.endsWith(".exe") ? base.slice(0, -4) : base;
+    return runners.includes(withoutExe);
+  };
+
+  // Helper to check if token is script-like/path-like
+  const isScriptLike = (t) => {
+    if (!t) return false;
+    const lower = t.toLowerCase();
+    return (
+      /[\\/]/.test(t) ||
+      lower.endsWith(".mjs") ||
+      lower.endsWith(".js") ||
+      lower.endsWith(".cjs") ||
+      lower.endsWith(".py") ||
+      lower.endsWith(".sh") ||
+      lower.endsWith(".ts") ||
+      lower.endsWith(".tsx") ||
+      lower.endsWith(".bat") ||
+      lower.endsWith(".cmd") ||
+      lower.endsWith(".ps1")
+    );
+  };
+
+  for (let i = 0; i < tokens.length; i++) {
+    const token = tokens[i];
+
+    // 1. Skip known runners
+    if (isRunnerToken(token)) {
+      continue;
+    }
+
+    // 2. Shell command payload: recursively parse that payload
+    if (
+      token.toLowerCase() === "-c" ||
+      token.toLowerCase() === "-command" ||
+      token.toLowerCase() === "--command"
+    ) {
+      if (i + 1 < tokens.length) {
+        return extractCommandPath(tokens[i + 1]);
+      }
+    }
+
+    // 3. Skip options that take an argument
+    if (
+      token === "-r" ||
+      token === "--require" ||
+      token === "--loader" ||
+      token === "--experimental-loader" ||
+      token === "--import" ||
+      token === "-m"
+    ) {
+      i++; // Skip the option parameter/argument token
+      continue;
+    }
+
+    // 4. Skip other flags (e.g. -c, --inspect, -v, /c)
+    if (token.startsWith("-") || (token.startsWith("/") && token.length === 2)) {
+      continue;
+    }
+
+    // 5. Check if it's a script/path-like target
+    if (isScriptLike(token)) {
+      return token;
+    }
+  }
+
   return null;
 }
 
@@ -327,9 +439,14 @@ async function main() {
   }
 }
 
-main().catch((err) => {
-  console.error(
-    `${C.red}doctor-hooks failed: ${err?.message ?? err}${C.reset}`,
-  );
-  process.exit(1);
-});
+const isMain = process.argv[1] && (
+  path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))
+);
+if (isMain) {
+  main().catch((err) => {
+    console.error(
+      `${C.red}doctor-hooks failed: ${err?.message ?? err}${C.reset}`,
+    );
+    process.exit(1);
+  });
+}
