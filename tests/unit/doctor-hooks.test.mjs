@@ -63,6 +63,32 @@ describe("doctor-hooks extractCommandPath", () => {
     );
   });
 
+  test("should handle recursive shell command payloads", () => {
+    assert.strictEqual(
+      extractCommandPath('sh -c "node .claude/hooks/foo.mjs"'),
+      ".claude/hooks/foo.mjs"
+    );
+    assert.strictEqual(
+      extractCommandPath('bash -c "./hook.sh"'),
+      "./hook.sh"
+    );
+    assert.strictEqual(
+      extractCommandPath('pwsh -Command .claude/hooks/foo.ps1'),
+      ".claude/hooks/foo.ps1"
+    );
+  });
+
+  test("should handle node loader, import and experimental options", () => {
+    assert.strictEqual(
+      extractCommandPath('node --experimental-loader ts-node/esm .claude/hooks/foo.ts'),
+      ".claude/hooks/foo.ts"
+    );
+    assert.strictEqual(
+      extractCommandPath('node --import ./.claude/hooks/setup.mjs .claude/hooks/foo.mjs'),
+      ".claude/hooks/foo.mjs"
+    );
+  });
+
   test("should return null for unrecognized/non-script commands (regression/false-positives check)", () => {
     assert.strictEqual(
       extractCommandPath("echo hello"),
@@ -94,7 +120,7 @@ describe("doctor-hooks extractCommandPath", () => {
     );
   });
 
-  test("should fallback to first non-runner token or null appropriately", () => {
+  test("should fallback to null appropriately", () => {
     assert.strictEqual(
       extractCommandPath(""),
       null
