@@ -8,6 +8,11 @@ The changelog explains what changed and why it matters. It intentionally avoids 
 
 ## [Unreleased]
 
+### Changed
+
+- **Compatibility Candidate Framework** - Added a source-backed primitive-surface framework for Qoder CLI, Trae, Kiro, Windsurf / Devin Desktop Cascade, Cline, Roo Code, and Continue while keeping them as candidate probes instead of formal runtime projections.
+- **Compatibility Evidence Boundary** - Split GitHub completion from all-tool compatibility evidence so generated reports keep Cursor in the compatibility follow-up lane, separate from primary release decisions.
+
 ## [2.8.29] - 2026-06-13
 
 ### Added
@@ -42,7 +47,7 @@ The changelog explains what changed and why it matters. It intentionally avoids 
 
 - **Framework Prompt Architecture** - Prompt assets are now validated across layered system/project/agent/skill/contract/runtime-adapter/eval surfaces, with review dimensions, regression fixtures, and context-sprawl budget rules.
 - **Governance Verification** - `meta:verify:governance` now includes default execution, asset sedimentation, research-native, framework prompt architecture, smooth capability discovery, and runtime priority validators.
-- **Single PRD Source** - The local-private PRD now records P-067, P-068 through P-084, P-085, and P-092 as locally tested while keeping Cursor native live as the remaining all-tool compatibility blocker.
+- **Single PRD Source** - The local-private PRD now records P-067, P-068 through P-084, P-085, and P-092 as locally tested while keeping Cursor native live evidence in the compatibility follow-up lane.
 
 ### Verification
 

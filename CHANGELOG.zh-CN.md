@@ -8,6 +8,11 @@
 
 ## [Unreleased]
 
+### 变更
+
+- **兼容候选框架** - 基于官方资料新增 Qoder CLI、Trae、Kiro、Windsurf / Devin Desktop Cascade、Cline、Roo Code、Continue 的原始能力表面框架，同时保持 candidate probe，不升级为正式工具端投影。
+- **兼容证据边界** - 将 GitHub 主完成判断与全工具端兼容证据拆开，Cursor 在 local-private PRD 与生成报告中保留为兼容后续项，并与主发布判断分离。
+
 ## [2.8.29] - 2026-06-13
 
 ### 新增
@@ -42,7 +47,7 @@
 
 - **框架型 Prompt 架构** - Prompt 资产现在按 system/project/agent/skill/contract/runtime-adapter/eval 分层验收，并加入 review dimensions、regression fixtures 和 context-sprawl budget 规则。
 - **治理验证链路** - `meta:verify:governance` 现在纳入 default execution、asset sedimentation、research-native、framework prompt architecture、smooth capability discovery 和 runtime priority validators。
-- **唯一 PRD 源** - local-private PRD 现在把 P-067、P-068 到 P-084、P-085、P-092 标为本地已测通，同时继续保留 Cursor native live 作为 all-tool compatibility 的剩余阻塞。
+- **唯一 PRD 源** - local-private PRD 现在把 P-067、P-068 到 P-084、P-085、P-092 标为本地已测通，同时把 Cursor native live 证据保留在兼容后续项中。
 
 ### 验证
 
