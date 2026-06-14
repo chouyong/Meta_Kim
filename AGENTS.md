@@ -401,7 +401,7 @@ Do not treat structural smoke, systemMessage/UI warning output, auth-present che
 - `node setup.mjs` installs selected platform projections and graphify wiring idempotently.
 - Runtime target selection has two layers: repo defaults in `config/sync.json`, machine-active targets in `.meta-kim/local.overrides.json`.
 - MCP Memory Service uses port `8000`.
-- `stop-memory-save.mjs` saves session summaries to the MCP Memory Service on session end.
+- `stop-memory-save.mjs` is a canonical/global MCP memory lifecycle asset installed by `scripts/install-mcp-memory-hooks.mjs`; it is not registered in the project `.claude/settings.json` projection.
 
 ## Reading Order
 
