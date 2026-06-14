@@ -105,6 +105,7 @@
         "stateCounts",
         "requiredFamilies",
         "truthAssertions",
+        "callableInvocationCoverage",
         "rows"
       ],
       "requiredFamilies": [
@@ -121,6 +122,8 @@
       ],
       "allowedStates": [
         "invoked",
+        "applied",
+        "host_visible_observed",
         "selected_not_invoked",
         "discovered_not_selected",
         "unavailable",

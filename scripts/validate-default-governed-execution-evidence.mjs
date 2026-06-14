@@ -180,7 +180,7 @@ function validateProductExperienceEvidence(report) {
     "bottom_design_failure_return_to_critical_fetch_thinking"
   );
   assert.equal(report.coreLoop.productExperiencePacket.generalizationGate.status, "pass");
-  assert.equal(report.coreLoop.productExperiencePacket.capabilityInvocationTruthGate.status, "pass");
+  assert.equal(report.coreLoop.productExperiencePacket.capabilityInvocationTruthGate.status, "partial");
   assert.equal(report.coreLoop.productExperiencePacket.agentTeamsPlaybookGate.status, "pass");
   const invocationByFamily = new Map(
     report.coreLoop.capabilityInvocationTruthPacket.rows.map((row) => [row.family, row])
@@ -188,7 +188,9 @@ function validateProductExperienceEvidence(report) {
   assert.equal(invocationByFamily.get("agent_subagent").state, "selected_not_invoked");
   assert.equal(invocationByFamily.get("app_visible_subagent").state, "not_required");
   assert.equal(invocationByFamily.get("worker_task").state, "invoked");
+  assert.equal(invocationByFamily.get("prompt_rule").state, "applied");
   assert.equal(invocationByFamily.get("agent_teams_playbook").state, "selected_not_invoked");
+  assert.equal(report.coreLoop.capabilityInvocationProbePacket.status, "not_run");
   assert.ok(
     ["selected_not_invoked", "discovered_not_selected", "not_required"].includes(
       invocationByFamily.get("mcp").state,

@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { promises as fs } from "node:fs";
+import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import path from "node:path";
 import process from "node:process";
@@ -1259,7 +1260,7 @@ function buildUserReadableRunReport({
     `- 编排: board=${visibleMetaTheorySurfacePacket?.orchestration?.boardId ?? "missing"} / owner=${visibleMetaTheorySurfacePacket?.orchestration?.synthesisOwner ?? "missing"} / workers=${visibleMetaTheorySurfacePacket?.orchestration?.workerTaskCount ?? 0}`,
     `- Dynamic Workflow: lanes=${visibleMetaTheorySurfacePacket?.dynamicWorkflow?.selectedLaneIds?.length ?? 0} / bindings=${visibleMetaTheorySurfacePacket?.dynamicWorkflow?.visibleRows?.length ?? 0}`,
     `- 能力发现: total=${visibleMetaTheorySurfacePacket?.capabilityInventory?.total ?? 0} / nonSkillTypes=${visibleMetaTheorySurfacePacket?.capabilityInventory?.nonSkillCapabilityTypeCount ?? 0} / notSkillOnly=${labels.boolean(Boolean(visibleMetaTheorySurfacePacket?.capabilityInventory?.notSkillOnly))}`,
-    `- 真实调用状态: families=${capabilityInvocationTruthPacket?.rows?.length ?? 0} / invoked=${capabilityInvocationTruthPacket?.stateCounts?.invoked ?? 0} / selectedNotInvoked=${capabilityInvocationTruthPacket?.stateCounts?.selected_not_invoked ?? 0} / appVisible=${capabilityInvocationTruthPacket?.rows?.find((row) => row.family === "app_visible_subagent")?.invokedCount ?? 0} / unavailable=${capabilityInvocationTruthPacket?.stateCounts?.unavailable ?? 0}`,
+    `- 真实调用状态: families=${capabilityInvocationTruthPacket?.rows?.length ?? 0} / invoked=${capabilityInvocationTruthPacket?.stateCounts?.invoked ?? 0} / applied=${capabilityInvocationTruthPacket?.stateCounts?.applied ?? 0} / hostVisible=${capabilityInvocationTruthPacket?.stateCounts?.host_visible_observed ?? 0} / selectedNotInvoked=${capabilityInvocationTruthPacket?.stateCounts?.selected_not_invoked ?? 0} / callableProbe=${capabilityInvocationTruthPacket?.callableInvocationCoverage?.status ?? "missing"} / unavailable=${capabilityInvocationTruthPacket?.stateCounts?.unavailable ?? 0}`,
     `- Agent Teams Playbook: status=${visibleMetaTheorySurfacePacket?.agentTeamsPlaybook?.status ?? "missing"} / selected=${labels.boolean(Boolean(visibleMetaTheorySurfacePacket?.agentTeamsPlaybook?.selected))} / waves=${visibleMetaTheorySurfacePacket?.agentTeamsPlaybook?.waveCount ?? 0}`,
     `- Peer Agent Mesh: peers=${visibleMetaTheorySurfacePacket?.peerAgentMesh?.peerCount ?? 0} / handoffs=${visibleMetaTheorySurfacePacket?.peerAgentMesh?.handoffCount ?? 0}`,
     `- LangGraph-style: nodes=${visibleMetaTheorySurfacePacket?.langGraph?.nodeCount ?? 0} / edges=${visibleMetaTheorySurfacePacket?.langGraph?.edgeCount ?? 0} / conditional=${visibleMetaTheorySurfacePacket?.langGraph?.conditionalEdgeCount ?? 0} / checkpoints=${visibleMetaTheorySurfacePacket?.langGraph?.checkpointCount ?? 0}`,
@@ -1269,7 +1270,7 @@ function buildUserReadableRunReport({
     `| 编排 orchestration | worker 数、parallelGroup、mergeOwner、synthesis owner | visibleMetaTheorySurfacePacket.orchestration | ${visibleMetaTheorySurfacePacket?.orchestration?.status ?? "missing"} |`,
     `| Dynamic Workflow | selected lanes、omitted lanes、capability bindings、worker results | visibleMetaTheorySurfacePacket.dynamicWorkflow | ${visibleMetaTheorySurfacePacket?.dynamicWorkflow?.status ?? "missing"} |`,
     `| 能力发现 capability inventory | agent/skill/command/MCP/tool/hook/runtime/memory/graph/research，不只 Skill | visibleMetaTheorySurfacePacket.capabilityInventory | ${visibleMetaTheorySurfacePacket?.capabilityInventory?.notSkillOnly ? "pass" : "partial"} |`,
-    `| 真实能力调用 capability invocation truth | invoked / selected_not_invoked / discovered_not_selected / unavailable / blocked / not_required | capabilityInvocationTruthPacket | ${capabilityInvocationTruthPacket?.status ?? "missing"} |`,
+    `| 真实能力调用 capability invocation truth | invoked / applied / host_visible_observed / selected_not_invoked / discovered_not_selected / unavailable / blocked / not_required | capabilityInvocationTruthPacket + capabilityInvocationProbePacket | ${capabilityInvocationTruthPacket?.status ?? "missing"} |`,
     `| Agent Teams Playbook | 2+ 并行 lane 时发现并选中 fan-out 编排适配器，同时保留 live spawn_agent 边界 | visibleMetaTheorySurfacePacket.agentTeamsPlaybook | ${visibleMetaTheorySurfacePacket?.agentTeamsPlaybook?.status ?? "missing"} |`,
     `| Peer Agent Mesh | peer workers、handoff、merge owner、result status | visibleMetaTheorySurfacePacket.peerAgentMesh | ${visibleMetaTheorySurfacePacket?.peerAgentMesh?.status ?? "missing"} |`,
     `| LangGraph-style 控制图 | nodes、edges、conditional edges、state、checkpoint、replay | visibleMetaTheorySurfacePacket.langGraph | ${visibleMetaTheorySurfacePacket?.langGraph?.status ?? "missing"} |`,
@@ -1506,27 +1507,27 @@ function buildRunReportPanelContract({
   const capabilityInvocationTruthAllowed = (
     contractDefinition.sectionRules.capabilityInvocationTruth.allowedStates ?? []
   ).length > 0 && capabilityInvocationTruthPacket?.status === "pass";
+  const basePanelContractOk =
+    aiReadableRubric.length ===
+      contractDefinition.sectionRules.aiReadableRubric.requiredStandardCount &&
+    aiReadableRubric.every((standard) => standard.status === "pass") &&
+    (contractDefinition.sectionRules.productExperience.allowedStatuses ?? []).includes(
+      productExperiencePacket?.status
+    ) &&
+    productExperiencePacket?.noOverclaimGate?.status === "pass" &&
+    visibleSurfaceAllowed &&
+    capabilityInvocationTruthAllowed &&
+    runtimeRows.every((row) =>
+      row.failureClass === RUNTIME_FAILURE_TAXONOMY.pass
+        ? row.strictReleasePass === true || row.evidenceKind === "live"
+        : row.strictReleasePass === false
+    );
+  const fullProductExperiencePass =
+    productExperiencePacket?.status === "product_experience_pass" && supportGatesPass;
   return {
     schemaVersion: contractDefinition.schemaVersion,
     contractId: "run-report-panel-contract",
-    status:
-      aiReadableRubric.length ===
-        contractDefinition.sectionRules.aiReadableRubric.requiredStandardCount &&
-      aiReadableRubric.every((standard) => standard.status === "pass") &&
-      (contractDefinition.sectionRules.productExperience.allowedStatuses ?? []).includes(
-        productExperiencePacket?.status
-      ) &&
-      productExperiencePacket?.noOverclaimGate?.status === "pass" &&
-      supportGatesPass &&
-      visibleSurfaceAllowed &&
-      capabilityInvocationTruthAllowed &&
-      runtimeRows.every((row) =>
-        row.failureClass === RUNTIME_FAILURE_TAXONOMY.pass
-          ? row.strictReleasePass === true || row.evidenceKind === "live"
-          : row.strictReleasePass === false
-      )
-        ? "pass"
-        : "fail",
+    status: basePanelContractOk ? (fullProductExperiencePass ? "pass" : "partial") : "fail",
     decisionSummary: {
       runId,
       status,
@@ -1595,6 +1596,8 @@ function buildRunReportPanelContract({
       stateCounts: capabilityInvocationTruthPacket?.stateCounts ?? {},
       requiredFamilies: capabilityInvocationTruthPacket?.requiredFamilies ?? [],
       truthAssertions: capabilityInvocationTruthPacket?.truthAssertions ?? null,
+      callableInvocationCoverage:
+        capabilityInvocationTruthPacket?.callableInvocationCoverage ?? null,
       rows: capabilityInvocationTruthPacket?.rows ?? [],
     },
     cardPlan: {
@@ -2350,6 +2353,7 @@ function buildGoalContractPacket({ task }) {
         "dynamicWorkflowRuntimePacket.status=pass",
         "agentTeamsPlaybookPacket.status=pass_or_not_required",
         "capabilityInvocationTruthPacket.status=pass",
+        "capabilityInvocationProbePacket.status=pass for product-experience callable invocation pass",
         "visibleMetaTheorySurfacePacket.status=pass",
         "userPerceptionPacket.status=pass",
         "productExperiencePacket.status=product_experience_pass",
@@ -2790,6 +2794,8 @@ function countBy(values) {
 
 const CAPABILITY_INVOCATION_STATES = [
   "invoked",
+  "applied",
+  "host_visible_observed",
   "selected_not_invoked",
   "discovered_not_selected",
   "unavailable",
@@ -2827,6 +2833,119 @@ function normalizeHostVisibleSubagents(input) {
   return [];
 }
 
+function compactCommand(command, args = []) {
+  return [path.basename(command), ...args].join(" ");
+}
+
+function tailText(value, maxLength = 800) {
+  const normalized = String(value ?? "").trim();
+  return normalized.length > maxLength ? normalized.slice(-maxLength) : normalized;
+}
+
+function runProbeProcess({ family, probeId, command, args, timeoutMs = 120_000 }) {
+  const runAt = nowIso();
+  const result = spawnSync(command, args, {
+    cwd: REPO_ROOT,
+    encoding: "utf8",
+    timeout: timeoutMs,
+    windowsHide: true,
+  });
+  const stdoutTail = tailText(result.stdout);
+  const stderrTail = tailText(result.stderr);
+  return {
+    family,
+    probeId,
+    status: result.status === 0 ? "pass" : "blocked",
+    evidenceKind: "fresh_invocation_probe",
+    command: compactCommand(command, args),
+    exitCode: result.status,
+    signal: result.signal ?? null,
+    timedOut: result.error?.code === "ETIMEDOUT",
+    runAt,
+    stdoutTail,
+    stderrTail,
+    stdoutSha256: stdoutTail ? textSha256(stdoutTail) : null,
+    stderrSha256: stderrTail ? textSha256(stderrTail) : null,
+  };
+}
+
+function buildCapabilityInvocationProbePacket({
+  dynamicWorkflowRuntimePacket,
+  enabled = false,
+}) {
+  const bindingRows = dynamicWorkflowRuntimePacket?.capabilityBindingRows ?? [];
+  const selected = {
+    mcp: bindingRows.some((row) => row.mcp.length > 0),
+    command_script: bindingRows.some((row) => row.commands.length > 0),
+    runtime_tool: bindingRows.some((row) => row.runtimeTools.length > 0),
+  };
+  const requiredFamilies = Object.entries(selected)
+    .filter(([, isSelected]) => isSelected)
+    .map(([family]) => family);
+  if (!enabled) {
+    return {
+      schemaVersion: "capability-invocation-probe-v0.1",
+      status: "not_run",
+      evidenceKind: "probe_not_requested",
+      requiredFamilies,
+      invokedFamilies: [],
+      missingFamilies: requiredFamilies,
+      probes: [],
+      truthBoundary:
+        "Discovery and binding can be validated without running local invocation probes, but product-experience pass requires fresh probe evidence for callable local families.",
+    };
+  }
+  const probes = [];
+  if (selected.mcp) {
+    probes.push(
+      runProbeProcess({
+        family: "mcp",
+        probeId: "meta-runtime-server-self-test",
+        command: process.execPath,
+        args: ["scripts/mcp/meta-runtime-server.mjs", "--self-test"],
+      }),
+    );
+  }
+  if (selected.command_script) {
+    probes.push(
+      runProbeProcess({
+        family: "command_script",
+        probeId: "prompt-executability-command",
+        command: process.execPath,
+        args: ["scripts/validate-prompt-executability.mjs"],
+      }),
+    );
+  }
+  if (selected.runtime_tool) {
+    probes.push(
+      runProbeProcess({
+        family: "runtime_tool",
+        probeId: "filesystem-shell-runtime-tool",
+        command: process.execPath,
+        args: [
+          "-e",
+          "const fs=require('fs'); process.exit(fs.existsSync('package.json') ? 0 : 1)",
+        ],
+      }),
+    );
+  }
+  const passedFamilies = new Set(
+    probes.filter((probe) => probe.status === "pass").map((probe) => probe.family),
+  );
+  const missingFamilies = requiredFamilies.filter((family) => !passedFamilies.has(family));
+  return {
+    schemaVersion: "capability-invocation-probe-v0.1",
+    status: missingFamilies.length === 0 ? "pass" : "partial",
+    evidenceKind: missingFamilies.length === 0 ? "fresh_invocation_probe" : "probe_partial",
+    requiredFamilies,
+    invokedFamilies: [...passedFamilies],
+    missingFamilies,
+    probes,
+    truthBoundary:
+      "These probes are real local process invocations for callable local families. They do not prove host Agent/subagent, Skill, hook-trigger, or Agent Team execution.",
+  };
+}
+
 function buildCapabilityInvocationTruthPacket({
   orchestrationReport,
   dynamicWorkflowRuntimePacket,
@@ -2834,6 +2953,7 @@ function buildCapabilityInvocationTruthPacket({
   workerExecutionEvidence,
   hostVisibleSubagents,
   agentTeamsPlaybookPacket,
+  capabilityInvocationProbePacket,
 }) {
   const bindingRows = dynamicWorkflowRuntimePacket?.capabilityBindingRows ?? [];
   const hasSelected = (selector) => bindingRows.some(selector);
@@ -2848,12 +2968,19 @@ function buildCapabilityInvocationTruthPacket({
       (item) => item.capabilityType,
     ),
   );
+  const probeByFamily = new Map(
+    (capabilityInvocationProbePacket?.probes ?? []).map((probe) => [probe.family, probe]),
+  );
+  const familyInvokedByProbe = (family) => probeByFamily.get(family)?.status === "pass";
   const makeRow = ({
     family,
     state,
     selectedCount = 0,
     invokedCount = 0,
+    appliedCount = 0,
+    observedCount = 0,
     evidenceRefs,
+    invocationEvidenceRefs = [],
     truthBoundary,
     mustNotClaimAs,
   }) => ({
@@ -2861,7 +2988,10 @@ function buildCapabilityInvocationTruthPacket({
     state,
     selectedCount,
     invokedCount,
+    appliedCount,
+    observedCount,
     evidenceRefs,
+    invocationEvidenceRefs,
     truthBoundary,
     mustNotClaimAs,
   });
@@ -2885,9 +3015,9 @@ function buildCapabilityInvocationTruthPacket({
     }),
     makeRow({
       family: "app_visible_subagent",
-      state: hostSubagents.length > 0 ? "invoked" : "not_required",
+      state: hostSubagents.length > 0 ? "host_visible_observed" : "not_required",
       selectedCount: hostSubagents.length,
-      invokedCount: hostSubagents.length,
+      observedCount: hostSubagents.length,
       evidenceRefs:
         hostSubagents.length > 0
           ? hostSubagents.map((item) => `host_ui:${item.name}`)
@@ -2933,16 +3063,22 @@ function buildCapabilityInvocationTruthPacket({
     }),
     makeRow({
       family: "mcp",
-      state: hasSelected((row) => row.mcp.length > 0)
-        ? "selected_not_invoked"
+      state: familyInvokedByProbe("mcp")
+        ? "invoked"
+        : hasSelected((row) => row.mcp.length > 0)
+          ? "selected_not_invoked"
         : inventoryTypes.has("mcp")
           ? "discovered_not_selected"
           : "not_required",
       selectedCount: bindingRows.reduce((sum, row) => sum + row.mcp.length, 0),
+      invokedCount: familyInvokedByProbe("mcp") ? 1 : 0,
       evidenceRefs: [
         "coreLoop.dynamicWorkflowRuntimePacket.capabilityBindingRows[].mcp",
-        "runtime MCP self-test belongs to validators, not this packet unless attached",
+        "coreLoop.capabilityInvocationProbePacket.probes[family=mcp]",
       ],
+      invocationEvidenceRefs: familyInvokedByProbe("mcp")
+        ? ["coreLoop.capabilityInvocationProbePacket.probes[family=mcp]"]
+        : [],
       truthBoundary:
         "MCP provider/tool binding is not an MCP call. Live MCP invocation needs tool-call or self-test evidence attached to the run.",
       mustNotClaimAs: ["mcp_tool_called", "external_provider_invoked"],
@@ -2966,10 +3102,10 @@ function buildCapabilityInvocationTruthPacket({
     makeRow({
       family: "prompt_rule",
       state: hasSelected((row) => Boolean(row.abstractPromptCapability?.status))
-        ? "invoked"
+        ? "applied"
         : "not_required",
       selectedCount: bindingRows.filter((row) => Boolean(row.abstractPromptCapability?.status)).length,
-      invokedCount: bindingRows.filter((row) => Boolean(row.abstractPromptCapability?.status)).length,
+      appliedCount: bindingRows.filter((row) => Boolean(row.abstractPromptCapability?.status)).length,
       evidenceRefs: [
         "coreLoop.goalContractPacket",
         "coreLoop.dynamicWorkflowRuntimePacket.capabilityBindingRows[].abstractPromptCapability",
@@ -2981,32 +3117,44 @@ function buildCapabilityInvocationTruthPacket({
     }),
     makeRow({
       family: "command_script",
-      state: hasSelected((row) => row.commands.length > 0)
-        ? "selected_not_invoked"
+      state: familyInvokedByProbe("command_script")
+        ? "invoked"
+        : hasSelected((row) => row.commands.length > 0)
+          ? "selected_not_invoked"
         : inventoryTypes.has("command")
           ? "discovered_not_selected"
           : "not_required",
       selectedCount: bindingRows.reduce((sum, row) => sum + row.commands.length, 0),
+      invokedCount: familyInvokedByProbe("command_script") ? 1 : 0,
       evidenceRefs: [
         "coreLoop.dynamicWorkflowRuntimePacket.capabilityBindingRows[].commands",
-        "verification commands run outside this packet unless fresh command output is attached",
+        "coreLoop.capabilityInvocationProbePacket.probes[family=command_script]",
       ],
+      invocationEvidenceRefs: familyInvokedByProbe("command_script")
+        ? ["coreLoop.capabilityInvocationProbePacket.probes[family=command_script]"]
+        : [],
       truthBoundary:
         "A command selected for a worker or validator is not marked invoked here without fresh command output on this run artifact.",
       mustNotClaimAs: ["command_executed"],
     }),
     makeRow({
       family: "runtime_tool",
-      state: hasSelected((row) => row.runtimeTools.length > 0)
-        ? "selected_not_invoked"
+      state: familyInvokedByProbe("runtime_tool")
+        ? "invoked"
+        : hasSelected((row) => row.runtimeTools.length > 0)
+          ? "selected_not_invoked"
         : inventoryTypes.has("tool")
           ? "discovered_not_selected"
           : "not_required",
       selectedCount: bindingRows.reduce((sum, row) => sum + row.runtimeTools.length, 0),
+      invokedCount: familyInvokedByProbe("runtime_tool") ? 1 : 0,
       evidenceRefs: [
         "coreLoop.dynamicWorkflowRuntimePacket.capabilityBindingRows[].runtimeTools",
-        "coreLoop.fetchPacket.capabilityDiscovery.capabilityInventory",
+        "coreLoop.capabilityInvocationProbePacket.probes[family=runtime_tool]",
       ],
+      invocationEvidenceRefs: familyInvokedByProbe("runtime_tool")
+        ? ["coreLoop.capabilityInvocationProbePacket.probes[family=runtime_tool]"]
+        : [],
       truthBoundary:
         "Runtime tools selected by loadout are not claimed as called unless tool-call evidence is attached.",
       mustNotClaimAs: ["runtime_tool_called"],
@@ -3054,7 +3202,15 @@ function buildCapabilityInvocationTruthPacket({
   const noLiveSubagentOverclaim =
     rows.find((row) => row.family === "agent_subagent")?.state !== "invoked" ||
     externalAgentSpawned;
-  const noMcpCallOverclaim = rows.find((row) => row.family === "mcp")?.state !== "invoked";
+  const noMcpCallOverclaim =
+    rows.find((row) => row.family === "mcp")?.state !== "invoked" ||
+    familyInvokedByProbe("mcp");
+  const noCommandCallOverclaim =
+    rows.find((row) => row.family === "command_script")?.state !== "invoked" ||
+    familyInvokedByProbe("command_script");
+  const noRuntimeToolOverclaim =
+    rows.find((row) => row.family === "runtime_tool")?.state !== "invoked" ||
+    familyInvokedByProbe("runtime_tool");
   const noHookTriggerOverclaim = rows.find((row) => row.family === "hook")?.state !== "invoked";
   const noHostUiSubagentOverclaim = rows
     .find((row) => row.family === "app_visible_subagent")
@@ -3067,18 +3223,31 @@ function buildCapabilityInvocationTruthPacket({
     statesValid &&
     noLiveSubagentOverclaim &&
     noMcpCallOverclaim &&
+    noCommandCallOverclaim &&
+    noRuntimeToolOverclaim &&
     noHookTriggerOverclaim &&
     noHostUiSubagentOverclaim &&
     noAgentTeamsPlaybookOverclaim &&
     rows.some((row) => row.state === "invoked") &&
+    capabilityInvocationProbePacket?.status !== "partial" &&
     rows.some((row) => row.state === "selected_not_invoked");
   return {
-    schemaVersion: "capability-invocation-truth-v0.2",
+    schemaVersion: "capability-invocation-truth-v0.3",
     status: pass ? "pass" : "partial",
-    evidenceKind: pass ? "product_experience_pass" : "truth_boundary_partial",
+    evidenceKind:
+      pass && capabilityInvocationProbePacket?.status === "pass"
+        ? "product_experience_pass"
+        : "truth_boundary_partial",
     stateTaxonomy: CAPABILITY_INVOCATION_STATES,
     rows,
     stateCounts,
+    callableInvocationCoverage: {
+      status: capabilityInvocationProbePacket?.status ?? "missing",
+      requiredFamilies: capabilityInvocationProbePacket?.requiredFamilies ?? [],
+      invokedFamilies: capabilityInvocationProbePacket?.invokedFamilies ?? [],
+      missingFamilies: capabilityInvocationProbePacket?.missingFamilies ?? [],
+      evidenceRef: "coreLoop.capabilityInvocationProbePacket",
+    },
     requiredFamilies: [
       "agent_subagent",
       "app_visible_subagent",
@@ -3096,10 +3265,14 @@ function buildCapabilityInvocationTruthPacket({
       noHostUiSubagentOverclaim,
       noAgentTeamsPlaybookOverclaim,
       noMcpCallOverclaim,
+      noCommandCallOverclaim,
+      noRuntimeToolOverclaim,
       noHookTriggerOverclaim,
       selectedIsNotInvoked: true,
       discoveredIsNotInvoked: true,
       configuredIsNotInvoked: true,
+      appliedIsNotInvoked: true,
+      hostVisibleIsNotInvoked: true,
     },
     failIf:
       "Any selected, discovered, configured, or matched capability is rendered as invoked without attached invocation evidence.",
@@ -3111,6 +3284,7 @@ function buildVisibleMetaTheorySurfacePacket({
   langGraphRunPacket,
   dynamicWorkflowRuntimePacket,
   peerAgentMeshPacket,
+  capabilityInvocationProbePacket,
   capabilityInvocationTruthPacket,
   agentTeamsPlaybookPacket,
 }) {
@@ -3174,6 +3348,7 @@ function buildVisibleMetaTheorySurfacePacket({
       omittedLaneIds: dynamicWorkflowRuntimePacket.omittedLaneIds,
       businessFlowLaneCount: dynamicWorkflowRuntimePacket.businessFlowLaneCount,
       capabilityBindingCoverage: dynamicWorkflowRuntimePacket.capabilityBindingCoverage,
+      callableInvocationCoverage: capabilityInvocationTruthPacket.callableInvocationCoverage,
       visibleRows: dynamicRows,
     },
     capabilityInventory: {
@@ -3187,11 +3362,15 @@ function buildVisibleMetaTheorySurfacePacket({
       status: capabilityInvocationTruthPacket.status,
       stateTaxonomy: capabilityInvocationTruthPacket.stateTaxonomy,
       stateCounts: capabilityInvocationTruthPacket.stateCounts,
+      callableInvocationCoverage: capabilityInvocationTruthPacket.callableInvocationCoverage,
+      probeStatus: capabilityInvocationProbePacket?.status ?? "missing",
       visibleRows: capabilityInvocationTruthPacket.rows.map((row) => ({
         family: row.family,
         state: row.state,
         selectedCount: row.selectedCount,
         invokedCount: row.invokedCount,
+        appliedCount: row.appliedCount,
+        observedCount: row.observedCount,
         truthBoundary: row.truthBoundary,
       })),
     },
@@ -3460,8 +3639,10 @@ function buildNoHardcodedFixtureGate({ goalContractPacket }) {
 
 function buildCapabilityInvocationTruthGate({ capabilityInvocationTruthPacket }) {
   const truthAssertions = capabilityInvocationTruthPacket?.truthAssertions ?? {};
+  const callableCoverage = capabilityInvocationTruthPacket?.callableInvocationCoverage ?? {};
   const status =
     capabilityInvocationTruthPacket?.status === "pass" &&
+    callableCoverage.status === "pass" &&
     truthAssertions.noLiveSubagentOverclaim === true &&
     truthAssertions.noHostUiSubagentOverclaim === true &&
     truthAssertions.noAgentTeamsPlaybookOverclaim === true &&
@@ -3469,7 +3650,9 @@ function buildCapabilityInvocationTruthGate({ capabilityInvocationTruthPacket })
     truthAssertions.noHookTriggerOverclaim === true &&
     truthAssertions.selectedIsNotInvoked === true &&
     truthAssertions.discoveredIsNotInvoked === true &&
-    truthAssertions.configuredIsNotInvoked === true
+    truthAssertions.configuredIsNotInvoked === true &&
+    truthAssertions.appliedIsNotInvoked === true &&
+    truthAssertions.hostVisibleIsNotInvoked === true
       ? "pass"
       : "partial";
   return {
@@ -3479,9 +3662,11 @@ function buildCapabilityInvocationTruthGate({ capabilityInvocationTruthPacket })
     evidenceKind: "product_support_gate",
     stateTaxonomy: capabilityInvocationTruthPacket?.stateTaxonomy ?? CAPABILITY_INVOCATION_STATES,
     requiredFamilies: capabilityInvocationTruthPacket?.requiredFamilies ?? [],
+    callableInvocationCoverage: callableCoverage,
     evidenceRefs: [
       "coreLoop.capabilityInvocationTruthPacket.rows",
       "coreLoop.capabilityInvocationTruthPacket.truthAssertions",
+      "coreLoop.capabilityInvocationProbePacket",
       "coreLoop.executionResult.workerExecutionEvidence",
       "coreLoop.dynamicWorkflowRuntimePacket.capabilityBindingRows",
       "coreLoop.agentTeamsPlaybookPacket",
@@ -3495,6 +3680,8 @@ function buildCapabilityInvocationTruthGate({ capabilityInvocationTruthPacket })
       "app_visible_subagent_as_runner_agent_spawn",
       "agent_teams_playbook_selected_as_live_agent_team",
       "prompt_update_as_flow_run",
+      "prompt_rule_applied_as_tool_invoked",
+      "host_visible_observed_as_runner_invoked",
     ],
     failIf:
       "A selected, discovered, configured, matched, prompt-applied, or app-visible capability is claimed as an invoked runner tool/agent/MCP/hook without fresh invocation evidence.",
@@ -3546,6 +3733,8 @@ function buildProductExperiencePacket({
   cardPlanPacket,
   dynamicWorkflowDecisionRecord,
 }) {
+  const callableInvocationPass =
+    capabilityInvocationTruthPacket?.callableInvocationCoverage?.status === "pass";
   const goals = [
     {
       id: "P-102",
@@ -3565,16 +3754,23 @@ function buildProductExperiencePacket({
     {
       id: "P-103",
       name: "Dynamic Workflow 默认路线",
-      status: dynamicWorkflowRuntimePacket.status === "pass" ? "pass" : "partial",
-      evidenceKind: dynamicWorkflowRuntimePacket.evidenceKind,
+      status:
+        dynamicWorkflowRuntimePacket.status === "pass" && callableInvocationPass
+          ? "pass"
+          : "partial",
+      evidenceKind:
+        dynamicWorkflowRuntimePacket.status === "pass" && callableInvocationPass
+          ? "product_experience_pass"
+          : dynamicWorkflowRuntimePacket.evidenceKind,
       evidenceRefs: [
         "coreLoop.dynamicWorkflowRuntimePacket.capabilityBindingRows",
         "coreLoop.dynamicWorkflowRuntimePacket.capabilityBindingCoverage",
+        "coreLoop.capabilityInvocationProbePacket",
         "coreLoop.capabilityInvocationTruthPacket",
         "coreLoop.executionResult.workerResultPackets",
       ],
       failIf:
-        "Only a fixed checklist, main-thread execution, workerTask without workerResult, or selected capability without invocation truth exists.",
+        "Only a fixed checklist, main-thread execution, workerTask without workerResult, selected capability without invocation truth, or selected callable providers without fresh invocation probe evidence exists.",
     },
     {
       id: "P-104",
@@ -3663,8 +3859,9 @@ function buildProductExperiencePacket({
       "langGraphRunPacket.status=pass",
       "dynamicWorkflowRuntimePacket.status=pass",
       "peerAgentMeshPacket.status=pass",
-      "capabilityInvocationTruthPacket.status=pass",
-      "visibleMetaTheorySurfacePacket.status=pass",
+    "capabilityInvocationTruthPacket.status=pass",
+    "capabilityInvocationTruthPacket.callableInvocationCoverage.status=pass",
+    "visibleMetaTheorySurfacePacket.status=pass",
       "userPerceptionPacket.status=pass",
       "productExperiencePacket.supportGates[].status=pass",
     ],
@@ -3791,6 +3988,7 @@ function buildCoreLoopArtifact({
   analytics,
   hostVisibleSubagents,
   agentTeamsPlaybookProvider,
+  invokeCapabilityProbes = false,
 }) {
   const workerTaskPackets = orchestrationReport.workerTaskPackets ?? [];
   const capabilityInventory =
@@ -4092,6 +4290,10 @@ function buildCoreLoopArtifact({
     dynamicWorkflowDecisionRecord,
     agentTeamsPlaybookPacket,
   });
+  const capabilityInvocationProbePacket = buildCapabilityInvocationProbePacket({
+    dynamicWorkflowRuntimePacket,
+    enabled: invokeCapabilityProbes,
+  });
   const capabilityInvocationTruthPacket = buildCapabilityInvocationTruthPacket({
     orchestrationReport,
     dynamicWorkflowRuntimePacket,
@@ -4099,12 +4301,14 @@ function buildCoreLoopArtifact({
     workerExecutionEvidence,
     hostVisibleSubagents,
     agentTeamsPlaybookPacket,
+    capabilityInvocationProbePacket,
   });
   const visibleMetaTheorySurfacePacket = buildVisibleMetaTheorySurfacePacket({
     orchestrationReport,
     langGraphRunPacket,
     dynamicWorkflowRuntimePacket,
     peerAgentMeshPacket,
+    capabilityInvocationProbePacket,
     capabilityInvocationTruthPacket,
     agentTeamsPlaybookPacket,
   });
@@ -4191,6 +4395,7 @@ function buildCoreLoopArtifact({
     dynamicWorkflowRuntimePacket,
     peerAgentMeshPacket,
     agentTeamsPlaybookPacket,
+    capabilityInvocationProbePacket,
     capabilityInvocationTruthPacket,
     visibleMetaTheorySurfacePacket,
     userPerceptionPacket,
@@ -4285,6 +4490,7 @@ function buildCoreLoopArtifact({
         executionEvidenceLayerIsHonest: true,
         productExperienceEvidencePresent:
           productExperiencePacket.status === "product_experience_pass" &&
+          capabilityInvocationProbePacket.status === "pass" &&
           capabilityInvocationTruthPacket.status === "pass" &&
           visibleMetaTheorySurfacePacket.status === "pass",
       },
@@ -4347,6 +4553,7 @@ function buildCoreLoopArtifact({
           "coreLoop.dynamicWorkflowRuntimePacket",
           "coreLoop.peerAgentMeshPacket",
           "coreLoop.agentTeamsPlaybookPacket",
+          "coreLoop.capabilityInvocationProbePacket",
           "coreLoop.capabilityInvocationTruthPacket",
           "coreLoop.visibleMetaTheorySurfacePacket",
           "coreLoop.userPerceptionPacket",
@@ -4488,6 +4695,7 @@ export async function runMetaTheoryGovernedExecution({
   conversationNoticeChannel = "stdout",
   conversationNoticeAdapter = CONVERSATION_NOTICE_ADAPTER,
   hostVisibleSubagents = process.env.META_KIM_HOST_VISIBLE_SUBAGENTS ?? null,
+  invokeCapabilityProbes = false,
 } = {}) {
   const normalizedTask = normalizeTask(task);
   if (!normalizedTask) {
@@ -4586,6 +4794,7 @@ export async function runMetaTheoryGovernedExecution({
     analytics,
     hostVisibleSubagents,
     agentTeamsPlaybookProvider,
+    invokeCapabilityProbes,
   });
   const userReportMarkdown = buildUserReadableRunReport({
     runId: effectiveRunId,
@@ -4656,6 +4865,7 @@ export async function runMetaTheoryGovernedExecution({
     dynamicWorkflowRuntimePacket: coreLoop.dynamicWorkflowRuntimePacket,
     peerAgentMeshPacket: coreLoop.peerAgentMeshPacket,
     agentTeamsPlaybookPacket: coreLoop.agentTeamsPlaybookPacket,
+    capabilityInvocationProbePacket: coreLoop.capabilityInvocationProbePacket,
     capabilityInvocationTruthPacket: coreLoop.capabilityInvocationTruthPacket,
     visibleMetaTheorySurfacePacket: coreLoop.visibleMetaTheorySurfacePacket,
     userPerceptionPacket: coreLoop.userPerceptionPacket,
@@ -4677,6 +4887,7 @@ export async function runMetaTheoryGovernedExecution({
       dynamicWorkflowRuntimePacket: coreLoop.dynamicWorkflowRuntimePacket,
       peerAgentMeshPacket: coreLoop.peerAgentMeshPacket,
       agentTeamsPlaybookPacket: coreLoop.agentTeamsPlaybookPacket,
+      capabilityInvocationProbePacket: coreLoop.capabilityInvocationProbePacket,
       capabilityInvocationTruthPacket: coreLoop.capabilityInvocationTruthPacket,
       visibleMetaTheorySurfacePacket: coreLoop.visibleMetaTheorySurfacePacket,
       userPerceptionPacket: coreLoop.userPerceptionPacket,
@@ -4891,6 +5102,7 @@ async function main() {
       "--host-visible-subagents",
       process.env.META_KIM_HOST_VISIBLE_SUBAGENTS ?? null,
     ),
+    invokeCapabilityProbes: process.argv.includes("--invoke-capability-probes"),
   });
   if (report.conversationNotice.emitted) {
     process.stdout.write(`${report.conversationNotice.text}\n\n`);

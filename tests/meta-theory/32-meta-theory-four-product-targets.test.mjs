@@ -68,7 +68,9 @@ describe("32 — Meta-theory three product goals and support gates", () => {
       assert.equal(invocationByFamily.get("agent_subagent").state, "selected_not_invoked");
       assert.equal(invocationByFamily.get("app_visible_subagent").state, "not_required");
       assert.equal(invocationByFamily.get("worker_task").state, "invoked");
+      assert.equal(invocationByFamily.get("prompt_rule").state, "applied");
       assert.equal(invocationByFamily.get("agent_teams_playbook").state, "selected_not_invoked");
+      assert.equal(report.defaultRuntimePath.capabilityInvocationProbePacket.status, "not_run");
       assert.ok(
         ["selected_not_invoked", "discovered_not_selected", "not_required"].includes(
           invocationByFamily.get("mcp").state
@@ -107,7 +109,7 @@ describe("32 — Meta-theory three product goals and support gates", () => {
       assert.equal(report.defaultRuntimePath.productExperiencePacket.generalizationGate.status, "pass");
       assert.equal(
         report.defaultRuntimePath.productExperiencePacket.capabilityInvocationTruthGate.status,
-        "pass"
+        "partial"
       );
       assert.equal(
         report.defaultRuntimePath.productExperiencePacket.agentTeamsPlaybookGate.status,
@@ -271,7 +273,12 @@ describe("32 — Meta-theory three product goals and support gates", () => {
 
       assert.equal(readBack.artifact.runId, "test-run-readable-report");
       assert.equal(readBack.artifact.runReport.status, "pass");
-      assert.equal(readBack.artifact.runReportPanelContract.status, "pass");
+      assert.equal(readBack.artifact.runReportPanelContract.status, "partial");
+      assert.equal(
+        readBack.artifact.runReportPanelContract.capabilityInvocationTruth.callableInvocationCoverage
+          .status,
+        "not_run",
+      );
       assert.equal(
         readBack.artifact.runReportPanelContract.schemaVersion,
         "run-report-panel-contract-v0.1"
@@ -346,7 +353,8 @@ describe("32 — Meta-theory three product goals and support gates", () => {
     assert.ok(output.peers > 0);
     assert.equal(output.capabilityInvocationTruth.status, "pass");
     assert.equal(output.capabilityInvocationTruth.states.invoked >= 1, true);
-    assert.equal(output.capabilityInvocationTruth.appVisibleSubagentState, "invoked");
+    assert.equal(output.capabilityInvocationTruth.appVisibleSubagentState, "not_required");
+    assert.equal(output.capabilityInvocationTruth.callableInvocationCoverage.status, "pass");
     assert.equal(output.capabilityInvocationTruth.agentTeamsPlaybookState, "selected_not_invoked");
     assert.equal(output.agentTeamsPlaybook.status, "pass");
     assert.equal(output.agentTeamsPlaybook.selected, true);

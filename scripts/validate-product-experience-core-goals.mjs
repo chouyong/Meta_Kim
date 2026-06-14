@@ -151,6 +151,8 @@ function assertCapabilityInvocationTruth(report) {
   assert.equal(packet.status, "pass");
   for (const state of [
     "invoked",
+    "applied",
+    "host_visible_observed",
     "selected_not_invoked",
     "discovered_not_selected",
     "unavailable",
@@ -164,27 +166,35 @@ function assertCapabilityInvocationTruth(report) {
     assert.ok(byFamily.has(family), `missing invocation family ${family}`);
   }
   assert.equal(byFamily.get("agent_subagent").state, "selected_not_invoked");
-  assert.equal(byFamily.get("app_visible_subagent").state, "invoked");
+  assert.equal(byFamily.get("app_visible_subagent").state, "not_required");
   assert.equal(byFamily.get("worker_task").state, "invoked");
-  assert.equal(byFamily.get("mcp").state, "selected_not_invoked");
+  assert.equal(byFamily.get("mcp").state, "invoked");
   assert.equal(byFamily.get("hook").state, "selected_not_invoked");
   assert.equal(byFamily.get("skill").state, "selected_not_invoked");
-  assert.equal(byFamily.get("command_script").state, "selected_not_invoked");
-  assert.equal(byFamily.get("runtime_tool").state, "selected_not_invoked");
+  assert.equal(byFamily.get("prompt_rule").state, "applied");
+  assert.equal(byFamily.get("command_script").state, "invoked");
+  assert.equal(byFamily.get("runtime_tool").state, "invoked");
   assert.equal(byFamily.get("agent_teams_playbook").state, "selected_not_invoked");
+  assert.deepEqual(packet.callableInvocationCoverage.missingFamilies, []);
+  assert.ok(packet.callableInvocationCoverage.invokedFamilies.includes("mcp"));
+  assert.ok(packet.callableInvocationCoverage.invokedFamilies.includes("command_script"));
+  assert.ok(packet.callableInvocationCoverage.invokedFamilies.includes("runtime_tool"));
   assert.equal(packet.truthAssertions.noLiveSubagentOverclaim, true);
   assert.equal(packet.truthAssertions.noHostUiSubagentOverclaim, true);
   assert.equal(packet.truthAssertions.noAgentTeamsPlaybookOverclaim, true);
   assert.equal(packet.truthAssertions.noMcpCallOverclaim, true);
+  assert.equal(packet.truthAssertions.noCommandCallOverclaim, true);
+  assert.equal(packet.truthAssertions.noRuntimeToolOverclaim, true);
   assert.equal(packet.truthAssertions.noHookTriggerOverclaim, true);
   assert.equal(packet.truthAssertions.selectedIsNotInvoked, true);
+  assert.equal(packet.truthAssertions.appliedIsNotInvoked, true);
+  assert.equal(packet.truthAssertions.hostVisibleIsNotInvoked, true);
   assert.ok(byFamily.get("agent_subagent").mustNotClaimAs.includes("live_subagent_invocation"));
   assert.ok(
     byFamily
       .get("app_visible_subagent")
       .mustNotClaimAs.includes("runner_agent_subagent_invocation"),
   );
-  assert.ok(byFamily.get("mcp").mustNotClaimAs.includes("mcp_tool_called"));
   assert.ok(byFamily.get("hook").mustNotClaimAs.includes("hook_triggered"));
   assert.ok(
     byFamily
@@ -192,6 +202,17 @@ function assertCapabilityInvocationTruth(report) {
       .mustNotClaimAs.includes("live_agent_team_created"),
   );
   assert.equal(report.runReportPanelContract.capabilityInvocationTruth.status, "pass");
+}
+
+function assertInvocationProbes(report) {
+  const packet = report.coreLoop.capabilityInvocationProbePacket;
+  assert.equal(packet.status, "pass");
+  assert.deepEqual(packet.missingFamilies, []);
+  const byFamily = new Map(packet.probes.map((probe) => [probe.family, probe]));
+  for (const family of ["mcp", "command_script", "runtime_tool"]) {
+    assert.equal(byFamily.get(family)?.status, "pass", `${family} probe did not pass`);
+    assert.equal(byFamily.get(family)?.exitCode, 0, `${family} probe exitCode was not 0`);
+  }
 }
 
 function assertAgentTeamsPlaybook(report) {
@@ -319,13 +340,14 @@ async function main() {
       stateDir: tempDir,
       dbPath: path.join(tempDir, "runs.sqlite"),
       emitConversationNotice: true,
-      hostVisibleSubagents: ["Host Review", "Codebase Analysis"],
+      invokeCapabilityProbes: true,
     });
     assert.equal(report.status, "pass");
     assertPacketStatus(report);
     assertLangGraphStyle(report);
     assertDynamicWorkflow(report);
     assertPeerMesh(report);
+    assertInvocationProbes(report);
     assertCapabilityInvocationTruth(report);
     assertAgentTeamsPlaybook(report);
     assertVisibleMetaTheorySurface(report);
@@ -360,6 +382,8 @@ async function main() {
           capabilityInvocationTruth: {
             status: report.coreLoop.capabilityInvocationTruthPacket.status,
             states: report.coreLoop.capabilityInvocationTruthPacket.stateCounts,
+            callableInvocationCoverage:
+              report.coreLoop.capabilityInvocationTruthPacket.callableInvocationCoverage,
             appVisibleSubagentState:
               report.coreLoop.capabilityInvocationTruthPacket.rows.find(
                 (row) => row.family === "app_visible_subagent",

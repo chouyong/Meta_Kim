@@ -269,6 +269,7 @@ test("governed execution emits a coreLoop artifact summary", () => {
   assert.equal(invocationByFamily.get("agent_subagent").state, "selected_not_invoked");
   assert.equal(invocationByFamily.get("app_visible_subagent").state, "not_required");
   assert.equal(invocationByFamily.get("worker_task").state, "invoked");
+  assert.equal(invocationByFamily.get("prompt_rule").state, "applied");
   assert.equal(
     invocationByFamily.get("agent_teams_playbook").state,
     artifact.coreLoop.agentTeamsPlaybookPacket.status === "pass"
@@ -281,6 +282,11 @@ test("governed execution emits a coreLoop artifact summary", () => {
     ),
   );
   assert.equal(invocationByFamily.get("hook").state, "selected_not_invoked");
+  assert.equal(artifact.coreLoop.capabilityInvocationProbePacket.status, "not_run");
+  assert.equal(
+    artifact.coreLoop.capabilityInvocationTruthPacket.callableInvocationCoverage.status,
+    "not_run",
+  );
   assert.equal(
     artifact.coreLoop.capabilityInvocationTruthPacket.truthAssertions.noLiveSubagentOverclaim,
     true,
@@ -326,7 +332,7 @@ test("governed execution emits a coreLoop artifact summary", () => {
     "bottom_design_failure_return_to_critical_fetch_thinking",
   );
   assert.equal(artifact.coreLoop.productExperiencePacket.generalizationGate.status, "pass");
-  assert.equal(artifact.coreLoop.productExperiencePacket.capabilityInvocationTruthGate.status, "pass");
+  assert.equal(artifact.coreLoop.productExperiencePacket.capabilityInvocationTruthGate.status, "partial");
   assert.equal(artifact.coreLoop.productExperiencePacket.agentTeamsPlaybookGate.status, "pass");
   assert.ok(artifact.coreLoop.governanceAgentResultPackets.length > 0);
   assert.equal(artifact.coreLoop.conductorConsumptionEvidence.status, "pass");
@@ -360,6 +366,40 @@ test("governed execution emits a coreLoop artifact summary", () => {
   assert.ok(artifact.coreLoop.publicReadyDecision.blockedBy.length > 0);
 });
 
+test("host-visible subagents are observed, not relabeled as runner invocations", () => {
+  const result = spawnSync(
+    process.execPath,
+    [
+      "scripts/run-meta-theory-governed-execution.mjs",
+      "--task",
+      "需要一次能产生多 worker 的 meta-theory governed run。",
+      "--run-id",
+      "core-loop-host-visible-subagent-test",
+      "--host-visible-subagents",
+      "Galileo,Codebase Analysis",
+    ],
+    { encoding: "utf8", timeout: 120_000 },
+  );
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+
+  const artifact = JSON.parse(
+    readFileSync(
+      ".meta-kim/state/default/governed-executions/core-loop-host-visible-subagent-test.json",
+      "utf8",
+    ),
+  );
+  const invocationByFamily = new Map(
+    artifact.coreLoop.capabilityInvocationTruthPacket.rows.map((row) => [row.family, row]),
+  );
+  assert.equal(invocationByFamily.get("app_visible_subagent").state, "host_visible_observed");
+  assert.equal(invocationByFamily.get("app_visible_subagent").observedCount, 2);
+  assert.equal(invocationByFamily.get("agent_subagent").state, "selected_not_invoked");
+  assert.equal(
+    artifact.coreLoop.capabilityInvocationTruthPacket.truthAssertions.noHostUiSubagentOverclaim,
+    true,
+  );
+});
+
 test("core-loop contract declares three product goals plus support gates", () => {
   assert.equal(
     CORE_LOOP.productExperienceCoreGoals.evidenceTierRequired,
@@ -384,6 +424,7 @@ test("core-loop contract declares three product goals plus support gates", () =>
     "dynamicWorkflowRuntimePacket",
     "peerAgentMeshPacket",
     "agentTeamsPlaybookPacket",
+    "capabilityInvocationProbePacket",
     "capabilityInvocationTruthPacket",
     "visibleMetaTheorySurfacePacket",
     "userPerceptionPacket",
@@ -397,6 +438,11 @@ test("core-loop contract declares three product goals plus support gates", () =>
   assert.ok(
     CORE_LOOP.productExperienceCoreGoals.capabilityInvocationTruthRequirements.some((rule) =>
       rule.includes("app-visible host UI subagents"),
+    ),
+  );
+  assert.ok(
+    CORE_LOOP.productExperienceCoreGoals.capabilityInvocationTruthRequirements.some((rule) =>
+      rule.includes("capabilityInvocationProbePacket"),
     ),
   );
   assert.deepEqual(CORE_LOOP.productExperienceCoreGoals.userPerceptionRequirements, [

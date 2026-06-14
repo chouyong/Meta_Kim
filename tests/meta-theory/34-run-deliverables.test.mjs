@@ -433,8 +433,10 @@ describe("34 — Meta-theory run deliverables", () => {
       assert.equal(invocationByFamily.get("agent_subagent").state, "selected_not_invoked");
       assert.equal(invocationByFamily.get("app_visible_subagent").state, "not_required");
       assert.equal(invocationByFamily.get("worker_task").state, "invoked");
+      assert.equal(invocationByFamily.get("prompt_rule").state, "applied");
       assert.equal(invocationByFamily.get("agent_teams_playbook").state, "selected_not_invoked");
       assert.equal(invocationByFamily.get("mcp").state, "selected_not_invoked");
+      assert.equal(runArtifact.capabilityInvocationProbePacket.status, "not_run");
       assert.equal(runArtifact.agentTeamsPlaybookPacket.status, "pass");
       assert.equal(runArtifact.agentTeamsPlaybookPacket.selected, true);
       assert.equal(runArtifact.visibleMetaTheorySurfacePacket.capabilityInvocationTruth.status, "pass");
@@ -460,7 +462,7 @@ describe("34 — Meta-theory run deliverables", () => {
         "bottom_design_failure_return_to_critical_fetch_thinking"
       );
       assert.equal(runArtifact.productExperiencePacket.generalizationGate.status, "pass");
-      assert.equal(runArtifact.productExperiencePacket.capabilityInvocationTruthGate.status, "pass");
+      assert.equal(runArtifact.productExperiencePacket.capabilityInvocationTruthGate.status, "partial");
       assert.equal(runArtifact.productExperiencePacket.agentTeamsPlaybookGate.status, "pass");
       const markdown = await readFile(path.join(tempDir, "natural-user-task.zh-CN.md"), "utf8");
       assert.match(markdown, /## Meta-Theory 可见编排面/);
