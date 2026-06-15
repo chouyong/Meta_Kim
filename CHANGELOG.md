@@ -6,6 +6,406 @@ This file is the reader-facing release history for Meta_Kim.
 
 The changelog explains what changed and why it matters. It intentionally avoids long internal task ledgers, low-signal backlog ids, and implementation trivia. When exact evidence is needed, use the repository history, tests, generated reports, and PRD artifacts.
 
+## [Unreleased]
+
+## [2.8.33] - 2026-06-15
+
+### Added
+
+- **Global-First Project Bootstrap** - Added `meta-kim project bootstrap` and `npm run meta:project:bootstrap` so a global Meta_Kim install can dry-run and apply project-level Claude Code / Codex projections without asking users to manually maintain both global and project state.
+- **First-Trigger Bootstrap Probe** - Extended the meta-theory activation hook to run a dry-run project bootstrap probe on first meta-theory activation and save source-chain evidence without silently applying project files.
+- **Lazy Bootstrap Acceptance Tests** - Added fixture coverage for empty projects, existing user config, stale manifests, read-only failures, managed-block replacement, protected JSON merge, backup manifests, and `.codex/config.toml` never-touch behavior.
+
+### Changed
+
+- **Project Source Chain Evidence** - Project bootstrap plans now expose the installed package root, canonical roots, `config/sync.json`, generated runtime mirrors, target project, file actions, merge policies, and skipped files before any write.
+- **Runtime Choice Surfaces** - Updated Claude Code and Codex choice-surface contracts to preserve structured decision-panel semantics while using the active host schema's maximum meaningful option count instead of a Meta_Kim hard cap.
+- **Capability Routing** - Moved capability discovery to canonical/index-first routing and prevented Codex and Claude Code routes from binding the other runtime's project agent adapters as callable execution owners.
+
+### Verification
+
+- `npm run meta:check`
+- `npm run meta:test:setup`
+- `npm run meta:test:governance`
+- `npm run meta:runtime:safety:validate`
+- `npm run meta:release:smoke`
+- `git diff --check`
+
+## [2.8.32] - 2026-06-15
+
+### Changed
+
+- **Codex Meta-Theory Fan-Out** - Made explicit `/meta-theory` and complex governed work fan-out eligible when there are multiple safe worker lanes, so Codex should plan real parallel work instead of silently falling back to one main-thread executor.
+- **Runtime Capacity Sizing** - Replaced the stale fixed five-agent wave cap with runtime capacity detection from Codex config and the official default, while still proving DAG dependencies, collision boundaries, workspace isolation, and external-write safety before fan-out.
+- **Invocation Truth Evidence** - Tightened run evidence so live subagents are reported as `invoked` only with host spawn evidence; unavailable host dispatch is reported as `unavailable`, single-lane work as `not_required`, and provider selection can no longer masquerade as execution.
+
+### Verification
+
+- `npm run meta:release:smoke`
+- `git diff --check`
+
+## [2.8.31] - 2026-06-14
+
+### Added
+
+- **Agent Teams Playbook Gate** - Added the P-110 support gate and `agentTeamsPlaybookPacket` so the default governed route selects `agent-teams-playbook` for two or more independent executable worker lanes, proves DAG/collision/workspace/external-write safety, sizes waves by runtime agent capacity, and records `not_required` for single-lane work.
+- **Capability Invocation Truth Layer** - Added explicit `agent_teams_playbook` truth states so selected providers, live subagent calls, MCP calls, skills, commands, hooks, and local workers cannot be relabeled as each other.
+- **Product Experience Validator** - Added a PRD/product validator that checks the three core goals plus support gates, including LangGraph-style run packets, Dynamic Workflow coverage, user-visible run surfaces, capability invocation truth, and the agent-teams adapter.
+
+### Changed
+
+- **Codex Meta-Theory Runtime** - Tightened the Codex `/meta-theory` adapter and meta-conductor prompt so `agent-teams-playbook` is selected only for real parallel worker lanes, not for every non-trivial task.
+- **Dependency Registry** - Promoted `agent-teams-playbook` from an external reference to an installed skill candidate with compatibility validation and a no-overclaim boundary.
+- **Release Smoke Coverage** - Extended release smoke to include the `agent-teams-playbook` integration test.
+
+### Verification
+
+- `npm run meta:deps:compat`
+- `npm run meta:prd:product-experience:validate`
+- `npm run meta:prd:default-execution:validate`
+- `npm run meta:prompt:validate`
+- `npm run meta:graphify:check`
+- `npm run meta:release:smoke`
+- Codex live probe created reviewer subagent `019ec274-15a4-7603-9986-335dad22c699` from thread `019ec26d-8837-77b2-95c8-1361bcb91128`; the `wait_agent` return was interrupted, so full review-return closure remains partial evidence.
+
+## [2.8.30] - 2026-06-13
+
+### Changed
+
+- **Primary Install Defaults** - Changed direct-Enter install/update defaults to Claude Code + Codex while keeping OpenClaw and Cursor available through explicit all-runtime or `--targets` selection.
+- **Fetch Research Quality Gate** - Internalized ECC-style deep research as a Meta_Kim-native Fetch contract with source-quality ladders, key-source deep reading, claim attribution, cross-checking, and original synthesis boundaries.
+- **Compatibility Candidate Framework** - Added a source-backed primitive-surface framework for Qoder CLI, Trae, Kiro, Windsurf / Devin Desktop Cascade, Cline, Roo Code, and Continue while keeping them as candidate probes instead of formal runtime projections.
+- **Compatibility Evidence Boundary** - Split GitHub completion from all-tool compatibility evidence so generated reports keep Cursor in the compatibility follow-up lane, separate from primary release decisions.
+
+### Verification
+
+- `npm run meta:sync`
+- `npm run meta:release:smoke`
+- `git diff --check`
+- `node setup.mjs --update --lang zh --targets claude,codex --project-dir <dir>...`
+
+## [2.8.29] - 2026-06-13
+
+### Added
+
+- **Native Choice Surface Guard** - Added regression coverage that prevents Codex and Claude Code branch-changing decisions from being completed by chat-card or artifact-only fallbacks.
+- **Run Status Surface** - Added localized run-status envelopes and commands so governed runs can expose reader-facing progress without leaking internal packet names.
+
+### Changed
+
+- **Codex and Claude Code No-Downgrade Rule** - Required Codex to use `request_user_input` and Claude Code to use `AskUserQuestion` or deferred `AskUserQuestion` for required execution decisions; unavailable or empty native surfaces now block before Execution instead of degrading silently.
+- **Runtime Mirror Mapping** - Synced the canonical meta-theory skill, meta agents, runtime references, and project-local runtime mirrors across Claude Code, Codex, Cursor, and OpenClaw.
+
+### Verification
+
+- `npm run meta:sync`
+- `npm run meta:governance:validate`
+- `npm run meta:prompt:validate`
+- `npm run meta:check:runtimes`
+- `npm run meta:test:meta-theory`
+- `git diff --check`
+
+## [2.8.28] - 2026-06-13
+
+### Added
+
+- **Default Governed Execution Evidence** - Added validators and run artifact packets proving the default Meta-Theory path emits governance agent results, Conductor consumption evidence, worker results, and worker execution evidence without relabeling structural boards as live runtime proof.
+- **Research-to-Native Productization** - Added source-backed productization contracts for research adoption, MCP/provider maturity, trace/eval control, AG-UI-style stage events, performance/cost budgets, and context engineering.
+- **Smooth Capability Discovery Guard** - Added a PRD validator that keeps agents, skills, scripts, MCP, tools, hooks, runtimes, memory, graph, and external providers as first-class discovery categories while allowing safe `no_expansion_needed` cases.
+- **Runtime Priority Contract** - Added a machine-readable contract and validator that keep Claude Code and Codex as primary prompt-first runtimes while preserving OpenClaw and Cursor as compatibility targets only.
+
+### Changed
+
+- **Framework Prompt Architecture** - Prompt assets are now validated across layered system/project/agent/skill/contract/runtime-adapter/eval surfaces, with review dimensions, regression fixtures, and context-sprawl budget rules.
+- **Governance Verification** - `meta:verify:governance` now includes default execution, asset sedimentation, research-native, framework prompt architecture, smooth capability discovery, and runtime priority validators.
+- **Single PRD Source** - The local-private PRD now records P-067, P-068 through P-084, P-085, and P-092 as locally tested while keeping Cursor native live evidence in the compatibility follow-up lane.
+
+### Verification
+
+- `npm run meta:prd:smooth-capability:validate`
+- `npm run meta:prd:runtime-priority:validate`
+- `node scripts/run-node-tests.mjs "tests/meta-theory/29-capability-gap-complete-product-prd.test.mjs"`
+- `npm run meta:verify:governance`
+- `npm run meta:release:smoke`
+- `git diff --check`
+- `npm run meta:github:gap`
+
+## [2.8.27] - 2026-06-13
+
+### Added
+
+- **Prompt-First Live Acceptance** - Added a PRD-linked live acceptance contract and runner that proves the same framework prompt through Claude Code and Codex before the prompt-first flow can be called complete.
+- **Source-Backed PRD Gates** - Added PRD source-map and dossier validators for product discovery, prompt/runtime, MCP/tools/providers, security, evaluation/observability, and architecture/release categories.
+
+### Changed
+
+- **Abstract Prompt Capability Validation** - `meta:prompt:validate` and governance verification now cover abstract capability families such as capability discovery, prompt intake optimization, planning continuity, runtime-native surfaces, MCP/providers, memory/graph, safety hooks, release evidence, and i18n.
+- **Prompt-First Release Evidence** - Governance verification now includes prompt-first stage contracts, live acceptance fixtures, source-map validation, PRD category dossiers, and public docs image-asset boundaries.
+- **Codex Live Runner Stability** - The Codex live acceptance runner now sends the prompt through stdin with `codex exec -`, avoiding Windows `.cmd` multiline prompt stalls while preserving real Codex execution evidence.
+
+### Verification
+
+- `npm run meta:prd:prompt-first-live:run`
+- `npm run meta:prd:prompt-first-live:validate`
+- `npm run meta:verify:governance`
+- `npm run meta:release:smoke`
+- `git diff --check`
+
+## [2.8.26] - 2026-06-12
+
+### Fixed
+
+- **Meta-Theory Deep Fetch Entry** - Project/repo/codebase understanding and commercialization strategy prompts now enter the governed Fetch path instead of falling through to shallow fast-path answers.
+- **Cross-Runtime Entry Parity** - Added Claude Code `/meta-theory` command projection support, Cursor's native always-on dispatch rule, and OpenClaw HEARTBEAT/SOUL project-understanding requirements so Claude, Codex, Cursor, and OpenClaw all route through the same governed entry contract.
+- **Run Artifact Evidence** - `meta:theory:run` now records project overview, maintainer contract, command inventory, Graphify, MCP, capability-index, machine-contract, and external-research capability source classes for project-understanding runs.
+
+### Verification
+
+- `node --test tests/meta-theory/47-meta-theory-entry-classifier.test.mjs`
+- `node --test tests/setup/sync-runtimes-manifest.test.mjs`
+- `node --test tests/governance/core-loop-contract.test.mjs`
+- `npm run meta:sync`
+- `npm run meta:check`
+- `git diff --check`
+
+## [2.8.25] - 2026-06-12
+
+### Fixed
+
+- **Claude Code Global Hook Cleanup** - Global Meta_Kim sync now validates the Claude Code `settings.json` hook commands, not only the `~/.claude/hooks/meta-kim/` package directory. This catches stale global Meta_Kim hook registrations that point at removed scripts and cause Claude Code `MODULE_NOT_FOUND` Stop hook errors.
+- **Installed-User Recovery Path** - Running the normal setup/update path now cleans stale global Meta_Kim hook entries and leaves only the currently managed global hook command, so existing installations recover without hand-editing Claude settings.
+
+### Verification
+
+- `npm run meta:check:global:release`
+- `npm run meta:test:setup`
+- `npm run meta:verify:governance`
+- `npm run meta:check`
+- `git diff --check`
+
+## [2.8.24] - 2026-06-12
+
+### Changed
+
+- **Runtime Safety Hardening Contract** - Added a release-grade governance contract that binds the five recent repair lanes into one validator: host config merge safety, cross-runtime HookPrompt protocol modeling, deletion/refactor residue sweep, runtime evidence templates, and install/update status semantics.
+- **Install Status Semantics** - Install and update messages now have machine-readable status classes (`success`, `skipped`, `manual`, `failed`) with next-action semantics, so user-facing setup output can distinguish expected skips, manual host steps, and real failures.
+- **HookPrompt Bad-Input Regression Coverage** - Added regression fixtures for markdown fences, delegated prompts, and internal-goal filtering, and verified Codex/Cursor adapters keep optimized prompt content in model-visible fields without reusing UI notices as policy.
+
+### Verification
+
+- Added `npm run meta:runtime:safety:validate` to `meta:verify:governance`.
+- `npm run meta:verify:governance`
+- `npm run meta:test:setup`
+- `npm run meta:sync`
+- `npm run discover:global`
+- `npm run meta:check`
+- `npm run meta:validate`
+- `npm run meta:release:smoke`
+- `npm run meta:setup:check`
+- `npm run meta:validate:run -- tests/fixtures/run-artifacts/valid-core-loop-release-run.json`
+- `npm run meta:graphify:rebuild`
+- `npm run meta:verify:all`
+- `git diff --check`
+
+## [2.8.23] - 2026-06-12
+
+### Changed
+
+- **Run-Scoped Worker Execution** - `meta:theory:run` now executes bounded worker task packets through a local run-scoped worker executor instead of stopping at structural dispatch readiness. The main thread still scopes, delegates, reviews, and synthesizes; no extra external agent is spawned.
+
+### Verification
+
+- Adds governance coverage that requires worker execution evidence while preserving the public-ready release gate.
+
+## [2.8.22] - 2026-06-12
+
+### Changed
+
+- **Core Loop Release Evidence Closure** - Completed the PDR release checklist and final release evidence for the governed execution repair so the shipped tag includes commit, tag, push, and GitHub Release proof.
+
+### Verification
+
+- Reused the `2.8.21` core-loop implementation evidence and reran the local release checks for the final `2.8.22` patch release.
+
+## [2.8.21] - 2026-06-12
+
+### Changed
+
+- **Core Loop Governed Execution Repair** - Meta_Kim now has a compact machine contract for the default eight-stage governed path, covering Critical, Fetch, Thinking, Execution, Review, Meta-Review, Verification, and Evolution with explicit IO, skip, gate, blocking, warning, public-ready, and writeback policy.
+- **Default Run Artifact Closure** - `meta:theory:run` now emits top-level request, intent, fetch, capability inventory, gap/ready, thinking, dispatch, worker task, execution, review, meta-review, verification, evolution, dynamic workflow, and public-ready packets for durable natural-language work.
+- **Capability Discovery Bus Integration** - The default run now uses the unified capability inventory bus instead of a skill-only or coarse summary. Inventory records cover agents, skills, scripts/tools, MCP, hooks, runtime, OS, memory, graph, and external dependency candidates with shared provider fields.
+- **Release Governance Gates** - Full release verification now includes governance validators and governance tests, including strict workflow fixture validation, PDR evidence mapping, and script registry cleanup-candidate protection.
+
+### Verification
+
+- `npm run meta:sync`
+- `npm run discover:global`
+- `npm run meta:check`
+- `npm run meta:validate`
+- `npm run meta:release:smoke`
+- `npm run meta:verify:governance`
+- `npm run meta:graphify:rebuild`
+- `npm run meta:check:global:release`
+- `npm run meta:verify:all`
+- `npm run meta:validate:run -- tests/fixtures/run-artifacts/valid-core-loop-release-run.json`
+- `git diff --check`
+
+## [2.8.20] - 2026-06-11
+
+### Changed
+
+- **Project Hook Ownership Rationalization** - Project runtime exports now keep project-specific hooks focused on Meta_Kim behavior, such as graph context, capability-first dispatch, and meta-theory activation. Global personal or reusable hooks, including prompt optimization, memory lifecycle helpers, planning helpers, and generic dangerous-command guards, are kept in the global runtime homes instead of being duplicated into every project.
+- **Global Hook Sync Coverage** - Global sync and release checks now compare the selected global hook files explicitly, while project sync removes stale global-only hook adapters from generated Codex and Cursor project folders. This keeps dependency-owned hooks updateable from their source projects and prevents duplicated prompt/context injection.
+- **Codex MCP Config Merge Normalization** - Codex MCP config merging was tightened so ECC-managed servers are normalized consistently while user-owned config remains preserved.
+
+### Verification
+
+- `npm run meta:release:smoke`
+- `npm run meta:check`
+- `npm run meta:check:global:release`
+- `npm run meta:test:setup`
+- `node scripts/validate-provider-capabilities.mjs`
+- `node scripts/validate-foundational-capabilities.mjs`
+- `node scripts/validate-hook-progression.mjs`
+- `npm run meta:graphify:check`
+- `git diff --check`
+
+## [2.8.19] - 2026-06-11
+
+### Changed
+
+- **Apache-2.0 License With NOTICE Attribution** - Meta_Kim's main project license changed from MIT to Apache License 2.0, with a root `NOTICE` file that carries the recommended attribution. Commercial use remains allowed, while redistributions of Meta_Kim or substantial portions of it must keep the Apache license text and NOTICE attribution. Earlier releases remain governed by the license that shipped with those releases.
+- **Automated Multi-Project Runtime Updates** - `setup.mjs` can now refresh project-level runtime files across multiple explicit or saved project directories, including `--project-dir` for scriptable targets, `--save-project-dirs` to remember a script-provided list, and `--all-projects` for saved local targets.
+- **Saved Project Directory Manager** - The update wizard now lets users manage a saved project directory list, enter multiple directories in one semicolon/comma-separated line, update all saved projects from the menu, and rerun saved targets with `--all-projects`.
+- **Project Config Protection During Batch Updates** - Multi-project runtime exports preserve and merge existing local `settings`, MCP, and hook configs instead of blindly replacing them. Local-only state such as `.claude/settings.local.json`, Codex project config, and OpenClaw workspace state is not exported.
+
+### Verification
+
+- `node --check setup.mjs`
+- `node --test tests/setup/project-deploy-protection.test.mjs tests/setup/setup-update-default-flow.test.mjs tests/setup/i18n.test.mjs`
+- `npm run meta:test:setup`
+- `npm run meta:sync`
+- `npm run meta:check`
+- `npm run meta:verify:all`
+- `npm --registry=https://registry.npmjs.org audit --audit-level=high`
+- `npm run meta:graphify:check`
+- `git diff --check`
+
+## [2.8.18] - 2026-06-11
+
+### Fixed
+
+- **Codex Planning Stop Hook Advisory Mode** - Codex planning-with-files Stop hooks no longer turn ordinary progress reminders into blocking continuations. This prevents completed answers from being folded into Codex App's processed section just because a stale or advisory plan reminder fired at the end of the turn.
+- **Zero-Phase Plan Handling** - Codex planning hook adapters now ignore `0/0` phase counts instead of treating them as incomplete work. Mixed `**Status:**` and inline `[status]` phase formats are counted consistently with the shell and PowerShell hooks.
+
+### Changed
+
+- **Change Readiness Contract** - Runtime, hook, setup, sync, provider, deletion, and release PRs now have a reusable checklist for host-state impact matrices, hook/prompt protocol flow, deletion residue sweeps, and evidence budgets.
+- **Execution Mode Classes** - `executionMode` values are now explicitly mapped into `real_execution`, `read_only_sidecar`, and `approval_gate` classes so validators and reviews can reason about execution semantics instead of raw task counts.
+
+### Verification
+
+- `node --check scripts/install-global-skills-all-runtimes.mjs`
+- `node --check scripts/validate-project.mjs`
+- `node --check scripts/validate-run-artifact.mjs`
+- `node --test tests/setup/release-docs-semantics.test.mjs tests/setup/install-cross-platform.test.mjs`
+- `node --test tests/meta-theory/09-run-artifact-validator.test.mjs tests/meta-theory/31-capability-gap-orchestration.test.mjs tests/meta-theory/33-capability-gap-orchestration-quality.test.mjs`
+- `node scripts/validate-provider-capabilities.mjs --strict-global-hooks --json`
+- `npm --registry=https://registry.npmjs.org audit --audit-level=high`
+- `npm run meta:verify:all`
+- Codex planning Stop hook smoke on this Windows host: `0/0` phase plans emit no block; normal incomplete plans emit `systemMessage`, not `decision:block`.
+- Installed-user hook merge smoke: after reinstalling `planning-with-files`, Codex keeps both `user_prompt_submit.py` and `hookprompt-adapter.mjs`; Cursor keeps `beforeSubmitPrompt` with `hookprompt-adapter.mjs`.
+
+## [2.8.17] - 2026-06-11
+
+### Fixed
+
+- **Real Execution Mode For Orchestration** - Worker task packets now declare `executionMode`, so Meta_Kim can distinguish real execution workers from approval gates and read-only Fetch/Review sidecars. Parallel groups can no longer pass quality gates when they contain only sidecars or approval steps.
+- **Capability Gap Board Validation** - Capability-gap orchestration reports now carry execution mode through the worker packet, task board, review checks, validation summary, and run-artifact validator. This makes fake parallelism visible and testable.
+- **ECC Plugin Update Path** - Claude plugin update mode now calls `claude plugin update ecc@ecc` when an installed ECC plugin record exists, and refreshes the plugin manager record after a successful update instead of relying on stale local metadata.
+- **Graphify Python Discovery** - Graphify setup and runtime checks now try Homebrew and Linuxbrew Python paths after normal `python3` / `python` launchers, improving macOS and Linux setup reliability when Python is installed outside PATH.
+
+### Verification
+
+- `node --test tests/meta-theory/09-run-artifact-validator.test.mjs`
+- `node --test tests/meta-theory/31-capability-gap-orchestration.test.mjs tests/meta-theory/33-capability-gap-orchestration-quality.test.mjs`
+- `node --test tests/setup/graphify-runtime.test.mjs tests/setup/graphify-wiring-contract.test.mjs tests/setup/install-cross-platform.test.mjs tests/setup/install-plugin-bundles.test.mjs`
+- `node --test tests/integration/agent-teams-playbook-integration.test.mjs tests/meta-theory/39-orchestration-dag-report.test.mjs tests/meta-theory/40-orchestration-scheduler-report.test.mjs`
+- `npm run meta:gap:validate-board`
+- `npm run meta:gap:complex-inputs`
+- `npm run meta:gap:codex-real-test`
+- `npm run meta:test:setup`
+- `npm run meta:test:meta-theory`
+- `npm run meta:check`
+- `npm run meta:graphify:rebuild`
+- `npm run meta:graphify:check`
+- `npm run meta:release:smoke`
+- `git diff --check`
+
+## [2.8.16] - 2026-06-10
+
+### Fixed
+
+- **Automatic Post-Copy Graphify Initialization** - Copied project-level Meta_Kim folders no longer require users to remember `node meta-kim-post-copy.mjs`. On the first `meta-theory` activation, Meta_Kim now starts the post-copy bootstrap automatically from the final project root.
+- **Non-Blocking First Trigger** - The generated `meta-kim-post-copy.mjs` now supports `--auto` and `--auto-worker`. The hook launches a detached background worker, records one-time state in `.meta-kim/state/default/post-copy-init.json`, and keeps the meta-theory startup path responsive even when Graphify dependency installation or graph generation takes longer.
+- **Runtime Hook Coverage** - Claude Code and Codex Skill activation now call the same shared spine hook, and Cursor prompt hooks can bootstrap explicit `meta-theory` prompts through the same path. The hook also honors `META_KIM_POST_COPY_AUTO=off` for explicit opt-out.
+- **Regression Coverage** - Setup tests now lock the automatic bootstrap contract, Cursor prompt hook ordering, and the copy-ready Graphify post-copy behavior.
+
+### Verification
+
+- `npm run meta:test:setup`
+- `npm run meta:graphify:rebuild`
+- `npm run meta:release:smoke`
+- `npm run meta:graphify:check`
+- `git diff --check`
+- `node --check setup.mjs`
+- `node --check canonical/runtime-assets/shared/hooks/activate-meta-theory-spine.mjs`
+- `node --check scripts/runtime-hook-mapping.mjs`
+- `node --check scripts/sync-runtimes.mjs`
+
+## [2.8.15] - 2026-06-10
+
+### Fixed
+
+- **Copy-Ready Graphify Initialization** - Project-level folders generated by quick setup or install/update export now include `meta-kim-post-copy.mjs`. After copying the generated folder contents from a staging location, such as Desktop, into any project root, run `node meta-kim-post-copy.mjs` there to initialize Graphify for the final project.
+- **Staging Directory Boundary** - Meta_Kim no longer treats the generated staging folder as the final Graphify root. This avoids creating or copying stale `graphify-out/` data for the wrong project while preserving per-project Graphify setup.
+- **Post-Copy Contract Coverage** - Setup tests now lock the copy-ready contract: exports write the bootstrap after runtime files are copied, the bootstrap resolves its own directory as the project root, and install/update exports do not silently build Graphify in the staging directory.
+
+### Verification
+
+- `node --check setup.mjs`
+- `node --test tests/setup/graphify-wiring-contract.test.mjs`
+- `node --test tests/setup/install-cross-platform.test.mjs tests/setup/setup-update-default-flow.test.mjs tests/setup/i18n.test.mjs`
+- `npm run meta:test:setup`
+- `npm run meta:graphify:rebuild`
+- `npm run meta:graphify:check`
+- `git diff --check`
+
+## [2.8.14] - 2026-06-10
+
+### Fixed
+
+- **Localized Install And Update Notices** - Install/update output for ECC, Graphify, Codex config preservation, native plugin handoff, marketplace checks, and loopback proxy handling now goes through Meta_Kim's shared i18n layer instead of hardcoded English strings. Chinese, Japanese, and Korean users now see localized status lines for expected skips and manual host-plugin steps.
+- **ECC Upstream Version Tracking** - ECC native installs now use `ecc-universal@latest` instead of the older `2.0.0-rc.1` release candidate in the runtime manifest, docs, compatibility evidence, and setup tests.
+- **Less Misleading Plugin Handoff Output** - Expected host limitations are now reported as skipped/manual steps instead of warning-like failures. Cursor and Codex native plugin messages now explain the manual host-plugin path without implying that the skill fallback failed.
+- **Graphify Skip Output Consistency** - Already-wired Graphify guide sections now report localized skip notices, and the old `[SKIP] graphify ...` line was aligned with Meta_Kim's normal skipped-state output.
+- **HookPrompt Markdown-Safe Output** - The upstream HookPrompt dependency now wraps raw user input and the optimized full prompt in fenced code blocks, so attachment headings such as `# Files mentioned by the user:` no longer render as oversized Markdown headings in the middle of Codex output.
+
+### Verification
+
+- `node --check .claude/hooks/user-prompt-submit.js; node --check .codex/hooks/user-prompt-submit.js; node --check test-hook.js` in `D:/KimProject/HookPrompt`
+- `node test-hook.js` in `D:/KimProject/HookPrompt`
+- `node scripts/install-global-skills-all-runtimes.mjs --dry-run --update --skills ecc,superpowers --targets claude,codex,cursor --lang zh-CN`
+- `node --test tests/setup/install-plugin-bundles.test.mjs tests/setup/graphify-wiring-contract.test.mjs tests/setup/install-cross-platform.test.mjs`
+- `npm run meta:test:setup`
+- `npm run meta:capabilities:smoke`
+- `npm run meta:check`
+- `npm run meta:release:smoke`
+- `npm run meta:verify:all`
+- `npm run meta:graphify:rebuild`
+- `npm run meta:graphify:check`
+- `git diff --check`
+
 ## [2.8.13] - 2026-06-10
 
 ### Fixed

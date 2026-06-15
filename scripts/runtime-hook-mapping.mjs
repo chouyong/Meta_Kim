@@ -202,66 +202,102 @@ export function buildCodexHooksJson({
   medusaSurfaceHookPath = ".codex/hooks/medusa-findings-surface.mjs",
   hookPromptAdapterPath = null,
 } = {}) {
-  const userPromptHooks = [
-    hookCommand(nodeHookCommand(memoryHookPath, ["--event", "user-prompt"]), 10),
-    hookCommand(nodeHookCommand(medusaSurfaceHookPath, ["--event", "user-prompt"]), 5),
-  ];
+  const userPromptHooks = [];
+  if (memoryHookPath) {
+    userPromptHooks.push(
+      hookCommand(nodeHookCommand(memoryHookPath, ["--event", "user-prompt"]), 10),
+    );
+  }
+  if (medusaSurfaceHookPath) {
+    userPromptHooks.push(
+      hookCommand(nodeHookCommand(medusaSurfaceHookPath, ["--event", "user-prompt"]), 5),
+    );
+  }
   if (hookPromptAdapterPath) {
     userPromptHooks.push(hookCommand(nodeHookCommand(hookPromptAdapterPath), 10));
   }
 
+  const hooks = {
+    UserPromptSubmit: [
+      {
+        hooks: userPromptHooks,
+      },
+    ],
+    PreToolUse: [
+      // Capability-first + meta-readonly deny gate must run before any other
+      // PreToolUse logic so it can short-circuit unsafe dispatches.
+      {
+        matcher: "Bash|apply_patch|Edit|Write|MultiEdit|NotebookEdit|Agent|spawn_agent",
+        hooks: [hookCommand(nodeHookCommand(enforceAgentDispatchHookPath), 10)],
+      },
+      {
+        matcher: "Bash",
+        hooks: [hookCommand(nodeHookCommand(graphifyHookPath))],
+      },
+    ],
+    Skill: [
+      {
+        matcher: "meta-theory",
+        hooks: [hookCommand(nodeHookCommand(spineHookPath), 5)],
+      },
+    ],
+  };
+
+  if (medusaEnqueueHookPath) {
+    hooks.PostToolUse = [
+      // Medusa AI-context content scan, enqueue path. Cheap, non-blocking;
+      // worker is spawned detached and writes findings asynchronously.
+      {
+        matcher: "Edit|Write|MultiEdit|NotebookEdit|apply_patch",
+        hooks: [hookCommand(nodeHookCommand(medusaEnqueueHookPath), 5)],
+      },
+    ];
+  }
+
+  if (memoryHookPath) {
+    hooks.SessionStart = [
+      {
+        matcher: "startup|resume",
+        hooks: [
+          hookCommand(nodeHookCommand(memoryHookPath, ["--event", "session-start"]), 10, {
+            statusMessage: "Loading Meta_Kim memory",
+          }),
+        ],
+      },
+    ];
+    hooks.Stop = [
+      {
+        hooks: [hookCommand(nodeHookCommand(memoryHookPath, ["--event", "stop"]), 10)],
+      },
+    ];
+  }
+  if (medusaSurfaceHookPath) {
+    const surfaceSessionStart = hookCommand(
+      nodeHookCommand(medusaSurfaceHookPath, ["--event", "session-start"]),
+      5,
+    );
+    const surfaceStop = hookCommand(
+      nodeHookCommand(medusaSurfaceHookPath, ["--event", "stop"]),
+      5,
+    );
+    if (hooks.SessionStart) {
+      hooks.SessionStart[0].hooks.push(surfaceSessionStart);
+    } else {
+      hooks.SessionStart = [{ matcher: "startup|resume", hooks: [surfaceSessionStart] }];
+    }
+    if (hooks.Stop) {
+      hooks.Stop[0].hooks.push(surfaceStop);
+    } else {
+      hooks.Stop = [{ hooks: [surfaceStop] }];
+    }
+  }
+  if (hooks.UserPromptSubmit[0].hooks.length === 0) {
+    delete hooks.UserPromptSubmit;
+  }
+
   return {
     hooks: {
-      SessionStart: [
-        {
-          matcher: "startup|resume",
-          hooks: [
-            hookCommand(nodeHookCommand(memoryHookPath, ["--event", "session-start"]), 10, {
-              statusMessage: "Loading Meta_Kim memory",
-            }),
-            hookCommand(nodeHookCommand(medusaSurfaceHookPath, ["--event", "session-start"]), 5),
-          ],
-        },
-      ],
-      UserPromptSubmit: [
-        {
-          hooks: userPromptHooks,
-        },
-      ],
-      PreToolUse: [
-        // Capability-first + meta-readonly deny gate must run before any other
-        // PreToolUse logic so it can short-circuit unsafe dispatches.
-        {
-          matcher: "Bash|apply_patch|Edit|Write|MultiEdit|NotebookEdit|Agent|spawn_agent",
-          hooks: [hookCommand(nodeHookCommand(enforceAgentDispatchHookPath), 10)],
-        },
-        {
-          matcher: "Bash",
-          hooks: [hookCommand(nodeHookCommand(graphifyHookPath))],
-        },
-      ],
-      PostToolUse: [
-        // Medusa AI-context content scan, enqueue path. Cheap, non-blocking;
-        // worker is spawned detached and writes findings asynchronously.
-        {
-          matcher: "Edit|Write|MultiEdit|NotebookEdit|apply_patch",
-          hooks: [hookCommand(nodeHookCommand(medusaEnqueueHookPath), 5)],
-        },
-      ],
-      Skill: [
-        {
-          matcher: "meta-theory",
-          hooks: [hookCommand(nodeHookCommand(spineHookPath), 5)],
-        },
-      ],
-      Stop: [
-        {
-          hooks: [
-            hookCommand(nodeHookCommand(memoryHookPath, ["--event", "stop"]), 10),
-            hookCommand(nodeHookCommand(medusaSurfaceHookPath, ["--event", "stop"]), 5),
-          ],
-        },
-      ],
+      ...hooks,
     },
   };
 }
@@ -269,6 +305,7 @@ export function buildCodexHooksJson({
 export function buildCursorHooksJson({
   graphifyHookPath = ".cursor/hooks/graphify-context.mjs",
   memoryHookPath = ".cursor/hooks/meta-kim-memory-save.mjs",
+  spineHookPath = ".cursor/hooks/activate-meta-theory-spine.mjs",
   enforceAgentDispatchHookPath = ".cursor/hooks/enforce-agent-dispatch.mjs",
   medusaEnqueueHookPath = ".cursor/hooks/medusa-postscan-enqueue.mjs",
   medusaSurfaceHookPath = ".cursor/hooks/medusa-findings-surface.mjs",
@@ -276,14 +313,20 @@ export function buildCursorHooksJson({
 } = {}) {
   const beforeSubmitPromptHooks = [
     {
-      command: nodeHookCommand(memoryHookPath, ["--event", "user-prompt"]),
-      timeout: 10,
+      command: nodeHookCommand(spineHookPath),
+      timeout: 5,
     },
     {
       command: nodeHookCommand(medusaSurfaceHookPath, ["--event", "user-prompt"]),
       timeout: 5,
     },
   ];
+  if (memoryHookPath) {
+    beforeSubmitPromptHooks.push({
+      command: nodeHookCommand(memoryHookPath, ["--event", "user-prompt"]),
+      timeout: 10,
+    });
+  }
   if (hookPromptAdapterPath) {
     beforeSubmitPromptHooks.push({
       command: nodeHookCommand(hookPromptAdapterPath),
@@ -291,50 +334,60 @@ export function buildCursorHooksJson({
     });
   }
 
+  const hooks = {
+    beforeSubmitPrompt: beforeSubmitPromptHooks,
+    preToolUse: [
+      // Capability-first + meta-readonly deny gate. failClosed=true ensures
+      // Cursor honors the deny payload even if the hook crashes.
+      {
+        command: nodeHookCommand(enforceAgentDispatchHookPath),
+        timeout: 10,
+        failClosed: true,
+      },
+      {
+        command: nodeHookCommand(graphifyHookPath),
+      },
+    ],
+  };
+  if (memoryHookPath) {
+    hooks.sessionStart = [
+      {
+        command: nodeHookCommand(memoryHookPath, ["--event", "session-start"]),
+        timeout: 10,
+      },
+    ];
+    hooks.stop = [
+      {
+        command: nodeHookCommand(memoryHookPath, ["--event", "stop"]),
+        timeout: 10,
+      },
+    ];
+  }
+  if (medusaEnqueueHookPath) {
+    // Medusa AI-context content scan, enqueue path. Stays fail-open: no
+    // failClosed flag — a slow/missing Python must never block edits.
+    hooks.postToolUse = [
+      {
+        command: nodeHookCommand(medusaEnqueueHookPath),
+        timeout: 5,
+      },
+    ];
+  }
+  if (medusaSurfaceHookPath) {
+    const surfaceSessionStart = {
+      command: nodeHookCommand(medusaSurfaceHookPath, ["--event", "session-start"]),
+      timeout: 5,
+    };
+    const surfaceStop = {
+      command: nodeHookCommand(medusaSurfaceHookPath, ["--event", "stop"]),
+      timeout: 5,
+    };
+    hooks.sessionStart = [...(hooks.sessionStart || []), surfaceSessionStart];
+    hooks.stop = [...(hooks.stop || []), surfaceStop];
+  }
+
   return {
     version: 1,
-    hooks: {
-      sessionStart: [
-        {
-          command: nodeHookCommand(memoryHookPath, ["--event", "session-start"]),
-          timeout: 10,
-        },
-        {
-          command: nodeHookCommand(medusaSurfaceHookPath, ["--event", "session-start"]),
-          timeout: 5,
-        },
-      ],
-      beforeSubmitPrompt: beforeSubmitPromptHooks,
-      preToolUse: [
-        // Capability-first + meta-readonly deny gate. failClosed=true ensures
-        // Cursor honors the deny payload even if the hook crashes.
-        {
-          command: nodeHookCommand(enforceAgentDispatchHookPath),
-          timeout: 10,
-          failClosed: true,
-        },
-        {
-          command: nodeHookCommand(graphifyHookPath),
-        },
-      ],
-      // Medusa AI-context content scan, enqueue path. Stays fail-open: no
-      // failClosed flag — a slow/missing Python must never block edits.
-      postToolUse: [
-        {
-          command: nodeHookCommand(medusaEnqueueHookPath),
-          timeout: 5,
-        },
-      ],
-      stop: [
-        {
-          command: nodeHookCommand(memoryHookPath, ["--event", "stop"]),
-          timeout: 10,
-        },
-        {
-          command: nodeHookCommand(medusaSurfaceHookPath, ["--event", "stop"]),
-          timeout: 5,
-        },
-      ],
-    },
+    hooks,
   };
 }

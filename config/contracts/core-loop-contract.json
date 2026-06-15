@@ -1,0 +1,468 @@
+{
+  "schemaVersion": 1,
+  "contractId": "meta-kim-core-loop-contract",
+  "owner": "meta-warden",
+  "defaultEntry": {
+    "path": "governed_execution_layer",
+    "trigger": "ordinary natural-language durable task or explicit meta-theory shortcut",
+    "spine": [
+      "Critical",
+      "Fetch",
+      "Thinking",
+      "Execution",
+      "Review",
+      "Meta-Review",
+      "Verification",
+      "Evolution"
+    ],
+    "entryScript": "scripts/run-meta-theory-governed-execution.mjs",
+    "packageScript": "meta:theory:run",
+    "contractIsDefaultPath": true
+  },
+  "stages": [
+    {
+      "stage": "Critical",
+      "requiredInputs": ["userRequest", "repoContext", "permissionBoundary"],
+      "requiredOutputs": [
+        "intentPacket.realIntent",
+        "intentPacket.successCriteria",
+        "intentPacket.nonGoals",
+        "intentPacket.blockingUnknowns",
+        "intentPacket.noQuotaClarification"
+      ],
+      "skipConditions": [
+        "pure read-only query with no durable artifact",
+        "already clear request with explicit noQuotaClarification record"
+      ],
+      "gateConditions": [
+        "missing intent that changes route, scope, risk, acceptance, permission, or non-goal",
+        "unclear architecture type"
+      ],
+      "blockingGates": ["unclear_user_intent", "unsafe_or_unbounded_permission"],
+      "warningGates": ["minor wording ambiguity with no route impact"],
+      "defaultOwner": "meta-warden"
+    },
+    {
+      "stage": "Fetch",
+      "requiredInputs": ["intentPacket", "taskClassification", "readBeforeEditEvidence"],
+      "requiredOutputs": [
+        "fetchPacket.evidence",
+        "fetchPacket.decisionImpactMap",
+        "fetchPacket.capabilityDiscovery.searchLog",
+        "fetchPacket.capabilityDiscovery.capabilityInventory",
+        "fetchPacket.capabilityGap",
+        "contextEngineeringBudget",
+        "fileChangeFactCard"
+      ],
+      "skipConditions": ["fast_path read-only answer with explicit evidence boundary"],
+      "gateConditions": [
+        "capability discovery missing",
+        "route-changing source unread",
+        "known unsupported runtime or OS"
+      ],
+      "blockingGates": ["missing_fetch_evidence", "missing_capability_discovery", "known_unsupported_runtime_or_os"],
+      "warningGates": ["stale global cache that does not affect selected route"],
+      "defaultOwner": "meta-conductor"
+    },
+    {
+      "stage": "Thinking",
+      "requiredInputs": ["intentPacket", "fetchPacket", "capabilityInventory"],
+      "requiredOutputs": [
+        "thinkingPacket.designFrame",
+        "thinkingPacket.owner",
+        "thinkingPacket.weapon",
+        "thinkingPacket.workerTaskPackets",
+        "thinkingPacket.reviewOwner",
+        "thinkingPacket.verificationOwner",
+        "thinkingPacket.mergeOwner",
+        "thinkingPacket.parallelGroups",
+        "thinkingPacket.dependencyPolicy",
+        "thinkingPacket.omittedLanesWithReason",
+        "dynamicWorkflowRuntimePacket.capabilityBindingRows",
+        "agentTeamsPlaybookPacket",
+        "peerAgentMeshPacket.peers",
+        "capabilityInvocationTruthPacket",
+        "visibleMetaTheorySurfacePacket",
+        "governanceAgentResultPackets",
+        "conductorConsumptionEvidence"
+      ],
+      "skipConditions": ["fast_path read-only answer with no execution route"],
+      "gateConditions": [
+        "owner or weapon not selected from Fetch evidence",
+        "main thread would become all-purpose executor",
+        "dependency policy missing"
+      ],
+      "blockingGates": ["missing_owner", "missing_weapon", "missing_verification_owner", "blind_execute"],
+      "warningGates": ["single obvious path recorded as no_branching_choice"],
+      "defaultOwner": "meta-conductor"
+    },
+    {
+      "stage": "Execution",
+      "requiredInputs": ["thinkingPacket", "workerTaskPackets", "sideEffectLedgerPacket"],
+      "requiredOutputs": [
+        "conductorConsumptionEvidence",
+        "agUiStageEvents",
+        "langGraphRunPacket.nodes",
+        "langGraphRunPacket.edges",
+        "langGraphRunPacket.stateTransition",
+        "langGraphRunPacket.eventLog",
+        "langGraphRunPacket.checkpoint",
+        "peerAgentMeshPacket.handoffs",
+        "agentTeamsPlaybookPacket",
+        "capabilityInvocationTruthPacket.rows",
+        "executionResult.workerResultPackets",
+        "executionResult.workerExecutionEvidence",
+        "executionResult.mergeResult"
+      ],
+      "skipConditions": ["read-only analysis", "blocked approval gate", "capability gap requires creation before execution"],
+      "gateConditions": [
+        "selected worker cannot execute",
+        "unsafe mutation",
+        "missing approval for external write or global install"
+      ],
+      "blockingGates": ["unsafe_mutation", "external_write_without_approval", "global_write_without_approval"],
+      "warningGates": ["low-risk local wording edit"],
+      "defaultOwner": "selected worker or selected capability provider"
+    },
+    {
+      "stage": "Review",
+      "requiredInputs": ["intentPacket", "fetchPacket", "thinkingPacket", "executionResult"],
+      "requiredOutputs": [
+        "reviewPacket.upstreamQuality",
+        "reviewPacket.ownerCoverage",
+        "reviewPacket.protocolCompliance",
+        "reviewPacket.qualityGate",
+        "reviewPacket.findings",
+        "productExperiencePacket.goals",
+        "productExperiencePacket.supportGates",
+        "productExperiencePacket.capabilityInvocationTruthGate",
+        "productExperiencePacket.noOverclaimGate"
+      ],
+      "skipConditions": ["fast_path read-only answer with no durable artifact"],
+      "gateConditions": [
+        "Critical incomplete",
+        "Fetch incomplete",
+        "Thinking route unsupported",
+        "execution evidence missing"
+      ],
+      "blockingGates": ["review_finds_unresolved_critical_or_high_issue"],
+      "warningGates": ["minor polish issue that does not affect acceptance"],
+      "defaultOwner": "meta-prism"
+    },
+    {
+      "stage": "Meta-Review",
+      "requiredInputs": ["reviewPacket", "verificationPlan", "publicReadyIntent"],
+      "requiredOutputs": [
+        "metaReviewPacket.reviewStandard",
+        "metaReviewPacket.biasCheck",
+        "metaReviewPacket.publicReadyGateCheck"
+      ],
+      "skipConditions": ["low-risk non-public local edit with recorded skip reason"],
+      "gateConditions": [
+        "review standard too low",
+        "missing public-ready evidence",
+        "runtime claim overstates evidence"
+      ],
+      "blockingGates": ["public_ready_overclaim", "review_standard_too_low"],
+      "warningGates": ["non-public smoke evidence only"],
+      "defaultOwner": "meta-warden"
+    },
+    {
+      "stage": "Verification",
+      "requiredInputs": ["reviewPacket", "workerResultPackets", "verificationPlan"],
+      "requiredOutputs": [
+        "verificationResult.status",
+        "verificationResult.evidence",
+        "traceEvalControlPlane",
+        "performanceCostBudget",
+        "goalContractPacket",
+        "capabilityInvocationTruthPacket",
+        "visibleMetaTheorySurfacePacket",
+        "userPerceptionPacket",
+        "productExperiencePacket",
+        "verificationResult.fixEvidence",
+        "verificationResult.remainingRisk"
+      ],
+      "skipConditions": ["no mutation and no completion claim", "explicit partial result"],
+      "gateConditions": [
+        "public-ready claim",
+        "release-grade claim",
+        "runtime, install, global sync, hook, dependency, security, or credential boundary",
+        "unsafe mutation"
+      ],
+      "blockingGates": [
+        "public_ready_without_verification",
+        "release_grade_without_live_or_declared_evidence",
+        "unsafe_operation_unverified"
+      ],
+      "warningGates": ["ordinary low-risk step that does not make a completion claim"],
+      "defaultOwner": "verify"
+    },
+    {
+      "stage": "Evolution",
+      "requiredInputs": ["reviewPacket", "verificationResult", "capabilityGapPacket"],
+      "requiredOutputs": [
+        "evolutionWritebackDecision",
+        "evolutionWritebackPacket.writebacks",
+        "evolutionWritebackPacket.noneWithReason",
+        "scarPacket"
+      ],
+      "skipConditions": ["no reusable lesson, recorded as none-with-reason"],
+      "gateConditions": [
+        "reusable capability gap discovered",
+        "agent boundary change needed",
+        "skill, tool, MCP, hook, workflow, runtime, or OS lesson should survive the run"
+      ],
+      "blockingGates": ["writeback_without_warden_approval", "missing_writeback_or_none_reason"],
+      "warningGates": ["candidate writeback requires later approval"],
+      "defaultOwner": "meta-chrysalis"
+    }
+  ],
+  "capabilityDiscovery": {
+    "principle": "Fetch discovers evidence, Thinking matches capabilities; never hardcode an agent before discovery.",
+    "normalMode": "cached_global_inventory_plus_project_light_scan",
+    "fullScanTriggers": [
+      "install",
+      "update",
+      "explicit_refresh",
+      "missing_cache",
+      "cache_older_than_14_days",
+      "missing_required_provider",
+      "high_risk_provider_route"
+    ],
+    "minimumSources": [
+      "canonical/agents",
+      "runtime agent mirrors",
+      "Codex custom agents",
+      "Claude Code agents",
+      "Cursor agents and rules",
+      "OpenClaw workspaces, skills, and config",
+      "repo skills",
+      "user/admin/system skills when discoverable",
+      "tools, scripts, and package commands",
+      "MCP servers and config",
+      "hooks",
+      "runtime capability matrix",
+      "OS compatibility matrix",
+      "config/capability-index",
+      "global capability inventory",
+      "Graphify/project map",
+      "previous run state and learned evolution records"
+    ],
+    "inventoryRecordRequiredFields": [
+      "id",
+      "providerType",
+      "sourcePath",
+      "runtimeSupport",
+      "riskLevel",
+      "ownerBoundary",
+      "canExecute",
+      "canReview",
+      "canVerify",
+      "canCreateOrUpgrade",
+      "missingDependencies",
+      "confidence",
+      "reason"
+    ]
+  },
+  "executionOwnership": {
+    "mainThreadRole": "scope_delegate_review_synthesize",
+    "forbiddenMainThreadRole": "all_purpose_executor",
+    "requiresWorkerTaskPackets": true,
+    "ownerSelectionMustUseFetchEvidence": true,
+    "governanceAgentsAreNotGenericImplementationWorkers": true
+  },
+  "dynamicWorkflow": {
+    "notFixedChecklist": true,
+    "cards": [
+      "Clarify",
+      "Shrink scope",
+      "Options",
+      "Execute",
+      "Verify",
+      "Fix",
+      "Rollback",
+      "Risk",
+      "Nudge",
+      "Pause"
+    ],
+    "requiredCardRecordFields": [
+      "trigger",
+      "reason",
+      "attentionCost",
+      "skippedCardsWithReason",
+      "interruptQueue",
+      "riskPreemption",
+      "maxIterationHandling",
+      "escalation"
+    ]
+  },
+  "productExperienceCoreGoals": {
+    "sourcePrdVersion": "v0.61",
+    "goalContractMethod": "outcome + verification + constraints + boundaries + iteration + completion evidence + stop/pause",
+    "evidenceTierRequired": "product_experience_pass",
+    "requiredPackets": [
+      "goalContractPacket",
+      "langGraphRunPacket",
+      "dynamicWorkflowRuntimePacket",
+      "peerAgentMeshPacket",
+      "agentTeamsPlaybookPacket",
+      "capabilityInvocationProbePacket",
+      "capabilityInvocationTruthPacket",
+      "visibleMetaTheorySurfacePacket",
+      "userPerceptionPacket",
+      "productExperiencePacket"
+    ],
+    "requiredGoalIds": ["P-102", "P-103", "P-104"],
+    "supportGateIds": ["P-105", "P-106", "P-107", "P-108", "P-109", "P-110"],
+    "langGraphStyleRequirements": [
+      "nodes",
+      "edges",
+      "state",
+      "stateTransition",
+      "eventLog",
+      "checkpoint",
+      "replay"
+    ],
+    "dynamicWorkflowRequirements": [
+      "skills",
+      "mcp",
+      "commands",
+      "runtimeTools",
+      "hookMatches",
+      "abstractPromptCapability",
+      "agentTeamsPlaybook",
+      "workerResultPackets"
+    ],
+    "capabilityInvocationTruthRequirements": [
+      "stateTaxonomy includes invoked, applied, host_visible_observed, selected_not_invoked, discovered_not_selected, unavailable, blocked, not_required",
+      "agent/subagent live invocation is invoked only with external agent spawn evidence; otherwise use unavailable, blocked, not_required, or selected_not_invoked according to host-tool availability and authorization evidence",
+      "app-visible host UI subagents are recorded separately from runner Agent/spawn_agent tool invocation",
+      "agent-teams-playbook is selected for 2+ executable parallel lanes but is not relabeled as a live Skill/Agent Team/spawn_agent call",
+      "MCP binding is not relabeled as MCP tool call without invocation evidence",
+      "hook match or file is not relabeled as triggered hook",
+      "command selection is not relabeled as command execution without fresh command output",
+      "run-scoped worker execution is not relabeled as live subagent invocation",
+      "product-experience pass requires capabilityInvocationProbePacket fresh local probes for callable MCP, command/script, and runtime-tool families when they are selected"
+    ],
+    "userPerceptionRequirements": [
+      "what_to_do",
+      "what_is_happening",
+      "how_it_will_run",
+      "acceptance_standard",
+      "pause_condition"
+    ],
+    "forbiddenCompletionEvidence": [
+      "contract_ready only",
+      "fixture_pass_not_live",
+      "local_runner_pass without user perception",
+      "runtime_json_pass",
+      "projection_smoke",
+      "internal packet dump",
+      "hidden orchestration artifacts",
+      "chat_card_as_native_popup",
+      "demo_fixture_as_framework_goal",
+      "selected_capability_as_invoked_tool",
+      "configured_mcp_as_called_tool",
+      "selected_command_as_executed",
+      "selected_runtime_tool_as_called",
+      "hook_file_or_match_as_triggered_hook",
+      "run_scoped_worker_as_live_subagent"
+      ,
+      "app_visible_subagent_as_runner_agent_spawn"
+    ],
+    "supportGateRequirements": {
+      "P-105": [
+        "goal has outcome",
+        "goal has verification",
+        "goal has constraints",
+        "goal has boundaries",
+        "goal has iteration policy",
+        "goal has stop/pause",
+        "no evidence-tier overclaim"
+      ],
+      "P-106": [
+        "Codex branch-changing choices require request_user_input before Execution",
+        "Claude Code branch-changing choices require AskUserQuestion before Execution",
+        "chat card, markdown card, hook warning, CLI notice, fixture transcript, or after-the-fact insertion cannot be native-popup proof",
+        "structural runner may record not_claimed_by_structural_runner but must not claim native live pass"
+      ],
+      "P-107": [
+        "same failure class appearing a second time means bottom_design_failure",
+        "return to Critical/Fetch/Thinking before retry",
+        "changed design or evidence path is required before another attempt",
+        "regression test or scar must record the prevention rule"
+      ],
+      "P-108": [
+        "durable goals, PRD, contracts, validators, and prompts stay task-agnostic",
+        "desktop sticky notes or other fixtures may test the framework but cannot become the framework goal",
+        "demo app stack, file path, or one-off product request cannot be a pass criterion"
+      ],
+      "P-109": [
+        "capabilityInvocationTruthPacket.rows covers agent/subagent, app-visible host subagent, worker task, skill, MCP, hook, prompt/rule, command/script, and runtime tool families",
+        "capabilityInvocationTruthPacket.rows also records agent_teams_playbook when fan-out orchestration is selected",
+        "each family records invoked, applied, host_visible_observed, selected_not_invoked, discovered_not_selected, unavailable, blocked, or not_required",
+        "selected, discovered, configured, or matched capabilities cannot be displayed as invoked without attached invocation evidence",
+        "run-scoped worker execution and app-visible host subagent UI evidence cannot be displayed as live runner Agent/spawn_agent invocation",
+        "MCP config/binding and hook file/match cannot be displayed as MCP call or hook trigger",
+        "callableInvocationCoverage.status must be pass for product-experience pass, with fresh probes for selected MCP, command/script, and runtime-tool families"
+      ],
+      "P-110": [
+        "agentTeamsPlaybookPacket is not_required for fewer than 2 executable worker lanes",
+        "2+ executable worker lanes must discover and select agent-teams-playbook as the fan-out orchestration adapter",
+        "fan-out waves use the current runtime agent capacity such as Codex [agents].max_threads, not an arbitrary Meta_Kim hard cap, prove DAG/collision/workspace/external-write safety, and preserve workerTaskPackets",
+        "the Node runner must not claim a live Skill, Agent Team, or Codex spawn_agent call without host tool-call evidence"
+      ]
+    }
+  },
+  "verificationPolicy": {
+    "role": "fuse_and_completion_evidence",
+    "notEveryStepInterceptor": true,
+    "hooksAreLastResortFuse": true,
+    "validatorsAreReleaseAndContractEvidence": true,
+    "reviewChecksQualityBeforeVerification": true,
+    "ordinaryLowRiskWork": "fast_smoke_allowed",
+    "upgradeVerificationFor": [
+      "runtime change",
+      "install/update behavior",
+      "global sync",
+      "hooks",
+      "dependency compatibility",
+      "security-sensitive behavior",
+      "release-grade claim",
+      "public-ready claim"
+    ]
+  },
+  "evolutionWritebackPolicy": {
+    "requiredDecision": ["writeback", "candidate-writeback", "none-with-reason"],
+    "writeReusableGapsTo": [
+      "canonical/agents",
+      "canonical/skills",
+      "config/contracts",
+      "config/capability-index",
+      "config/governance",
+      "project state"
+    ],
+    "forbiddenWithoutApproval": ["automatic canonical write", "global write", "external write"],
+    "noneRequiresReason": true
+  },
+  "publicReadyClaim": {
+    "requiresVerificationEvidence": true,
+    "requiresSummaryClosure": true,
+    "requiresUserGoalDone": true,
+    "requiresSinglePrimaryDeliverable": true,
+    "blocksOn": [
+      "missing Critical/Fetch/Thinking record",
+      "unresolved high or critical review finding",
+      "verification skipped",
+      "runtime smoke mislabeled as live",
+      "writeback decision missing"
+    ]
+  },
+  "crossRuntimeBoundary": {
+    "targets": ["claude", "codex", "openclaw", "cursor"],
+    "doNotMixFormats": true,
+    "canonicalSourceFirst": true,
+    "runtimeMirrorsAreGeneratedUnlessExplicitlyDocumented": true
+  }
+}

@@ -265,6 +265,7 @@ async function validateRequiredFiles() {
     "config/contracts/sync-manifest.schema.json",
     "config/contracts/runtime-profile.schema.json",
     "config/contracts/runtime-compatibility-catalog.schema.json",
+    "config/contracts/core-loop-contract.json",
     "config/runtime-compatibility-catalog.json",
     "config/contracts/workflow-contract.json",
     CANONICAL_CAPABILITY_INDEX_RELATIVE,
@@ -277,6 +278,198 @@ async function validateRequiredFiles() {
       `Missing required file: ${relativePath}`,
     );
   }
+}
+
+async function validateCoreLoopContract() {
+  const contractPath = path.join(
+    repoRoot,
+    "config",
+    "contracts",
+    "core-loop-contract.json",
+  );
+  const contract = JSON.parse(await fs.readFile(contractPath, "utf8"));
+  const expectedStages = [
+    "Critical",
+    "Fetch",
+    "Thinking",
+    "Execution",
+    "Review",
+    "Meta-Review",
+    "Verification",
+    "Evolution",
+  ];
+
+  assert(
+    (contract.schemaVersion ?? 0) >= 1 &&
+      contract.contractId === "meta-kim-core-loop-contract",
+    "core-loop-contract.json must define the Meta_Kim core loop contract.",
+  );
+  assert(
+    contract.defaultEntry?.contractIsDefaultPath === true &&
+      contract.defaultEntry?.entryScript ===
+        "scripts/run-meta-theory-governed-execution.mjs" &&
+      contract.defaultEntry?.packageScript === "meta:theory:run",
+    "core-loop-contract.json must bind the default governed execution entrypoint.",
+  );
+  const stages = contract.stages ?? [];
+  assert(
+    stages.map((stage) => stage.stage).join("|") === expectedStages.join("|"),
+    "core-loop-contract.json must define the exact eight-stage spine in order.",
+  );
+  for (const stage of stages) {
+    for (const field of [
+      "requiredInputs",
+      "requiredOutputs",
+      "skipConditions",
+      "gateConditions",
+      "blockingGates",
+      "warningGates",
+      "defaultOwner",
+    ]) {
+      assert(stage[field] !== undefined, `core-loop-contract ${stage.stage} missing ${field}.`);
+    }
+    assert(
+      stage.requiredInputs.length > 0 &&
+        stage.requiredOutputs.length > 0 &&
+        stage.skipConditions.length > 0 &&
+        stage.gateConditions.length > 0,
+      `core-loop-contract ${stage.stage} must have non-empty IO, skip, and gate policy.`,
+    );
+  }
+  const byStage = Object.fromEntries(stages.map((stage) => [stage.stage, stage]));
+  for (const field of [
+    "intentPacket.realIntent",
+    "intentPacket.successCriteria",
+    "intentPacket.nonGoals",
+    "intentPacket.blockingUnknowns",
+    "intentPacket.noQuotaClarification",
+  ]) {
+    assert(
+      byStage.Critical.requiredOutputs.includes(field),
+      `Critical requiredOutputs must include ${field}.`,
+    );
+  }
+  for (const field of [
+    "fetchPacket.capabilityDiscovery.searchLog",
+    "fetchPacket.capabilityDiscovery.capabilityInventory",
+    "fetchPacket.capabilityGap",
+  ]) {
+    assert(byStage.Fetch.requiredOutputs.includes(field), `Fetch requiredOutputs must include ${field}.`);
+  }
+  for (const field of [
+    "thinkingPacket.owner",
+    "thinkingPacket.weapon",
+    "thinkingPacket.workerTaskPackets",
+    "thinkingPacket.reviewOwner",
+    "thinkingPacket.verificationOwner",
+    "thinkingPacket.mergeOwner",
+    "thinkingPacket.parallelGroups",
+    "thinkingPacket.dependencyPolicy",
+    "thinkingPacket.omittedLanesWithReason",
+  ]) {
+    assert(
+      byStage.Thinking.requiredOutputs.includes(field),
+      `Thinking requiredOutputs must include ${field}.`,
+    );
+  }
+  assert(
+    byStage.Review.requiredInputs.includes("thinkingPacket") &&
+      byStage.Review.requiredOutputs.includes("reviewPacket.upstreamQuality"),
+    "Review must check Critical/Fetch/Thinking quality before result polish.",
+  );
+  assert(
+    byStage["Meta-Review"].requiredOutputs.includes(
+      "metaReviewPacket.publicReadyGateCheck",
+    ),
+    "Meta-Review must check the public-ready gate.",
+  );
+  assert(
+    byStage.Verification.gateConditions.includes("public-ready claim") &&
+      byStage.Verification.warningGates.some((gate) => /ordinary low-risk/i.test(gate)),
+    "Verification must act as fuse/public-ready gate, not every-step interception.",
+  );
+  assert(
+    byStage.Evolution.requiredOutputs.includes(
+      "evolutionWritebackPacket.noneWithReason",
+    ) &&
+      byStage.Evolution.blockingGates.includes("missing_writeback_or_none_reason"),
+    "Evolution must require writeback or none-with-reason.",
+  );
+
+  const discovery = contract.capabilityDiscovery ?? {};
+  for (const source of [
+    "canonical/agents",
+    "runtime agent mirrors",
+    "MCP servers and config",
+    "tools, scripts, and package commands",
+    "hooks",
+    "runtime capability matrix",
+    "OS compatibility matrix",
+    "config/capability-index",
+    "global capability inventory",
+    "Graphify/project map",
+  ]) {
+    assert(
+      discovery.minimumSources?.includes(source),
+      `core-loop-contract capabilityDiscovery.minimumSources must include ${source}.`,
+    );
+  }
+  for (const field of [
+    "id",
+    "providerType",
+    "sourcePath",
+    "runtimeSupport",
+    "riskLevel",
+    "ownerBoundary",
+    "canExecute",
+    "canReview",
+    "canVerify",
+    "canCreateOrUpgrade",
+    "missingDependencies",
+    "confidence",
+    "reason",
+  ]) {
+    assert(
+      discovery.inventoryRecordRequiredFields?.includes(field),
+      `capability inventory record contract must require ${field}.`,
+    );
+  }
+  const cards = contract.dynamicWorkflow?.cards ?? [];
+  for (const card of [
+    "Clarify",
+    "Shrink scope",
+    "Options",
+    "Execute",
+    "Verify",
+    "Fix",
+    "Rollback",
+    "Risk",
+    "Nudge",
+    "Pause",
+  ]) {
+    assert(cards.includes(card), `dynamic workflow cards must include ${card}.`);
+  }
+  assert(
+    contract.executionOwnership?.mainThreadRole === "scope_delegate_review_synthesize" &&
+      contract.executionOwnership?.requiresWorkerTaskPackets === true,
+    "Execution ownership must keep the main thread as dispatcher/synthesizer and require workerTaskPackets.",
+  );
+  assert(
+    contract.verificationPolicy?.notEveryStepInterceptor === true &&
+      contract.verificationPolicy?.hooksAreLastResortFuse === true &&
+      contract.verificationPolicy?.validatorsAreReleaseAndContractEvidence === true,
+    "Verification policy must keep hooks as fuses and validators as release/contract gates.",
+  );
+  assert(
+    contract.publicReadyClaim?.requiresVerificationEvidence === true &&
+      contract.publicReadyClaim?.blocksOn?.includes("runtime smoke mislabeled as live"),
+    "Public-ready claims must require verification evidence and block smoke-as-live overclaims.",
+  );
+  assert(
+    contract.crossRuntimeBoundary?.doNotMixFormats === true &&
+      contract.crossRuntimeBoundary?.canonicalSourceFirst === true,
+    "Cross-runtime policy must forbid mixing runtime formats and keep canonical source first.",
+  );
 }
 
 async function validateWorkflowContract() {
@@ -458,6 +651,45 @@ async function validateWorkflowContract() {
   assert(
     capabilityDiscovery.forbiddenFields?.includes("platformSurface"),
     "workflow-contract.json researchCapabilityDiscovery must forbid platformSurface guessing.",
+  );
+  const researchQualityGate =
+    contract.protocols?.contentEvidencePacket?.deepResearchPlanQualityGate ?? {};
+  for (const field of [
+    "decisionUse",
+    "questions",
+    "sourceCategoriesPlanned",
+    "deepReadTargets",
+    "sourceQualityLadder",
+    "claimAttributionRules",
+    "crossCheckStrategy",
+    "originalSynthesisRules",
+    "decisionImpactCriteria",
+  ]) {
+    assert(
+      researchQualityGate.requiredPlanFields?.includes(field),
+      `workflow-contract.json deepResearchPlanQualityGate must require ${field}.`,
+    );
+  }
+  assert(
+    researchQualityGate.minimumSearchAngles >= 3,
+    "workflow-contract.json deepResearchPlanQualityGate must require at least 3 search angles.",
+  );
+  assert(
+    researchQualityGate.minimumKeySourcesToDeepRead >= 3,
+    "workflow-contract.json deepResearchPlanQualityGate must require key-source deep reading.",
+  );
+  assert(
+    researchQualityGate.minimumIndependentSourcesForRouteChangingClaim >= 2,
+    "workflow-contract.json deepResearchPlanQualityGate must require cross-source route evidence.",
+  );
+  assert(
+    researchQualityGate.originalSynthesisPolicy?.forbidden?.includes(
+      "copying third-party prompt text",
+    ) &&
+      researchQualityGate.originalSynthesisPolicy?.forbidden?.includes(
+        "using cosmetic rewrites to disguise copied wording",
+      ),
+    "workflow-contract.json deepResearchPlanQualityGate must forbid copied prompt text and cosmetic disguise.",
   );
 
   const optionFrame = contract.protocols?.preDecisionOptionFrame ?? {};
@@ -693,6 +925,7 @@ async function validateWorkflowContract() {
     "todayTask",
     "scopeFiles",
     "workType",
+    "executionMode",
     "qualityBar",
     "referenceDirection",
     "verifySteps",
@@ -702,6 +935,55 @@ async function validateWorkflowContract() {
     assert(
       workerFields.includes(field),
       `workflow-contract.json workerTaskPacket must require ${field}.`,
+    );
+  }
+  const executionModePolicy =
+    contract.protocols?.workerTaskPacket?.executionModePolicy ?? {};
+  assert(
+    executionModePolicy.executionWorkerModes?.includes("primary_execution") &&
+      executionModePolicy.executionWorkerModes?.includes("factory_then_dispatch"),
+    "workflow-contract.json workerTaskPacket.executionModePolicy must define execution worker modes.",
+  );
+  assert(
+    executionModePolicy.sidecarModes?.includes("readonly_fetch_sidecar") &&
+      executionModePolicy.sidecarModes?.includes("readonly_review_sidecar"),
+    "workflow-contract.json workerTaskPacket.executionModePolicy must define read-only sidecar modes.",
+  );
+  const executionModeEnum = executionModePolicy.executionModeEnum ?? [];
+  const executionModeClasses = new Set(executionModePolicy.executionModeClasses ?? []);
+  const executionModeClassMap = executionModePolicy.executionModeClassMap ?? {};
+  for (const expectedClass of [
+    "real_execution",
+    "read_only_sidecar",
+    "approval_gate",
+  ]) {
+    assert(
+      executionModeClasses.has(expectedClass),
+      `workflow-contract.json workerTaskPacket.executionModePolicy must define ${expectedClass}.`,
+    );
+  }
+  for (const mode of executionModeEnum) {
+    assert(
+      executionModeClasses.has(executionModeClassMap[mode]),
+      `workflow-contract.json workerTaskPacket.executionModePolicy must classify ${mode}.`,
+    );
+  }
+  for (const mode of executionModePolicy.executionWorkerModes ?? []) {
+    assert(
+      executionModeClassMap[mode] === "real_execution",
+      `workflow-contract.json execution worker mode ${mode} must classify as real_execution.`,
+    );
+  }
+  for (const mode of executionModePolicy.sidecarModes ?? []) {
+    assert(
+      executionModeClassMap[mode] === "read_only_sidecar",
+      `workflow-contract.json sidecar mode ${mode} must classify as read_only_sidecar.`,
+    );
+  }
+  for (const mode of executionModePolicy.approvalGateModes ?? []) {
+    assert(
+      executionModeClassMap[mode] === "approval_gate",
+      `workflow-contract.json approval gate mode ${mode} must classify as approval_gate.`,
     );
   }
   const verifySteps = contract.protocols?.workerTaskPacket?.verifyStepsField ?? {};
@@ -1116,6 +1398,10 @@ async function validateSyncConfiguration() {
     "config/sync.json defaultTargets must be a subset of supportedTargets.",
   );
   assert(
+    JSON.stringify(defaultTargets) === JSON.stringify(["claude", "codex"]),
+    "config/sync.json defaultTargets must keep direct-Enter install/update on Claude Code and Codex only.",
+  );
+  assert(
     availableTargets.every((target) =>
       Object.prototype.hasOwnProperty.call(profiles, target),
     ),
@@ -1197,9 +1483,27 @@ async function validateRuntimeCompatibilityCatalog() {
   );
   assert(
     catalog.decisionBoundary?.noAutoPromotionFromDependencyInstall === true &&
-      catalog.decisionBoundary?.noAutoPromotionFromGenericSkillPath === true,
-    "runtime compatibility catalog must forbid automatic promotion from dependency installs or generic paths.",
+      catalog.decisionBoundary?.noAutoPromotionFromGenericSkillPath === true &&
+      catalog.decisionBoundary?.noFormalClaimFromSurfaceMatch === true,
+    "runtime compatibility catalog must forbid automatic promotion from dependency installs, generic paths, or primitive surface matches.",
   );
+  const requiredSurfaces = [
+    "instruction_context",
+    "skill_workflow",
+    "agent_mode",
+    "hook_automation",
+    "mcp_tooling",
+    "command_cli",
+    "memory_context",
+    "permission_safety",
+  ];
+  for (const surface of requiredSurfaces) {
+    assert(
+      typeof catalog.surfaceTaxonomy?.[surface] === "string" &&
+        catalog.surfaceTaxonomy[surface].trim(),
+      `runtime compatibility catalog surfaceTaxonomy missing ${surface}.`,
+    );
+  }
 
   const products = catalog.products ?? [];
   assert(
@@ -1293,6 +1597,112 @@ async function validateRuntimeCompatibilityCatalog() {
         .length >= 4,
     "qoder candidate must be anchored to issue #7 and official Qoder docs.",
   );
+
+  const candidateProfiles = [
+    {
+      id: "qoder",
+      minDocs: 4,
+      surfaces: [
+        "instruction_context",
+        "skill_workflow",
+        "agent_mode",
+        "hook_automation",
+        "mcp_tooling",
+      ],
+      status: "verified_current",
+    },
+    {
+      id: "trae",
+      minDocs: 4,
+      surfaces: [
+        "instruction_context",
+        "skill_workflow",
+        "agent_mode",
+        "mcp_tooling",
+        "memory_context",
+      ],
+      status: "partial",
+    },
+    {
+      id: "kiro",
+      minDocs: 4,
+      surfaces: [
+        "instruction_context",
+        "skill_workflow",
+        "hook_automation",
+        "mcp_tooling",
+        "command_cli",
+      ],
+      status: "partial",
+    },
+    {
+      id: "windsurf",
+      minDocs: 4,
+      surfaces: [
+        "instruction_context",
+        "skill_workflow",
+        "hook_automation",
+        "mcp_tooling",
+        "memory_context",
+      ],
+      status: "partial",
+    },
+    {
+      id: "cline",
+      minDocs: 2,
+      surfaces: ["instruction_context", "mcp_tooling", "permission_safety"],
+      status: "partial",
+    },
+    {
+      id: "roo-code",
+      minDocs: 4,
+      surfaces: [
+        "instruction_context",
+        "skill_workflow",
+        "agent_mode",
+        "mcp_tooling",
+        "command_cli",
+        "permission_safety",
+      ],
+      status: "partial",
+    },
+    {
+      id: "continue",
+      minDocs: 4,
+      surfaces: [
+        "instruction_context",
+        "agent_mode",
+        "mcp_tooling",
+        "command_cli",
+        "permission_safety",
+      ],
+      status: "partial",
+    },
+  ];
+  for (const profile of candidateProfiles) {
+    const product = byId.get(profile.id);
+    assert(product, `runtime compatibility catalog must include candidate ${profile.id}.`);
+    assert(
+      product.tier === "candidate_probe" &&
+        product.formalProjection?.inSyncManifest === false &&
+        product.dependencyInstall?.ecc?.support === "not_supported" &&
+        product.genericCompatibility?.status === profile.status,
+      `${profile.id} must remain a candidate_probe with honest projection and ECC boundaries.`,
+    );
+    assert(
+      !eccTargets.has(profile.id) && !supportedTargets.has(profile.id),
+      `${profile.id} must not be in ECC targets or sync supportedTargets until promoted.`,
+    );
+    const surfaces = new Set(product.compatibilitySurfaces ?? []);
+    for (const surface of profile.surfaces) {
+      assert(surfaces.has(surface), `${profile.id} candidate missing ${surface} surface.`);
+    }
+    assert(
+      (product.evidence ?? []).filter((entry) => entry.type === "official_docs")
+        .length >= profile.minDocs,
+      `${profile.id} candidate must cite enough official docs evidence.`,
+    );
+  }
 
   const cursor = byId.get("cursor");
   assert(cursor, "runtime compatibility catalog must include cursor.");
@@ -1449,6 +1859,7 @@ async function main() {
 
   // 2. Workflow contract
   step(current++, TOTAL, t.val.step02, t.val.step02Detail);
+  await validateCoreLoopContract();
   await validateWorkflowContract();
   pass(t.val.step02Pass);
 

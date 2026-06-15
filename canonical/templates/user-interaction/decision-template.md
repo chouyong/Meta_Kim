@@ -14,7 +14,9 @@ Use this template when multiple viable solutions exist with distinct trade-offs.
 
 ## Runtime Adapter Payload
 
-The canonical template defines the semantic card only. Runtime adapters may compact or reshape it for a native choice surface, but they must preserve the decision purpose, route-changing dimension, recommended default, option count, option trade-offs, selection result, fallback reason, and writeback target.
+The canonical template defines the semantic card only. Runtime adapters may compact or reshape it for a native choice surface, but they must preserve the decision purpose, route-changing dimension, recommended default, runtime-native maximum option policy, option trade-offs, selection result, fallback reason, and writeback target.
+
+For primary native runtimes, the adapter must keep the interaction feeling like a structured decision panel rather than a plain prompt. Preserve these semantic sections when they affect the decision: AI understanding, AI additions, Capability route, Candidate paths, expected result, advantages, disadvantages or risk, and verification impact. Runtime-specific payload limits and current host maximums belong in the matching runtime reference, not in this generic template.
 
 Renderer-specific payload schemas belong in runtime references, not in this generic template.
 
@@ -37,3 +39,36 @@ Renderer-specific payload schemas belong in runtime references, not in this gene
 - The answer would not change the deliverable, owner, scope, risk, or acceptance
 - The assistant can proceed with an explicit assumption and document it
 - The question exists only to satisfy a question count
+
+## Prompt Acceptance
+
+This template binds `user-interaction-and-i18n`, `governance-orchestration`, `runtime-native-surfaces`, and `verification-eval-and-release`. It captures the semantic decision card and leaves renderer-specific payloads to runtime adapters.
+
+## Pass
+
+- The question changes execution, scope, risk, owner, or acceptance.
+- Options are materially different, understandable to a non-technical user, and include trade-offs.
+- A recommended default is marked when Critical, Fetch, and Thinking evidence supports one.
+- Runtime fallback preserves decision purpose, route-changing dimension, runtime-native maximum option policy, trade-offs, selection result, fallback reason, writeback target, and locale.
+
+## Fail
+
+- The template is used for a ritual question that does not change the route.
+- It exposes internal packet jargon as the primary user-facing choice.
+- It embeds Codex, Claude Code, Cursor, or OpenClaw renderer schemas into the generic template.
+
+## Block
+
+Block the decision card when fewer than two viable options exist, evidence is too weak to state trade-offs, the user already gave a binding instruction, or the question only satisfies a process quota.
+
+## Return to stage
+
+Return to Critical for unclear user outcome. Return to Fetch for missing evidence. Return to Thinking for incomplete branch comparison, owner selection, or acceptance impact.
+
+## Verification
+
+Check runtime-native maximum option policy, route-changing dimension, recommended default, trade-off completeness, fallback reason, selected locale, and writeback target. Run `npm run meta:prompt:validate` after editing this template.
+
+## Preserve
+
+Preserve user control, native choice surfaces, chat fallback, localization, and the distinction between semantic decision contracts and runtime-specific rendering schemas.

@@ -6,6 +6,406 @@
 
 更新说明只解释“改了什么、为什么重要”。过细的内部任务编号、低价值 backlog id 和实现流水账不放在这里；需要精确证据时，请看 Git 历史、测试、生成报告和 PRD 产物。
 
+## [Unreleased]
+
+## [2.8.33] - 2026-06-15
+
+### 新增
+
+- **全局优先项目懒初始化** - 新增 `meta-kim project bootstrap` 和 `npm run meta:project:bootstrap`，让全局安装的 Meta_Kim 可以先 dry-run 再 apply 项目级 Claude Code / Codex 投影，用户不需要手动维护全局和项目两套状态。
+- **首次触发 Bootstrap 探针** - 扩展 meta-theory activation hook：首次触发 meta-theory 时会运行项目 bootstrap dry-run probe，并保存 source-chain 证据，但不会静默写入项目文件。
+- **懒初始化验收测试** - 新增空项目、已有用户配置、旧 manifest、只读失败、managed block 替换、保护式 JSON merge、备份 manifest、`.codex/config.toml` 永不触碰等场景覆盖。
+
+### 变更
+
+- **项目级来源链证据** - 项目 bootstrap plan 现在会在任何写入前暴露 installed package root、canonical roots、`config/sync.json`、生成的 runtime mirrors、目标项目、文件动作、merge policy 和 skipped files。
+- **运行时原生选择面** - 更新 Claude Code 和 Codex 的 choice-surface 合同，保留结构化决策面板语义，并使用当前 host schema 的最大有意义选项数，不再使用 Meta_Kim 自己的硬编码上限。
+- **能力路由** - 能力发现改为 canonical/index-first 路由，并防止 Codex 和 Claude Code 把对方 runtime 的 project agent adapter 误当作可调用执行 owner。
+
+### 验证
+
+- `npm run meta:check`
+- `npm run meta:test:setup`
+- `npm run meta:test:governance`
+- `npm run meta:runtime:safety:validate`
+- `npm run meta:release:smoke`
+- `git diff --check`
+
+## [2.8.32] - 2026-06-15
+
+### 变更
+
+- **Codex Meta-Theory 并行编排** - 显式 `/meta-theory` 和复杂治理任务在存在多条安全 worker lane 时，会进入 fan-out eligible 路线，避免 Codex 静默退回主线程单干。
+- **运行时容量分 wave** - 移除旧的固定 5 个 agent 上限，改为读取 Codex 配置和官方默认容量，同时在 fan-out 前证明 DAG 依赖、冲突边界、workspace 隔离和 external-write 安全。
+- **能力调用真实性证据** - 收紧运行证据：只有存在 host spawn 证据时才把 live subagent 标为 `invoked`；host 不可用标为 `unavailable`，单 lane 标为 `not_required`，不能再把 provider 选中冒充为真实执行。
+
+### 验证
+
+- `npm run meta:release:smoke`
+- `git diff --check`
+
+## [2.8.31] - 2026-06-14
+
+### 新增
+
+- **Agent Teams Playbook 门禁** - 新增 P-110 支撑门和 `agentTeamsPlaybookPacket`，让默认治理路线在出现两条及以上独立可执行 worker lane 时选中 `agent-teams-playbook`，先证明 DAG/冲突/workspace/external-write 安全，再按 runtime agent capacity 分 wave；单 lane 任务记录为 `not_required`。
+- **能力调用真实性层** - 新增 `agent_teams_playbook` 调用状态，避免把 selected provider、live subagent 调用、MCP、skill、command、hook 或本地 worker 互相冒充。
+- **产品体验 Validator** - 新增 PRD/product validator，覆盖三大核心目标和支撑门，包括 LangGraph-style run packet、Dynamic Workflow 覆盖、用户可见运行面、能力调用真实性和 agent-teams 适配。
+
+### 变更
+
+- **Codex Meta-Theory Runtime** - 收紧 Codex `/meta-theory` 适配器和 meta-conductor prompt：`agent-teams-playbook` 只在真实并行 worker lane 中选中，不会套到所有非平凡任务上。
+- **依赖登记** - 将 `agent-teams-playbook` 从 external reference 提升为 installed skill candidate，并加入兼容验证与不得越级宣称 live 调用的边界。
+- **发布 Smoke 覆盖** - `meta:release:smoke` 现在包含 `agent-teams-playbook` 集成测试。
+
+### 验证
+
+- `npm run meta:deps:compat`
+- `npm run meta:prd:product-experience:validate`
+- `npm run meta:prd:default-execution:validate`
+- `npm run meta:prompt:validate`
+- `npm run meta:graphify:check`
+- `npm run meta:release:smoke`
+- Codex live probe 从线程 `019ec26d-8837-77b2-95c8-1361bcb91128` 创建 reviewer 子智能体 `019ec274-15a4-7603-9986-335dad22c699`；`wait_agent` 回流被中断，因此完整 Review 回流闭环仍只算 partial 证据。
+
+## [2.8.30] - 2026-06-13
+
+### 变更
+
+- **主链安装默认项** - 将安装/更新时直接回车的默认目标改为 Claude Code + Codex，同时保留 OpenClaw、Cursor 的显式 all-runtime 或 `--targets` 选择路径。
+- **Fetch 研究质量门** - 将 ECC 式 deep research 抽象内化为 Meta_Kim 原生 Fetch 合同，加入来源质量阶梯、关键来源深读、声明归因、交叉验证和原创综合边界。
+- **兼容候选框架** - 基于官方资料新增 Qoder CLI、Trae、Kiro、Windsurf / Devin Desktop Cascade、Cline、Roo Code、Continue 的原始能力表面框架，同时保持 candidate probe，不升级为正式工具端投影。
+- **兼容证据边界** - 将 GitHub 主完成判断与全工具端兼容证据拆开，Cursor 在 local-private PRD 与生成报告中保留为兼容后续项，并与主发布判断分离。
+
+### 验证
+
+- `npm run meta:sync`
+- `npm run meta:release:smoke`
+- `git diff --check`
+- `node setup.mjs --update --lang zh --targets claude,codex --project-dir <dir>...`
+
+## [2.8.29] - 2026-06-13
+
+### 新增
+
+- **原生选择面守卫** - 新增回归测试，防止 Codex 和 Claude Code 的关键分支决策被聊天卡片或纯 artifact fallback 冒充完成。
+- **运行状态面** - 新增本地化 run-status envelope 和命令，让治理运行能展示用户可读进度，同时不泄漏内部 packet 名称。
+
+### 变更
+
+- **Codex 与 Claude Code 不降级规则** - Codex 必须用 `request_user_input`，Claude Code 必须用 `AskUserQuestion` 或 deferred `AskUserQuestion` 完成必需执行决策；原生交互面不可用或返回空时，会在 Execution 前阻断，而不是静默降级。
+- **Runtime 镜像映射** - 已把 canonical meta-theory skill、meta agents、runtime references 和项目内 runtime mirrors 同步到 Claude Code、Codex、Cursor、OpenClaw。
+
+### 验证
+
+- `npm run meta:sync`
+- `npm run meta:governance:validate`
+- `npm run meta:prompt:validate`
+- `npm run meta:check:runtimes`
+- `npm run meta:test:meta-theory`
+- `git diff --check`
+
+## [2.8.28] - 2026-06-13
+
+### 新增
+
+- **默认治理执行证据** - 新增 validators 和 run artifact packets，证明默认 Meta-Theory 路径会产出治理 agent result、Conductor consumption evidence、worker result 和 worker execution evidence，同时不会把结构化 board 冒充成 live runtime 证据。
+- **Research-to-native 产品化** - 新增来源化产品合同，覆盖研究采纳矩阵、MCP/provider 成熟度、trace/eval 控制、AG-UI 风格阶段事件、performance/cost budget 和 context engineering。
+- **顺滑能力发现守卫** - 新增 PRD validator，把 agent、skill、script、MCP、tools、hook、runtime、memory、graph、external provider 都保留为一等发现类别，同时允许安全的 `no_expansion_needed`。
+- **Runtime 优先级合同** - 新增机器可读合同和 validator，固定 Claude Code 与 Codex 为 prompt-first 主链路，OpenClaw 与 Cursor 只作为兼容目标保留。
+
+### 变更
+
+- **框架型 Prompt 架构** - Prompt 资产现在按 system/project/agent/skill/contract/runtime-adapter/eval 分层验收，并加入 review dimensions、regression fixtures 和 context-sprawl budget 规则。
+- **治理验证链路** - `meta:verify:governance` 现在纳入 default execution、asset sedimentation、research-native、framework prompt architecture、smooth capability discovery 和 runtime priority validators。
+- **唯一 PRD 源** - local-private PRD 现在把 P-067、P-068 到 P-084、P-085、P-092 标为本地已测通，同时把 Cursor native live 证据保留在兼容后续项中。
+
+### 验证
+
+- `npm run meta:prd:smooth-capability:validate`
+- `npm run meta:prd:runtime-priority:validate`
+- `node scripts/run-node-tests.mjs "tests/meta-theory/29-capability-gap-complete-product-prd.test.mjs"`
+- `npm run meta:verify:governance`
+- `npm run meta:release:smoke`
+- `git diff --check`
+- `npm run meta:github:gap`
+
+## [2.8.27] - 2026-06-13
+
+### 新增
+
+- **Prompt-first 实机验收** - 新增和 PRD 绑定的 live acceptance contract 与 runner，要求同一套框架型 prompt 在 Claude Code 和 Codex 上都跑通，才能声明 prompt-first 全流程完成。
+- **PRD 来源化门禁** - 新增 PRD source-map 与分类 dossier validators，覆盖产品发现、prompt/runtime、MCP/tools/providers、安全、评测/可观测性、架构/发布等大类。
+
+### 变更
+
+- **抽象 Prompt 能力验收** - `meta:prompt:validate` 和治理验证现在会覆盖能力发现、prompt intake 优化、planning 连续性、runtime 原生能力、MCP/provider、memory/graph、安全 hook、发布证据和 i18n 等抽象能力族。
+- **Prompt-first 发布证据收口** - 治理验证现在纳入 prompt-first stage contract、live acceptance fixture、source-map 校验、PRD 分类 dossier，以及 public docs 图片资产边界。
+- **Codex 实机 runner 稳定性** - Codex live acceptance runner 现在通过 `codex exec -` 从 stdin 传入 prompt，避免 Windows `.cmd` 多行 prompt 卡住，同时保留真实 Codex 执行证据。
+
+### 验证
+
+- `npm run meta:prd:prompt-first-live:run`
+- `npm run meta:prd:prompt-first-live:validate`
+- `npm run meta:verify:governance`
+- `npm run meta:release:smoke`
+- `git diff --check`
+
+## [2.8.26] - 2026-06-12
+
+### 修复
+
+- **Meta-Theory 深度 Fetch 入口** - 项目/仓库/代码库理解、商业化发展和策略类问题现在会进入治理化 Fetch 路径，不再落到浅层 fast path 回答。
+- **跨运行时入口对齐** - 新增 Claude Code `/meta-theory` command 投影支持、Cursor 原生 always-on dispatch rule、OpenClaw HEARTBEAT/SOUL 项目理解契约，让 Claude、Codex、Cursor、OpenClaw 都走同一条治理入口约束。
+- **Run artifact 证据补齐** - `meta:theory:run` 现在会为项目理解类运行记录项目概览、维护契约、命令库存、Graphify、MCP、能力索引、机器契约和外部检索能力等 Fetch source class。
+
+### 验证
+
+- `node --test tests/meta-theory/47-meta-theory-entry-classifier.test.mjs`
+- `node --test tests/setup/sync-runtimes-manifest.test.mjs`
+- `node --test tests/governance/core-loop-contract.test.mjs`
+- `npm run meta:sync`
+- `npm run meta:check`
+- `git diff --check`
+
+## [2.8.25] - 2026-06-12
+
+### 修复
+
+- **Claude Code 全局 Hook 清理** - 全局 Meta_Kim 同步现在会校验 Claude Code `settings.json` 里的 hook 命令，不再只检查 `~/.claude/hooks/meta-kim/` 包目录。这样可以抓到指向已删除脚本的旧全局 Meta_Kim hook 注册，避免 Claude Code 在 Stop 阶段反复报 `MODULE_NOT_FOUND`。
+- **已安装用户恢复路径** - 正常 setup/update 路径现在会清理旧的全局 Meta_Kim hook 条目，只保留当前被管理的全局 hook 命令；已有安装不需要手工改 Claude settings 也能恢复。
+
+### 验证
+
+- `npm run meta:check:global:release`
+- `npm run meta:test:setup`
+- `npm run meta:verify:governance`
+- `npm run meta:check`
+- `git diff --check`
+
+## [2.8.24] - 2026-06-12
+
+### 变更
+
+- **Runtime Safety 治理契约** - 新增发布级治理契约，把近期 5 条修复线收进同一个 validator：宿主配置安全合并、跨 runtime HookPrompt 协议建模、删除/重构残留清扫、runtime evidence 模板、安装/更新状态语义。
+- **安装状态语义固定** - 安装和更新文案现在有机器可读状态类：`success`、`skipped`、`manual`、`failed`，并绑定用户下一步动作，避免把预期跳过、手工步骤和真实失败混在一起。
+- **HookPrompt 坏输入回归** - 新增 markdown fence、delegated prompt、internal-goal filter 三类回归样本，并验证 Codex / Cursor adapter 会把优化内容放进模型可见字段，不把 UI 提示误当成策略决策。
+
+### 验证
+
+- 新增 `npm run meta:runtime:safety:validate`，并接入 `meta:verify:governance`。
+- `npm run meta:verify:governance`
+- `npm run meta:test:setup`
+- `npm run meta:sync`
+- `npm run discover:global`
+- `npm run meta:check`
+- `npm run meta:validate`
+- `npm run meta:release:smoke`
+- `npm run meta:setup:check`
+- `npm run meta:validate:run -- tests/fixtures/run-artifacts/valid-core-loop-release-run.json`
+- `npm run meta:graphify:rebuild`
+- `npm run meta:verify:all`
+- `git diff --check`
+
+## [2.8.23] - 2026-06-12
+
+### 变更
+
+- **Run-scoped Worker 实机执行** - `meta:theory:run` 现在会通过本地 run-scoped worker executor 执行 bounded worker task packets，不再停在结构化调度就绪。主线程仍然只负责 scope、dispatch、review 和 synthesize；不会额外派外部 Agent。
+
+### 验证
+
+- 增加 governance 覆盖，要求 worker execution evidence，同时继续保留 public-ready 发布门禁。
+
+## [2.8.22] - 2026-06-12
+
+### 变更
+
+- **核心治理线路发布证据收口** - 补齐 PDR 发布清单和最终发布证据，让最终 tag 内包含 commit、tag、push 和 GitHub Release 证明。
+
+### 验证
+
+- 复用 `2.8.21` 的核心治理线路实现证据，并为最终 `2.8.22` patch 发布重新运行本地发布检查。
+
+## [2.8.21] - 2026-06-12
+
+### 变更
+
+- **核心治理线路修复** - Meta_Kim 现在有了默认 8 阶段治理路径的机器契约，覆盖 Critical、Fetch、Thinking、Execution、Review、Meta-Review、Verification、Evolution 的输入输出、跳过条件、门禁、阻断、警告、public-ready 和写回策略。
+- **默认运行产物闭合** - `meta:theory:run` 现在会为普通自然语言 durable task 输出顶层 request、intent、fetch、能力库存、gap/ready、thinking、dispatch、worker task、execution、review、meta-review、verification、evolution、dynamic workflow 和 public-ready 包。
+- **能力发现总线接入默认入口** - 默认 run 不再只带 skill 或粗粒度摘要，而是接入统一 capability inventory bus。能力记录覆盖 agent、skill、script/tool、MCP、hook、runtime、OS、memory、graph 和外部依赖候选，并使用统一 provider 字段。
+- **发布治理门禁补齐** - 完整发布验证现在会包含 governance validators 和 governance tests，覆盖 strict workflow fixture、PDR 证据映射，以及脚本 registry 的 cleanup candidate 保护。
+
+### 验证
+
+- `npm run meta:sync`
+- `npm run discover:global`
+- `npm run meta:check`
+- `npm run meta:validate`
+- `npm run meta:release:smoke`
+- `npm run meta:verify:governance`
+- `npm run meta:graphify:rebuild`
+- `npm run meta:check:global:release`
+- `npm run meta:verify:all`
+- `npm run meta:validate:run -- tests/fixtures/run-artifacts/valid-core-loop-release-run.json`
+- `git diff --check`
+
+## [2.8.20] - 2026-06-11
+
+### 变更
+
+- **项目 Hook 归属合理化** - 项目级运行时导出现在只保留和 Meta_Kim 项目行为强相关的 hook，例如图谱上下文、能力优先调度和 meta-theory 激活。提示词优化、记忆生命周期、planning 辅助、通用危险命令拦截这类个人通用 hook，统一留在全局运行时目录，不再重复投影到每个项目。
+- **全局 Hook 同步覆盖补齐** - 全局同步和发布检查现在会明确比对被管理的全局 hook 文件；项目同步会清理 Codex / Cursor 项目目录里残留的全局专属 hook adapter。这样依赖项目自己的 hook 可以继续从源项目更新，也避免同一份提示词或上下文被重复注入。
+- **Codex MCP 配置合并规范化** - Codex MCP 配置合并逻辑进一步收紧，ECC 管理的 server 会按统一命名和结构归一化，同时继续保留用户自己的配置。
+
+### 验证
+
+- `npm run meta:release:smoke`
+- `npm run meta:check`
+- `npm run meta:check:global:release`
+- `npm run meta:test:setup`
+- `node scripts/validate-provider-capabilities.mjs`
+- `node scripts/validate-foundational-capabilities.mjs`
+- `node scripts/validate-hook-progression.mjs`
+- `npm run meta:graphify:check`
+- `git diff --check`
+
+## [2.8.19] - 2026-06-11
+
+### 变更
+
+- **Apache-2.0 + NOTICE 署名声明** - Meta_Kim 主项目许可证从 MIT 调整为 Apache License 2.0，并新增根目录 `NOTICE` 文件承载推荐署名。商业使用仍然允许；分发 Meta_Kim 或其实质性部分时，需要保留 Apache 许可证文本和 NOTICE 署名声明。此前已经发布的版本仍按各自发布时附带的许可证适用。
+- **多项目运行时自动更新** - `setup.mjs` 现在可以一次刷新多个显式传入或已保存项目目录里的项目级运行时文件，支持用 `--project-dir` 传入脚本化目标、用 `--save-project-dirs` 保存脚本传入列表，也支持用 `--all-projects` 复用本机保存的目标列表。
+- **已保存项目目录管理器** - 更新向导现在支持管理已保存项目目录列表，可在一行里用分号或逗号输入多个目录，从菜单里更新全部已保存项目，也可用 `--all-projects` 复用。
+- **批量更新时保护项目配置** - 多项目运行时导出会保留并合并已有本地 `settings`、MCP 和 hook 配置，不再直接替换；`.claude/settings.local.json`、Codex 项目配置、OpenClaw workspace 状态等本地状态不会被导出。
+
+### 验证
+
+- `node --check setup.mjs`
+- `node --test tests/setup/project-deploy-protection.test.mjs tests/setup/setup-update-default-flow.test.mjs tests/setup/i18n.test.mjs`
+- `npm run meta:test:setup`
+- `npm run meta:sync`
+- `npm run meta:check`
+- `npm run meta:verify:all`
+- `npm --registry=https://registry.npmjs.org audit --audit-level=high`
+- `npm run meta:graphify:check`
+- `git diff --check`
+
+## [2.8.18] - 2026-06-11
+
+### 修复
+
+- **Codex Planning Stop Hook 改为提示模式** - Codex 的 planning-with-files Stop hook 不再把普通进度提醒转成强制继续执行。这样回答已经完成时，不会因为结尾触发旧计划提醒，就把关键答案折叠进 Codex App 的“已处理”区域。
+- **零 Phase 计划不再误判未完成** - Codex planning hook adapter 遇到 `0/0` phase 计数时会安静跳过，不再当成未完成任务；混合 `**Status:**` 与 inline `[status]` 的计划格式，也会与 shell / PowerShell hook 一样稳定计数。
+
+### 变更
+
+- **变更准备合同** - 运行时、hook、setup、sync、provider、删除和发布类 PR 现在有可复用检查清单，覆盖宿主状态影响矩阵、hook/prompt 协议流、删除残留清扫和证据预算。
+- **执行模式分类** - `executionMode` 现在会明确映射到 `real_execution`、`read_only_sidecar`、`approval_gate` 三类。验证器和 Review 可以按语义类别判断执行是否真实发生，而不是只看任务节点数量。
+
+### 验证
+
+- `node --check scripts/install-global-skills-all-runtimes.mjs`
+- `node --check scripts/validate-project.mjs`
+- `node --check scripts/validate-run-artifact.mjs`
+- `node --test tests/setup/release-docs-semantics.test.mjs tests/setup/install-cross-platform.test.mjs`
+- `node --test tests/meta-theory/09-run-artifact-validator.test.mjs tests/meta-theory/31-capability-gap-orchestration.test.mjs tests/meta-theory/33-capability-gap-orchestration-quality.test.mjs`
+- `node scripts/validate-provider-capabilities.mjs --strict-global-hooks --json`
+- `npm --registry=https://registry.npmjs.org audit --audit-level=high`
+- `npm run meta:verify:all`
+- 本机 Windows Codex planning Stop hook smoke：`0/0` phase 计划不再 block；普通未完成计划只返回 `systemMessage`，不返回 `decision:block`。
+- 已安装用户路径 hook 合并 smoke：重新安装 `planning-with-files` 后，Codex 同时保留 `user_prompt_submit.py` 和 `hookprompt-adapter.mjs`；Cursor 的 `beforeSubmitPrompt` 仍保留 `hookprompt-adapter.mjs`。
+
+## [2.8.17] - 2026-06-11
+
+### 修复
+
+- **编排任务有真实执行模式** - `workerTaskPacket` 现在会声明 `executionMode`，Meta_Kim 可以区分真正执行 worker、审批门禁，以及只读 Fetch/Review sidecar。只包含 sidecar 或审批步骤的并行组，不能再通过质量门。
+- **Capability Gap 编排验证更严格** - Capability-gap 报告现在会把 execution mode 贯穿到 worker packet、任务板、Review 检查、验证摘要和 run artifact validator。这样“看起来并行、实际没执行”的假并行会被直接暴露并拦下。
+- **ECC 插件更新路径修正** - Claude plugin update 模式在发现已有 ECC 插件记录时，会调用 `claude plugin update ecc@ecc`；更新成功后重新读取插件管理器记录，避免沿用旧路径或旧 SHA。
+- **Graphify Python 发现更稳** - Graphify setup 和 runtime 检查会在普通 `python3` / `python` 之后继续尝试 Homebrew 和 Linuxbrew Python 路径。macOS / Linux 用户即使 Python 没放进 PATH，也更容易完成 Graphify 初始化。
+
+### 验证
+
+- `node --test tests/meta-theory/09-run-artifact-validator.test.mjs`
+- `node --test tests/meta-theory/31-capability-gap-orchestration.test.mjs tests/meta-theory/33-capability-gap-orchestration-quality.test.mjs`
+- `node --test tests/setup/graphify-runtime.test.mjs tests/setup/graphify-wiring-contract.test.mjs tests/setup/install-cross-platform.test.mjs tests/setup/install-plugin-bundles.test.mjs`
+- `node --test tests/integration/agent-teams-playbook-integration.test.mjs tests/meta-theory/39-orchestration-dag-report.test.mjs tests/meta-theory/40-orchestration-scheduler-report.test.mjs`
+- `npm run meta:gap:validate-board`
+- `npm run meta:gap:complex-inputs`
+- `npm run meta:gap:codex-real-test`
+- `npm run meta:test:setup`
+- `npm run meta:test:meta-theory`
+- `npm run meta:check`
+- `npm run meta:graphify:rebuild`
+- `npm run meta:graphify:check`
+- `npm run meta:release:smoke`
+- `git diff --check`
+
+## [2.8.16] - 2026-06-10
+
+### 修复
+
+- **复制后自动初始化 Graphify** - 复制到任意项目根目录的 Meta_Kim 项目级文件夹，不再要求用户记住并手动运行 `node meta-kim-post-copy.mjs`。首次触发 `meta-theory` 时，Meta_Kim 会从最终项目根目录自动启动 post-copy bootstrap。
+- **首次触发不阻塞** - 生成的 `meta-kim-post-copy.mjs` 现在支持 `--auto` 和 `--auto-worker`。hook 只启动一个分离的后台 worker，把一次性状态写入 `.meta-kim/state/default/post-copy-init.json`；即使 Graphify 依赖安装或建图耗时较长，也不会卡住 meta-theory 启动路径。
+- **运行时 hook 覆盖补齐** - Claude Code 和 Codex 的 Skill 激活会调用同一个 shared spine hook；Cursor 的 prompt hook 也能在显式 `meta-theory` 输入时走同一路径自动 bootstrap。需要显式关闭时，可以设置 `META_KIM_POST_COPY_AUTO=off`。
+- **回归测试覆盖** - setup 测试现在锁定自动 bootstrap 契约、Cursor prompt hook 顺序，以及复制后 Graphify 初始化行为。
+
+### 验证
+
+- `npm run meta:test:setup`
+- `npm run meta:graphify:rebuild`
+- `npm run meta:release:smoke`
+- `npm run meta:graphify:check`
+- `git diff --check`
+- `node --check setup.mjs`
+- `node --check canonical/runtime-assets/shared/hooks/activate-meta-theory-spine.mjs`
+- `node --check scripts/runtime-hook-mapping.mjs`
+- `node --check scripts/sync-runtimes.mjs`
+
+## [2.8.15] - 2026-06-10
+
+### 修复
+
+- **可复制目录的 Graphify 初始化** - quick setup 或 install/update 导出的项目级文件夹现在会包含 `meta-kim-post-copy.mjs`。当你先把生成目录放在桌面等临时位置，再把其中全部内容复制到任意项目根目录后，在最终项目里运行 `node meta-kim-post-copy.mjs` 即可为该项目初始化 Graphify。
+- **临时目录边界更清楚** - Meta_Kim 不再把桌面这类生成/暂存目录误当成最终 Graphify root。这样不会为错误目录生成或复制过期的 `graphify-out/`，Graphify 仍然按最终项目逐个初始化。
+- **复制后契约测试覆盖** - setup 测试现在会锁定 copy-ready 契约：运行时文件复制完成后才写入 bootstrap；bootstrap 用自身所在目录作为项目根；install/update 导出不会悄悄在暂存目录里构建 Graphify。
+
+### 验证
+
+- `node --check setup.mjs`
+- `node --test tests/setup/graphify-wiring-contract.test.mjs`
+- `node --test tests/setup/install-cross-platform.test.mjs tests/setup/setup-update-default-flow.test.mjs tests/setup/i18n.test.mjs`
+- `npm run meta:test:setup`
+- `npm run meta:graphify:rebuild`
+- `npm run meta:graphify:check`
+- `git diff --check`
+
+## [2.8.14] - 2026-06-10
+
+### 修复
+
+- **安装和更新提示本地化** - ECC、Graphify、Codex 配置保护、原生插件交接、插件市场检查和回环代理处理等安装/更新输出，现在统一走 Meta_Kim shared i18n，不再散落硬编码英文。中文、日文、韩文用户会看到本地化的跳过状态和手动宿主插件步骤。
+- **ECC 上游版本跟随** - ECC 原生安装现在使用 `ecc-universal@latest`，不再使用旧的 `2.0.0-rc.1` release candidate；运行时清单、文档、兼容性证据和 setup 测试都已同步。
+- **插件交接提示不再误导** - 宿主限制导致的预期手动步骤现在显示为跳过/手动处理，不再像失败警告。Codex 和 Cursor 原生插件提示会说明应走宿主插件入口，而不是暗示技能目录回退失败。
+- **Graphify 跳过状态一致** - 已经存在 Graphify 指南章节时，Graphify install 会输出本地化跳过提示；旧的 `[SKIP] graphify ...` 也统一成 Meta_Kim 的跳过状态输出。
+- **HookPrompt Markdown 安全输出** - 上游 HookPrompt 依赖现在会把用户原始输入和优化后的完整提示词都放进 fenced code block；因此 `# Files mentioned by the user:` 这类附件标题不再会在 Codex 中间输出里被渲染成超大 Markdown 标题。
+
+### 验证
+
+- `node --check .claude/hooks/user-prompt-submit.js; node --check .codex/hooks/user-prompt-submit.js; node --check test-hook.js`（在 `D:/KimProject/HookPrompt`）
+- `node test-hook.js`（在 `D:/KimProject/HookPrompt`）
+- `node scripts/install-global-skills-all-runtimes.mjs --dry-run --update --skills ecc,superpowers --targets claude,codex,cursor --lang zh-CN`
+- `node --test tests/setup/install-plugin-bundles.test.mjs tests/setup/graphify-wiring-contract.test.mjs tests/setup/install-cross-platform.test.mjs`
+- `npm run meta:test:setup`
+- `npm run meta:capabilities:smoke`
+- `npm run meta:check`
+- `npm run meta:release:smoke`
+- `npm run meta:verify:all`
+- `npm run meta:graphify:rebuild`
+- `npm run meta:graphify:check`
+- `git diff --check`
+
 ## [2.8.13] - 2026-06-10
 
 ### 修复

@@ -1,6 +1,6 @@
 # Codex Runtime Adapter
 
-In Codex, `/meta-theory` is authorization to use available subagent/delegation tools when the user explicitly requests governed subagent work or the active user request names Critical / Fetch / Thinking / Review with meta-theory. Only claim delegation when a real tool was called successfully.
+In Codex, `/meta-theory` is user-visible authorization to use available subagent/delegation tools when the task has multiple independent worker lanes. A prompt that explicitly asks for subagents, parallel agents, one-agent-per-point review, or `/meta-theory` may satisfy Codex's explicit subagent trigger; a hidden governance-only inference does not. Only claim delegation when a real tool was called successfully.
 
 Codex must not self-degrade to "single-thread dispatcher" merely because it is running in Codex App. If `spawn_agent` / subagent tooling is exposed, Thinking may select it after Fetch evidence and the dispatcher must show which temporary workers were spawned. If the tool is absent or fails, record `subagentCapabilityStatus=unavailable` and a concrete `degradationReason`.
 
@@ -16,9 +16,12 @@ If `spawn_agent` is available and the user explicitly authorized subagents:
 
 - use it for independent, bounded worker or review lanes after Thinking creates `workerTaskPackets`
 - keep each worker's write scope disjoint when it edits files
+- size fan-out from Codex `[agents].max_threads`, current runtime capacity, task DAG, and collision boundaries instead of a fixed Meta_Kim cap
 - show the dispatch board before or alongside dispatch
 - distinguish temporary `runtimeInstanceAlias` from durable `roleDisplayName` and `ownerAgent`
 - do not describe the temporary subagent prompt as the created/iterated project agent
+
+`agent-teams-playbook` is the Codex fan-out adapter after Thinking, not a substitute for Thinking. Select it when there are 2+ executable `workerTaskPackets` with proven DAG, collision, workspace-isolation, and external-write safety; record `not_required` for single-lane work and partial/degraded for unsafe fan-out. A selected playbook provider is `agent_teams_playbook=selected_not_invoked` until a live Skill/Agent Team/spawn_agent call is actually attached as host evidence.
 
 ## Codex Durable Agent Projection
 
@@ -34,11 +37,15 @@ Other formal tool projections follow `config/sync.json` and `config/runtime-comp
 
 ## Choice Surfaces
 
-Use native `request_user_input` only when exposed, and only with a valid 1-3 question payload that offers meaningful options. Otherwise use a short chat decision card. Do not call a chat fallback a popup.
+Use native `request_user_input` only when exposed, and only with a payload accepted by the active host schema. Use the active runtime-native maximum meaningful option count; Meta_Kim must not impose a lower product cap. In current Codex App schemas this may be 1-3 questions with 2-3 mutually exclusive choices per question; treat that as observed host capacity, not a permanent Meta_Kim limit. If a future or different Codex host exposes more options, use that larger maximum. Codex is a primary Meta_Kim runtime, so required branch-changing decisions must not be downgraded to a chat decision card.
 
-If `request_user_input` returns API 400 or another host validation error, do not retry blindly. Fall back once to a localized markdown decision card, record `choiceSurfaceFallback=api_error`, and wait for the user's answer in chat.
+If `request_user_input` is unavailable, returns API 400, returns empty, or is rejected by the host, record `nativeChoiceSurfaceBlocked` with the concrete reason, stop before Execution, and return to Critical or Thinking. Do not continue with a localized markdown decision card as acceptance evidence.
+
+Trigger proof rule: when `request_user_input` is present in the active Codex tool set and `choiceSurfaceState` is `critical_clarification_allowed` or `execution_confirmation_allowed`, the assistant must call `request_user_input` in the current chat turn before Execution. A `cardPlanPacket`, CLI `conversationNotice`, markdown report, hook warning, or generated artifact only records that a choice is needed; it is not evidence that a native Codex choice surface was shown. Completion proof is the returned `request_user_input` answer, or a blocking `nativeChoiceSurfaceBlocked` record when the native surface cannot run.
 
 Visible Decision cards need at least two meaningful options and a recommended default. Critical clarification can appear before Fetch when the user's wording is too ambiguous to collect the right evidence. Notices can stay concise.
+
+Native structured panel content: treat each `request_user_input.questions[]` item as a compact decision panel, not a plain yes/no prompt. The `header` stays short and user-language friendly, the `question` text preserves the semantic panel sections "AI understanding", "AI additions", "Capability route", and "Candidate paths" when those sections affect the choice, and each option `description` must preserve expected result, advantage, disadvantage/risk, and verification impact. Mark the recommended option in its label with "(Recommended)" when required by the active Codex host. If the semantic decision frame has more viable options than the active schema accepts, render the strongest host-maximum set and record omitted alternatives in the Thinking notes; never retry a rejected oversized payload unchanged.
 
 Fetch/content evidence must precede Thinking/pre-decision option framing. Targeted read-only baseline verification such as existing test or validator runs belongs to Fetch when it changes the route; it does not belong to Critical. Once the run starts collecting repo evidence through Fetch-class inspection, the spine should progress into Fetch even if no planning file has been written yet. At the transition from Thinking to Execution, present one Decision only when the answer changes scope, owner, risk, or acceptance. After Thinking completes, BEFORE any Execution, ask the user only if the route branches. DO NOT ask confirmation during Critical/Fetch/Thinking/Review just to satisfy a ritual.
 
@@ -70,7 +77,7 @@ There is no question quota. Each visible question must change an execution branc
 
 ## Codex Multi-Option Choice Surface Rule
 
-For every confirmation or decision surface in Codex, use `default_mode_request_user_input` and `request_user_input` when available; otherwise render a clean choice card. Do not show a `Preflight` block unless the user explicitly asks for debug, audit, protocol, or governance trace output. Always show at least two viable options, include an explicit output-language choice when language is unresolved, use the latest input language, and render Option A placeholders as resolved user-facing language instead of hardcoding any single human language. Claude Code native question tool remains unchanged.
+For every required confirmation or decision surface in Codex, use `default_mode_request_user_input` and `request_user_input`. Do not show a `Preflight` block unless the user explicitly asks for debug, audit, protocol, or governance trace output. Always show the maximum viable options accepted by the active host schema, include an explicit output-language choice when language is unresolved, use the latest input language, and render Option A placeholders as resolved user-facing language instead of hardcoding any single human language. If `request_user_input` is unavailable, block instead of treating a chat card as an accepted Codex decision. Claude Code native question tool remains unchanged.
 
 Choice Surface Gate states: `not_allowed`, `critical_clarification_allowed`, `execution_confirmation_allowed`, `completed`. FORBIDDEN: premature choice surface for test a popup / interactive box / popup_test_request. Critical -> Fetch -> Thinking must happen before execution confirmation. If the intent frame is missing or conflicting and the missing answer changes route, scope, risk, acceptance, owner, permission, or non-goal, ask Critical clarification and must not present execution options. `contentEvidencePacket` precedes `preDecisionOptionFrame`. No candidate paths means no execution confirmation; no Fetch evidence means Thinking is not complete; no Thinking result means no pre-Execution confirmation.
 

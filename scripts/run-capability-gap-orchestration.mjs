@@ -36,6 +36,28 @@ const OWNER_BY_DECISION = {
   blocked_or_needs_approval: "meta-sentinel",
 };
 
+const FACTORY_DECISIONS = new Set([
+  "create_skill",
+  "create_agent",
+  "create_script",
+  "create_mcp_provider",
+]);
+
+const EXECUTION_WORKER_MODES = new Set([
+  "primary_execution",
+  "factory_then_dispatch",
+  "verification_execution",
+]);
+
+const APPROVAL_GATE_MODES = new Set(["approval_gate"]);
+
+const EXECUTION_MODE_ENUM = new Set([
+  ...EXECUTION_WORKER_MODES,
+  ...APPROVAL_GATE_MODES,
+  "readonly_fetch_sidecar",
+  "readonly_review_sidecar",
+]);
+
 const MULTI_TYPE_CAPABILITY_INVENTORY = [
   {
     capabilityType: "agent",
@@ -646,6 +668,16 @@ function inferDynamicWorkflowIntent(input) {
     /(原型|demo|只要页面|不要后端|先看样子)/u,
     /\b(prototype|demo|mockup)\b/i,
   ]);
+  const externalWritesExplicitlyForbidden = matchesAny(normalized, [
+    /(不要真实发布|不真实发布|不使用生产凭证|不要使用生产凭证|不要真实外部写|不要实际发布|不要登录真实账号)/u,
+    /\b(no real publish|do not publish|without production credentials|no production credentials|no external writes?)\b/i,
+  ]);
+  const requestsLiveExternalAction =
+    !externalWritesExplicitlyForbidden &&
+    matchesAny(normalized, [
+      /(现在发布|直接发布|立刻发布|发到小红书|登录账号|使用凭证|使用生产凭证|真实发布|实际发布|真实外部写)/u,
+      /\b(publish now|post now|use production credentials|log in|real publish|external write)\b/i,
+    ]);
   const requiresReleaseOps =
     !prototypeOnly &&
     (matchesAny(normalized, [
@@ -672,6 +704,8 @@ function inferDynamicWorkflowIntent(input) {
     requiresExternalResearch,
     requiresReleaseOps,
     prototypeOnly,
+    externalWritesExplicitlyForbidden,
+    requestsLiveExternalAction,
   };
 }
 
@@ -742,6 +776,11 @@ function resolveCapabilityLoadout(slot, projectProfile, intent) {
 function materializeProjectCapabilitySlot(slot, projectProfile, intent) {
   const projectAgentId = projectAgentIdFor(slot, projectProfile);
   const capabilityLoadout = resolveCapabilityLoadout(slot, projectProfile, intent);
+  const externalWriteRiskBoundary = slot.externalWriteBoundary === true;
+  const externalWriteBoundary =
+    externalWriteRiskBoundary &&
+    intent.requestsLiveExternalAction === true &&
+    intent.externalWritesExplicitlyForbidden !== true;
   return {
     laneId: slot.laneId,
     publicLabel: slot.publicLabel,
@@ -754,7 +793,15 @@ function materializeProjectCapabilitySlot(slot, projectProfile, intent) {
     dependsOn: [...slot.dependsOn],
     toolRequirements: [...slot.toolRequirements],
     capabilityLoadout,
-    externalWriteBoundary: slot.externalWriteBoundary === true,
+    externalWriteRiskBoundary,
+    externalWriteBoundary,
+    externalWritePolicy: externalWriteRiskBoundary
+      ? {
+          mode: externalWriteBoundary ? "approval_gate_for_live_external_action" : "design_and_sandbox_only",
+          realExternalWriteAllowed: false,
+          requiresExplicitApprovalForLiveWrite: true,
+        }
+      : null,
     slotSource: "capability_slot_catalog",
     projectAgentSource: "synthesized_from_project_profile_and_capability_requirements",
   };
@@ -813,6 +860,8 @@ function sanitizeDynamicWorkflowIntent(intent) {
     requiresExternalResearch: intent.requiresExternalResearch,
     requiresReleaseOps: intent.requiresReleaseOps,
     prototypeOnly: intent.prototypeOnly,
+    externalWritesExplicitlyForbidden: intent.externalWritesExplicitlyForbidden,
+    requestsLiveExternalAction: intent.requestsLiveExternalAction,
   };
 }
 
@@ -899,9 +948,74 @@ function makeGroupKey(result) {
 }
 
 function needsExternalResearch(input) {
-  return /\b(latest|current|today|api|platform|provider|dependency|external|web|search|official|version|price)\b|联网|最新|当前|今天|平台|外部|生态|供应商|依赖|官方|版本|价格|搜索|市场/i.test(
+  return /\b(latest|current|today|api|platform|provider|dependency|external|web|search|official|version|price|market|competitor|commercial|commerciali[sz]e|pricing|customer|investor|strategy)\b|联网|最新|当前|今天|平台|外部|生态|供应商|依赖|官方|版本|价格|搜索|市场|竞品|商业化|定价|客户|投资|战略|发展/i.test(
     String(input ?? "")
   );
+}
+
+function projectFetchSources(input) {
+  const text = String(input ?? "");
+  const sources = [
+    {
+      source: "README.md",
+      sourceType: "project_overview",
+      routeImpact: "explain user-facing purpose and installation surface",
+      requiredForProjectUnderstanding: true,
+    },
+    {
+      source: "AGENTS.md",
+      sourceType: "maintainer_contract",
+      routeImpact: "bind runtime behavior, governance entry, and Graphify policy",
+      requiredForProjectUnderstanding: true,
+    },
+    {
+      source: "package.json",
+      sourceType: "command_inventory",
+      routeImpact: "discover executable product and verification commands",
+      requiredForProjectUnderstanding: true,
+    },
+    {
+      source: "graphify-out/GRAPH_REPORT.md",
+      sourceType: "project_graph",
+      routeImpact: "navigate broad codebase structure before source verification",
+      requiredForProjectUnderstanding: true,
+    },
+    {
+      source: "canonical/skills/meta-theory/SKILL.md",
+      sourceType: "canonical_skill",
+      routeImpact: "bind meta-theory executable governance rules",
+      requiredForProjectUnderstanding: true,
+    },
+    {
+      source: "config/contracts/core-loop-contract.json",
+      sourceType: "machine_contract",
+      routeImpact: "prove the default governed execution entry and stage outputs",
+      requiredForProjectUnderstanding: true,
+    },
+    {
+      source: "config/capability-index/",
+      sourceType: "capability_index",
+      routeImpact: "discover reusable agents, skills, tools, MCPs, hooks, and runtime providers",
+      requiredForProjectUnderstanding: true,
+    },
+    {
+      source: ".mcp.json and runtime MCP configs",
+      sourceType: "mcp_inventory",
+      routeImpact: "detect retrieval and memory/tool providers before Thinking",
+      requiredForProjectUnderstanding: true,
+    },
+  ];
+
+  if (needsExternalResearch(text)) {
+    sources.push({
+      source: "runtime retrieval capability inventory",
+      sourceType: "external_research_capability",
+      routeImpact: "prove web_search/url_fetch/browser/MCP/provider path or block before market claims",
+      requiredForProjectUnderstanding: true,
+    });
+  }
+
+  return sources;
 }
 
 function buildResearchCapabilityDiscovery(input) {
@@ -994,6 +1108,13 @@ function makeWorkerTaskPacket({ gap, group, groupIndex, itemIndex }) {
   const capabilityLoadout = cloneCapabilityLoadout(lane?.capabilityLoadout);
   const roleSoulPolicy = lane ? buildRoleSoulPolicy(lane) : null;
   const taskPacketId = stableId("worker-task", `${group.groupKey}-${gap.requestId}`);
+  const executionMode = lane
+    ? "primary_execution"
+    : decision === "blocked_or_needs_approval"
+      ? "approval_gate"
+      : FACTORY_DECISIONS.has(decision)
+        ? "factory_then_dispatch"
+        : "primary_execution";
   return {
     taskPacketId,
     owner: gap.owner,
@@ -1002,6 +1123,7 @@ function makeWorkerTaskPacket({ gap, group, groupIndex, itemIndex }) {
       : decision === "worker_task_only"
         ? "existing-owner"
         : "create-owner-first",
+    executionMode,
     workerInstanceMode: lane ? "run-scoped-instance" : "gap-decision-worker",
     ownerAgent: gap.owner,
     projectAgentId: lane?.projectAgentId ?? null,
@@ -1020,6 +1142,8 @@ function makeWorkerTaskPacket({ gap, group, groupIndex, itemIndex }) {
       "Do not execute external writes without approval.",
       "Do not turn one-run details into durable identity.",
       ...(lane?.externalWriteBoundary
+        ? ["Do not perform real third-party publish actions without explicit user approval."]
+        : lane?.externalWriteRiskBoundary
         ? ["Do not perform real third-party publish actions without explicit user approval."]
         : []),
     ],
@@ -1048,7 +1172,9 @@ function makeWorkerTaskPacket({ gap, group, groupIndex, itemIndex }) {
     capabilityLoadout,
     capabilityBindings: capabilityLoadout,
     roleSoulPolicy,
+    externalWriteRiskBoundary: lane?.externalWriteRiskBoundary === true,
     externalWriteBoundary: lane?.externalWriteBoundary === true,
+    externalWritePolicy: lane?.externalWritePolicy ?? null,
     durableIdentityStatus: lane
       ? "project_agent_profile_synthesized_and_capability_pinned_for_run"
       : decision === "create_agent"
@@ -1178,6 +1304,7 @@ export function buildCapabilityGapOrchestration(input) {
         dependsOn: packet.dependsOn,
         toolRequirements: packet.toolRequirements,
         capabilityLoadout: packet.capabilityLoadout,
+        executionMode: packet.executionMode,
         ownerMode: packet.ownerMode,
         workerInstanceMode: packet.workerInstanceMode,
         durableIdentityStatus: packet.durableIdentityStatus,
@@ -1271,6 +1398,7 @@ export function buildCapabilityGapOrchestration(input) {
       businessFlowLaneId: packet.businessFlowLaneId,
       businessFlowLaneLabel: packet.businessFlowLaneLabel,
       ownerMode: packet.ownerMode,
+      executionMode: packet.executionMode,
       workerInstanceMode: packet.workerInstanceMode,
       capabilityLoadoutSummary: packet.capabilityLoadout
         ? {
@@ -1345,10 +1473,16 @@ export function buildCapabilityGapOrchestration(input) {
         agent.knowledgeGraphPolicy?.afterMutationPolicy?.rebuildCommand ===
           "npm run meta:graphify:rebuild"
     );
+  const executionModeReady =
+    workerTaskPackets.length > 0 &&
+    workerTaskPackets.every((packet) => EXECUTION_MODE_ENUM.has(packet.executionMode)) &&
+    (workerTaskPackets.some((packet) => EXECUTION_WORKER_MODES.has(packet.executionMode)) ||
+      workerTaskPackets.every((packet) => APPROVAL_GATE_MODES.has(packet.executionMode)));
   const status =
     requests.length > 0 &&
     workerTaskPackets.length === decided.length &&
     workerTaskPackets.every((packet) => packet.mergeOwner === "meta-conductor") &&
+    executionModeReady &&
     dynamicProjectAgentIdentityReady &&
     dynamicProjectAgentEvidenceReady &&
     dynamicProjectAgentGraphReady &&
@@ -1399,11 +1533,7 @@ export function buildCapabilityGapOrchestration(input) {
       mustDistinguishTemporarySubagentsFromDurableAgents: true,
     },
     fetchEvidence: {
-      sources: [
-        "canonical/skills/meta-theory/SKILL.md",
-        "config/contracts/workflow-contract.json",
-        "config/contracts/capability-gap-decision-contract.json",
-      ],
+      sources: projectFetchSources(input),
       entryGate: "meta-warden",
       orchestrationOwner: "meta-conductor",
       decisionKernel: "scripts/capability-gap-mvp.mjs",
@@ -1473,6 +1603,16 @@ export function buildCapabilityGapOrchestration(input) {
           orchestrationTaskBoardPacket.triggerChain[0] === "meta-theory-skill-adapter",
         conductorOwnsBoard: orchestrationTaskBoardPacket.synthesisOwner === "meta-conductor",
         eachGapHasWorkerTask: workerTaskPackets.length === decided.length,
+        workerTasksDeclareExecutionMode: workerTaskPackets.every((packet) =>
+          EXECUTION_MODE_ENUM.has(packet.executionMode)
+        ),
+        executionWorkersAreNotSidecars:
+          workerTaskPackets.some((packet) =>
+            EXECUTION_WORKER_MODES.has(packet.executionMode)
+          ) ||
+          workerTaskPackets.every((packet) =>
+            APPROVAL_GATE_MODES.has(packet.executionMode)
+          ),
         sameOwnerInstancesHaveShardScope: workerTaskPackets.every(
           (packet) => packet.roleInstanceId && packet.shardScope && packet.mergeOwner
         ),
@@ -1563,6 +1703,7 @@ async function main() {
           owner: packet.owner,
           projectAgentId: packet.projectAgentId,
           ownerMode: packet.ownerMode,
+          executionMode: packet.executionMode,
           workerInstanceMode: packet.workerInstanceMode,
           durableIdentityStatus: packet.durableIdentityStatus,
           capabilityProfileId: packet.capabilityLoadout?.capabilityProfileId ?? null,
@@ -1606,6 +1747,10 @@ async function main() {
             report.reviewResult.checks.dynamicProjectAgentsHaveGraphPolicies,
           dynamicLanesHaveLoadoutAndSoulPolicy:
             report.reviewResult.checks.dynamicLanesHaveLoadoutAndSoulPolicy,
+          workerTasksDeclareExecutionMode:
+            report.reviewResult.checks.workerTasksDeclareExecutionMode,
+          executionWorkersAreNotSidecars:
+            report.reviewResult.checks.executionWorkersAreNotSidecars,
         },
       },
       null,

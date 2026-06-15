@@ -18,6 +18,8 @@ description: |
 ## Purpose
 Run Meta_Kim as an executable governance system, not a theory essay. The main thread locks intent, gathers evidence, chooses route, delegates bounded work, reviews, verifies, and synthesizes. It must not become a generic implementation worker for non-trivial work.
 
+Machine contract: `config/contracts/core-loop-contract.json` is the compact default-path contract for this skill. It binds ordinary durable work and explicit meta-theory shortcuts to `npm run meta:theory:run`, requires the eight-stage spine, and defines which gates block, warn, or stay progressive.
+
 ## Trigger
 Activate from ordinary natural-language durable work, not only from command words. If the user asks to plan and start work, organize priorities, produce repair suggestions, build a verification checklist, fix a non-trivial issue, handle multi-file execution, run review/verification, or resolve subjective/taste-dependent quality, classify the entry and choose the governed route automatically. Explicit `/meta-theory`, `meta-theory`, or `元理论` mentions are maintainer shortcuts, not required human behavior.
 
@@ -45,11 +47,22 @@ Important: Architecture Type Distinction. Meta Architecture means agent governan
 - Type D: review, verification, rollback, public-ready, or warning closure.
 - Type E: orchestration, planning files, business-flow, and cross-runtime release.
 
+## Complexity Fan-out Trigger
+
+Do not wait for the user to spell out agent names when the route is visibly complex. Treat the run as fan-out eligible when any of these signals appear:
+
+- explicit `/meta-theory`, `critical and fetch thinking and review`, "并行", "多个 agent", "review + fix + verify", or equivalent wording
+- 2+ independent files, runtimes, platforms, capability families, PR/issue lanes, research angles, product lanes, or verification lanes
+- cross-runtime behavior, release/update/sync, hook/security/sandbox, PRD/contract/validator, or repeated same-type failure work
+- user feedback that the current Meta_Kim route is slow, serial, missing agents, missing dynamic workflow, or repeatedly corrected
+
+When fan-out eligible, Thinking must produce `workerTaskPackets` before Execution and attempt real runtime subagent dispatch when the host exposes `spawn_agent` / `Agent`. The default is not "main thread handles it"; the default is "delegate independent lanes, synthesize centrally." If a Codex run lacks direct subagent wording but has no explicit `/meta-theory`, present a native choice surface that names the parallel-agent route before Execution. If the host tool is unavailable, record degraded mode; do not silently serialize without a reason.
+
 ## Stage map
 
 | # | Stage | Action | Interaction |
 |---|---|---|---|
-| 1 | Critical | clarify intent first, lock user pain, value, success criteria, non-goals, permissions, and Architecture Type; for wishful or ambiguous input, enter Critical-Fetch intent loop: translate intent -> read context -> enrich intent -> present IntentCard for user confirmation (up to `criticalFetchLoopMax` rounds) | If a required intent dimension is missing and the answer changes route, scope, risk, or non-goal, set `choiceSurfaceState = critical_clarification_allowed` and ask before proceeding. Do not present execution options during Critical. Present an IntentCard after context-enriched intent translation; user confirms or corrects through the runtime adapter's verified choice surface, or a chat decision card fallback. |
+| 1 | Critical | clarify intent first, lock user pain, value, success criteria, non-goals, permissions, and Architecture Type; for wishful or ambiguous input, enter Critical-Fetch intent loop: translate intent -> read context -> enrich intent -> present IntentCard for user confirmation (up to `criticalFetchLoopMax` rounds) | If a required intent dimension is missing and the answer changes route, scope, risk, or non-goal, set `choiceSurfaceState = critical_clarification_allowed` and ask before proceeding. Do not present execution options during Critical. Present an IntentCard after context-enriched intent translation; Codex and Claude Code must confirm through their native interactive choice surface, while compatibility runtimes may use a clearly labeled chat decision card fallback. |
 | 2 | Fetch | gather online/web and local evidence, confirm the problem, list candidate solutions with sources, extract material claims, run targeted read-only baseline verification when it changes the route, discover retrieval capabilities, complete a multi-type capability inventory before Thinking, and build a change fact card before any file mutation | If evidence suggests multiple valid paths with different trade-offs, surface the options in the user's language before Thinking. If current external facts or third-party capability claims matter, `meta-scout` or an equivalent evidence owner must finish source-backed research before Thinking. |
 | 3 | Thinking | determine needed execution capabilities across governance agents, execution agents, skills, scripts, commands, MCP capabilities/providers/tools, runtime tools, plugins/connectors, retrieval capabilities, dependency/external packages, and run-scoped workerTasks; match existing capabilities; create or upgrade only for gaps; bind the file delivery contract; plan DAG/parallel/serial lanes with `mergeOwner` | Present at least 2 candidate paths with a recommended default. Ask the user to confirm the chosen path before Execution. |
 | 4 | Execution | run multi-agent work using the agents, skills, scripts, commands, MCP capabilities, runtime tools, plugins/connectors, retrieval capabilities, dependencies, and tools selected by Thinking artifacts | No interaction unless route-changing discovery occurs mid-execution — then pause and inform. |
@@ -60,7 +73,30 @@ Important: Architecture Type Distinction. Meta Architecture means agent governan
 
 ## User Interaction
 
-**MANDATORY**: Use the current runtime adapter's verified native choice surface at key decision points. Keep the canonical card contract platform-neutral; renderer-specific schemas and tool names belong in runtime references such as `runtime-claude.md` or `runtime-codex.md`, not in the generic contract. If the native surface is unavailable or returns empty, fall back to a localized chat decision card and wait for the user's explicit reply.
+**MANDATORY**: Use the current runtime adapter's verified native choice surface at key decision points. Keep the canonical card contract platform-neutral; renderer-specific schemas and tool names belong in runtime references such as `runtime-claude.md` or `runtime-codex.md`, not in the generic contract. For Codex and Claude Code, required branch-changing decisions must use `request_user_input` or `AskUserQuestion`; if that native interactive surface is unavailable, empty, rejected, stripped, or not deferred to host UI, block before Execution and return to Critical/Thinking. Only compatibility runtimes may fall back to a localized chat decision card, and that fallback must not be reported as a Codex or Claude Code popup.
+
+## Global-First Project Bootstrap
+
+When this skill is reached from a global installation and the current project is missing or stale for Meta_Kim project-level projections, do not make the human maintain global and project state manually. Run the project bootstrap probe first, then ask through the runtime-native choice surface before writing.
+
+Source chain for project-level files:
+
+```text
+installed Meta_Kim package root
+-> canonical/ and config/sync.json
+-> generated runtime mirrors inside the installed package
+-> setup.mjs --project-bootstrap dry-run/apply
+-> current project .meta-kim/state/default/project-bootstrap.json
+```
+
+Required behavior:
+
+- Before project writes, run a dry-run probe such as `meta-kim project bootstrap --dry-run --project-dir <current-project> --json` or `node setup.mjs --project-bootstrap --dry-run --project-dir <current-project> --json` from the installed Meta_Kim package root.
+- The dry-run output must expose `sourceChain`, target state, active targets, file actions, merge policies, skipped files, and stale manifest status. If `sourceChain` is missing, return to Fetch; do not design or apply from memory.
+- If the target needs initialization or update, ask the user through Claude Code `AskUserQuestion` or Codex `request_user_input` before `--apply`. Compatibility runtimes may show a localized decision card, but that is not Claude/Codex native proof.
+- Apply only after confirmation or an explicit trusted-auto policy. The apply path must create a backup under `.meta-kim/backups/project-bootstrap/<timestamp>` before overwriting or merging existing files and must write `.meta-kim/state/default/project-bootstrap.json`.
+- Preserve user-owned content: JSON configs use additive preserve-user-state merge; existing `AGENTS.md` and `CLAUDE.md` keep user text and receive or update only a Meta_Kim managed block; `.codex/config.toml`, credentials, project trust state, local runtime state, and workspace state are never copied as project bootstrap files.
+- Stale, readonly, permission-denied, or conflicting managed-block cases are not success. Record the blocker, show the next safe action, and do not claim project bootstrap pass until a fresh probe or apply result proves it.
 
 **When to ask:**
 
@@ -72,9 +108,11 @@ Important: Architecture Type Distinction. Meta Architecture means agent governan
 | Review | Issues found that need user preference to resolve | "Quality concern: rebuild or patch?" |
 
 **Question format:**
-- 2–4 meaningful options with clear trade-offs
+- Use the active runtime-native maximum meaningful option count; Meta_Kim must not add a lower option cap of its own
 - One recommended default labeled clearly
 - User's language, not internal packet field names
+- For Codex, inspect the active `request_user_input` schema and use its maximum accepted meaningful option count. If the active host exposes 2-3 options per question, use up to 3; if a future or different host exposes more, use that larger maximum. If semantic options exceed the active host maximum, show the strongest host-maximum set and record omitted alternatives instead of retrying an oversized payload unchanged.
+- The native payload is a structured decision panel: preserve AI understanding, AI additions, Capability route, Candidate paths, expected result, advantages, disadvantages/risk, and verification impact when those fields affect the decision.
 - Stop and wait — do not proceed until the user answers
 
 **Do not ask:**
@@ -100,7 +138,7 @@ Dispatch to `meta-prism` and `meta-warden`; optional `meta-scout`, `meta-sentine
 
 ## Type E: Orchestration / Business Flow / Release
 
-Dispatch to `meta-conductor` for dynamic business-flow blueprint and parallel lane orchestration, then `meta-warden` for synthesis. Conductor must classify the user's natural-language intent, choose lanes by evidence and dependency signals, record omitted lanes with reasons, and only then fan out worker tasks. Thinking to Execution may use `agent-teams-playbook` only when there are 2+ independent parallel worker lanes / two or more parallel worker lane candidates. Independent sub-tasks must be parallelized when safe; avoid fake parallelism.
+Dispatch to `meta-conductor` for dynamic business-flow blueprint and parallel lane orchestration, then `meta-warden` for synthesis. Conductor must classify the user's natural-language intent, choose lanes by evidence and dependency signals, record omitted lanes with reasons, and only then fan out worker tasks. Thinking to Execution must select `agent-teams-playbook` as the fan-out orchestration adapter when there are 2+ executable worker lanes whose DAG dependencies, collision boundaries, workspace isolation, and external-write policy prove safe fan-out; fewer than 2 executable lanes record `not_required`, and unsafe fan-out records partial/degraded rather than pass. The playbook is an adapter after `workerTaskPackets` exist, not a replacement for Critical, Fetch, Thinking, owner selection, or verification planning. Size parallel waves from the runtime's current agent capacity and the task DAG rather than an arbitrary Meta_Kim hard cap; use all independent lanes that are safe to run, split only when runtime capacity or collision boundaries require it, and avoid role inflation. Independent sub-tasks must be parallelized when safe; avoid fake parallelism.
 
 Routine Type E release work defaults to lightweight smoke when the change is low-risk prompt/docs/governance wording, changelog, or version metadata. Use `meta:release:smoke` plus `git diff --check`, then commit/tag/publish without upgrading to full live gates unless risk or the user asks. Release-grade Type E is reserved for install/update, global sync, hooks, runtime matrix, provider registry, dependency compatibility, probes, package contents, security-sensitive behavior, or explicit full/live evidence requests; detailed evidence chains live in `dev-governance.md`, `owner-resolution.md`, and `verification-evidence.md`. Validators, gates, and hooks are protection, not the engine; if they patch missing route evidence after the fact, return to Thinking before public-ready or release.
 
@@ -125,6 +163,8 @@ Fetch discovery minimum checklist: before Thinking, search at least these locati
 Pass condition: `fetchPacket.capabilityDiscovery.searchLog` exists with checked sources and results, including empty or unavailable source entries; `fetchPacket.capabilityDiscovery.capabilityInventory` covers all capability types and all runtime-specific paths that affect the route; and planned file mutation records `fileChangeFactCard`; detailed schema lives in `dev-governance.md`.
 
 Fetch angle decomposition: for research or analysis tasks (when `contentEvidencePacket.researchRequired = true`), decompose the core question into N semantically distinct search angles before searching. Each angle must target a different aspect; rephrasing the same angle is forbidden. Output: `contentEvidencePacket.searchAngles = [{angle, keywords, expectedCoverage}]`. Default N=3; increase for complex multi-domain questions.
+
+Decision-grade research synthesis: Fetch must turn external research practice into Meta_Kim-native evidence, not copy another project's prompt text, template, command examples, or visible structure into canonical governance. For research-required runs, record `contentEvidencePacket.deepResearchPlan` with the user's decision use, 3+ distinct sub-questions, planned source classes, key-source deep-read targets, source-quality ladder, claim attribution rules, cross-check strategy, original-synthesis rules, and decision-impact criteria. Search volume is not evidence; at least one material claim must map to owner, route, scope, risk, acceptance, blocker, or rejected path before Thinking can use it. Search snippets alone are insufficient for route-changing claims; Fetch must deep-read the strongest available primary or official sources and flag single-source claims as unverified. External methods may be cited in private research notes, but durable Meta_Kim prompts keep only abstract invariants: question decomposition, source breadth, key-source reading, citation discipline, contradiction handling, assumption ledger, and Thinking handoff.
 
 Graphify knowledge policy: Graphify is an agent capability, not a context dump. At run start, use existing `graphify-out/GRAPH_REPORT.md`, `graphify-out/graph.json`, or wiki indexes as navigation if present; do not run a global freshness check or rebuild just because a graph exists. Use graph queries and subgraph slices to locate relevant modules, concepts, and file anchors, then verify route-changing claims against source files. Inject only worker-relevant graph slices, short hints, and file anchors; never inject the full `graph.json`, full `GRAPH_REPORT.md`, or broad graph dumps into every worker. After code, canonical, contract, or runtime-facing doc mutation, rebuild Graphify in Verification/Evolution; reserve `meta:graphify:check` for verification, release, public-ready, or explicit graph validation.
 
@@ -159,6 +199,10 @@ User experience truth boundary: users should not need to run `npm` scripts, insp
 Natural-language trigger rule: the user does not need to ask for stages, agents, skills, MCPs, commands, packets, or reports. If a normal human task triggers meta-theory, the dispatcher must automatically translate the internal route into a plain-language stage plan: what this stage does, what capability/loadout will be used, what result the user will see, and what starts next. Technical names may appear only as a compact backing loadout for traceability; the primary explanation must read like an operation handoff, not a protocol dump.
 
 Interactive execution communication: during multi-stage work, the dispatcher must report progress to the user at natural transition points — not only at the pre-decision gate. Report triggers: (1) Fetch complete — brief evidence summary and route impact, (2) Thinking complete — chosen path and trade-offs, (3) each Execution phase complete — what was done and what remains, (4) Review findings that change scope — surface them immediately, (5) route-changing discovery mid-execution — pause and inform. Each report is a compact notice (max 3 bullets), not a full packet dump. If the discovery changes scope, owner, or risk, upgrade the notice to a Decision card requiring user input. This "communicate while working" pattern keeps the user informed and in control without requiring them to ask for status.
+
+Meta-theory visible surface: when the user explicitly triggers meta-theory or the task enters governed execution, the user-facing output must expose a compact orchestration surface before or alongside execution. It must name the orchestration owner/board, Dynamic Workflow lane choice, capability discovery beyond Skill, peer agent mesh / handoff shape, and LangGraph-style node-edge-state-checkpoint shape. Do not hide these behind `coreLoop`, JSON, packet names, or generated reports only. If a runtime cannot show this surface directly, state the blocked/degraded surface and provide the readable report artifact; do not claim P-104 user perception pass from hidden artifacts alone.
+
+Capability invocation truth: every governed run that names agents/subagents, app-visible host UI subagents, skills, MCP, hooks, prompts/rules, commands/scripts, runtime tools, memory, graph, `agent-teams-playbook`, or worker tasks must classify each capability family as `invoked`, `applied`, `host_visible_observed`, `selected_not_invoked`, `discovered_not_selected`, `unavailable`, `blocked`, or `not_required`. `invoked` requires attached fresh invocation evidence. A selected skill, selected `agent-teams-playbook` provider, configured MCP server, matched hook, command candidate, runtime tool candidate, or run-scoped worker is not an invoked runner capability without attached invocation evidence. Prompt/rule behavior is `applied`, not an external tool call. Host UI subagent badges are `host_visible_observed`, not Meta_Kim runner `spawn_agent` / `Agent` invocation. Product-experience pass for callable local families requires `capabilityInvocationProbePacket` evidence for selected MCP, command/script, and runtime-tool families. If no real runtime Agent/subagent tool call is available or attached, record whether the host tool is unavailable, blocked by authorization, not required, or merely selected_not_invoked; keep peer workers as run-scoped structural workers and do not call them live subagents or peer-to-peer runtime agents. If `agent-teams-playbook` is selected, record it separately as `agent_teams_playbook=selected_not_invoked` unless a live Skill/Agent Team/spawn_agent call is attached.
 
 ## Dynamic business-flow capability matrix
 
@@ -199,6 +243,27 @@ Before Execution, inspect the relevant local source of truth:
 - `config/capability-index/weapon-registry.json` for weapons.
 - `config/capability-index/dependency-project-registry.json` and `.meta-kim/state/default/dependency-capability-index.json` for dependencies.
 - `config/skills.json`, runtime projections, MCP configs, hooks, package scripts, Graphify, Memory, and repository search for foundational capabilities.
+
+## Abstract foundational capability triggers
+
+Do not narrow Meta_Kim to a few named skills. Treat named packages such as `findskill`, `hookprompt`, `planning-with-files`, and `skill-creator` as examples inside a wider abstract capability surface described by `config/contracts/prompt-abstract-capability-contract.json`.
+
+Hardcode capability families and conflict rules in prompts; discover concrete providers at run time:
+
+| Capability family | Trigger in the prompt | Conflict boundary |
+|---|---|---|
+| `governance-orchestration` | Durable planning, governance, review, verification, prioritization, repair, runtime, or release work | Governance agents route and review; they do not become generic implementation workers. |
+| `capability-discovery-and-retrieval` | Owner, tool, dependency, current fact, provider, or verification path affects the route | `findskill` and external search are run-scoped Fetch inputs, not permanent agent identity bindings. |
+| `prompt-intake-optimization` | User prompt submission or prompt optimization request | `hookprompt` may add prompt context; it must not override user intent, PRD decisions, meta-theory route, or planning state. |
+| `planning-continuity` | Non-query durable work needs resume, progress, evidence, route, or acceptance continuity | Planning files are update-only continuity state: append, refine, or mark superseded; do not overwrite or reset `task_plan.md`, `findings.md`, or `progress.md`. |
+| `skill-agent-tool-creation` | Fetch proves a reusable capability gap after existing providers are checked | `skill-creator`, create-agent, or tool creation starts only after gap proof, review, and Warden-approved durable writeback. |
+| `runtime-native-surfaces` | Runtime-facing route, projection, hook, command, skill, agent, MCP, choice, sandbox, or approval behavior | Preserve native, partial, unknown, and blocked states; do not fake or replace runtime-native abilities. |
+| `execution-tools-and-commands` | Real execution, file edits, browser/UI proof, command output, or validator/test evidence is needed | Select tools by owner, permission, runtime, OS, and verification; command pass is evidence, not user-goal completion. |
+| `mcp-external-provider-and-plugin` | External data, external tool, provider SDK, plugin, connector, dependency, or MCP affects the route | Configured or installed providers are not live proof; external writes, credentials, paid actions, and mutations need approval and verification. |
+| `memory-graph-and-observability` | Prior decisions, project map, graph freshness, run state, trace, or evidence continuity affects route or acceptance | Memory and graph guide navigation; verify route-changing claims against source files or fresh artifacts. |
+| `safety-hooks-and-permissions` | Unsafe mutation, missing dispatch evidence, hook loop, install/update, sandbox, approval, or credential risk appears | Hooks are last-resort fuses, not planners; repeated blocks return to the responsible stage. |
+| `verification-eval-and-release` | A prompt, route, runtime, release, or user goal is claimed complete | Do not relabel smoke, config validation, skipped, needsAuth, or old artifacts as live/release-grade proof. |
+| `user-interaction-and-i18n` | Route-changing ambiguity, user choice, progress notice, or output-language handling is visible | Ask only route-changing questions and preserve locale; renderer schemas stay in runtime adapters. |
 
 ## Native ability preservation
 
@@ -308,6 +373,12 @@ Low-score, unknown, partial, uninstalled, external, high-risk, or reference-only
 ## No Hook loop
 
 Hooks are last-resort fuses, not the main governance engine. Execution must pass the key behavior preflight before mutation: intent, evidence, capability discovery, runtime/OS not known-unsupported, owner, owner loadout across skill/command/MCP/tool/prompt, memory strategy, and Review standard. Detailed dependency eligibility, rollback, verification owner, warning classification, and writeback reservation are validator/public-ready gates unless their absence makes execution unsafe. A Hook block must include `returnToStage`, `repairOwner`, `repairAction`, `allowedNextAction`, and `forbiddenRetry`. The same Hook reason may block once; the second same-reason block enters `hookRepairMode`; a third same-hook block stops Execution and creates `hookFailurePacket`. Never retry the same blocked action unchanged.
+
+## Same-Type Failure Design Gate
+
+This gate applies beyond hooks. If the same failure class appears for the second time in one goal or acceptance run, treat it as `bottom_design_failure`, not as another local patch opportunity. Return to Critical, Fetch, or Thinking and change the underlying goal contract, route design, evidence path, owner/loadout choice, runtime adapter, or verification gate before retrying.
+
+Failure classes include missing native choice surface before Execution, fixture-specific hardcoding, validator rescue after a weak route, verification pass without runtime evidence, repeated hook reason, and repeated user correction about the same target. A fix must change the design or evidence route and add a regression test or scar. Do not rerun the same action, prompt, fixture, or local edit unchanged after the second same-class failure.
 
 ## Degraded Mode
 

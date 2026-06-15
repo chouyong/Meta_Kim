@@ -9,9 +9,9 @@ import {
 import {
   buildCodexHooksJson,
   buildCursorHooksJson,
-  buildHookPromptAdapterSource,
   nodeHookCommand,
 } from "./runtime-hook-mapping.mjs";
+import { ensureCodexAppNativeControls } from "./codex-config-merge.mjs";
 import {
   canonicalAgentsDir,
   canonicalCapabilityIndexDir,
@@ -67,7 +67,7 @@ function recordSafe(fn) {
  *   D = Project runtime skills   (.claude/skills, .agents/skills, ...)
  *   E = Project runtime hooks    (.claude/hooks, .codex/hooks, .cursor/hooks, openclaw/hooks)
  *   F = Project runtime agents   (.claude/agents, .codex/agents, .cursor/agents)
- *   G = Project settings + MCP   (.claude/settings.json, .mcp.json, .codex/*.toml)
+ *   G = Project settings + MCP   (.claude/settings.json, .claude/commands, .mcp.json, .codex/*.toml)
  */
 export function inferProjectCategory(filePath, rootDir = repoRoot) {
   if (typeof filePath !== "string" || !filePath) return null;
@@ -109,6 +109,7 @@ export function inferProjectCategory(filePath, rootDir = repoRoot) {
     return CATEGORIES.D;
   }
   if (
+    rel.startsWith(".claude/commands/") ||
     rel.startsWith(".codex/commands/") ||
     rel === ".codex/hooks.json" ||
     rel === ".cursor/hooks.json" ||
@@ -625,6 +626,7 @@ function resolveProjectionDirs(scope) {
     claudeSkillsProjectionDir: claude.skillsDir,
     claudeSkillProjectionRoot: claude.skillRoot,
     claudeHooksProjectionDir: claude.hooksDir,
+    claudeCommandsDir: claude.commandsDir,
     claudeSettingsProjectionPath: claude.settingsFile,
     claudeMcpProjectionPath: claude.mcpFile,
     claudeCapabilityIndexDir: claude.capabilityIndexDir,
@@ -645,6 +647,7 @@ function resolveProjectionDirs(scope) {
     codexHooksDir: globalScope ? null : codex.hooksDir,
     codexHooksFile: globalScope ? null : codex.hooksFile,
     codexCommandsDir: codex.commandsDir,
+    codexConfigPath: globalScope ? null : codex.configFile,
     codexConfigExamplePath: codex.configExampleFile,
     codexCapabilityIndexDir: codex.capabilityIndexDir,
 
@@ -679,6 +682,7 @@ function resolveProjectionDirs(scope) {
       claudeSkills: claude.display.skillsDir,
       claudeSkill: claude.display.skillRoot,
       claudeHooks: claude.display.hooksDir,
+      claudeCommands: claude.display.commandsDir,
       claudeSettings: claude.display.settingsFile,
       claudeMcp: claude.display.mcpFile,
       claudeCapabilityIndex: claude.display.capabilityIndexDir,
@@ -688,7 +692,8 @@ function resolveProjectionDirs(scope) {
       codexHooks: globalScope ? null : codex.display.hooksDir,
       codexHooksFile: globalScope ? null : codex.display.hooksFile,
       codexCommands: codex.display.commandsDir,
-      codexConfig: codex.display.configExampleFile,
+      codexConfig: globalScope ? null : codex.display.configFile,
+      codexConfigExample: codex.display.configExampleFile,
       codexCapabilityIndex: codex.display.capabilityIndexDir,
       openclawWorkspaces: globalScope
         ? openclaw.baseDir
@@ -727,6 +732,12 @@ const canonicalClaudeMcpPath = path.join(
   "claude",
   "mcp.json",
 );
+const canonicalClaudeCommandPath = path.join(
+  canonicalRuntimeAssetsDir,
+  "claude",
+  "commands",
+  "meta-theory.md",
+);
 const canonicalCodexConfigExamplePath = path.join(
   canonicalRuntimeAssetsDir,
   "codex",
@@ -737,12 +748,6 @@ const canonicalCodexCommandPath = path.join(
   "codex",
   "commands",
   "meta-theory.md",
-);
-const canonicalSharedMemoryHookPath = path.join(
-  canonicalRuntimeAssetsDir,
-  "shared",
-  "hooks",
-  "meta-kim-memory-save.mjs",
 );
 const canonicalSharedSpineHookPath = path.join(
   canonicalRuntimeAssetsDir,
@@ -778,6 +783,31 @@ const canonicalOpenClawMemoryHookDir = path.join(
   "hooks",
   "mcp-memory-service",
 );
+
+const PROJECT_CLAUDE_HOOK_FILES = new Set([
+  "bash-readonly-whitelist.mjs",
+  "enforce-agent-dispatch.mjs",
+  "graphify-context.mjs",
+  "hook-i18n.mjs",
+  "post-console-log-warn.mjs",
+  "post-format.mjs",
+  "post-typecheck.mjs",
+  "skip-reminder.mjs",
+  "spine-state.mjs",
+  "stop-compaction.mjs",
+  "stop-completion-guard.mjs",
+  "stop-console-log-audit.mjs",
+  "stop-spine-cleanup.mjs",
+  "subagent-context.mjs",
+  "utils.mjs",
+]);
+
+const REMOVED_PROJECT_CLAUDE_HOOK_FILES = [
+  "block-dangerous-bash.mjs",
+  "ecc-permission-cache-wrapper.mjs",
+  "stop-memory-save.mjs",
+  "stop-save-progress.mjs",
+];
 
 const preferredOrder = [
   "meta-warden",
@@ -1027,6 +1057,8 @@ Generated from \`${agent.sourceFile}\`. Edit the canonical source first, then ru
 - When the user asks which agents exist, how many agents exist, or who can collaborate right now, query the live runtime registry first through \`agents_list\`. If that tool is unavailable, fall back to an explicit runtime command and state the result source.
 - Stay inside your own responsibility boundary unless the user explicitly asks you to coordinate broader work.
 - The theory source is \`canonical/skills/meta-theory/references/meta-theory.md\`; public runtime behavior must not depend on local narrative notes.
+- For \`meta-theory\`, \`/meta-theory\`, project understanding, architecture, runtime routing, hook/MCP/tool routing, commercialization, market, competitor, pricing, growth, strategy, or roadmap tasks, run or faithfully follow \`npm run meta:theory:run -- "<user request>"\` before Thinking. If command execution or retrieval capability is unavailable, return \`blocked_to_fetch\` with the exact missing capability instead of giving a shallow summary.
+- Project-understanding Fetch must account for README, AGENTS, package scripts, canonical agents/skills/runtime assets, contracts, capability index, runtime projections, MCP configs, hooks, dependency registry, and Graphify when present.
 
 ${agent.body}
 `;
@@ -1517,6 +1549,25 @@ function renderMetaKimRuntimeMcp(content, rootDir) {
   return content.replaceAll("__REPO_ROOT__", normalizedRoot);
 }
 
+function renderCodexConfigExample(content, rootDir) {
+  const normalizedRoot = rootDir.replace(/\\/g, "/");
+  return content.replaceAll("REPLACE_WITH_REPO_ROOT", normalizedRoot);
+}
+
+export function buildCodexProjectConfig(
+  currentContent,
+  configExampleContent,
+  options = {},
+) {
+  const seed = String(currentContent ?? "").trim()
+    ? String(currentContent ?? "")
+    : renderCodexConfigExample(configExampleContent, repoRoot);
+  return ensureCodexAppNativeControls(seed, {
+    codexHome: resolveRuntimeHomeDir("codex"),
+    ...options,
+  });
+}
+
 function emptyMcpConfigContent() {
   return `${JSON.stringify({ mcpServers: {} }, null, 2)}\n`;
 }
@@ -1848,7 +1899,7 @@ export function buildCodexGraphifyContextHook() {
 
 export function buildCodexProjectHooksJson({
   graphifyHookPath = ".codex/hooks/graphify-context.mjs",
-  memoryHookPath = ".codex/hooks/meta-kim-memory-save.mjs",
+  memoryHookPath = null,
   spineHookPath = ".codex/hooks/activate-meta-theory-spine.mjs",
   enforceAgentDispatchHookPath = ".codex/hooks/enforce-agent-dispatch.mjs",
   hookPromptAdapterPath = null,
@@ -1864,13 +1915,15 @@ export function buildCodexProjectHooksJson({
 
 export function buildCursorProjectHooksJson({
   graphifyHookPath = ".cursor/hooks/graphify-context.mjs",
-  memoryHookPath = ".cursor/hooks/meta-kim-memory-save.mjs",
+  memoryHookPath = null,
+  spineHookPath = ".cursor/hooks/activate-meta-theory-spine.mjs",
   enforceAgentDispatchHookPath = ".cursor/hooks/enforce-agent-dispatch.mjs",
   hookPromptAdapterPath = null,
 } = {}) {
   return buildCursorHooksJson({
     graphifyHookPath,
     memoryHookPath,
+    spineHookPath,
     enforceAgentDispatchHookPath,
     hookPromptAdapterPath,
   });
@@ -1920,6 +1973,7 @@ async function syncClaudeProjection(
     claudeAgentsProjectionDir,
     claudeSkillsProjectionDir,
     claudeHooksProjectionDir,
+    claudeCommandsDir,
     claudeSettingsProjectionPath,
     claudeMcpProjectionPath,
     displayPaths,
@@ -1946,10 +2000,30 @@ async function syncClaudeProjection(
     changedFiles,
   );
 
+  const claudeMetaTheoryCommand = await tryReadCanonical(
+    canonicalClaudeCommandPath,
+  );
+  if (
+    claudeMetaTheoryCommand &&
+    (
+      await writeGeneratedFile(
+        path.join(claudeCommandsDir, "meta-theory.md"),
+        claudeMetaTheoryCommand,
+      )
+    ).changed
+  ) {
+    changedFiles.push(`${displayPaths.claudeCommands}/meta-theory.md`);
+  }
+
   const hookEntries = (
     await fs.readdir(canonicalClaudeHooksDir, { withFileTypes: true })
   )
-    .filter((entry) => entry.isFile() && entry.name.endsWith(".mjs"))
+    .filter(
+      (entry) =>
+        entry.isFile() &&
+        entry.name.endsWith(".mjs") &&
+        PROJECT_CLAUDE_HOOK_FILES.has(entry.name),
+    )
     .sort((left, right) => left.name.localeCompare(right.name));
 
   for (const hookEntry of hookEntries) {
@@ -2011,6 +2085,15 @@ async function syncClaudeProjection(
       ).changed
     ) {
       changedFiles.push(`${displayPaths.claudeHooks}/${scriptName}`);
+    }
+  }
+
+  for (const hookName of REMOVED_PROJECT_CLAUDE_HOOK_FILES) {
+    if (
+      (await removeGeneratedPath(path.join(claudeHooksProjectionDir, hookName)))
+        .changed
+    ) {
+      changedFiles.push(`${displayPaths.claudeHooks}/${hookName}`);
     }
   }
 
@@ -2132,6 +2215,10 @@ Examples:
   // Safety assertion: all writes must stay within allowedRoots
   if (!checkOnly) {
     assertHomeBound(dirs.claudeAgentsProjectionDir, dirs.allowedRoots);
+    assertHomeBound(dirs.claudeCommandsDir, dirs.allowedRoots);
+    if (dirs.codexConfigPath) {
+      assertHomeBound(dirs.codexConfigPath, dirs.allowedRoots);
+    }
     if (dirs.claudeMcpProjectionPath) {
       assertHomeBound(dirs.claudeMcpProjectionPath, dirs.allowedRoots);
     }
@@ -2329,7 +2416,27 @@ Examples:
         )
       ).changed
     ) {
-      changedFiles.push(dp.codexConfig);
+      changedFiles.push(dp.codexConfigExample);
+    }
+    if (dirs.codexConfigPath && codexConfigExample) {
+      let currentCodexConfig = null;
+      try {
+        currentCodexConfig = await fs.readFile(dirs.codexConfigPath, "utf8");
+      } catch (error) {
+        if (error.code !== "ENOENT") {
+          throw error;
+        }
+      }
+      const nextCodexConfig = buildCodexProjectConfig(
+        currentCodexConfig,
+        codexConfigExample,
+      );
+      if (
+        (await writeGeneratedFile(dirs.codexConfigPath, nextCodexConfig))
+          .changed
+      ) {
+        changedFiles.push(dp.codexConfig);
+      }
     }
 
     const codexMetaTheoryCommand = await tryReadCanonical(
@@ -2357,18 +2464,6 @@ Examples:
         ).changed
       ) {
         changedFiles.push(`${dp.codexHooks}/graphify-context.mjs`);
-      }
-      const memoryHookContent = await tryReadCanonical(canonicalSharedMemoryHookPath);
-      if (
-        memoryHookContent &&
-        (
-          await writeGeneratedFile(
-            path.join(dirs.codexHooksDir, "meta-kim-memory-save.mjs"),
-            memoryHookContent,
-          )
-        ).changed
-      ) {
-        changedFiles.push(`${dp.codexHooks}/meta-kim-memory-save.mjs`);
       }
       const spineHookContent = await tryReadCanonical(canonicalSharedSpineHookPath);
       if (
@@ -2471,15 +2566,17 @@ Examples:
       ) {
         changedFiles.push(`${dp.codexHooks}/hook-i18n.mjs`);
       }
-      if (
-        (
-          await writeGeneratedFile(
-            path.join(dirs.codexHooksDir, "hookprompt-adapter.mjs"),
-            buildHookPromptAdapterSource("codex"),
-          )
-        ).changed
-      ) {
-        changedFiles.push(`${dp.codexHooks}/hookprompt-adapter.mjs`);
+      for (const staleHook of [
+        "hookprompt-adapter.mjs",
+        "meta-kim-memory-save.mjs",
+        "planning-with-files-adapter.mjs",
+      ]) {
+        if (
+          (await removeGeneratedPath(path.join(dirs.codexHooksDir, staleHook)))
+            .changed
+        ) {
+          changedFiles.push(`${dp.codexHooks}/${staleHook}`);
+        }
       }
       // Medusa AI-context scan: enqueue hook + surface hook + worker + Python helper.
       const medusaCodexAssets = [
@@ -2508,10 +2605,6 @@ Examples:
         scope === "global"
           ? path.join(dirs.codexHooksDir, "graphify-context.mjs")
           : ".codex/hooks/graphify-context.mjs";
-      const memoryHookPath =
-        scope === "global"
-          ? path.join(dirs.codexHooksDir, "meta-kim-memory-save.mjs")
-          : ".codex/hooks/meta-kim-memory-save.mjs";
       const spineHookPath =
         scope === "global"
           ? path.join(dirs.codexHooksDir, "activate-meta-theory-spine.mjs")
@@ -2520,20 +2613,14 @@ Examples:
         scope === "global"
           ? path.join(dirs.codexHooksDir, "enforce-agent-dispatch.mjs")
           : ".codex/hooks/enforce-agent-dispatch.mjs";
-      const hookPromptAdapterPath =
-        scope === "global"
-          ? path.join(dirs.codexHooksDir, "hookprompt-adapter.mjs")
-          : ".codex/hooks/hookprompt-adapter.mjs";
       if (
         (
           await writeGeneratedJson(
             dirs.codexHooksFile,
             buildCodexProjectHooksJson({
               graphifyHookPath,
-              memoryHookPath,
               spineHookPath,
               enforceAgentDispatchHookPath,
-              hookPromptAdapterPath,
             }),
           )
         ).changed
@@ -2647,18 +2734,6 @@ Examples:
     );
 
     if (dirs.cursorHooksDir && dirs.cursorHooksFile) {
-      const memoryHookContent = await tryReadCanonical(canonicalSharedMemoryHookPath);
-      if (
-        memoryHookContent &&
-        (
-          await writeGeneratedFile(
-            path.join(dirs.cursorHooksDir, "meta-kim-memory-save.mjs"),
-            memoryHookContent,
-          )
-        ).changed
-      ) {
-        changedFiles.push(`${dp.cursorHooks}/meta-kim-memory-save.mjs`);
-      }
       if (
         (
           await writeGeneratedFile(
@@ -2668,6 +2743,20 @@ Examples:
         ).changed
       ) {
         changedFiles.push(`${dp.cursorHooks}/graphify-context.mjs`);
+      }
+      const cursorSpineHookContent = await tryReadCanonical(
+        canonicalSharedSpineHookPath,
+      );
+      if (
+        cursorSpineHookContent &&
+        (
+          await writeGeneratedFile(
+            path.join(dirs.cursorHooksDir, "activate-meta-theory-spine.mjs"),
+            cursorSpineHookContent,
+          )
+        ).changed
+      ) {
+        changedFiles.push(`${dp.cursorHooks}/activate-meta-theory-spine.mjs`);
       }
       // Sync the dispatch-enforcement gate + its bash-readonly classifier from
       // the Claude canonical hooks directory. deny() output adapts to Cursor's
@@ -2759,15 +2848,17 @@ Examples:
       ) {
         changedFiles.push(`${dp.cursorHooks}/hook-i18n.mjs`);
       }
-      if (
-        (
-          await writeGeneratedFile(
-            path.join(dirs.cursorHooksDir, "hookprompt-adapter.mjs"),
-            buildHookPromptAdapterSource("cursor"),
-          )
-        ).changed
-      ) {
-        changedFiles.push(`${dp.cursorHooks}/hookprompt-adapter.mjs`);
+      for (const staleHook of [
+        "hookprompt-adapter.mjs",
+        "meta-kim-memory-save.mjs",
+        "planning-with-files-adapter.mjs",
+      ]) {
+        if (
+          (await removeGeneratedPath(path.join(dirs.cursorHooksDir, staleHook)))
+            .changed
+        ) {
+          changedFiles.push(`${dp.cursorHooks}/${staleHook}`);
+        }
       }
       // Medusa AI-context scan: enqueue hook + surface hook + worker + Python helper.
       const medusaCursorAssets = [
@@ -2796,27 +2887,22 @@ Examples:
         scope === "global"
           ? path.join(dirs.cursorHooksDir, "graphify-context.mjs")
           : ".cursor/hooks/graphify-context.mjs";
-      const memoryHookPath =
+      const spineHookPath =
         scope === "global"
-          ? path.join(dirs.cursorHooksDir, "meta-kim-memory-save.mjs")
-          : ".cursor/hooks/meta-kim-memory-save.mjs";
+          ? path.join(dirs.cursorHooksDir, "activate-meta-theory-spine.mjs")
+          : ".cursor/hooks/activate-meta-theory-spine.mjs";
       const enforceAgentDispatchHookPath =
         scope === "global"
           ? path.join(dirs.cursorHooksDir, "enforce-agent-dispatch.mjs")
           : ".cursor/hooks/enforce-agent-dispatch.mjs";
-      const hookPromptAdapterPath =
-        scope === "global"
-          ? path.join(dirs.cursorHooksDir, "hookprompt-adapter.mjs")
-          : ".cursor/hooks/hookprompt-adapter.mjs";
       if (
         (
           await writeGeneratedJson(
             dirs.cursorHooksFile,
             buildCursorProjectHooksJson({
               graphifyHookPath,
-              memoryHookPath,
+              spineHookPath,
               enforceAgentDispatchHookPath,
-              hookPromptAdapterPath,
             }),
           )
         ).changed
@@ -2913,6 +2999,9 @@ Examples:
     claudeHooks: changedFiles.filter((f) =>
       hasDisplayPrefix(f, dirs.displayPaths.claudeHooks),
     ).length,
+    claudeCommands: changedFiles.filter((f) =>
+      hasDisplayPrefix(f, dirs.displayPaths.claudeCommands),
+    ).length,
     claudeSettings: changedFiles.filter(
       (f) =>
         normalizeDisplayPath(f) ===
@@ -2934,9 +3023,14 @@ Examples:
       hasDisplayPrefix(f, dirs.displayPaths.codexHooks),
     ).length,
     codexConfig: changedFiles.filter(
-      (f) =>
-        normalizeDisplayPath(f) ===
-        normalizeDisplayPath(dirs.displayPaths.codexConfig),
+      (f) => {
+        const normalized = normalizeDisplayPath(f);
+        return (
+          normalized === normalizeDisplayPath(dirs.displayPaths.codexConfig) ||
+          normalized ===
+            normalizeDisplayPath(dirs.displayPaths.codexConfigExample)
+        );
+      },
     ).length,
     codexHooksFile: changedFiles.filter(
       (f) =>
@@ -2999,6 +3093,11 @@ Examples:
         {
           label: dirs.displayPaths.claudeHooks,
           count: layerCounts.claudeHooks,
+          summaryKind: "files",
+        },
+        {
+          label: dirs.displayPaths.claudeCommands,
+          count: layerCounts.claudeCommands,
           summaryKind: "files",
         },
         {

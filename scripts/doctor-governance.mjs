@@ -27,10 +27,9 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, "..");
 const execFileAsync = promisify(execFile);
 
-/** @type {string[]} Same order as validate-project.mjs EXPECTED_CLAUDE_HOOK_COMMANDS */
+/** @type {string[]} Same order as generated .claude/settings.json hook commands. */
 const EXPECTED_CLAUDE_HOOK_COMMANDS = [
   "node .claude/hooks/activate-meta-theory-spine.mjs",
-  "node .claude/hooks/block-dangerous-bash.mjs",
   "node .claude/hooks/enforce-agent-dispatch.mjs",
   "node .claude/hooks/graphify-context.mjs",
   "node .claude/hooks/medusa-findings-surface.mjs",
@@ -41,7 +40,6 @@ const EXPECTED_CLAUDE_HOOK_COMMANDS = [
   "node .claude/hooks/post-console-log-warn.mjs",
   "node .claude/hooks/subagent-context.mjs",
   "node .claude/hooks/stop-compaction.mjs",
-  "node .claude/hooks/stop-memory-save.mjs",
   "node .claude/hooks/stop-console-log-audit.mjs",
   "node .claude/hooks/stop-completion-guard.mjs",
   "node .claude/hooks/stop-spine-cleanup.mjs",
@@ -63,9 +61,9 @@ const FIXTURE = path.join(
 );
 
 /**
- * Normalize a hook command to its canonical hook name (e.g. "block-dangerous-bash").
- * Handles both relative paths ("node .claude/hooks/block-dangerous-bash.mjs")
- * and absolute Windows paths (node "C:\...\block-dangerous-bash.mjs").
+ * Normalize a hook command to its canonical hook name (e.g. "graphify-context").
+ * Handles both relative paths ("node .claude/hooks/graphify-context.mjs")
+ * and absolute Windows paths (node "C:\...\graphify-context.mjs").
  */
 function normalizeHookName(command) {
   const trimmed = command.trim();

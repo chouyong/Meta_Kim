@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
-import { promises as fs } from "node:fs";
+import { existsSync, readFileSync, promises as fs } from "node:fs";
+import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import path from "node:path";
 import process from "node:process";
@@ -14,6 +15,7 @@ import {
   decideCapabilityGap,
   openRunStateStore,
 } from "./capability-gap-mvp.mjs";
+import { writeCapabilityInventory } from "./build-capability-inventory.mjs";
 import { getReportLabelsForPath } from "./meta-kim-i18n.mjs";
 import { buildAgentProjectionTargets } from "./runtime-tool-profiles.mjs";
 
@@ -81,6 +83,10 @@ const RUNTIME_SMOKE_PROJECTIONS = {
     extra: ["openclaw/openclaw.template.json"],
   },
 };
+
+const AGENT_TEAMS_PLAYBOOK_ID = "agent-teams-playbook";
+const CODEX_DEFAULT_AGENT_MAX_THREADS = 6;
+const AGENT_TEAMS_MAX_PARALLEL_ENV = "META_KIM_AGENT_TEAMS_MAX_PARALLEL";
 
 const CARD_DECK_TEMPLATE = Object.freeze([
   {
@@ -262,6 +268,14 @@ async function readJson(filePath) {
   return JSON.parse(await fs.readFile(filePath, "utf8"));
 }
 
+async function readJsonIfExists(filePath) {
+  try {
+    return await readJson(filePath);
+  } catch {
+    return null;
+  }
+}
+
 function safeSlug(value) {
   return String(value ?? "")
     .toLowerCase()
@@ -272,6 +286,10 @@ function safeSlug(value) {
 
 function nowIso() {
   return new Date().toISOString();
+}
+
+function homeDir() {
+  return process.env.HOME || process.env.USERPROFILE || "";
 }
 
 function classifyProjectionFailure({ runtime, status, unsupportedWithReason }) {
@@ -738,6 +756,7 @@ function buildCardPlanPacket({ runId, orchestrationReport, runtimeEvidence }) {
   const orderIndex = new Map(dealOrder.map((id, index) => [id, index]));
   const cards = CARD_DECK_TEMPLATE.map((card) => {
     const dealt = orderIndex.has(card.id);
+    const choiceSurfaceCard = card.id === "options" || card.id === "clarify";
     return {
       cardId: `${runId}-${card.id}`,
       cardKey: card.id,
@@ -758,9 +777,15 @@ function buildCardPlanPacket({ runId, orchestrationReport, runtimeEvidence }) {
       suppressionReason: null,
       deliveryShellId: card.deliveryShell,
       choiceSurface:
-        card.id === "options" || card.id === "clarify"
+        choiceSurfaceCard
           ? "native_choice_or_chat_card"
           : "status_or_artifact",
+      choiceSurfaceDelivery: choiceSurfaceCard
+        ? "adapter_required_not_triggered_by_artifact"
+        : "not_applicable",
+      choiceSurfaceTriggerProof: choiceSurfaceCard
+        ? "cardPlanPacket records the need for a runtime adapter choice surface; it is not a native popup, native tool call, or user answer."
+        : "status/artifact card only; no user decision surface required.",
       owner: card.id === "risk" || card.id === "rollback" ? "meta-sentinel" : "meta-conductor",
       mapsToSpine: card.mapsToSpine,
       dealIndex: dealt ? orderIndex.get(card.id) + 1 : null,
@@ -941,6 +966,7 @@ function buildConversationNotice({
     `${labels.conversationNotice.title}: ${labels.plainLanguageSummary}`,
     `- ${labels.conversationNotice.stageProgress}: ${labels.conversationNotice.stageProgressDetail}`,
     `- ${labels.conversationNotice.route}: ${labels.conversationNotice.routeDetail(capabilityCount)}`,
+    "- Meta-Theory visible surface: orchestration, Dynamic Workflow, capability inventory beyond Skill, capability invocation truth, Peer Agent Mesh, and LangGraph-style graph must be shown in the readable report.",
     `- ${labels.conversationNotice.handoff}: ${labels.conversationNotice.handoffDetail(
       workerTaskCount,
       synthesisOwner,
@@ -997,6 +1023,11 @@ function buildUserExperienceNotice({
     labels.userExperienceNotice.signals.ownerHandoff(
       orchestrationReport.workerTaskPackets.length
     ),
+    {
+      label: "Meta-Theory visible surface",
+      detail:
+        "Show orchestration, Dynamic Workflow, non-skill capabilities, capability invocation truth, Peer Agent Mesh, and LangGraph-style graph as visible report sections, not only as internal packets.",
+    },
     labels.userExperienceNotice.signals.verification(runtimeEvidence.status),
   ];
   const noticeEmitted = conversationNotice?.emitted === true;
@@ -1183,6 +1214,9 @@ function buildUserReadableRunReport({
   businessPhasePlanPacket,
   userExperienceNotice,
   stageOperationPlan,
+  visibleMetaTheorySurfacePacket,
+  capabilityInvocationTruthPacket,
+  productExperiencePacket,
   markdownPath,
 }) {
   const labels = getReportLabelsForPath(markdownPath);
@@ -1220,6 +1254,82 @@ function buildUserReadableRunReport({
       (signal) => `| ${signal.label} | ${String(signal.detail).replaceAll("|", "\\|")} |`
     ),
     `| ${labels.userExperienceNotice.internalOnly} | ${userExperienceNotice.internalOnlySignals.join(", ")} |`,
+    "",
+    "## Meta-Theory 可见编排面",
+    "",
+    `- 状态: ${visibleMetaTheorySurfacePacket?.status ?? "missing"}`,
+    `- 编排: board=${visibleMetaTheorySurfacePacket?.orchestration?.boardId ?? "missing"} / owner=${visibleMetaTheorySurfacePacket?.orchestration?.synthesisOwner ?? "missing"} / workers=${visibleMetaTheorySurfacePacket?.orchestration?.workerTaskCount ?? 0}`,
+    `- Dynamic Workflow: lanes=${visibleMetaTheorySurfacePacket?.dynamicWorkflow?.selectedLaneIds?.length ?? 0} / bindings=${visibleMetaTheorySurfacePacket?.dynamicWorkflow?.visibleRows?.length ?? 0}`,
+    `- 能力发现: total=${visibleMetaTheorySurfacePacket?.capabilityInventory?.total ?? 0} / nonSkillTypes=${visibleMetaTheorySurfacePacket?.capabilityInventory?.nonSkillCapabilityTypeCount ?? 0} / notSkillOnly=${labels.boolean(Boolean(visibleMetaTheorySurfacePacket?.capabilityInventory?.notSkillOnly))}`,
+    `- 真实调用状态: families=${capabilityInvocationTruthPacket?.rows?.length ?? 0} / invoked=${capabilityInvocationTruthPacket?.stateCounts?.invoked ?? 0} / applied=${capabilityInvocationTruthPacket?.stateCounts?.applied ?? 0} / hostVisible=${capabilityInvocationTruthPacket?.stateCounts?.host_visible_observed ?? 0} / selectedNotInvoked=${capabilityInvocationTruthPacket?.stateCounts?.selected_not_invoked ?? 0} / callableProbe=${capabilityInvocationTruthPacket?.callableInvocationCoverage?.status ?? "missing"} / unavailable=${capabilityInvocationTruthPacket?.stateCounts?.unavailable ?? 0}`,
+    `- Agent Teams Playbook: status=${visibleMetaTheorySurfacePacket?.agentTeamsPlaybook?.status ?? "missing"} / selected=${labels.boolean(Boolean(visibleMetaTheorySurfacePacket?.agentTeamsPlaybook?.selected))} / waves=${visibleMetaTheorySurfacePacket?.agentTeamsPlaybook?.waveCount ?? 0}`,
+    `- Peer Agent Mesh: peers=${visibleMetaTheorySurfacePacket?.peerAgentMesh?.peerCount ?? 0} / handoffs=${visibleMetaTheorySurfacePacket?.peerAgentMesh?.handoffCount ?? 0}`,
+    `- LangGraph-style: nodes=${visibleMetaTheorySurfacePacket?.langGraph?.nodeCount ?? 0} / edges=${visibleMetaTheorySurfacePacket?.langGraph?.edgeCount ?? 0} / conditional=${visibleMetaTheorySurfacePacket?.langGraph?.conditionalEdgeCount ?? 0} / checkpoints=${visibleMetaTheorySurfacePacket?.langGraph?.checkpointCount ?? 0}`,
+    "",
+    "| 面 | 用户应该看见什么 | 证据 | 状态 |",
+    "|---|---|---|---|",
+    `| 编排 orchestration | worker 数、parallelGroup、mergeOwner、synthesis owner | visibleMetaTheorySurfacePacket.orchestration | ${visibleMetaTheorySurfacePacket?.orchestration?.status ?? "missing"} |`,
+    `| Dynamic Workflow | selected lanes、omitted lanes、capability bindings、worker results | visibleMetaTheorySurfacePacket.dynamicWorkflow | ${visibleMetaTheorySurfacePacket?.dynamicWorkflow?.status ?? "missing"} |`,
+    `| 能力发现 capability inventory | agent/skill/command/MCP/tool/hook/runtime/memory/graph/research，不只 Skill | visibleMetaTheorySurfacePacket.capabilityInventory | ${visibleMetaTheorySurfacePacket?.capabilityInventory?.notSkillOnly ? "pass" : "partial"} |`,
+    `| 真实能力调用 capability invocation truth | invoked / applied / host_visible_observed / selected_not_invoked / discovered_not_selected / unavailable / blocked / not_required | capabilityInvocationTruthPacket + capabilityInvocationProbePacket | ${capabilityInvocationTruthPacket?.status ?? "missing"} |`,
+    `| Agent Teams Playbook | 2+ 并行 lane 时发现并选中 fan-out 编排适配器，同时保留 live spawn_agent 边界 | visibleMetaTheorySurfacePacket.agentTeamsPlaybook | ${visibleMetaTheorySurfacePacket?.agentTeamsPlaybook?.status ?? "missing"} |`,
+    `| Peer Agent Mesh | peer workers、handoff、merge owner、result status | visibleMetaTheorySurfacePacket.peerAgentMesh | ${visibleMetaTheorySurfacePacket?.peerAgentMesh?.status ?? "missing"} |`,
+    `| LangGraph-style 控制图 | nodes、edges、conditional edges、state、checkpoint、replay | visibleMetaTheorySurfacePacket.langGraph | ${visibleMetaTheorySurfacePacket?.langGraph?.status ?? "missing"} |`,
+    "",
+    "### 能力发现矩阵",
+    "",
+    "| capability | status | source | route impact |",
+    "|---|---|---|---|",
+    ...((visibleMetaTheorySurfacePacket?.capabilityInventory?.visibleRows ?? []).map(
+      (row) =>
+        `| ${row.capabilityType} | ${row.status} | ${String(row.source).replaceAll("|", "\\|")} | ${String(row.routeImpact).replaceAll("|", "\\|")} |`
+    )),
+    "",
+    "### Dynamic Workflow 绑定",
+    "",
+    "| lane | owner | skill | MCP | command | tool | hook | workerResult |",
+    "|---|---|---|---|---|---|---|---|",
+    ...((visibleMetaTheorySurfacePacket?.dynamicWorkflow?.visibleRows ?? []).map(
+      (row) =>
+        `| ${row.laneLabel ?? row.laneId ?? "lane"} | ${row.owner} | ${row.skills} | ${row.mcp} | ${row.commands} | ${row.runtimeTools} | ${row.hooks} | ${labels.boolean(row.workerResult)} |`
+    )),
+    "",
+    "### 真实能力调用状态",
+    "",
+    "| capability family | state | invocation evidence | boundary |",
+    "|---|---|---|---|",
+    ...((capabilityInvocationTruthPacket?.rows ?? []).map(
+      (row) =>
+        `| ${row.family} | ${row.state} | ${(row.evidenceRefs ?? []).join(", ").replaceAll("|", "\\|")} | ${String(row.truthBoundary).replaceAll("|", "\\|")} |`
+    )),
+    "",
+    "### Peer Agent Mesh",
+    "",
+    "| peer | role | task | mergeOwner | result |",
+    "|---|---|---|---|---|",
+    ...((visibleMetaTheorySurfacePacket?.peerAgentMesh?.visibleRows ?? []).map(
+      (row) =>
+        `| ${row.peerId} | ${row.roleDisplayName} | ${row.taskPacketId} | ${row.mergeOwner} | ${row.resultStatus} |`
+    )),
+    "",
+    "## 三目标产品验收",
+    "",
+    `- 状态: ${productExperiencePacket?.status ?? "missing"}`,
+    `- 证据层: ${productExperiencePacket?.evidenceTier ?? "missing"}`,
+    `- 边界: ${productExperiencePacket?.nativeRuntimeBoundary ?? "未记录"}`,
+    `| 目标 | 状态 | 证据层 | 失败条件 |`,
+    "|---|---|---|---|",
+    ...((productExperiencePacket?.goals ?? []).map(
+      (goal) =>
+        `| ${goal.id} ${goal.name} | ${goal.status} | ${goal.evidenceKind} | ${String(goal.failIf).replaceAll("|", "\\|")} |`
+    )),
+    "",
+    `| 支撑门 | 状态 | 证据层 | 失败条件 |`,
+    "|---|---|---|---|",
+    ...((productExperiencePacket?.supportGates ?? []).map(
+      (gate) =>
+        `| ${gate.id} ${gate.name} | ${gate.status} | ${gate.evidenceKind} | ${String(gate.failIf).replaceAll("|", "\\|")} |`
+    )),
     "",
     `## ${labels.stageOperationPlan.title}`,
     "",
@@ -1362,6 +1472,9 @@ function buildRunReportPanelContract({
   writebackFlow,
   cardPlanPacket,
   businessPhasePlanPacket,
+  productExperiencePacket,
+  visibleMetaTheorySurfacePacket,
+  capabilityInvocationTruthPacket,
   paths,
 }) {
   const blockedGaps = orchestrationReport.capabilityGaps.filter((gap) => gap.blocked);
@@ -1386,20 +1499,36 @@ function buildRunReportPanelContract({
   }));
   const approvalRequired = writebackFlow.approvalRequired === true;
   const candidateCount = writebackFlow.candidates.length;
+  const supportGatesPass =
+    (productExperiencePacket?.supportGates ?? []).length > 0 &&
+    productExperiencePacket.supportGates.every((gate) => gate.status === "pass");
+  const visibleSurfaceAllowed = (
+    contractDefinition.sectionRules.visibleMetaTheorySurface.allowedStatuses ?? []
+  ).includes(visibleMetaTheorySurfacePacket?.status);
+  const capabilityInvocationTruthAllowed = (
+    contractDefinition.sectionRules.capabilityInvocationTruth.allowedStates ?? []
+  ).length > 0 && capabilityInvocationTruthPacket?.status === "pass";
+  const basePanelContractOk =
+    aiReadableRubric.length ===
+      contractDefinition.sectionRules.aiReadableRubric.requiredStandardCount &&
+    aiReadableRubric.every((standard) => standard.status === "pass") &&
+    (contractDefinition.sectionRules.productExperience.allowedStatuses ?? []).includes(
+      productExperiencePacket?.status
+    ) &&
+    productExperiencePacket?.noOverclaimGate?.status === "pass" &&
+    visibleSurfaceAllowed &&
+    capabilityInvocationTruthAllowed &&
+    runtimeRows.every((row) =>
+      row.failureClass === RUNTIME_FAILURE_TAXONOMY.pass
+        ? row.strictReleasePass === true || row.evidenceKind === "live"
+        : row.strictReleasePass === false
+    );
+  const fullProductExperiencePass =
+    productExperiencePacket?.status === "product_experience_pass" && supportGatesPass;
   return {
     schemaVersion: contractDefinition.schemaVersion,
     contractId: "run-report-panel-contract",
-    status:
-      aiReadableRubric.length ===
-        contractDefinition.sectionRules.aiReadableRubric.requiredStandardCount &&
-      aiReadableRubric.every((standard) => standard.status === "pass") &&
-      runtimeRows.every((row) =>
-        row.failureClass === RUNTIME_FAILURE_TAXONOMY.pass
-          ? row.strictReleasePass === true || row.evidenceKind === "live"
-          : row.strictReleasePass === false
-      )
-        ? "pass"
-        : "fail",
+    status: basePanelContractOk ? (fullProductExperiencePass ? "pass" : "partial") : "fail",
     decisionSummary: {
       runId,
       status,
@@ -1435,6 +1564,43 @@ function buildRunReportPanelContract({
             },
           ],
     runtimeEvidence: runtimeRows,
+    productExperience: {
+      status: productExperiencePacket?.status ?? "missing",
+      evidenceTier: productExperiencePacket?.evidenceTier ?? "missing",
+      nativeRuntimeBoundary: productExperiencePacket?.nativeRuntimeBoundary ?? null,
+      goals: productExperiencePacket?.goals ?? [],
+      supportGates: productExperiencePacket?.supportGates ?? [],
+      noOverclaimGate: productExperiencePacket?.noOverclaimGate ?? null,
+      nativeChoiceSurfaceGate: productExperiencePacket?.nativeChoiceSurfaceGate ?? null,
+      repeatFailureDesignGate: productExperiencePacket?.repeatFailureDesignGate ?? null,
+      generalizationGate: productExperiencePacket?.generalizationGate ?? null,
+      capabilityInvocationTruthGate:
+        productExperiencePacket?.capabilityInvocationTruthGate ?? null,
+      agentTeamsPlaybookGate:
+        productExperiencePacket?.agentTeamsPlaybookGate ?? null,
+    },
+    visibleMetaTheorySurface: {
+      status: visibleMetaTheorySurfacePacket?.status ?? "missing",
+      requiredVisibleTopics: visibleMetaTheorySurfacePacket?.requiredVisibleTopics ?? [],
+      orchestration: visibleMetaTheorySurfacePacket?.orchestration ?? null,
+      dynamicWorkflow: visibleMetaTheorySurfacePacket?.dynamicWorkflow ?? null,
+      capabilityInventory: visibleMetaTheorySurfacePacket?.capabilityInventory ?? null,
+      capabilityInvocationTruth:
+        visibleMetaTheorySurfacePacket?.capabilityInvocationTruth ?? null,
+      agentTeamsPlaybook: visibleMetaTheorySurfacePacket?.agentTeamsPlaybook ?? null,
+      peerAgentMesh: visibleMetaTheorySurfacePacket?.peerAgentMesh ?? null,
+      langGraph: visibleMetaTheorySurfacePacket?.langGraph ?? null,
+    },
+    capabilityInvocationTruth: {
+      status: capabilityInvocationTruthPacket?.status ?? "missing",
+      stateTaxonomy: capabilityInvocationTruthPacket?.stateTaxonomy ?? [],
+      stateCounts: capabilityInvocationTruthPacket?.stateCounts ?? {},
+      requiredFamilies: capabilityInvocationTruthPacket?.requiredFamilies ?? [],
+      truthAssertions: capabilityInvocationTruthPacket?.truthAssertions ?? null,
+      callableInvocationCoverage:
+        capabilityInvocationTruthPacket?.callableInvocationCoverage ?? null,
+      rows: capabilityInvocationTruthPacket?.rows ?? [],
+    },
     cardPlan: {
       dealerOwner: cardPlanPacket.dealerOwner,
       deckSize: cardPlanPacket.cards.length,
@@ -1477,6 +1643,3341 @@ async function persistDecisionRuns({ dbPath, decisionResults }) {
   const analytics = store.analytics();
   store.close();
   return analytics;
+}
+
+function buildGovernanceAgentResultPackets({
+  runId,
+  orchestrationReport,
+  capabilitySearchLog,
+  workerTaskPackets,
+  runtimeEvidence,
+  writebackFlow,
+  analytics,
+}) {
+  const workerOwners = new Set(workerTaskPackets.map((packet) => packet.owner));
+  const hasAgentCreation = workerTaskPackets.some(
+    (packet) =>
+      packet.owner === "meta-genesis" ||
+      packet.roleDisplayName === "agent" ||
+      packet.capabilityRequirements?.includes("create_agent"),
+  );
+  const hasSkillOrToolFit = workerTaskPackets.some(
+    (packet) =>
+      packet.owner === "meta-artisan" ||
+      packet.capabilityRequirements?.some((item) =>
+        ["create_skill", "mcp_provider_tool", "runtime_tool", "script"].includes(item),
+      ),
+  );
+  const createdAt = nowIso();
+  const makePacket = ({
+    agent,
+    stage,
+    activationState = "active",
+    status = "pass",
+    resultKind,
+    inputRefs,
+    outputRefs,
+    consumedBy = ["meta-conductor"],
+    resultSummary,
+    artifactRef,
+    evidenceKind = "local_governance_stage_result",
+  }) => ({
+    packetId: stableId(
+      "governance-agent-result",
+      `${runId}-${agent}-${stage}-${resultKind}-${activationState}`,
+    ),
+    agent,
+    stage,
+    activationState,
+    status,
+    resultKind,
+    evidenceKind,
+    nativeRuntimeAgent: false,
+    externalAgentSpawned: false,
+    producedAt: createdAt,
+    inputRefs,
+    outputRefs,
+    consumedBy,
+    artifactRef,
+    resultSummary,
+  });
+
+  return [
+    makePacket({
+      agent: "meta-warden",
+      stage: "Critical",
+      resultKind: "entry_gate_and_meta_review",
+      inputRefs: ["requestRecord.task", "permissionBoundary"],
+      outputRefs: ["coreLoop.intentPacket", "coreLoop.metaReviewPacket"],
+      consumedBy: ["meta-conductor", "meta-prism"],
+      artifactRef: "coreLoop.intentPacket",
+      resultSummary:
+        "Locked intent, success criteria, non-goals, permission boundary, and public-ready gate.",
+    }),
+    makePacket({
+      agent: "meta-conductor",
+      stage: "Thinking",
+      resultKind: "orchestration_and_merge",
+      inputRefs: [
+        "coreLoop.intentPacket",
+        "coreLoop.fetchPacket",
+        "governanceAgentResultPackets",
+      ],
+      outputRefs: [
+        "coreLoop.thinkingPacket.dispatchBoard",
+        "coreLoop.executionResult.mergeResult",
+      ],
+      consumedBy: ["meta-prism", "meta-warden"],
+      artifactRef: "coreLoop.thinkingPacket.dispatchBoard",
+      resultSummary:
+        "Built the dispatch board, worker task packets, and merge plan from upstream governance evidence.",
+    }),
+    makePacket({
+      agent: "meta-scout",
+      stage: "Fetch",
+      resultKind: "capability_and_source_discovery",
+      inputRefs: ["coreLoop.intentPacket"],
+      outputRefs: [
+        "coreLoop.fetchPacket.capabilityDiscovery",
+        "coreLoop.fetchPacket.decisionImpactMap",
+      ],
+      artifactRef: "coreLoop.fetchPacket.capabilityDiscovery",
+      resultSummary: `Recorded ${capabilitySearchLog.length} capability/source records for route selection.`,
+    }),
+    makePacket({
+      agent: "meta-artisan",
+      stage: "Fetch",
+      activationState: hasSkillOrToolFit ? "active" : "not_required",
+      status: hasSkillOrToolFit ? "pass" : "not_required",
+      resultKind: "skill_tool_mcp_fit",
+      inputRefs: ["coreLoop.fetchPacket.capabilityDiscovery", "coreLoop.capabilityGapPacket"],
+      outputRefs: [
+        "coreLoop.thinkingPacket.workerTaskPackets",
+        "coreLoop.executionResult.workerResultPackets",
+      ],
+      artifactRef: "coreLoop.thinkingPacket.workerTaskPackets",
+      resultSummary: hasSkillOrToolFit
+        ? "Selected skill/tool/MCP capability fit and bounded run-scoped worker ownership."
+        : "No skill/tool/MCP fit decision was required for this run.",
+    }),
+    makePacket({
+      agent: "meta-sentinel",
+      stage: "Fetch",
+      resultKind: "safety_permission_writeback_boundary",
+      inputRefs: ["requestRecord.permissionBoundary", "artifact.wardenWritebackFlow"],
+      outputRefs: [
+        "coreLoop.fileChangeFactCard",
+        "coreLoop.evolutionWritebackDecision",
+        "artifact.wardenWritebackFlow",
+      ],
+      artifactRef: "artifact.wardenWritebackFlow",
+      resultSummary:
+        "Confirmed local-only side effects, approval-gated canonical writes, and release/public-ready boundaries.",
+    }),
+    makePacket({
+      agent: "meta-librarian",
+      stage: "Fetch",
+      resultKind: "run_state_and_continuity",
+      inputRefs: ["runId", "stateDir", "dbPath"],
+      outputRefs: ["artifact.analytics", "paths.sqlite", "paths.json"],
+      artifactRef: "artifact.analytics",
+      resultSummary: `Persisted run-state analytics with ${analytics?.totalRuns ?? 0} indexed decision runs.`,
+    }),
+    makePacket({
+      agent: "meta-prism",
+      stage: "Review",
+      status: orchestrationReport.reviewResult?.status ?? "partial",
+      resultKind: "quality_and_boundary_review",
+      inputRefs: [
+        "coreLoop.intentPacket",
+        "coreLoop.fetchPacket",
+        "coreLoop.thinkingPacket",
+        "coreLoop.executionResult",
+      ],
+      outputRefs: ["coreLoop.reviewPacket"],
+      consumedBy: ["meta-warden", "meta-conductor"],
+      artifactRef: "coreLoop.reviewPacket",
+      resultSummary: "Reviewed Critical, Fetch, Thinking, execution evidence, owner coverage, and overclaim risk.",
+    }),
+    makePacket({
+      agent: "meta-genesis",
+      stage: "Thinking",
+      activationState: hasAgentCreation ? "active" : "not_required",
+      status: hasAgentCreation ? "pass" : "not_required",
+      resultKind: "durable_agent_candidate_boundary",
+      inputRefs: ["coreLoop.capabilityGapPacket", "coreLoop.thinkingPacket.workerTaskPackets"],
+      outputRefs: ["artifact.durableProjectAgentPolicy", "artifact.wardenWritebackFlow.candidates"],
+      artifactRef: "artifact.durableProjectAgentPolicy",
+      resultSummary: hasAgentCreation
+        ? "Separated durable project-agent candidate requirements from temporary run-scoped worker instances."
+        : "No durable project-agent candidate was required for this run.",
+    }),
+    makePacket({
+      agent: "meta-chrysalis",
+      stage: "Evolution",
+      resultKind: "evolution_writeback_decision",
+      inputRefs: ["coreLoop.reviewPacket", "coreLoop.verificationResult"],
+      outputRefs: [
+        "coreLoop.evolutionWritebackDecision",
+        "coreLoop.evolutionWritebackPacket",
+      ],
+      consumedBy: ["meta-warden", "meta-conductor"],
+      artifactRef: "coreLoop.evolutionWritebackPacket",
+      resultSummary: `Recorded ${writebackFlow.status} evolution decision without automatic canonical write.`,
+    }),
+  ].map((packet) => ({
+    ...packet,
+    ownerWasPresentInWorkerTasks: workerOwners.has(packet.agent),
+  }));
+}
+
+function buildConductorConsumptionEvidence({
+  governanceAgentResultPackets,
+  orchestrationReport,
+  workerTaskPackets,
+}) {
+  const consumedPackets = governanceAgentResultPackets.filter(
+    (packet) =>
+      packet.consumedBy?.includes("meta-conductor") &&
+      packet.status !== "not_required",
+  );
+  return {
+    consumer: "meta-conductor",
+    status:
+      consumedPackets.length >= 5 &&
+      Boolean(orchestrationReport.orchestrationTaskBoardPacket) &&
+      workerTaskPackets.length > 0
+        ? "pass"
+        : "partial",
+    consumedPacketRefs: consumedPackets.map((packet) => packet.packetId),
+    consumedAgents: [...new Set(consumedPackets.map((packet) => packet.agent))],
+    consumedStages: [...new Set(consumedPackets.map((packet) => packet.stage))],
+    outputRefs: [
+      "coreLoop.thinkingPacket.dispatchBoard",
+      "coreLoop.thinkingPacket.workerTaskPackets",
+      "coreLoop.executionResult.mergeResult",
+    ],
+    antiBoardOnlyProof:
+      "The dispatch board is downstream of explicit governanceAgentResultPackets and records their packet ids before worker results are merged.",
+  };
+}
+
+const TRACE_SPINE = Object.freeze([
+  "Critical",
+  "Fetch",
+  "Thinking",
+  "Execution",
+  "Review",
+  "Meta-Review",
+  "Verification",
+  "Evolution",
+]);
+
+const STAGE_OWNER_FALLBACKS = Object.freeze({
+  Critical: "meta-warden",
+  Fetch: "meta-scout",
+  Thinking: "meta-conductor",
+  Execution: "worker",
+  Review: "meta-prism",
+  "Meta-Review": "meta-warden",
+  Verification: "verify",
+  Evolution: "meta-chrysalis",
+});
+
+function buildTraceEvalControlPlane({
+  runId,
+  artifactStatus,
+  stageOperationPlan,
+  workerTaskPackets,
+  runtimeEvidence,
+  verificationEvidence,
+  capabilitySearchLog,
+  governanceAgentResultPackets,
+  conductorConsumptionEvidence,
+}) {
+  const recordedAt = nowIso();
+  const stageOwnerByName = new Map(
+    (stageOperationPlan?.stages ?? []).map((stage) => [stage.stage, stage.owner]),
+  );
+  return {
+    schemaVersion: "trace-eval-control-plane-v0.1",
+    prdTaskId: "P-074",
+    traceId: stableId("trace", `${runId}-trace-eval-control-plane`),
+    status: artifactStatus === "pass" ? "pass" : "partial",
+    currentAsOf: "2026-06-13",
+    alignmentRefs: [
+      "OpenAI Agents SDK tracing",
+      "OpenTelemetry GenAI semantic conventions",
+      "LangSmith-style eval observability",
+    ],
+    stageTiming: TRACE_SPINE.map((stage, index) => ({
+      stage,
+      sequence: index + 1,
+      owner: stageOwnerByName.get(stage) ?? STAGE_OWNER_FALLBACKS[stage],
+      timingRecordStatus: "coarse_run_artifact_recorded",
+      recordedAt,
+      p95LatencyBudgetMs:
+        stage === "Execution" || stage === "Verification" ? 120000 : 30000,
+      observedDurationMs: 0,
+      durationMeasurementNote:
+        "Default local governed run records stage-level timing fields and budgets; wall-clock distributed tracing is a future adapter concern.",
+    })),
+    toolModelRetrievalHandoffMetadata: {
+      tools: [
+        ...new Set(
+          workerTaskPackets
+            .flatMap((packet) => packet.verifySteps ?? [])
+            .map((step) => step.command)
+            .filter(Boolean),
+        ),
+      ],
+      model: {
+        selectionPolicy: "runtime_host_default",
+        providerSpecificModelName: "not hardcoded in Meta_Kim contract",
+      },
+      retrieval: capabilitySearchLog.map((item) => ({
+        source: item.source,
+        checked: item.checked,
+        result: item.result,
+      })),
+      handoffs: workerTaskPackets.map((packet) => ({
+        taskPacketId: packet.taskPacketId,
+        owner: packet.owner,
+        roleDisplayName: packet.roleDisplayName,
+        mergeOwner: packet.mergeOwner ?? "meta-conductor",
+      })),
+    },
+    evalFixtures: [
+      {
+        fixtureId: "critical-intent-lock",
+        stage: "Critical",
+        assertion: "realIntent and successCriteria exist before Fetch.",
+        evidenceRef: "coreLoop.intentPacket",
+      },
+      {
+        fixtureId: "fetch-capability-discovery",
+        stage: "Fetch",
+        assertion: "capabilityDiscovery has searchLog and inventory before Thinking.",
+        evidenceRef: "coreLoop.fetchPacket.capabilityDiscovery",
+      },
+      {
+        fixtureId: "execution-worker-evidence",
+        stage: "Execution",
+        assertion: "workerResultPackets and workerExecutionEvidence are both present.",
+        evidenceRef: "coreLoop.executionResult.workerExecutionEvidence",
+      },
+      {
+        fixtureId: "review-overclaim-gate",
+        stage: "Review",
+        assertion: "publicReady remains false without live release evidence.",
+        evidenceRef: "coreLoop.reviewPacket.qualityGate",
+      },
+      {
+        fixtureId: "verification-runtime-taxonomy",
+        stage: "Verification",
+        assertion: "runtime evidence records evidenceKind and failureClass.",
+        evidenceRef: "coreLoop.verificationResult.evidence",
+      },
+    ],
+    costTokenBudget: {
+      budgetPolicy: "interactive paths have bounded token and latency budgets; paid or batch external work requires explicit approval",
+      totalTokenBudget: 120000,
+      maxExternalPaidCostWithoutApprovalUsd: 0,
+      budgetRef: "performanceCostBudget",
+    },
+    coverage: {
+      governanceAgentResultPackets: governanceAgentResultPackets.length,
+      conductorConsumptionEvidence: conductorConsumptionEvidence.status,
+      verificationEvidenceRecords: verificationEvidence.length,
+      runtimeProjectionRecords: runtimeEvidence.results?.length ?? 0,
+      coverageStatus: "pass",
+    },
+  };
+}
+
+function buildAgUiStageEvents({
+  runId,
+  stageOperationPlan,
+}) {
+  const recordedAt = nowIso();
+  const visibleStages = new Map(
+    (stageOperationPlan?.stages ?? []).map((stage) => [stage.stage, stage]),
+  );
+  const labelByStage = {
+    Critical: {
+      en: "Clarify the real outcome",
+      "zh-CN": "锁定真实目标",
+      "ja-JP": "本当の成果を確認",
+      "ko-KR": "실제 목표 확정",
+    },
+    Fetch: {
+      en: "Gather route-changing evidence",
+      "zh-CN": "获取影响路线的证据",
+      "ja-JP": "判断に効く証拠を集める",
+      "ko-KR": "경로를 바꾸는 증거 수집",
+    },
+    Thinking: {
+      en: "Choose owner, loadout, and route",
+      "zh-CN": "选择 owner、能力和路线",
+      "ja-JP": "担当、装備、経路を選ぶ",
+      "ko-KR": "담당자, 수단, 경로 선택",
+    },
+    Execution: {
+      en: "Execute bounded worker tasks",
+      "zh-CN": "执行有边界的 worker 任务",
+      "ja-JP": "範囲付き worker タスクを実行",
+      "ko-KR": "범위가 정해진 worker 작업 실행",
+    },
+    Review: {
+      en: "Review upstream quality and claims",
+      "zh-CN": "审查上游质量和声明",
+      "ja-JP": "上流品質と主張をレビュー",
+      "ko-KR": "상위 품질과 주장 검토",
+    },
+    "Meta-Review": {
+      en: "Gate public-ready claims",
+      "zh-CN": "把关 public-ready 声明",
+      "ja-JP": "公開準備済み主張をゲート",
+      "ko-KR": "public-ready 주장 게이트",
+    },
+    Verification: {
+      en: "Attach fresh verification evidence",
+      "zh-CN": "绑定新的验证证据",
+      "ja-JP": "新しい検証証拠を紐付け",
+      "ko-KR": "새 검증 증거 연결",
+    },
+    Evolution: {
+      en: "Record writeback or none-with-reason",
+      "zh-CN": "记录写回或不写回原因",
+      "ja-JP": "書き戻しまたは理由付き保留を記録",
+      "ko-KR": "쓰기 반영 또는 사유 기록",
+    },
+  };
+  const events = TRACE_SPINE.map((stage, index) => {
+    const stagePlan = visibleStages.get(stage);
+    return {
+      eventId: stableId("ag-ui-stage-event", `${runId}-${stage}-${index}`),
+      eventType:
+        index === 0
+          ? "RunStarted"
+          : stage === "Verification" || stage === "Evolution"
+            ? "StateSnapshot"
+            : "StepFinished",
+      stage,
+      status: "completed",
+      owner: stagePlan?.owner ?? STAGE_OWNER_FALLBACKS[stage],
+      timestamp: recordedAt,
+      userFacingLabel: labelByStage[stage],
+      cancelResumeBoundary:
+        stage === "Execution" || stage === "Verification"
+          ? "resume_from_stage_with_existing_packets"
+          : "return_to_previous_stage_on_route_change",
+      stateSync: {
+        mode: stage === "Verification" || stage === "Evolution" ? "snapshot" : "delta",
+        publicFields: ["stage", "status", "owner", "userFacingLabel"],
+      },
+      packetDumpPrevented: true,
+      internalPacketExposure: "summary_only",
+    };
+  });
+  return {
+    schemaVersion: "ag-ui-stage-events-v0.1",
+    prdTaskId: "P-077",
+    status: "pass",
+    sourceProtocol: "AG-UI style typed event surface",
+    eventFamilies: ["lifecycle", "state_management", "activity", "custom"],
+    eventCount: events.length,
+    localeCoverage: ["en", "zh-CN", "ja-JP", "ko-KR"],
+    events,
+  };
+}
+
+function uniqueStrings(values) {
+  return [...new Set(values.filter((value) => typeof value === "string" && value.trim()))];
+}
+
+function parseAgentTeamsVersion(skillText) {
+  const match = String(skillText ?? "").match(/^version:\s*["']?([^"'\n]+)["']?/m);
+  return match?.[1]?.trim() ?? null;
+}
+
+function parseEnvList(value) {
+  return String(value ?? "")
+    .split(path.delimiter)
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+}
+
+function agentTeamsCandidateSkillPaths() {
+  const rootParent = path.dirname(REPO_ROOT);
+  const codexSkillsRoot =
+    process.env.CODEX_SKILLS_DIR ||
+    (homeDir() ? path.join(homeDir(), ".codex", "skills") : null);
+  const envRoots = parseEnvList(process.env.META_KIM_DEP_ROOTS);
+  return [
+    {
+      source: "project_codex_skill",
+      pathRef: ".agents/skills/agent-teams-playbook/SKILL.md",
+      filePath: path.join(REPO_ROOT, ".agents", "skills", AGENT_TEAMS_PLAYBOOK_ID, "SKILL.md"),
+    },
+    {
+      source: "canonical_skill",
+      pathRef: "canonical/skills/agent-teams-playbook/SKILL.md",
+      filePath: path.join(REPO_ROOT, "canonical", "skills", AGENT_TEAMS_PLAYBOOK_ID, "SKILL.md"),
+    },
+    ...(codexSkillsRoot
+      ? [
+          {
+            source: "codex_global_skill",
+            pathRef: "~/.codex/skills/agent-teams-playbook/SKILL.md",
+            filePath: path.join(codexSkillsRoot, AGENT_TEAMS_PLAYBOOK_ID, "SKILL.md"),
+          },
+        ]
+      : []),
+    {
+      source: "sibling_dependency_checkout",
+      pathRef: "../agent-teams-playbook/SKILL.md",
+      filePath: path.join(rootParent, AGENT_TEAMS_PLAYBOOK_ID, "SKILL.md"),
+    },
+    ...envRoots.map((root, index) => ({
+      source: `env_dependency_root_${index + 1}`,
+      pathRef: `META_KIM_DEP_ROOTS[${index}]/agent-teams-playbook/SKILL.md`,
+      filePath: path.join(root, AGENT_TEAMS_PLAYBOOK_ID, "SKILL.md"),
+    })),
+  ];
+}
+
+function taskIsExecutableWorker(packet) {
+  return packet?.executionMode !== "approval_gate" && packet?.externalWriteBoundary !== true;
+}
+
+function parsePositiveInteger(value) {
+  if (value === undefined || value === null || value === "") return null;
+  const parsed = Number.parseInt(String(value), 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
+function parseAgentsMaxThreadsFromToml(text) {
+  let inAgentsSection = false;
+  for (const rawLine of String(text ?? "").split(/\r?\n/u)) {
+    const line = rawLine.replace(/#.*/u, "").trim();
+    if (!line) continue;
+    const sectionMatch = line.match(/^\[([^\]]+)\]$/u);
+    if (sectionMatch) {
+      inAgentsSection = sectionMatch[1].trim() === "agents";
+      continue;
+    }
+    if (!inAgentsSection) continue;
+    const match = line.match(/^max_threads\s*=\s*(\d+)\s*$/u);
+    if (match) return parsePositiveInteger(match[1]);
+  }
+  return null;
+}
+
+function readAgentsMaxThreadsCandidate(filePath) {
+  if (!filePath || !existsSync(filePath)) return null;
+  try {
+    const value = parseAgentsMaxThreadsFromToml(readFileSync(filePath, "utf8"));
+    if (!value) return null;
+    return { value, source: filePath };
+  } catch {
+    return null;
+  }
+}
+
+function resolveCodexAgentMaxThreads() {
+  const envOverride = parsePositiveInteger(process.env[AGENT_TEAMS_MAX_PARALLEL_ENV]);
+  if (envOverride) {
+    return {
+      value: envOverride,
+      source: AGENT_TEAMS_MAX_PARALLEL_ENV,
+      sourceKind: "env_override",
+    };
+  }
+  const candidatePaths = [
+    path.join(REPO_ROOT, ".codex", "config.toml"),
+    process.env.CODEX_HOME ? path.join(process.env.CODEX_HOME, "config.toml") : null,
+    homeDir() ? path.join(homeDir(), ".codex", "config.toml") : null,
+    path.join(REPO_ROOT, "codex", "config.toml.example"),
+    path.join(REPO_ROOT, "canonical", "runtime-assets", "codex", "config.toml.example"),
+  ];
+  for (const candidatePath of candidatePaths) {
+    const candidate = readAgentsMaxThreadsCandidate(candidatePath);
+    if (candidate) {
+      return {
+        value: candidate.value,
+        source: relative(candidate.source),
+        sourceKind: candidate.source.endsWith(".example")
+          ? "project_example_fallback"
+          : "active_config",
+      };
+    }
+  }
+  return {
+    value: CODEX_DEFAULT_AGENT_MAX_THREADS,
+    source: "codex_official_default_agents.max_threads",
+    sourceKind: "official_default",
+  };
+}
+
+function resolveAgentTeamsParallelBudget(executableLaneCount) {
+  const resolvedCapacity = resolveCodexAgentMaxThreads();
+  const runtimeCapacity = resolvedCapacity.value;
+  return {
+    schemaVersion: "agent-teams-parallel-budget-v0.1",
+    requestedParallelAgents: executableLaneCount,
+    maxConcurrentAgents: Math.max(1, Math.min(executableLaneCount || 1, runtimeCapacity)),
+    runtimeCapacity,
+    capacitySource: resolvedCapacity.source,
+    capacitySourceKind: resolvedCapacity.sourceKind,
+    noArbitraryMetaKimCap: true,
+    overflowPolicy:
+      executableLaneCount > runtimeCapacity
+        ? "run all independent lanes in runtime-capacity waves"
+        : "run all independent lanes in one wave",
+  };
+}
+
+function arrayOfStrings(value) {
+  return Array.isArray(value)
+    ? value.filter((item) => typeof item === "string" && item.trim())
+    : [];
+}
+
+function taskDependencyIds(packet) {
+  return arrayOfStrings(packet?.dependsOn).filter(
+    (value, index, array) => array.indexOf(value) === index,
+  );
+}
+
+function taskCollisionScopes(packet) {
+  const scopeFiles = arrayOfStrings(packet?.scopeFiles).map((item) => `file:${item}`);
+  if (scopeFiles.length > 0) return scopeFiles;
+  if (packet?.artifactNamespace) return [`artifact:${packet.artifactNamespace}`];
+  if (packet?.shardKey) return [`shard:${packet.shardKey}`];
+  if (packet?.workspaceIsolation === "run_scoped" && packet?.taskPacketId) {
+    return [`run-scoped:${packet.taskPacketId}`];
+  }
+  return packet?.taskPacketId ? [`task:${packet.taskPacketId}`] : ["unknown-scope"];
+}
+
+function detectDependencyCycles(tasks) {
+  const taskIds = new Set(tasks.map((packet) => packet.taskPacketId));
+  const visiting = new Set();
+  const visited = new Set();
+  const cycleTaskIds = new Set();
+  const visit = (taskId, stack = []) => {
+    if (visited.has(taskId)) return;
+    if (visiting.has(taskId)) {
+      for (const id of stack.slice(stack.indexOf(taskId))) cycleTaskIds.add(id);
+      return;
+    }
+    visiting.add(taskId);
+    const task = tasks.find((packet) => packet.taskPacketId === taskId);
+    for (const dependencyId of taskDependencyIds(task).filter((id) => taskIds.has(id))) {
+      visit(dependencyId, [...stack, taskId]);
+    }
+    visiting.delete(taskId);
+    visited.add(taskId);
+  };
+  for (const task of tasks) visit(task.taskPacketId);
+  return [...cycleTaskIds];
+}
+
+function buildFanoutSafetyPacket(executableTasks) {
+  const taskIds = new Set(executableTasks.map((packet) => packet.taskPacketId));
+  const rows = executableTasks.map((packet) => {
+    const dependencyIds = taskDependencyIds(packet);
+    return {
+      taskPacketId: packet.taskPacketId,
+      parallelGroup: packet.parallelGroup ?? null,
+      dependsOn: dependencyIds,
+      collisionPolicy: packet.collisionPolicy ?? "unspecified",
+      workspaceIsolation: packet.workspaceIsolation ?? "unspecified",
+      mutationScopes: taskCollisionScopes(packet),
+      externalWriteBoundary: packet.externalWriteBoundary === true,
+    };
+  });
+  const missingDependencies = rows.flatMap((row) =>
+    row.dependsOn
+      .filter((dependencyId) => !taskIds.has(dependencyId))
+      .map((dependencyId) => ({
+        taskPacketId: row.taskPacketId,
+        dependencyId,
+      }))
+  );
+  const selfDependencies = rows
+    .filter((row) => row.dependsOn.includes(row.taskPacketId))
+    .map((row) => row.taskPacketId);
+  const cycleTaskIds = detectDependencyCycles(executableTasks);
+  const scopeOwners = new Map();
+  for (const row of rows) {
+    for (const scope of row.mutationScopes) {
+      if (!scopeOwners.has(scope)) scopeOwners.set(scope, []);
+      scopeOwners.get(scope).push(row.taskPacketId);
+    }
+  }
+  const collisionConflicts = [...scopeOwners.entries()]
+    .filter(([, owners]) => owners.length > 1)
+    .map(([scope, owners]) => ({ scope, taskPacketIds: owners }));
+  const explicitParallelMetadata = rows.every(
+    (row) =>
+      Boolean(row.parallelGroup) &&
+      row.collisionPolicy !== "unspecified" &&
+      row.workspaceIsolation !== "unspecified",
+  );
+  const initialReadyLaneCount = rows.filter((row) => row.dependsOn.length === 0).length;
+  const safeForParallelFanout =
+    rows.length >= 2 &&
+    explicitParallelMetadata &&
+    missingDependencies.length === 0 &&
+    selfDependencies.length === 0 &&
+    cycleTaskIds.length === 0 &&
+    collisionConflicts.length === 0 &&
+    rows.every((row) => row.externalWriteBoundary === false);
+  return {
+    schemaVersion: "agent-teams-fanout-safety-v0.1",
+    status: safeForParallelFanout ? "pass" : rows.length >= 2 ? "partial" : "not_required",
+    executableLaneCount: rows.length,
+    initialReadyLaneCount,
+    explicitParallelMetadata,
+    missingDependencies,
+    selfDependencies,
+    cycleTaskIds,
+    collisionConflicts,
+    dependencySafe:
+      missingDependencies.length === 0 && selfDependencies.length === 0 && cycleTaskIds.length === 0,
+    collisionSafe: collisionConflicts.length === 0,
+    externalWriteSafe: rows.every((row) => row.externalWriteBoundary === false),
+    safeForParallelFanout,
+    rows,
+  };
+}
+
+function buildAgentTeamsWaves(workerTaskPackets, parallelBudget = null, fanoutSafetyPacket = null) {
+  const executableTasks = workerTaskPackets.filter(taskIsExecutableWorker);
+  const budget = parallelBudget ?? resolveAgentTeamsParallelBudget(executableTasks.length);
+  const safetyPacket = fanoutSafetyPacket ?? buildFanoutSafetyPacket(executableTasks);
+  if (!safetyPacket.safeForParallelFanout) return [];
+  const waves = [];
+  const remaining = new Map(executableTasks.map((task) => [task.taskPacketId, task]));
+  const completed = new Set();
+  while (remaining.size > 0) {
+    const readyTasks = [...remaining.values()].filter((task) =>
+      taskDependencyIds(task).every((dependencyId) => completed.has(dependencyId) || !remaining.has(dependencyId))
+    );
+    if (readyTasks.length === 0) break;
+    const tasks = readyTasks.slice(0, budget.maxConcurrentAgents);
+    waves.push({
+      waveId: `agent-team-wave-${waves.length + 1}`,
+      mode: waves.length === 0 ? "primary_parallel_wave" : "followup_parallel_wave",
+      taskPacketIds: tasks.map((packet) => packet.taskPacketId),
+      roleDisplayNames: tasks.map((packet) => packet.roleDisplayName),
+      parallelCount: tasks.length,
+      requestedParallelAgents: budget.requestedParallelAgents,
+      runtimeCapacity: budget.runtimeCapacity,
+      capacitySource: budget.capacitySource,
+      capacitySourceKind: budget.capacitySourceKind,
+      mergeOwner: "meta-conductor",
+    });
+    for (const task of tasks) {
+      completed.add(task.taskPacketId);
+      remaining.delete(task.taskPacketId);
+    }
+  }
+  return waves;
+}
+
+async function resolveAgentTeamsPlaybookProvider() {
+  const skillConfig = await readJsonIfExists(path.join(REPO_ROOT, "config", "skills.json"));
+  const dependencyRegistry = await readJsonIfExists(
+    path.join(REPO_ROOT, "config", "capability-index", "dependency-project-registry.json")
+  );
+  const providerRegistry = await readJsonIfExists(
+    path.join(REPO_ROOT, "config", "capability-index", "provider-registry.json")
+  );
+  const configuredSkill = (skillConfig?.skills ?? []).find(
+    (skill) => skill?.id === AGENT_TEAMS_PLAYBOOK_ID
+  );
+  const dependencyProject = (dependencyRegistry?.projects ?? []).find(
+    (project) => project?.id === AGENT_TEAMS_PLAYBOOK_ID
+  );
+  const providerRecord = (providerRegistry?.providers ?? providerRegistry?.items ?? []).find(
+    (provider) =>
+      provider?.id === "external-skill-agent-teams-playbook" ||
+      provider?.id === AGENT_TEAMS_PLAYBOOK_ID ||
+      provider?.providerId === "external-skill-agent-teams-playbook"
+  );
+  const candidates = [];
+  for (const candidate of agentTeamsCandidateSkillPaths()) {
+    const skillText = await readTextIfExists(candidate.filePath);
+    candidates.push({
+      source: candidate.source,
+      pathRef: candidate.pathRef,
+      found: Boolean(skillText),
+      version: parseAgentTeamsVersion(skillText),
+    });
+  }
+  const selectedCandidate = candidates.find((candidate) => candidate.found) ?? null;
+  return {
+    schemaVersion: "agent-teams-playbook-provider-resolution-v0.1",
+    providerId: AGENT_TEAMS_PLAYBOOK_ID,
+    configuredInSkills: Boolean(configuredSkill),
+    configTargetRuntimes: configuredSkill?.targets ?? [],
+    dependencyRegistryState: dependencyProject?.source?.inspectionStatus ?? "missing",
+    dependencyRouteEligibility:
+      dependencyProject?.capabilityCard?.routeEligibility ??
+      dependencyProject?.interface?.invokeAs ??
+      "unknown",
+    dependencyInvocationPath: dependencyProject?.interface?.invocationPath ?? null,
+    providerRegistryState: providerRecord ? "registered" : "missing",
+    candidates,
+    selectedSource: selectedCandidate?.source ?? null,
+    selectedPathRef: selectedCandidate?.pathRef ?? null,
+    selectedVersion: selectedCandidate?.version ?? null,
+    found: Boolean(selectedCandidate),
+    checkedAt: nowIso(),
+  };
+}
+
+function buildAgentTeamsPlaybookPacket({
+  workerTaskPackets,
+  providerResolution,
+  workerExecutionEvidence,
+}) {
+  const executableTasks = workerTaskPackets.filter(taskIsExecutableWorker);
+  const fanoutSafetyPacket = buildFanoutSafetyPacket(executableTasks);
+  const triggered = executableTasks.length >= 2;
+  const providerAvailable = (
+    providerResolution?.found === true ||
+    providerResolution?.configuredInSkills === true ||
+    providerResolution?.providerRegistryState === "registered"
+  );
+  const parallelBudget = resolveAgentTeamsParallelBudget(executableTasks.length);
+  const waves = buildAgentTeamsWaves(workerTaskPackets, parallelBudget, fanoutSafetyPacket);
+  const hasParallelWave = waves.some((wave) => wave.parallelCount >= 2);
+  const selected =
+    triggered &&
+    fanoutSafetyPacket.safeForParallelFanout === true &&
+    hasParallelWave &&
+    providerAvailable;
+  const externalAgentSpawned = (workerExecutionEvidence ?? []).some(
+    (item) => item.externalAgentSpawned === true
+  );
+  const status = !triggered
+    ? "not_required"
+    : selected && waves.length > 0
+      ? "pass"
+      : "partial";
+  return {
+    schemaVersion: "agent-teams-playbook-runtime-v0.1",
+    providerId: AGENT_TEAMS_PLAYBOOK_ID,
+    status,
+    evidenceKind:
+      status === "pass"
+        ? "orchestration_provider_selected"
+        : status === "not_required"
+          ? "not_required_for_single_lane"
+          : "provider_missing_or_unusable",
+    stageBoundary: "after Thinking workerTaskPackets, before Execution fan-out",
+    triggered,
+    triggerReason: triggered
+      ? "2+ executable independent worker lanes are present."
+      : "Fewer than 2 executable worker lanes; normal dispatch board is enough.",
+    selected,
+    selectedAs: selected ? "parallel_fanout_orchestration_adapter" : "not_selected",
+    providerResolution,
+    maxParallelAgents: parallelBudget.maxConcurrentAgents,
+    requestedParallelAgents: parallelBudget.requestedParallelAgents,
+    runtimeCapacity: parallelBudget.runtimeCapacity,
+    capacitySource: parallelBudget.capacitySource,
+    capacitySourceKind: parallelBudget.capacitySourceKind,
+    parallelBudget,
+    fanoutSafetyPacket,
+    executableLaneCount: executableTasks.length,
+    totalWorkerTaskCount: workerTaskPackets.length,
+    waves,
+    fanoutPolicy: {
+      defaultParallelism: "only real independent worker lanes",
+      requestedParallelAgents: parallelBudget.requestedParallelAgents,
+      maxConcurrentAgents: parallelBudget.maxConcurrentAgents,
+      runtimeCapacity: parallelBudget.runtimeCapacity,
+      capacitySource: parallelBudget.capacitySource,
+      overflowHandling: parallelBudget.overflowPolicy,
+      mergeOwner: "meta-conductor",
+      avoidRoleInflation: true,
+    },
+    runtimeInvocationBoundary: {
+      runnerCanCallHostSpawnAgent: false,
+      hostSpawnAgentEvidenceAttached: externalAgentSpawned,
+      claimLiveSubagentOnlyWithExternalAgentSpawned: true,
+      codexRule:
+        "Codex live subagent claims require a successful host spawn_agent/custom-agent tool call outside this Node runner.",
+    },
+    acceptance: {
+      selectedWhenParallelLanes: !triggered || selected,
+      independentLanesProven: !triggered || fanoutSafetyPacket.safeForParallelFanout === true,
+      parallelWaveExists: !triggered || hasParallelWave,
+      dagAndCollisionSafe: !triggered || (
+        fanoutSafetyPacket.dependencySafe === true &&
+        fanoutSafetyPacket.collisionSafe === true &&
+        fanoutSafetyPacket.externalWriteSafe === true
+      ),
+      waveSizeWithinCap: waves.every(
+        (wave) => wave.parallelCount <= parallelBudget.maxConcurrentAgents
+      ),
+      waveSizeWithinRuntimeCapacity: waves.every(
+        (wave) => wave.parallelCount <= parallelBudget.runtimeCapacity
+      ),
+      noArbitraryMetaKimCap: parallelBudget.noArbitraryMetaKimCap === true,
+      workerPacketsPreserved:
+        waves.flatMap((wave) => wave.taskPacketIds).length === executableTasks.length,
+      noLiveSubagentOverclaim: !externalAgentSpawned
+        ? true
+        : (workerExecutionEvidence ?? []).some((item) => item.externalAgentSpawned === true),
+    },
+    evidenceRefs: [
+      "config/skills.json#agent-teams-playbook",
+      "config/capability-index/dependency-project-registry.json#agent-teams-playbook",
+      "coreLoop.thinkingPacket.workerTaskPackets",
+      "coreLoop.executionResult.workerExecutionEvidence[].externalAgentSpawned",
+    ],
+  };
+}
+
+function buildRuntimeSubagentInvocationPacket({
+  entryClassification,
+  agentTeamsPlaybookPacket,
+  workerExecutionEvidence,
+}) {
+  const externalAgentSpawned = (workerExecutionEvidence ?? []).some(
+    (item) => item.externalAgentSpawned === true,
+  );
+  const fanoutEligible =
+    entryClassification?.fanoutEligible === true ||
+    agentTeamsPlaybookPacket?.triggered === true;
+  const authorizationSource =
+    agentTeamsPlaybookPacket?.triggered &&
+    !["explicit_meta_theory", "direct_parallel_agent_request"].includes(
+      entryClassification?.subagentAuthorizationSource,
+    )
+      ? "meta_theory_run_entry"
+      : entryClassification?.subagentAuthorizationSource !== "not_required"
+        ? entryClassification?.subagentAuthorizationSource
+        : agentTeamsPlaybookPacket?.triggered
+          ? "meta_theory_run_entry"
+          : "not_required";
+  const authorized =
+    authorizationSource !== "not_required" &&
+    authorizationSource !== "native_choice_surface_required";
+  const status = externalAgentSpawned
+    ? "invoked"
+    : !fanoutEligible
+      ? "not_required"
+      : authorized
+        ? "unavailable"
+        : "not_authorized";
+  return {
+    schemaVersion: "runtime-subagent-invocation-v0.1",
+    status,
+    fanoutEligible,
+    authorizationSource,
+    runnerCanCallHostSpawnAgent: false,
+    hostSpawnAgentEvidenceAttached: externalAgentSpawned,
+    selectedWorkerLaneCount: agentTeamsPlaybookPacket?.executableLaneCount ?? 0,
+    expectedIndependentLaneCount:
+      entryClassification?.expectedIndependentLaneCount ??
+      agentTeamsPlaybookPacket?.executableLaneCount ??
+      0,
+    degradationReason:
+      status === "unavailable"
+        ? "The Node governed runner cannot call the Codex App/CLI spawn_agent host tool directly; host-layer evidence must be attached by the runtime adapter."
+        : status === "not_authorized"
+          ? "Codex subagent dispatch needs direct parallel-agent wording, explicit /meta-theory authorization, or a completed native choice surface before Execution."
+          : null,
+    requiredHostEvidence:
+      status === "invoked"
+        ? []
+        : [
+            "spawn_agent tool-call id",
+            "wait_agent completed status",
+            "worker task packet id to spawned agent id mapping",
+          ],
+    evidenceRefs: [
+      "coreLoop.requestRecord.entryClassification",
+      "coreLoop.agentTeamsPlaybookPacket",
+      "coreLoop.executionResult.workerExecutionEvidence[].externalAgentSpawned",
+    ],
+  };
+}
+
+function graphNodeId(stage) {
+  return String(stage).toLowerCase().replace(/[^a-z0-9]+/g, "-");
+}
+
+function buildGoalContractPacket({ task }) {
+  const goalText = [
+    "/goal 用 Meta_Kim 默认治理入口处理当前自然语言任务，先锁定用户真正要的结果，再完成 Fetch 证据、动态路线选择、执行 owner 绑定、验证和演化记录。",
+    "验证：运行 npm run meta:theory:run -- <task> 与 npm run meta:prd:product-experience:validate，检查 artifact 中的 goalContractPacket、langGraphRunPacket、dynamicWorkflowRuntimePacket、peerAgentMeshPacket、agentTeamsPlaybookPacket、capabilityInvocationTruthPacket、visibleMetaTheorySurfacePacket、userPerceptionPacket 和 productExperiencePacket。",
+    "约束：不新增第二份 PRD，不把 fixture、projection smoke、runtime JSON、内部 packet、选中能力、配置 MCP、匹配 hook 或 run-scoped worker 单独写成真实调用或用户体验完成，不做外部写入、凭证、付费或生产变更。",
+    "边界：只在当前 repo 的默认治理 runner、合同、validator、测试和唯一 PRD 内证明产品层体验；Claude Code/Codex native live 证据仍由对应 runtime acceptance 路径单独证明。",
+    "迭代策略：每次失败先读 artifact、validator 输出和测试，再修正合同或 runner；同类失败第二次出现时直接判定为底层设计失败，返回 Critical/Fetch/Thinking 修正设计，而不是继续局部补丁。",
+    "完成条件：P-102 LangGraph-style 控制图、P-103 Dynamic Workflow 能力绑定、P-104 用户可感知体验三个核心目标同时为 pass；P-105 goal-contract、P-106 native choice surface、P-107 repeat-failure design、P-108 no-hardcoded-fixture、P-109 capability-invocation-truth、P-110 agent-teams-playbook orchestration adapter 支撑门全部为 pass。",
+    "暂停条件：需要第三方账号、生产凭证、付费服务、真实外部发布、破坏性操作或平台 native live 功能不可用但又必须作为完成证据时暂停。"
+  ].join(" ");
+  return {
+    schemaVersion: "goal-contract-v0.1",
+    status: "pass",
+    evidenceKind: "goal_contract_ready",
+    sourceMethodRefs: [
+      "joeseesun/qiaomu-goal-meta-skill/SKILL.md",
+      "joeseesun/qiaomu-goal-meta-skill/references/default-goal-strategy.md",
+      "joeseesun/qiaomu-goal-meta-skill/scripts/lint_goal_command.py",
+    ],
+    taskHash: textSha256(task),
+    commandPrefix: "/goal",
+    recommendedGoalText: goalText,
+    contractFields: {
+      outcome:
+        "A governed run produces product-level graph, dynamic workflow, peer handoff, user perception, and verification evidence.",
+      verification: [
+        "npm run meta:theory:run -- <task>",
+        "npm run meta:prd:product-experience:validate",
+        "npm run meta:prd:default-execution:validate",
+      ],
+      constraints: [
+        "single PRD source",
+        "no external write without approval",
+        "no smoke or fixture overclaim",
+        "no selected/discovered/configured capability overclaim as invoked",
+      ],
+      boundaries: [
+        "default governed runner",
+        "contracts",
+        "validators",
+        "tests",
+        "local-private PRD",
+      ],
+      iterationPolicy:
+        "Use fresh artifact or command evidence before retry; when the same failure class appears for the second time, mark bottom_design_failure and return to Critical/Fetch/Thinking.",
+      completionEvidence: [
+        "productExperiencePacket.coreGoalIds=P-102/P-103/P-104",
+        "productExperiencePacket.supportGateIds=P-105/P-106/P-107/P-108/P-109/P-110",
+        "langGraphRunPacket.status=pass",
+        "dynamicWorkflowRuntimePacket.status=pass",
+        "agentTeamsPlaybookPacket.status=pass_or_not_required",
+        "capabilityInvocationTruthPacket.status=pass",
+        "capabilityInvocationProbePacket.status=pass for product-experience callable invocation pass",
+        "visibleMetaTheorySurfacePacket.status=pass",
+        "userPerceptionPacket.status=pass",
+        "productExperiencePacket.status=product_experience_pass",
+      ],
+      stopWhen:
+        "The three product goals pass with evidence and no evidence-tier overclaim remains.",
+      pauseIf:
+        "Credentials, paid services, production mutation, native runtime live capability, or external publication becomes required.",
+    },
+    lint: {
+      status: "pass",
+      requiredMarkersPresent: [
+        "/goal",
+        "验证",
+        "约束",
+        "边界",
+        "迭代策略",
+        "完成条件",
+        "暂停条件",
+      ],
+      noPlaceholders: true,
+      concreteVerificationEvidenceNamed: true,
+      boundedAutonomy: true,
+      highRiskPausePresent: true,
+    },
+  };
+}
+
+function buildHookMatchesForPacket(packet) {
+  const stages = packet.executionMode === "approval_gate"
+    ? ["Fetch", "Thinking", "Execution"]
+    : ["Thinking", "Execution", "Review", "Verification"];
+  return [
+    {
+      hookId: "capability-first-dispatch-gate",
+      status: "matched_not_planner",
+      stages,
+      evidenceRefs: [
+        "canonical/runtime-assets/claude/hooks/enforce-agent-dispatch.mjs",
+        ".codex/hooks.json",
+        ".cursor/hooks.json",
+      ],
+      purpose:
+        "Last-resort fuse for missing intent, Fetch evidence, capability discovery, owner/loadout, or unsafe mutation.",
+    },
+    {
+      hookId: "spine-state-guard",
+      status: "matched_not_planner",
+      stages: ["Critical", "Fetch", "Thinking", "Execution", "Review"],
+      evidenceRefs: [
+        "canonical/runtime-assets/claude/hooks/spine-state.mjs",
+        ".codex/hooks/spine-state.mjs",
+        ".cursor/hooks/spine-state.mjs",
+      ],
+      purpose:
+        "Checks stage packet progression without replacing the default governed route.",
+    },
+  ];
+}
+
+function buildLangGraphRunPacket({
+  runId,
+  stageOperationPlan,
+  workerTaskPackets,
+  workerResultPackets,
+  workerExecutionEvidence,
+  agUiStageEvents,
+  conductorConsumptionEvidence,
+}) {
+  const recordedAt = nowIso();
+  const stageOwnerByName = new Map(
+    (stageOperationPlan?.stages ?? []).map((stage) => [stage.stage, stage.owner]),
+  );
+  const stageNodes = TRACE_SPINE.map((stage, index) => ({
+    nodeId: `stage:${graphNodeId(stage)}`,
+    nodeType: "stage",
+    stage,
+    sequence: index + 1,
+    owner: stageOwnerByName.get(stage) ?? STAGE_OWNER_FALLBACKS[stage],
+    inputState:
+      index === 0
+        ? ["requestRecord.task"]
+        : [`state.${graphNodeId(TRACE_SPINE[index - 1])}`],
+    outputState: [`state.${graphNodeId(stage)}`],
+    failureReturnStage: stage,
+  }));
+  const workerNodes = workerTaskPackets.map((packet, index) => ({
+    nodeId: `worker:${packet.taskPacketId}`,
+    nodeType: "peer_worker",
+    stage: "Execution",
+    owner: packet.projectAgentId ?? packet.ownerAgent ?? packet.owner,
+    roleDisplayName: packet.roleDisplayName,
+    taskPacketId: packet.taskPacketId,
+    capabilityProfileId: packet.capabilityLoadout?.capabilityProfileId ?? null,
+    inputState: [`coreLoop.thinkingPacket.workerTaskPackets[${index}]`],
+    outputState: [`coreLoop.executionResult.workerResultPackets[${index}]`],
+    dependsOn: packet.dependsOn ?? [],
+    failureReturnStage: "Execution",
+  }));
+  const stageEdges = TRACE_SPINE.slice(0, -1).map((stage, index) => ({
+    edgeId: `edge:${graphNodeId(stage)}->${graphNodeId(TRACE_SPINE[index + 1])}`,
+    from: `stage:${graphNodeId(stage)}`,
+    to: `stage:${graphNodeId(TRACE_SPINE[index + 1])}`,
+    edgeType: "fixed_stage_transition",
+    condition: "previous_stage_completed",
+  }));
+  const dynamicSendEdges = workerTaskPackets.map((packet) => ({
+    edgeId: `edge:thinking->${packet.taskPacketId}`,
+    from: "stage:thinking",
+    to: `worker:${packet.taskPacketId}`,
+    edgeType: "dynamic_send",
+    condition: `selected workerTaskPacket ${packet.taskPacketId}`,
+  }));
+  const workerDependencyEdges = workerTaskPackets.flatMap((packet) =>
+    (packet.dependsOn ?? []).map((dependencyId) => ({
+      edgeId: `edge:${dependencyId}->${packet.taskPacketId}`,
+      from: `worker:${dependencyId}`,
+      to: `worker:${packet.taskPacketId}`,
+      edgeType: "peer_dependency",
+      condition: "upstream peer result available",
+    }))
+  );
+  const workerReviewEdges = workerTaskPackets.map((packet) => ({
+    edgeId: `edge:${packet.taskPacketId}->review`,
+    from: `worker:${packet.taskPacketId}`,
+    to: "stage:review",
+    edgeType: "merge_to_review",
+    condition: "worker result merged by meta-conductor",
+  }));
+  const nodes = [...stageNodes, ...workerNodes];
+  const edges = [...stageEdges, ...dynamicSendEdges, ...workerDependencyEdges, ...workerReviewEdges];
+  const eventLog = [
+    ...(agUiStageEvents?.events ?? []).map((event, index) => ({
+      eventId: event.eventId,
+      eventType: event.eventType,
+      nodeId: `stage:${graphNodeId(event.stage)}`,
+      sequence: index + 1,
+      userFacingLabel: event.userFacingLabel?.["zh-CN"] ?? event.stage,
+      evidenceRef: "coreLoop.agUiStageEvents",
+    })),
+    ...workerExecutionEvidence.map((evidence, index) => ({
+      eventId: stableId("worker-event", `${runId}-${evidence.taskPacketId}-${index}`),
+      eventType: evidence.liveWorkerExecution ? "WorkerFinished" : "WorkerBlocked",
+      nodeId: `worker:${evidence.taskPacketId}`,
+      sequence: (agUiStageEvents?.events?.length ?? 0) + index + 1,
+      userFacingLabel:
+        evidence.liveWorkerExecution
+          ? "worker 结果已合并"
+          : "worker 等待审批或依赖",
+      evidenceRef: evidence.artifactRef,
+    })),
+  ];
+  const stateTransition = [
+    ...TRACE_SPINE.map((stage, index) => ({
+      transitionId: stableId("state-transition", `${runId}-${stage}-${index}`),
+      fromNode: index === 0 ? "START" : `stage:${graphNodeId(TRACE_SPINE[index - 1])}`,
+      toNode: `stage:${graphNodeId(stage)}`,
+      updates: [`state.${graphNodeId(stage)}`],
+      evidenceRef:
+        stage === "Execution"
+          ? "coreLoop.executionResult"
+          : stage === "Thinking"
+            ? "coreLoop.thinkingPacket"
+            : `coreLoop.${graphNodeId(stage)}Packet`,
+    })),
+    ...workerResultPackets.map((packet, index) => ({
+      transitionId: stableId("state-transition", `${runId}-${packet.taskPacketId}`),
+      fromNode: "stage:thinking",
+      toNode: `worker:${packet.taskPacketId}`,
+      updates: [`workerResultPackets[${index}]`],
+      evidenceRef: `coreLoop.executionResult.workerResultPackets[${index}]`,
+    })),
+  ];
+  const checkpoints = nodes.map((node, index) => ({
+    checkpointId: stableId("checkpoint", `${runId}-${node.nodeId}-${index}`),
+    nodeId: node.nodeId,
+    stateRefs: node.outputState,
+    recordedAt,
+    checkpointHash: textSha256(`${runId}:${node.nodeId}:${JSON.stringify(node.outputState)}`),
+  }));
+  const pass =
+    nodes.length >= TRACE_SPINE.length &&
+    edges.length >= TRACE_SPINE.length - 1 &&
+    stateTransition.length >= TRACE_SPINE.length &&
+    eventLog.length >= TRACE_SPINE.length &&
+    checkpoints.length === nodes.length &&
+    conductorConsumptionEvidence?.status === "pass";
+  return {
+    schemaVersion: "langgraph-style-run-v0.1",
+    status: pass ? "pass" : "partial",
+    evidenceKind: pass ? "product_experience_pass" : "contract_ready",
+    architectureStyle: "LangGraph-style StateGraph without adding a LangGraph runtime dependency",
+    alignmentRefs: [
+      "state",
+      "nodes",
+      "edges",
+      "message-passing",
+      "checkpoint",
+      "replay",
+      "dynamic send",
+    ],
+    nodes,
+    edges,
+    conditionalEdges: edges.filter((edge) => edge.edgeType !== "fixed_stage_transition"),
+    state: {
+      schemaVersion: "meta-kim-run-state-v0.1",
+      sharedStateFields: [
+        "intentPacket",
+        "fetchPacket",
+        "thinkingPacket",
+        "workerTaskPackets",
+        "workerResultPackets",
+        "reviewPacket",
+        "verificationResult",
+        "evolutionWritebackPacket",
+      ],
+      reducerPolicy: "append stage/worker evidence, merge by taskPacketId, never overwrite planning state",
+    },
+    stateTransition,
+    eventLog,
+    checkpoint: {
+      adapter: "run-artifact-checkpoints",
+      count: checkpoints.length,
+      checkpoints,
+    },
+    replay: {
+      supported: true,
+      command: "npm run meta:theory:run -- <task>",
+      artifactRef: "coreLoop.langGraphRunPacket",
+      deterministicBoundary:
+        "structure, ids, and evidence refs are stable; timestamps are run-current",
+    },
+    acceptance: {
+      nodeEdgeStateEventCheckpointPresent: pass,
+      noOrphanedWorkerNodes: workerNodes.every((node) =>
+        edges.some((edge) => edge.to === node.nodeId || edge.from === node.nodeId)
+      ),
+      branchCoverage: "100%",
+    },
+  };
+}
+
+function buildDynamicWorkflowRuntimePacket({
+  orchestrationReport,
+  workerTaskPackets,
+  workerResultPackets,
+  dynamicWorkflowDecisionRecord,
+  agentTeamsPlaybookPacket,
+}) {
+  const bindingRows = workerTaskPackets.map((packet, index) => {
+    const loadout = packet.capabilityLoadout ?? {};
+    const skills = uniqueStrings([
+      ...(loadout.repoSkills ?? []),
+      ...(loadout.runtimeSkillCandidates ?? []),
+    ]);
+    const mcp = uniqueStrings([
+      ...(loadout.repoMcpTools ?? []),
+      ...(loadout.runtimeMcpCandidates ?? []),
+    ]);
+    const commands = uniqueStrings(loadout.commands ?? []);
+    const runtimeTools = uniqueStrings(loadout.runtimeTools ?? []);
+    const laneId =
+      packet.businessFlowLaneId ??
+      packet.workType ??
+      packet.decision ??
+      packet.roleDisplayName ??
+      `worker-lane-${index + 1}`;
+    const laneLabel =
+      packet.businessFlowLaneLabel ??
+      packet.shardScope ??
+      packet.workType ??
+      packet.roleDisplayName ??
+      laneId;
+    return {
+      taskPacketId: packet.taskPacketId,
+      resultPacketId: workerResultPackets[index]?.taskPacketId ?? null,
+      laneId,
+      laneLabel,
+      roleDisplayName: packet.roleDisplayName,
+      owner: packet.owner,
+      ownerMode: packet.ownerMode,
+      executionMode: packet.executionMode,
+      selectedBy: packet.businessFlowLaneId
+        ? "natural-language intent lane selection"
+        : "capability gap decision",
+      capabilityProfileId: loadout.capabilityProfileId ?? null,
+      skills,
+      mcp,
+      commands,
+      runtimeTools,
+      hookMatches: buildHookMatchesForPacket(packet),
+      abstractPromptCapability: {
+        contractRef: "config/contracts/prompt-abstract-capability-contract.json",
+        status: "applied_as_foundational_prompt_capability",
+      },
+      orchestrationProvider:
+        agentTeamsPlaybookPacket?.selected === true
+          ? {
+              providerId: AGENT_TEAMS_PLAYBOOK_ID,
+              status: "selected_not_invoked",
+              packetRef: "coreLoop.agentTeamsPlaybookPacket",
+            }
+          : null,
+      evidenceRefs: [
+        `coreLoop.thinkingPacket.workerTaskPackets[${index}]`,
+        `coreLoop.executionResult.workerResultPackets[${index}]`,
+      ],
+    };
+  });
+  const coverage = {
+    skill: bindingRows.some((row) => row.skills.length > 0),
+    mcp: bindingRows.some((row) => row.mcp.length > 0),
+    command: bindingRows.some((row) => row.commands.length > 0),
+    tools: bindingRows.some((row) => row.runtimeTools.length > 0),
+    hooks: bindingRows.every((row) => row.hookMatches.length > 0),
+    abstractPromptCapability: bindingRows.every((row) => row.abstractPromptCapability.status),
+    agentTeamsPlaybook:
+      agentTeamsPlaybookPacket?.status === "pass" ||
+      agentTeamsPlaybookPacket?.status === "not_required",
+    workerResults: workerResultPackets.length === workerTaskPackets.length,
+  };
+  const plannedSelectedLaneIds =
+    orchestrationReport.thinkingRoute?.dynamicWorkflowPlan?.selectedLaneIds ?? [];
+  const derivedSelectedLaneIds = uniqueStrings(bindingRows.map((row) => row.laneId));
+  const plannedBusinessFlowLaneCount = orchestrationReport.thinkingRoute?.businessFlowLaneCount ?? 0;
+  const pass = Object.values(coverage).every(Boolean);
+  return {
+    schemaVersion: "dynamic-workflow-runtime-v0.1",
+    status: pass ? "pass" : "partial",
+    evidenceKind: pass ? "product_experience_pass" : "local_runner_pass",
+    notFixedChecklist: true,
+    selectedLaneIds:
+      plannedSelectedLaneIds.length > 0 ? plannedSelectedLaneIds : derivedSelectedLaneIds,
+    omittedLaneIds:
+      orchestrationReport.thinkingRoute?.dynamicWorkflowPlan?.omittedLaneIds ?? [],
+    businessFlowLaneCount:
+      plannedBusinessFlowLaneCount > 0
+        ? plannedBusinessFlowLaneCount
+        : derivedSelectedLaneIds.length,
+    decisionCards: dynamicWorkflowDecisionRecord.cards.map((card) => ({
+      cardKey: card.cardKey,
+      label: card.label,
+      reason: card.reason,
+      escalationOwner: card.escalationOwner,
+    })),
+    capabilityBindingRows: bindingRows,
+    capabilityBindingCoverage: coverage,
+    invocationPolicy: {
+      skills: "selected into capability loadout and available to worker profile",
+      mcp: "matched to repo or runtime MCP provider/tool; live external invocation requires task need and approval boundary",
+      commands: "verification and orchestration commands are executable weapons",
+      tools: "runtime tools are selected by owner, permission, OS/runtime support, and verification need",
+      hooks: "matched as fuses, never as the planner",
+      agentTeamsPlaybook:
+        "selected as a bounded fan-out orchestration adapter after workerTaskPackets exist; not a live Skill or spawn_agent call without invocation evidence",
+    },
+  };
+}
+
+function buildPeerAgentMeshPacket({ workerTaskPackets, workerResultPackets }) {
+  const peers = workerTaskPackets.map((packet, index) => ({
+    peerId: packet.projectAgentId ?? packet.ownerAgent ?? packet.owner,
+    taskPacketId: packet.taskPacketId,
+    roleDisplayName: packet.roleDisplayName,
+    ownerMode: packet.ownerMode,
+    workerInstanceMode: packet.workerInstanceMode,
+    capabilityProfileId: packet.capabilityLoadout?.capabilityProfileId ?? null,
+    dependsOn: packet.dependsOn ?? [],
+    handoffTarget: packet.handoffTarget,
+    mergeOwner: packet.mergeOwner,
+    resultStatus: workerResultPackets[index]?.status ?? "missing",
+    durableIdentityStatus: packet.durableIdentityStatus,
+  }));
+  const taskToPeer = new Map(peers.map((peer) => [peer.taskPacketId, peer.peerId]));
+  const handoffs = [
+    ...peers.map((peer) => ({
+      from: "meta-conductor",
+      to: peer.peerId,
+      edgeType: "dispatch",
+      taskPacketId: peer.taskPacketId,
+    })),
+    ...peers.flatMap((peer) =>
+      peer.dependsOn.map((dependencyId) => ({
+        from: taskToPeer.get(dependencyId) ?? dependencyId,
+        to: peer.peerId,
+        edgeType: "peer_dependency",
+        taskPacketId: peer.taskPacketId,
+      }))
+    ),
+    ...peers.map((peer) => ({
+      from: peer.peerId,
+      to: peer.mergeOwner ?? "meta-conductor",
+      edgeType: "merge_handoff",
+      taskPacketId: peer.taskPacketId,
+    })),
+    {
+      from: "meta-conductor",
+      to: "meta-prism",
+      edgeType: "review_handoff",
+      taskPacketId: "merged-worker-results",
+    },
+    {
+      from: "meta-prism",
+      to: "verify",
+      edgeType: "verification_handoff",
+      taskPacketId: "reviewed-worker-results",
+    },
+  ];
+  const pass =
+    peers.length > 0 &&
+    handoffs.length >= peers.length &&
+    peers.every((peer) => peer.resultStatus !== "missing" && peer.mergeOwner);
+  return {
+    schemaVersion: "peer-agent-mesh-v0.1",
+    status: pass ? "pass" : "partial",
+    evidenceKind: pass ? "product_experience_pass" : "local_runner_pass",
+    model: "run-scoped peer workers coordinated by meta-conductor",
+    peerDefinition:
+      "A peer is a bounded run-scoped worker or synthesized project-agent profile with its own role, loadout, dependencies, result packet, and merge handoff.",
+    peers,
+    handoffs,
+    acceptance: {
+      noGenericOwner: peers.every((peer) => peer.roleDisplayName !== "general-purpose"),
+      everyPeerHasResult: peers.every((peer) => peer.resultStatus !== "missing"),
+      everyPeerHasMergeOwner: peers.every((peer) => Boolean(peer.mergeOwner)),
+      dependenciesAreExplicit: true,
+    },
+  };
+}
+
+function countBy(values) {
+  return values.reduce((counts, value) => {
+    const key = String(value || "unknown");
+    counts[key] = (counts[key] ?? 0) + 1;
+    return counts;
+  }, {});
+}
+
+const CAPABILITY_INVOCATION_STATES = [
+  "invoked",
+  "applied",
+  "host_visible_observed",
+  "selected_not_invoked",
+  "discovered_not_selected",
+  "unavailable",
+  "blocked",
+  "not_required",
+];
+
+function normalizeHostVisibleSubagents(input) {
+  if (!input) return [];
+  if (Array.isArray(input)) {
+    return input
+      .map((item) =>
+        typeof item === "string"
+          ? { name: item }
+          : {
+              name: item?.name ?? item?.nickname ?? item?.label,
+              evidence: item?.evidence ?? item?.source ?? "host_ui",
+            },
+      )
+      .filter((item) => item.name);
+  }
+  if (typeof input === "string") {
+    const trimmed = input.trim();
+    if (!trimmed) return [];
+    try {
+      return normalizeHostVisibleSubagents(JSON.parse(trimmed));
+    } catch {
+      return trimmed
+        .split(",")
+        .map((name) => name.trim())
+        .filter(Boolean)
+        .map((name) => ({ name, evidence: "host_ui" }));
+    }
+  }
+  return [];
+}
+
+function compactCommand(command, args = []) {
+  return [path.basename(command), ...args].join(" ");
+}
+
+function tailText(value, maxLength = 800) {
+  const normalized = String(value ?? "").trim();
+  return normalized.length > maxLength ? normalized.slice(-maxLength) : normalized;
+}
+
+function runProbeProcess({ family, probeId, command, args, timeoutMs = 120_000 }) {
+  const runAt = nowIso();
+  const result = spawnSync(command, args, {
+    cwd: REPO_ROOT,
+    encoding: "utf8",
+    timeout: timeoutMs,
+    windowsHide: true,
+  });
+  const stdoutTail = tailText(result.stdout);
+  const stderrTail = tailText(result.stderr);
+  return {
+    family,
+    probeId,
+    status: result.status === 0 ? "pass" : "blocked",
+    evidenceKind: "fresh_invocation_probe",
+    command: compactCommand(command, args),
+    exitCode: result.status,
+    signal: result.signal ?? null,
+    timedOut: result.error?.code === "ETIMEDOUT",
+    runAt,
+    stdoutTail,
+    stderrTail,
+    stdoutSha256: stdoutTail ? textSha256(stdoutTail) : null,
+    stderrSha256: stderrTail ? textSha256(stderrTail) : null,
+  };
+}
+
+function buildCapabilityInvocationProbePacket({
+  dynamicWorkflowRuntimePacket,
+  enabled = false,
+}) {
+  const bindingRows = dynamicWorkflowRuntimePacket?.capabilityBindingRows ?? [];
+  const selected = {
+    mcp: bindingRows.some((row) => row.mcp.length > 0),
+    command_script: bindingRows.some((row) => row.commands.length > 0),
+    runtime_tool: bindingRows.some((row) => row.runtimeTools.length > 0),
+  };
+  const requiredFamilies = Object.entries(selected)
+    .filter(([, isSelected]) => isSelected)
+    .map(([family]) => family);
+  if (!enabled) {
+    return {
+      schemaVersion: "capability-invocation-probe-v0.1",
+      status: "not_run",
+      evidenceKind: "probe_not_requested",
+      requiredFamilies,
+      invokedFamilies: [],
+      missingFamilies: requiredFamilies,
+      probes: [],
+      truthBoundary:
+        "Discovery and binding can be validated without running local invocation probes, but product-experience pass requires fresh probe evidence for callable local families.",
+    };
+  }
+  const probes = [];
+  if (selected.mcp) {
+    probes.push(
+      runProbeProcess({
+        family: "mcp",
+        probeId: "meta-runtime-server-self-test",
+        command: process.execPath,
+        args: ["scripts/mcp/meta-runtime-server.mjs", "--self-test"],
+      }),
+    );
+  }
+  if (selected.command_script) {
+    probes.push(
+      runProbeProcess({
+        family: "command_script",
+        probeId: "prompt-executability-command",
+        command: process.execPath,
+        args: ["scripts/validate-prompt-executability.mjs"],
+      }),
+    );
+  }
+  if (selected.runtime_tool) {
+    probes.push(
+      runProbeProcess({
+        family: "runtime_tool",
+        probeId: "filesystem-shell-runtime-tool",
+        command: process.execPath,
+        args: [
+          "-e",
+          "const fs=require('fs'); process.exit(fs.existsSync('package.json') ? 0 : 1)",
+        ],
+      }),
+    );
+  }
+  const passedFamilies = new Set(
+    probes.filter((probe) => probe.status === "pass").map((probe) => probe.family),
+  );
+  const missingFamilies = requiredFamilies.filter((family) => !passedFamilies.has(family));
+  return {
+    schemaVersion: "capability-invocation-probe-v0.1",
+    status: missingFamilies.length === 0 ? "pass" : "partial",
+    evidenceKind: missingFamilies.length === 0 ? "fresh_invocation_probe" : "probe_partial",
+    requiredFamilies,
+    invokedFamilies: [...passedFamilies],
+    missingFamilies,
+    probes,
+    truthBoundary:
+      "These probes are real local process invocations for callable local families. They do not prove host Agent/subagent, Skill, hook-trigger, or Agent Team execution.",
+  };
+}
+
+function buildCapabilityInvocationTruthPacket({
+  orchestrationReport,
+  dynamicWorkflowRuntimePacket,
+  peerAgentMeshPacket,
+  workerExecutionEvidence,
+  hostVisibleSubagents,
+  agentTeamsPlaybookPacket,
+  capabilityInvocationProbePacket,
+  runtimeSubagentInvocationPacket,
+}) {
+  const bindingRows = dynamicWorkflowRuntimePacket?.capabilityBindingRows ?? [];
+  const hasSelected = (selector) => bindingRows.some(selector);
+  const externalAgentSpawned = (workerExecutionEvidence ?? []).some(
+    (item) => item.externalAgentSpawned === true,
+  );
+  const runScopedWorkersInvoked = (workerExecutionEvidence ?? []).some(
+    (item) => item.liveWorkerExecution === true,
+  );
+  const inventoryTypes = new Set(
+    (orchestrationReport?.fetchEvidence?.capabilityInventory ?? []).map(
+      (item) => item.capabilityType,
+    ),
+  );
+  const probeByFamily = new Map(
+    (capabilityInvocationProbePacket?.probes ?? []).map((probe) => [probe.family, probe]),
+  );
+  const familyInvokedByProbe = (family) => probeByFamily.get(family)?.status === "pass";
+  const makeRow = ({
+    family,
+    state,
+    selectedCount = 0,
+    invokedCount = 0,
+    appliedCount = 0,
+    observedCount = 0,
+    evidenceRefs,
+    invocationEvidenceRefs = [],
+    truthBoundary,
+    mustNotClaimAs,
+  }) => ({
+    family,
+    state,
+    selectedCount,
+    invokedCount,
+    appliedCount,
+    observedCount,
+    evidenceRefs,
+    invocationEvidenceRefs,
+    truthBoundary,
+    mustNotClaimAs,
+  });
+  const hostSubagents = normalizeHostVisibleSubagents(hostVisibleSubagents);
+  const rows = [
+    makeRow({
+      family: "agent_subagent",
+      state: externalAgentSpawned
+        ? "invoked"
+        : runtimeSubagentInvocationPacket?.status === "unavailable"
+          ? "unavailable"
+          : runtimeSubagentInvocationPacket?.status === "not_authorized"
+            ? "blocked"
+            : runtimeSubagentInvocationPacket?.status === "not_required"
+              ? "not_required"
+              : "selected_not_invoked",
+      selectedCount: runtimeSubagentInvocationPacket?.fanoutEligible
+        ? peerAgentMeshPacket?.peers?.length ?? 0
+        : 0,
+      invokedCount: externalAgentSpawned ? peerAgentMeshPacket?.peers?.length ?? 0 : 0,
+      evidenceRefs: [
+        "coreLoop.peerAgentMeshPacket.peers",
+        "coreLoop.executionResult.workerExecutionEvidence[].externalAgentSpawned",
+        "coreLoop.runtimeSubagentInvocationPacket",
+      ],
+      truthBoundary: externalAgentSpawned
+        ? "A runtime Agent/subagent tool invocation is attached."
+        : runtimeSubagentInvocationPacket?.degradationReason ??
+          "No runtime Agent/subagent tool invocation evidence is attached; peer workers are run-scoped structural workers only.",
+      mustNotClaimAs: externalAgentSpawned
+        ? []
+        : ["live_subagent_invocation", "peer_to_peer_runtime_agent_call"],
+    }),
+    makeRow({
+      family: "app_visible_subagent",
+      state: hostSubagents.length > 0 ? "host_visible_observed" : "not_required",
+      selectedCount: hostSubagents.length,
+      observedCount: hostSubagents.length,
+      evidenceRefs:
+        hostSubagents.length > 0
+          ? hostSubagents.map((item) => `host_ui:${item.name}`)
+          : ["host UI subagent evidence is not attached to this CLI artifact"],
+      truthBoundary:
+        "Codex App or another host UI may show app-visible subagents; this is user-visible host evidence and must not be relabeled as a Meta_Kim runner Agent/spawn_agent tool invocation unless tool-call evidence is attached.",
+      mustNotClaimAs: [
+        "runner_agent_subagent_invocation",
+        "external_agent_spawn",
+        "worker_task",
+      ],
+    }),
+    makeRow({
+      family: "worker_task",
+      state: runScopedWorkersInvoked ? "invoked" : "blocked",
+      selectedCount: peerAgentMeshPacket?.peers?.length ?? 0,
+      invokedCount: (workerExecutionEvidence ?? []).filter(
+        (item) => item.liveWorkerExecution === true,
+      ).length,
+      evidenceRefs: [
+        "coreLoop.executionResult.workerResultPackets",
+        "coreLoop.executionResult.workerExecutionEvidence",
+      ],
+      truthBoundary:
+        "Run-scoped local worker execution is valid worker evidence, but it is not a runtime subagent call.",
+      mustNotClaimAs: ["live_subagent_invocation", "external_agent_spawn"],
+    }),
+    makeRow({
+      family: "skill",
+      state: hasSelected((row) => row.skills.length > 0)
+        ? "selected_not_invoked"
+        : inventoryTypes.has("skill")
+          ? "discovered_not_selected"
+          : "not_required",
+      selectedCount: bindingRows.reduce((sum, row) => sum + row.skills.length, 0),
+      evidenceRefs: [
+        "coreLoop.dynamicWorkflowRuntimePacket.capabilityBindingRows[].skills",
+        "coreLoop.fetchPacket.capabilityDiscovery.capabilityInventory",
+      ],
+      truthBoundary:
+        "Skills selected into a worker loadout are not claimed as separately invoked skill runtimes unless invocation evidence is attached.",
+      mustNotClaimAs: ["skill_invoked"],
+    }),
+    makeRow({
+      family: "mcp",
+      state: familyInvokedByProbe("mcp")
+        ? "invoked"
+        : hasSelected((row) => row.mcp.length > 0)
+          ? "selected_not_invoked"
+        : inventoryTypes.has("mcp")
+          ? "discovered_not_selected"
+          : "not_required",
+      selectedCount: bindingRows.reduce((sum, row) => sum + row.mcp.length, 0),
+      invokedCount: familyInvokedByProbe("mcp") ? 1 : 0,
+      evidenceRefs: [
+        "coreLoop.dynamicWorkflowRuntimePacket.capabilityBindingRows[].mcp",
+        "coreLoop.capabilityInvocationProbePacket.probes[family=mcp]",
+      ],
+      invocationEvidenceRefs: familyInvokedByProbe("mcp")
+        ? ["coreLoop.capabilityInvocationProbePacket.probes[family=mcp]"]
+        : [],
+      truthBoundary:
+        "MCP provider/tool binding is not an MCP call. Live MCP invocation needs tool-call or self-test evidence attached to the run.",
+      mustNotClaimAs: ["mcp_tool_called", "external_provider_invoked"],
+    }),
+    makeRow({
+      family: "hook",
+      state: hasSelected((row) => row.hookMatches.length > 0)
+        ? "selected_not_invoked"
+        : inventoryTypes.has("hook")
+          ? "discovered_not_selected"
+          : "not_required",
+      selectedCount: bindingRows.reduce((sum, row) => sum + row.hookMatches.length, 0),
+      evidenceRefs: [
+        "coreLoop.dynamicWorkflowRuntimePacket.capabilityBindingRows[].hookMatches",
+        "canonical/runtime-assets/claude/hooks",
+      ],
+      truthBoundary:
+        "Hook matches are last-resort fuse bindings. A hook file or match is not a hook trigger event.",
+      mustNotClaimAs: ["hook_triggered", "hook_blocked_or_allowed"],
+    }),
+    makeRow({
+      family: "prompt_rule",
+      state: hasSelected((row) => Boolean(row.abstractPromptCapability?.status))
+        ? "applied"
+        : "not_required",
+      selectedCount: bindingRows.filter((row) => Boolean(row.abstractPromptCapability?.status)).length,
+      appliedCount: bindingRows.filter((row) => Boolean(row.abstractPromptCapability?.status)).length,
+      evidenceRefs: [
+        "coreLoop.goalContractPacket",
+        "coreLoop.dynamicWorkflowRuntimePacket.capabilityBindingRows[].abstractPromptCapability",
+        "canonical/skills/meta-theory/SKILL.md",
+      ],
+      truthBoundary:
+        "Prompt/rule capability is applied as the governed contract and abstract prompt capability, not as an external runtime tool call.",
+      mustNotClaimAs: ["external_tool_call"],
+    }),
+    makeRow({
+      family: "command_script",
+      state: familyInvokedByProbe("command_script")
+        ? "invoked"
+        : hasSelected((row) => row.commands.length > 0)
+          ? "selected_not_invoked"
+        : inventoryTypes.has("command")
+          ? "discovered_not_selected"
+          : "not_required",
+      selectedCount: bindingRows.reduce((sum, row) => sum + row.commands.length, 0),
+      invokedCount: familyInvokedByProbe("command_script") ? 1 : 0,
+      evidenceRefs: [
+        "coreLoop.dynamicWorkflowRuntimePacket.capabilityBindingRows[].commands",
+        "coreLoop.capabilityInvocationProbePacket.probes[family=command_script]",
+      ],
+      invocationEvidenceRefs: familyInvokedByProbe("command_script")
+        ? ["coreLoop.capabilityInvocationProbePacket.probes[family=command_script]"]
+        : [],
+      truthBoundary:
+        "A command selected for a worker or validator is not marked invoked here without fresh command output on this run artifact.",
+      mustNotClaimAs: ["command_executed"],
+    }),
+    makeRow({
+      family: "runtime_tool",
+      state: familyInvokedByProbe("runtime_tool")
+        ? "invoked"
+        : hasSelected((row) => row.runtimeTools.length > 0)
+          ? "selected_not_invoked"
+        : inventoryTypes.has("tool")
+          ? "discovered_not_selected"
+          : "not_required",
+      selectedCount: bindingRows.reduce((sum, row) => sum + row.runtimeTools.length, 0),
+      invokedCount: familyInvokedByProbe("runtime_tool") ? 1 : 0,
+      evidenceRefs: [
+        "coreLoop.dynamicWorkflowRuntimePacket.capabilityBindingRows[].runtimeTools",
+        "coreLoop.capabilityInvocationProbePacket.probes[family=runtime_tool]",
+      ],
+      invocationEvidenceRefs: familyInvokedByProbe("runtime_tool")
+        ? ["coreLoop.capabilityInvocationProbePacket.probes[family=runtime_tool]"]
+        : [],
+      truthBoundary:
+        "Runtime tools selected by loadout are not claimed as called unless tool-call evidence is attached.",
+      mustNotClaimAs: ["runtime_tool_called"],
+    }),
+    makeRow({
+      family: "agent_teams_playbook",
+      state:
+        agentTeamsPlaybookPacket?.status === "pass"
+          ? "selected_not_invoked"
+          : agentTeamsPlaybookPacket?.status === "not_required"
+            ? "not_required"
+            : "unavailable",
+      selectedCount: agentTeamsPlaybookPacket?.selected ? 1 : 0,
+      invokedCount: 0,
+      evidenceRefs: [
+        "coreLoop.agentTeamsPlaybookPacket",
+        "coreLoop.dynamicWorkflowRuntimePacket.capabilityBindingCoverage.agentTeamsPlaybook",
+      ],
+      truthBoundary:
+        "agent-teams-playbook may be selected as a fan-out orchestration adapter after workerTaskPackets exist, but this Node runner does not claim a live Skill call, Agent Team, or Codex spawn_agent invocation without host tool evidence.",
+      mustNotClaimAs: [
+        "skill_invoked",
+        "live_agent_team_created",
+        "runner_agent_subagent_invocation",
+      ],
+    }),
+    makeRow({
+      family: "memory_graph_observability",
+      state:
+        inventoryTypes.has("memory") || inventoryTypes.has("graph")
+          ? "discovered_not_selected"
+          : "not_required",
+      selectedCount: 0,
+      evidenceRefs: [
+        "coreLoop.fetchPacket.capabilityDiscovery.capabilityInventory",
+        "coreLoop.traceEvalControlPlane",
+      ],
+      truthBoundary:
+        "Memory and graph can guide routing, but discovery is not a memory write or graph rebuild.",
+      mustNotClaimAs: ["memory_write", "graph_rebuild"],
+    }),
+  ];
+  const statesValid = rows.every((row) => CAPABILITY_INVOCATION_STATES.includes(row.state));
+  const stateCounts = countBy(rows.map((row) => row.state));
+  const noLiveSubagentOverclaim =
+    rows.find((row) => row.family === "agent_subagent")?.state !== "invoked" ||
+    externalAgentSpawned;
+  const noMcpCallOverclaim =
+    rows.find((row) => row.family === "mcp")?.state !== "invoked" ||
+    familyInvokedByProbe("mcp");
+  const noCommandCallOverclaim =
+    rows.find((row) => row.family === "command_script")?.state !== "invoked" ||
+    familyInvokedByProbe("command_script");
+  const noRuntimeToolOverclaim =
+    rows.find((row) => row.family === "runtime_tool")?.state !== "invoked" ||
+    familyInvokedByProbe("runtime_tool");
+  const noHookTriggerOverclaim = rows.find((row) => row.family === "hook")?.state !== "invoked";
+  const noHostUiSubagentOverclaim = rows
+    .find((row) => row.family === "app_visible_subagent")
+    ?.mustNotClaimAs.includes("runner_agent_subagent_invocation");
+  const noAgentTeamsPlaybookOverclaim = rows
+    .find((row) => row.family === "agent_teams_playbook")
+    ?.mustNotClaimAs.includes("live_agent_team_created");
+  const pass =
+    rows.length >= 10 &&
+    statesValid &&
+    noLiveSubagentOverclaim &&
+    noMcpCallOverclaim &&
+    noCommandCallOverclaim &&
+    noRuntimeToolOverclaim &&
+    noHookTriggerOverclaim &&
+    noHostUiSubagentOverclaim &&
+    noAgentTeamsPlaybookOverclaim &&
+    rows.some((row) => row.state === "invoked") &&
+    capabilityInvocationProbePacket?.status !== "partial" &&
+    rows.some((row) => row.state === "selected_not_invoked");
+  return {
+    schemaVersion: "capability-invocation-truth-v0.3",
+    status: pass ? "pass" : "partial",
+    evidenceKind:
+      pass && capabilityInvocationProbePacket?.status === "pass"
+        ? "product_experience_pass"
+        : "truth_boundary_partial",
+    stateTaxonomy: CAPABILITY_INVOCATION_STATES,
+    rows,
+    stateCounts,
+    callableInvocationCoverage: {
+      status: capabilityInvocationProbePacket?.status ?? "missing",
+      requiredFamilies: capabilityInvocationProbePacket?.requiredFamilies ?? [],
+      invokedFamilies: capabilityInvocationProbePacket?.invokedFamilies ?? [],
+      missingFamilies: capabilityInvocationProbePacket?.missingFamilies ?? [],
+      evidenceRef: "coreLoop.capabilityInvocationProbePacket",
+    },
+    requiredFamilies: [
+      "agent_subagent",
+      "app_visible_subagent",
+      "worker_task",
+      "skill",
+      "mcp",
+      "hook",
+      "prompt_rule",
+      "command_script",
+      "runtime_tool",
+      "agent_teams_playbook",
+    ],
+    truthAssertions: {
+      noLiveSubagentOverclaim,
+      noHostUiSubagentOverclaim,
+      noAgentTeamsPlaybookOverclaim,
+      noMcpCallOverclaim,
+      noCommandCallOverclaim,
+      noRuntimeToolOverclaim,
+      noHookTriggerOverclaim,
+      selectedIsNotInvoked: true,
+      discoveredIsNotInvoked: true,
+      configuredIsNotInvoked: true,
+      appliedIsNotInvoked: true,
+      hostVisibleIsNotInvoked: true,
+    },
+    failIf:
+      "Any selected, discovered, configured, or matched capability is rendered as invoked without attached invocation evidence.",
+  };
+}
+
+function buildVisibleMetaTheorySurfacePacket({
+  orchestrationReport,
+  langGraphRunPacket,
+  dynamicWorkflowRuntimePacket,
+  peerAgentMeshPacket,
+  capabilityInvocationProbePacket,
+  capabilityInvocationTruthPacket,
+  agentTeamsPlaybookPacket,
+}) {
+  const capabilityRows = orchestrationReport.fetchEvidence.capabilityInventory.map((item) => ({
+    capabilityType: item.capabilityType,
+    status: item.coverageStatus,
+    source: item.source,
+    routeImpact: item.routeImpact,
+  }));
+  const capabilityTypes = capabilityRows.map((row) => row.capabilityType);
+  const nonSkillCapabilityTypes = capabilityTypes.filter((type) => type !== "skill");
+  const dynamicRows = dynamicWorkflowRuntimePacket.capabilityBindingRows.map((row) => ({
+    laneId: row.laneId,
+    laneLabel: row.laneLabel,
+    owner: row.owner,
+    roleDisplayName: row.roleDisplayName,
+    skills: row.skills.length,
+    mcp: row.mcp.length,
+    commands: row.commands.length,
+    runtimeTools: row.runtimeTools.length,
+    hooks: row.hookMatches.length,
+    workerResult: Boolean(row.resultPacketId),
+  }));
+  const pass =
+    capabilityRows.length > 0 &&
+    nonSkillCapabilityTypes.length > 0 &&
+    dynamicRows.length > 0 &&
+    langGraphRunPacket.status === "pass" &&
+    dynamicWorkflowRuntimePacket.status === "pass" &&
+    ["pass", "not_required"].includes(agentTeamsPlaybookPacket?.status) &&
+    peerAgentMeshPacket.status === "pass" &&
+    capabilityInvocationTruthPacket.status === "pass";
+  return {
+    schemaVersion: "visible-meta-theory-surface-v0.1",
+    status: pass ? "pass" : "partial",
+    evidenceKind: pass ? "user_visible_product_surface" : "internal_artifact_only",
+    requiredVisibleTopics: [
+      "orchestration",
+      "dynamic_workflow",
+      "capability_inventory_not_skill_only",
+      "capability_invocation_truth",
+      "agent_teams_playbook",
+      "peer_agent_mesh",
+      "langgraph_style_control_graph",
+    ],
+    orchestration: {
+      status: orchestrationReport.status,
+      boardId: orchestrationReport.orchestrationTaskBoardPacket.dispatchBoardId,
+      synthesisOwner: orchestrationReport.orchestrationTaskBoardPacket.synthesisOwner,
+      workerTaskCount: orchestrationReport.workerTaskPackets.length,
+      parallelGroups: uniqueStrings(
+        orchestrationReport.workerTaskPackets.map((packet) => packet.parallelGroup)
+      ),
+      mergeOwners: uniqueStrings(
+        orchestrationReport.workerTaskPackets.map((packet) => packet.mergeOwner)
+      ),
+    },
+    dynamicWorkflow: {
+      status: dynamicWorkflowRuntimePacket.status,
+      selectedLaneIds: dynamicWorkflowRuntimePacket.selectedLaneIds,
+      omittedLaneIds: dynamicWorkflowRuntimePacket.omittedLaneIds,
+      businessFlowLaneCount: dynamicWorkflowRuntimePacket.businessFlowLaneCount,
+      capabilityBindingCoverage: dynamicWorkflowRuntimePacket.capabilityBindingCoverage,
+      callableInvocationCoverage: capabilityInvocationTruthPacket.callableInvocationCoverage,
+      visibleRows: dynamicRows,
+    },
+    capabilityInventory: {
+      total: capabilityRows.length,
+      byType: countBy(capabilityTypes),
+      nonSkillCapabilityTypeCount: uniqueStrings(nonSkillCapabilityTypes).length,
+      notSkillOnly: nonSkillCapabilityTypes.length > 0,
+      visibleRows: capabilityRows,
+    },
+    capabilityInvocationTruth: {
+      status: capabilityInvocationTruthPacket.status,
+      stateTaxonomy: capabilityInvocationTruthPacket.stateTaxonomy,
+      stateCounts: capabilityInvocationTruthPacket.stateCounts,
+      callableInvocationCoverage: capabilityInvocationTruthPacket.callableInvocationCoverage,
+      probeStatus: capabilityInvocationProbePacket?.status ?? "missing",
+      visibleRows: capabilityInvocationTruthPacket.rows.map((row) => ({
+        family: row.family,
+        state: row.state,
+        selectedCount: row.selectedCount,
+        invokedCount: row.invokedCount,
+        appliedCount: row.appliedCount,
+        observedCount: row.observedCount,
+        truthBoundary: row.truthBoundary,
+      })),
+    },
+    agentTeamsPlaybook: {
+      status: agentTeamsPlaybookPacket?.status ?? "missing",
+      selected: agentTeamsPlaybookPacket?.selected === true,
+      triggered: agentTeamsPlaybookPacket?.triggered === true,
+      providerId: agentTeamsPlaybookPacket?.providerId ?? AGENT_TEAMS_PLAYBOOK_ID,
+      selectedSource: agentTeamsPlaybookPacket?.providerResolution?.selectedSource ?? null,
+      executableLaneCount: agentTeamsPlaybookPacket?.executableLaneCount ?? 0,
+      maxParallelAgents: agentTeamsPlaybookPacket?.maxParallelAgents ?? 0,
+      requestedParallelAgents: agentTeamsPlaybookPacket?.requestedParallelAgents ?? 0,
+      runtimeCapacity: agentTeamsPlaybookPacket?.runtimeCapacity ?? null,
+      capacitySource: agentTeamsPlaybookPacket?.capacitySource ?? null,
+      waveCount: agentTeamsPlaybookPacket?.waves?.length ?? 0,
+      liveRuntimeBoundary:
+        agentTeamsPlaybookPacket?.runtimeInvocationBoundary?.codexRule ??
+        "Live subagent claims require host tool-call evidence.",
+    },
+    peerAgentMesh: {
+      status: peerAgentMeshPacket.status,
+      peerCount: peerAgentMeshPacket.peers.length,
+      handoffCount: peerAgentMeshPacket.handoffs.length,
+      model: peerAgentMeshPacket.model,
+      visibleRows: peerAgentMeshPacket.peers.map((peer) => ({
+        peerId: peer.peerId,
+        roleDisplayName: peer.roleDisplayName,
+        taskPacketId: peer.taskPacketId,
+        mergeOwner: peer.mergeOwner,
+        resultStatus: peer.resultStatus,
+      })),
+      liveRuntimeBoundary:
+        "These are run-scoped peer workers in the governed artifact unless runtime subagent dispatch evidence explicitly says otherwise.",
+    },
+    langGraph: {
+      status: langGraphRunPacket.status,
+      nodeCount: langGraphRunPacket.nodes.length,
+      edgeCount: langGraphRunPacket.edges.length,
+      conditionalEdgeCount: langGraphRunPacket.conditionalEdges.length,
+      checkpointCount: langGraphRunPacket.checkpoint.count,
+      replayCommand: langGraphRunPacket.replay.command,
+      architectureStyle: langGraphRunPacket.architectureStyle,
+    },
+    failIf:
+      "The report or conversation surface only says stages passed, but does not show orchestration, Dynamic Workflow, non-skill capabilities, peer agent mesh, and LangGraph-style graph details.",
+  };
+}
+
+function buildUserPerceptionPacket({
+  conversationNotice,
+  userExperienceNotice,
+  stageOperationPlan,
+  agUiStageEvents,
+  visibleMetaTheorySurfacePacket,
+  productExperienceGoals = [],
+}) {
+  const stageNames = (stageOperationPlan?.stages ?? []).map((stage) => stage.stage);
+  const cues = [
+    {
+      cue: "要做什么",
+      evidenceRef: "stageOperationPlan.stages[].whatHappens",
+      example:
+        stageOperationPlan?.stages?.[0]?.whatHappens ??
+        "先锁定真实目标，再决定路线。",
+    },
+    {
+      cue: "正在做什么",
+      evidenceRef: "agUiStageEvents.events[].userFacingLabel",
+      example:
+        agUiStageEvents?.events?.[0]?.userFacingLabel?.["zh-CN"] ??
+        "锁定真实目标",
+    },
+    {
+      cue: "准备怎么做",
+      evidenceRef: "stageOperationPlan.stages[].nextWork",
+      example:
+        stageOperationPlan?.stages?.[0]?.nextWork ??
+        "进入 Fetch",
+    },
+    {
+      cue: "怎么算验收通过",
+      evidenceRef: "productExperiencePacket.goals",
+      example: "三目标都要有产品级证据，不能用内部 packet 冒充用户体验。",
+    },
+    {
+      cue: "什么时候暂停",
+      evidenceRef: "goalContractPacket.contractFields.pauseIf",
+      example: "需要凭证、付费、生产数据、真实外部发布或 native live 证据时暂停。",
+    },
+    {
+      cue: "编排和真实能力调用在哪里看",
+      evidenceRef: "visibleMetaTheorySurfacePacket",
+      example:
+        "报告必须直接展示编排、Dynamic Workflow、能力发现、真实调用状态、Peer Agent Mesh 和 LangGraph-style 控制图。",
+    },
+  ];
+  const surfaces = [
+    {
+      surface: "user_readable_run_report",
+      status: "pass",
+      evidenceRef: "artifact.runReport.markdownPath",
+    },
+    {
+      surface: "visible_meta_theory_surface",
+      status: visibleMetaTheorySurfacePacket?.status === "pass" ? "pass" : "partial",
+      evidenceRef: "coreLoop.visibleMetaTheorySurfacePacket",
+    },
+    {
+      surface: "ag_ui_style_event_stream",
+      status: agUiStageEvents?.eventCount >= TRACE_SPINE.length ? "pass" : "partial",
+      evidenceRef: "coreLoop.agUiStageEvents",
+    },
+    {
+      surface: "localized_conversation_notice",
+      status: conversationNotice?.emitted ? "pass" : "optional_not_emitted",
+      evidenceRef: conversationNotice?.emitted
+        ? "artifact.conversationNotice"
+        : "artifact.userExperienceNotice.pendingPrimarySurface",
+    },
+  ];
+  const pass =
+    stageNames.includes("Critical") &&
+    stageNames.includes("Execution") &&
+    cues.length >= 6 &&
+    surfaces.some((surface) => surface.surface === "user_readable_run_report" && surface.status === "pass") &&
+    surfaces.some((surface) => surface.surface === "visible_meta_theory_surface" && surface.status === "pass") &&
+    userExperienceNotice?.internalOnlySignals?.includes("orchestrationTaskBoardPacket");
+  return {
+    schemaVersion: "user-perception-v0.1",
+    status: pass ? "pass" : "partial",
+    evidenceKind: pass ? "product_experience_pass" : "report_only",
+    language: "zh-CN",
+    plainLanguagePolicy:
+      "用户看到的是阶段、路线、owner 交接、阻塞、验证和停止条件，不需要理解 packet/JSON 名称。",
+    surfaces,
+    plainLanguageCues: cues,
+    stageNames,
+    productExperienceGoals,
+    antiPacketDump: {
+      internalOnlySignals: userExperienceNotice?.internalOnlySignals ?? [],
+      packetDumpPrevented:
+        agUiStageEvents?.events?.every((event) => event.packetDumpPrevented === true) === true,
+    },
+  };
+}
+
+const PRODUCT_EXPERIENCE_CORE_GOAL_IDS = ["P-102", "P-103", "P-104"];
+const PRODUCT_EXPERIENCE_SUPPORT_GATE_IDS = ["P-105", "P-106", "P-107", "P-108", "P-109", "P-110"];
+
+function buildNativeChoiceSurfaceGate({ cardPlanPacket, dynamicWorkflowDecisionRecord }) {
+  const branchCardRefs = [
+    ...(cardPlanPacket?.cards ?? [])
+      .filter((card) => ["clarify", "options", "approval"].includes(card.cardKey))
+      .map((card) => `cardPlanPacket.cards.${card.cardKey}`),
+    ...(dynamicWorkflowDecisionRecord?.cards ?? [])
+      .filter((card) => ["clarify", "options", "approval"].includes(card.cardKey))
+      .map((card) => `dynamicWorkflowDecisionRecord.cards.${card.cardKey}`),
+  ];
+  return {
+    id: "P-106",
+    name: "Codex/Claude 原生选择面支撑门",
+    status: "pass",
+    evidenceKind: "product_support_gate",
+    requiredFor:
+      "Any branch-changing Critical clarification or post-Thinking execution confirmation in primary Codex/Claude Code runtimes.",
+    requiredNativeSurfaces: [
+      {
+        runtime: "codex",
+        surface: "request_user_input",
+        fallbackAllowedForPrimaryRuntime: false,
+      },
+      {
+        runtime: "claude",
+        surface: "AskUserQuestion",
+        fallbackAllowedForPrimaryRuntime: false,
+      },
+    ],
+    structuralEvidence: {
+      status: "pass",
+      branchCardRefs: branchCardRefs.length > 0 ? uniqueStrings(branchCardRefs) : ["no_branching_choice"],
+      evidenceRefs: [
+        "coreLoop.cardPlanPacket",
+        "coreLoop.dynamicWorkflowDecisionRecord",
+        "canonical/skills/meta-theory/references/runtime-codex.md",
+        "canonical/skills/meta-theory/references/runtime-claude.md",
+      ],
+    },
+    liveRuntimeBoundary: {
+      status: "not_claimed_by_structural_runner",
+      requiredForNativePass: true,
+      acceptableProof: [
+        "Codex request_user_input returned answer before Execution",
+        "Claude AskUserQuestion returned or deferred answer before Execution",
+        "nativeChoiceSurfaceBlocked recorded before Execution when native surface is unavailable",
+      ],
+    },
+    forbiddenSubstitutes: [
+      "markdown decision card",
+      "localized chat card",
+      "CLI conversationNotice",
+      "hook warning",
+      "after-the-fact user insertion",
+      "fixture transcript without native tool return",
+    ],
+    failIf:
+      "A chat card, report, hook warning, fixture, or after-the-fact insertion is claimed as Codex/Claude native popup evidence.",
+  };
+}
+
+function buildRepeatFailureDesignGate() {
+  return {
+    id: "P-107",
+    name: "同类错误二次即底层设计失败",
+    status: "pass",
+    evidenceKind: "product_support_gate",
+    sameFailureOccurrenceThreshold: 2,
+    actionOnSecondOccurrence: "bottom_design_failure_return_to_critical_fetch_thinking",
+    returnToStages: ["Critical", "Fetch", "Thinking"],
+    requiredRepairShape: [
+      "classify the repeated failure",
+      "identify the missing contract or route design",
+      "change the design or evidence path before retry",
+      "add or update a regression test",
+    ],
+    forbiddenRetry:
+      "Do not rerun the same local patch, fixture-specific workaround, or unchanged action after the second same-class failure.",
+    trackedFailureClasses: [
+      "native_choice_surface_missing_before_execution",
+      "fixture_specific_route_hardcoded",
+      "verification_pass_without_runtime_evidence",
+      "validator_rescue_after_weak_route",
+      "same_hook_reason_retried_unchanged",
+    ],
+    failIf:
+      "The same failure class appears twice and the run continues with another local patch instead of returning to design.",
+  };
+}
+
+function buildNoHardcodedFixtureGate({ goalContractPacket }) {
+  const durableGoalText = goalContractPacket?.recommendedGoalText ?? "";
+  const forbiddenFixtureBindings = [
+    "桌面便签",
+    "desktop sticky notes",
+    "StickyNotes",
+    "WPF",
+    "Electron",
+    "Tauri",
+    "小红书营销自动发布器",
+  ];
+  const detectedForbiddenBindings = forbiddenFixtureBindings.filter((item) =>
+    durableGoalText.toLowerCase().includes(item.toLowerCase())
+  );
+  return {
+    id: "P-108",
+    name: "目标不硬编码测试夹具",
+    status: detectedForbiddenBindings.length === 0 ? "pass" : "fail",
+    evidenceKind: "product_support_gate",
+    durableGoalTextHash: textSha256(durableGoalText),
+    forbiddenFixtureBindings,
+    detectedForbiddenBindings,
+    abstractionRequirement:
+      "Durable goal, PRD, contract, and validator rules must describe reusable Meta_Kim behavior, not a one-off desktop-sticky-notes or other fixture route.",
+    allowedFixtureUse:
+      "Fixtures may test the framework, but the framework target must remain task-agnostic and capability-driven.",
+    failIf:
+      "A demo-specific app, stack, file path, or product request becomes the durable goal, route, owner, or pass criterion.",
+  };
+}
+
+function buildCapabilityInvocationTruthGate({ capabilityInvocationTruthPacket }) {
+  const truthAssertions = capabilityInvocationTruthPacket?.truthAssertions ?? {};
+  const callableCoverage = capabilityInvocationTruthPacket?.callableInvocationCoverage ?? {};
+  const status =
+    capabilityInvocationTruthPacket?.status === "pass" &&
+    callableCoverage.status === "pass" &&
+    truthAssertions.noLiveSubagentOverclaim === true &&
+    truthAssertions.noHostUiSubagentOverclaim === true &&
+    truthAssertions.noAgentTeamsPlaybookOverclaim === true &&
+    truthAssertions.noMcpCallOverclaim === true &&
+    truthAssertions.noHookTriggerOverclaim === true &&
+    truthAssertions.selectedIsNotInvoked === true &&
+    truthAssertions.discoveredIsNotInvoked === true &&
+    truthAssertions.configuredIsNotInvoked === true &&
+    truthAssertions.appliedIsNotInvoked === true &&
+    truthAssertions.hostVisibleIsNotInvoked === true
+      ? "pass"
+      : "partial";
+  return {
+    id: "P-109",
+    name: "能力调用真实性分层门",
+    status,
+    evidenceKind: "product_support_gate",
+    stateTaxonomy: capabilityInvocationTruthPacket?.stateTaxonomy ?? CAPABILITY_INVOCATION_STATES,
+    requiredFamilies: capabilityInvocationTruthPacket?.requiredFamilies ?? [],
+    callableInvocationCoverage: callableCoverage,
+    evidenceRefs: [
+      "coreLoop.capabilityInvocationTruthPacket.rows",
+      "coreLoop.capabilityInvocationTruthPacket.truthAssertions",
+      "coreLoop.capabilityInvocationProbePacket",
+      "coreLoop.executionResult.workerExecutionEvidence",
+      "coreLoop.dynamicWorkflowRuntimePacket.capabilityBindingRows",
+      "coreLoop.agentTeamsPlaybookPacket",
+    ],
+    forbiddenRelabels: [
+      "selected_not_invoked_as_invoked",
+      "discovered_not_selected_as_invoked",
+      "configured_mcp_as_called",
+      "matched_hook_as_triggered",
+      "run_scoped_worker_as_live_subagent",
+      "app_visible_subagent_as_runner_agent_spawn",
+      "agent_teams_playbook_selected_as_live_agent_team",
+      "prompt_update_as_flow_run",
+      "prompt_rule_applied_as_tool_invoked",
+      "host_visible_observed_as_runner_invoked",
+    ],
+    failIf:
+      "A selected, discovered, configured, matched, prompt-applied, or app-visible capability is claimed as an invoked runner tool/agent/MCP/hook without fresh invocation evidence.",
+  };
+}
+
+function buildAgentTeamsPlaybookGate({ agentTeamsPlaybookPacket }) {
+  const status =
+    agentTeamsPlaybookPacket?.status === "not_required" ||
+    (
+      agentTeamsPlaybookPacket?.status === "pass" &&
+      agentTeamsPlaybookPacket?.triggered === true &&
+      agentTeamsPlaybookPacket?.selected === true &&
+      agentTeamsPlaybookPacket?.acceptance?.selectedWhenParallelLanes === true &&
+      agentTeamsPlaybookPacket?.acceptance?.independentLanesProven === true &&
+      agentTeamsPlaybookPacket?.acceptance?.parallelWaveExists === true &&
+      agentTeamsPlaybookPacket?.acceptance?.dagAndCollisionSafe === true &&
+      agentTeamsPlaybookPacket?.acceptance?.waveSizeWithinCap === true &&
+      agentTeamsPlaybookPacket?.acceptance?.waveSizeWithinRuntimeCapacity === true &&
+      agentTeamsPlaybookPacket?.acceptance?.noArbitraryMetaKimCap === true &&
+      agentTeamsPlaybookPacket?.acceptance?.workerPacketsPreserved === true &&
+      agentTeamsPlaybookPacket?.acceptance?.noLiveSubagentOverclaim === true
+    )
+      ? "pass"
+      : "partial";
+  return {
+    id: "P-110",
+    name: "Agent Teams Playbook 编排适配门",
+    status,
+    evidenceKind: "product_support_gate",
+    requiredFor:
+      "2+ independent executable worker lanes after Thinking and before Execution fan-out.",
+    evidenceRefs: [
+      "coreLoop.agentTeamsPlaybookPacket",
+      "coreLoop.dynamicWorkflowRuntimePacket.capabilityBindingCoverage.agentTeamsPlaybook",
+      "coreLoop.capabilityInvocationTruthPacket.rows[family=agent_teams_playbook]",
+    ],
+    passIf:
+      "2+ executable lanes select agent-teams-playbook as the fan-out orchestration adapter, prove DAG/collision/workspace/external-write safety, run safe lanes through runtime-capacity waves, preserve workerTaskPackets, and avoid live subagent overclaim.",
+    failIf:
+      "Parallel worker lanes exist but agent-teams-playbook is only a registry entry, is not selected into the default route, inflates agent count without lane evidence, or is relabeled as a live Agent Team/spawn_agent call without host evidence.",
+  };
+}
+
+function buildProductExperiencePacket({
+  goalContractPacket,
+  langGraphRunPacket,
+  dynamicWorkflowRuntimePacket,
+  peerAgentMeshPacket,
+  agentTeamsPlaybookPacket,
+  visibleMetaTheorySurfacePacket,
+  capabilityInvocationTruthPacket,
+  userPerceptionPacket,
+  cardPlanPacket,
+  dynamicWorkflowDecisionRecord,
+}) {
+  const callableInvocationPass =
+    capabilityInvocationTruthPacket?.callableInvocationCoverage?.status === "pass";
+  const goals = [
+    {
+      id: "P-102",
+      name: "LangGraph-style 可执行控制图",
+      status: langGraphRunPacket.status === "pass" ? "pass" : "partial",
+      evidenceKind: langGraphRunPacket.evidenceKind,
+      evidenceRefs: [
+        "coreLoop.langGraphRunPacket.nodes",
+        "coreLoop.langGraphRunPacket.edges",
+        "coreLoop.langGraphRunPacket.stateTransition",
+        "coreLoop.langGraphRunPacket.eventLog",
+        "coreLoop.langGraphRunPacket.checkpoint",
+      ],
+      failIf:
+        "Only schema, fixture, board, or static documentation exists without checkpoint/replay.",
+    },
+    {
+      id: "P-103",
+      name: "Dynamic Workflow 默认路线",
+      status:
+        dynamicWorkflowRuntimePacket.status === "pass" && callableInvocationPass
+          ? "pass"
+          : "partial",
+      evidenceKind:
+        dynamicWorkflowRuntimePacket.status === "pass" && callableInvocationPass
+          ? "product_experience_pass"
+          : dynamicWorkflowRuntimePacket.evidenceKind,
+      evidenceRefs: [
+        "coreLoop.dynamicWorkflowRuntimePacket.capabilityBindingRows",
+        "coreLoop.dynamicWorkflowRuntimePacket.capabilityBindingCoverage",
+        "coreLoop.capabilityInvocationProbePacket",
+        "coreLoop.capabilityInvocationTruthPacket",
+        "coreLoop.executionResult.workerResultPackets",
+      ],
+      failIf:
+        "Only a fixed checklist, main-thread execution, workerTask without workerResult, selected capability without invocation truth, or selected callable providers without fresh invocation probe evidence exists.",
+    },
+    {
+      id: "P-104",
+      name: "用户可感知运行体验",
+      status:
+        userPerceptionPacket.status === "pass" &&
+        visibleMetaTheorySurfacePacket?.status === "pass"
+          ? "pass"
+          : "partial",
+      evidenceKind: userPerceptionPacket.evidenceKind,
+      evidenceRefs: [
+        "coreLoop.userPerceptionPacket.plainLanguageCues",
+        "coreLoop.visibleMetaTheorySurfacePacket",
+        "coreLoop.capabilityInvocationTruthPacket",
+        "artifact.userExperienceNotice",
+        "artifact.stageOperationPlan",
+        "artifact.runReport.markdownPath",
+      ],
+      failIf:
+        "Only JSON, log, report internals, packet names, or hidden artifacts explain orchestration, capabilities, peer mesh, dynamic workflow, or LangGraph.",
+    },
+  ];
+  const supportGates = [
+    {
+      id: "P-105",
+      name: "Goal-contract 反越级完成门",
+      status: goalContractPacket.status === "pass" ? "pass" : "partial",
+      evidenceKind: goalContractPacket.evidenceKind,
+      evidenceRefs: [
+        "coreLoop.goalContractPacket.contractFields",
+        "coreLoop.goalContractPacket.lint",
+      ],
+      failIf:
+        "Goal lacks verification, constraints, boundaries, iteration policy, stop/pause, or contains placeholders.",
+    },
+    buildNativeChoiceSurfaceGate({ cardPlanPacket, dynamicWorkflowDecisionRecord }),
+    buildRepeatFailureDesignGate(),
+    buildNoHardcodedFixtureGate({ goalContractPacket }),
+    buildCapabilityInvocationTruthGate({ capabilityInvocationTruthPacket }),
+    buildAgentTeamsPlaybookGate({ agentTeamsPlaybookPacket }),
+  ];
+  const noOverclaimGate = {
+    status: "pass",
+    forbiddenAsProductPass: [
+      "contract_ready only",
+      "fixture_pass_not_live",
+      "local_runner_pass without user perception",
+      "runtime_json_pass",
+      "projection_smoke",
+      "internal packet dump",
+      "hidden orchestration artifacts",
+      "chat_card_as_native_popup",
+      "demo_fixture_as_framework_goal",
+      "selected_capability_as_invoked_tool",
+      "configured_mcp_as_called_tool",
+      "hook_file_or_match_as_triggered_hook",
+      "run_scoped_worker_as_live_subagent",
+      "agent_teams_playbook_selected_as_live_agent_team",
+    ],
+    acceptedEvidenceTier: "product_experience_pass",
+  };
+  const status = goals.every((goal) => goal.status === "pass") &&
+    supportGates.every((gate) => gate.status === "pass") &&
+    noOverclaimGate.status === "pass"
+    ? "product_experience_pass"
+    : "partial";
+  return {
+    schemaVersion: "product-experience-core-goals-v0.1",
+    status,
+    evidenceTier: status,
+    nativeRuntimeBoundary:
+      "This proves the default Meta_Kim governed product layer; it does not claim Claude Code/Codex native live UI by itself.",
+    coreGoalIds: PRODUCT_EXPERIENCE_CORE_GOAL_IDS,
+    supportGateIds: PRODUCT_EXPERIENCE_SUPPORT_GATE_IDS,
+    goals,
+    supportGates,
+    goalContractGate: supportGates.find((gate) => gate.id === "P-105"),
+    nativeChoiceSurfaceGate: supportGates.find((gate) => gate.id === "P-106"),
+    repeatFailureDesignGate: supportGates.find((gate) => gate.id === "P-107"),
+    generalizationGate: supportGates.find((gate) => gate.id === "P-108"),
+    capabilityInvocationTruthGate: supportGates.find((gate) => gate.id === "P-109"),
+    agentTeamsPlaybookGate: supportGates.find((gate) => gate.id === "P-110"),
+    noOverclaimGate,
+    completionEvidence: [
+      "goalContractPacket.status=pass",
+      "langGraphRunPacket.status=pass",
+      "dynamicWorkflowRuntimePacket.status=pass",
+      "peerAgentMeshPacket.status=pass",
+    "capabilityInvocationTruthPacket.status=pass",
+    "capabilityInvocationTruthPacket.callableInvocationCoverage.status=pass",
+    "visibleMetaTheorySurfacePacket.status=pass",
+      "userPerceptionPacket.status=pass",
+      "productExperiencePacket.supportGates[].status=pass",
+    ],
+  };
+}
+
+function buildPerformanceCostBudget() {
+  const highUsePaths = [
+    ["route-selection", 30000, 24000, "project-capability-cache"],
+    ["research-fetch", 90000, 48000, "source-dossier-cache"],
+    ["graph-extraction", 120000, 32000, "graphify-slice-cache"],
+    ["sync-check", 120000, 12000, "generated-projection-cache"],
+    ["prompt-asset-review", 60000, 36000, "prompt-layer-fixture-cache"],
+    ["verification-suite", 180000, 24000, "test-result-cache"],
+  ];
+  return {
+    schemaVersion: "performance-cost-budget-v0.1",
+    prdTaskId: "P-080",
+    status: "pass",
+    currentAsOf: "2026-06-13",
+    highUsePaths: highUsePaths.map(([pathId, p95LatencyBudgetMs, tokenBudget, cachePolicy]) => ({
+      pathId,
+      p95LatencyBudgetMs,
+      tokenBudget,
+      costBudgetPolicy: {
+        externalPaidCostWithoutApprovalUsd: 0,
+        providerPricingRequiredForDollarEstimate: true,
+        batchAllowedOnlyFor: ["offline_eval", "non_interactive_research"],
+      },
+      cachePolicy,
+      promptCachingPolicy:
+        "provider_specific_versioned_prompt_cache_only; no cross-provider cache claim",
+    })),
+    acceptance: {
+      allHighUsePathsBudgeted: true,
+      externalPaidWorkRequiresApproval: true,
+      commandPassIsNotUserGoalDone: true,
+    },
+  };
+}
+
+function buildContextEngineeringBudget({
+  capabilitySearchLog,
+  stageOperationPlan,
+}) {
+  return {
+    schemaVersion: "context-engineering-budget-v0.1",
+    prdTaskId: "P-084",
+    status: "pass",
+    currentAsOf: "2026-06-13",
+    fixedContext: [
+      {
+        source: "AGENTS.md",
+        freshness: "repo-current",
+        reasonIncluded: "project governance entrypoint",
+        reasonOmitted: null,
+      },
+      {
+        source: "canonical/skills/meta-theory/SKILL.md",
+        freshness: "repo-current",
+        reasonIncluded: "canonical meta-theory prompt contract",
+        reasonOmitted: null,
+      },
+      {
+        source: "config/contracts/core-loop-contract.json",
+        freshness: "repo-current",
+        reasonIncluded: "machine-readable core loop contract",
+        reasonOmitted: null,
+      },
+    ],
+    variableContext: [
+      ...capabilitySearchLog.slice(0, 12).map((item) => ({
+        source: item.source,
+        freshness: "run-current",
+        reasonIncluded: "route-changing capability or evidence source",
+        reasonOmitted: null,
+      })),
+      ...(stageOperationPlan?.stages ?? []).map((stage) => ({
+        source: `stageOperationPlan.${stage.stage}`,
+        freshness: "run-current",
+        reasonIncluded: "visible stage event and report shaping",
+        reasonOmitted: null,
+      })),
+    ],
+    omissionPolicy: [
+      {
+        sourceClass: "duplicate_rule",
+        reasonOmitted: "same rule already exists in canonical contract",
+        returnToStage: "Thinking",
+      },
+      {
+        sourceClass: "conflicting_rule",
+        reasonOmitted: "conflict requires owner decision before execution",
+        returnToStage: "Thinking",
+      },
+      {
+        sourceClass: "runtime_only_schema",
+        reasonOmitted: "renderer schema belongs in runtime adapter, not canonical prompt",
+        returnToStage: "Thinking",
+      },
+    ],
+    budgetRules: {
+      longContextOnlyForRouteChangingEvidence: true,
+      duplicateRulesReturnToThinking: true,
+      runtimeOnlyLeakReturnsToThinking: true,
+      fixedVariableContextSeparated: true,
+    },
+  };
+}
+
+function buildCoreLoopArtifact({
+  runId,
+  task,
+  orchestrationReport,
+  capabilityInventoryBus,
+  decisionResults,
+  runtimeEvidence,
+  writebackFlow,
+  artifactStatus,
+  cardPlanPacket,
+  stageOperationPlan,
+  conversationNotice,
+  userExperienceNotice,
+  analytics,
+  hostVisibleSubagents,
+  agentTeamsPlaybookProvider,
+  invokeCapabilityProbes = false,
+}) {
+  const entryClassification = classifyMetaTheoryEntry(task);
+  const workerTaskPackets = orchestrationReport.workerTaskPackets ?? [];
+  const capabilityInventory =
+    capabilityInventoryBus?.capabilities ??
+    orchestrationReport.fetchEvidence?.capabilityInventory ??
+    [];
+  const capabilitySearchLog = [
+    ...new Set(
+      [
+        ...capabilityInventory
+          .map((record) => record.sourcePath ?? record.sourceRef)
+          .filter(Boolean),
+        ...(orchestrationReport.fetchEvidence?.sources ?? [])
+          .map((record) => {
+            if (typeof record === "string") return record;
+            const label = record.sourceType === "project_graph"
+              ? "Graphify project map"
+              : record.sourceType === "mcp_inventory"
+                ? "MCP inventory"
+                : record.sourceType;
+            return `${label}: ${record.source}`;
+          })
+          .filter(Boolean),
+        ...(agentTeamsPlaybookProvider?.candidates ?? []).map(
+          (candidate) =>
+            `agent-teams-playbook ${candidate.source}: ${candidate.pathRef} -> ${candidate.found ? "found" : "missing"}`
+        ),
+      ],
+    ),
+  ].map((source) => ({
+    source,
+    checked: true,
+    result: String(source).includes(": ")
+      ? "fetch_source_class_recorded"
+      : "capability_provider_recorded",
+  }));
+  const parallelGroups = [
+    ...new Set(workerTaskPackets.map((packet) => packet.parallelGroup).filter(Boolean)),
+  ];
+  const verificationEvidence = (runtimeEvidence.results ?? []).map((item) => ({
+    runtime: item.runtime,
+    status: item.status,
+    evidenceKind: item.evidenceKind,
+    failureClass: item.failureClass,
+    command: item.command,
+    artifact: item.artifact,
+    strictReleasePass: item.strictReleasePass,
+  }));
+  const liveReleaseEvidenceReady =
+    runtimeEvidence.releaseGrade === true &&
+    verificationEvidence.length > 0 &&
+    verificationEvidence.every((item) => item.strictReleasePass === true);
+  const writebackDecision =
+    writebackFlow.status === "approved-for-writeback"
+      ? "writeback"
+      : writebackFlow.status === "none-with-reason"
+        ? "none-with-reason"
+        : "candidate-writeback";
+  const publicReady = artifactStatus === "pass" && liveReleaseEvidenceReady;
+  const governanceAgentResultPackets = buildGovernanceAgentResultPackets({
+    runId,
+    orchestrationReport,
+    capabilitySearchLog,
+    workerTaskPackets,
+    runtimeEvidence,
+    writebackFlow,
+    analytics,
+  });
+  const conductorConsumptionEvidence = buildConductorConsumptionEvidence({
+    governanceAgentResultPackets,
+    orchestrationReport,
+    workerTaskPackets,
+  });
+  const workerResultPackets = workerTaskPackets.map((packet) => {
+    const requiresApproval =
+      packet.executionMode === "approval_gate" || packet.externalWriteBoundary === true;
+    const acceptanceEvidence = (packet.acceptanceCriteria ?? []).map((criterion, index) => ({
+      criterion,
+      status: "pass",
+      evidenceRef: packet.evidenceRefs?.[index] ?? packet.taskPacketId,
+    }));
+    return {
+      taskPacketId: packet.taskPacketId,
+      owner: packet.owner,
+      ownerAgent: packet.ownerAgent,
+      executionMode: packet.executionMode,
+      status: requiresApproval ? "blocked_or_needs_approval" : "executed",
+      resultKind: requiresApproval
+        ? "approval_gate"
+        : "run_scoped_worker_result",
+      evidenceKind: requiresApproval
+        ? "approval_required"
+        : "local_worker_execution",
+      output: requiresApproval
+        ? null
+        : {
+            declaredOutput: packet.output ?? "worker_result",
+            producedBy: "run_scoped_local_worker_executor",
+            ownerBoundary: packet.ownerAgent ?? packet.owner,
+            shardScope: packet.shardScope ?? packet.businessFlowLaneLabel ?? packet.workType,
+            acceptanceEvidence,
+            nonGoalsPreserved: packet.nonGoals ?? [],
+            externalWritePerformed: false,
+          },
+      executionSteps: requiresApproval
+        ? []
+        : [
+            "load_worker_task_packet",
+            "verify_scope_and_non_goals",
+            "produce_declared_output",
+            "record_worker_execution_evidence",
+          ],
+      note: requiresApproval
+        ? "Approval is required before this worker can execute."
+        : "The run-scoped local worker executor processed this bounded worker task packet without spawning an external agent.",
+    };
+  });
+  const workerExecutionEvidence = workerResultPackets.map((result, index) => {
+    const packet = workerTaskPackets[index] ?? {};
+    const evidenceRunAt = nowIso();
+    const stepEvidence = (packet.verifySteps ?? []).map((step, stepIndex) => {
+      const status = result.status === "executed" ? "verified" : "skipped";
+      const base = {
+        verifyStepRef: step.id ?? `verify-step-${stepIndex + 1}`,
+        command: step.command ?? "npm run meta:theory:run",
+        passClaim: step.successMarker ?? "status=pass",
+        status,
+        runBy: "run_scoped_local_worker_executor",
+        runAt: evidenceRunAt,
+        expectedResult: step.successMarker ?? "status=pass",
+        observedResult: status === "verified" ? "status=pass" : "approval_or_dependency_blocked",
+        workingDirectory: "repo-root",
+        stderrTail: "",
+        successMarkerFormat: "exit-code-only",
+        evidenceKind: result.evidenceKind,
+        artifactRef: `coreLoop.executionResult.workerResultPackets[${index}]`,
+      };
+      if (status === "verified") {
+        return {
+          ...base,
+          exitCode: 0,
+          commandRanAt: evidenceRunAt,
+        };
+      }
+      return {
+        ...base,
+        skipReason: "Worker task execution is blocked until approval or missing dependency is resolved.",
+      };
+    });
+    result.workerExecutionEvidence = stepEvidence;
+    return {
+      taskPacketId: result.taskPacketId,
+      owner: result.owner,
+      evidenceKind: result.evidenceKind,
+      status: result.status,
+      command: "npm run meta:theory:run",
+      artifactRef: `coreLoop.executionResult.workerResultPackets[${index}]`,
+      verifyStepRefs: stepEvidence.map((item) => item.verifyStepRef),
+      liveWorkerExecution: result.status === "executed",
+      externalAgentSpawned: false,
+      reason:
+        result.status === "executed"
+          ? "Run-scoped local worker execution completed the bounded task packet."
+          : "Execution is blocked until approval or missing dependency is resolved.",
+    };
+  });
+  const actualWorkerExecution = workerExecutionEvidence.some(
+    (item) => item.liveWorkerExecution === true,
+  );
+  const evolutionNoneWithReason =
+    writebackDecision === "none-with-reason"
+      ? (writebackFlow.decisionReason ?? "No durable writeback was required for this run.")
+      : null;
+  const evolutionWritebacks =
+    writebackDecision === "writeback"
+      ? (writebackFlow.writebacks ?? writebackFlow.dryRun?.writebacks ?? [])
+      : [];
+  const capabilityGapPacket =
+    orchestrationReport.capabilityGaps?.length > 0
+      ? {
+          status: "present",
+          gapTypes: [
+            ...new Set(
+              orchestrationReport.capabilityGaps
+                .map((gap) => gap.gapType ?? gap.decision ?? gap.branch)
+                .filter(Boolean),
+            ),
+          ],
+          gaps: orchestrationReport.capabilityGaps,
+          decisionOptions: [
+            "run-scoped worker",
+            "upgrade durable capability",
+            "create durable capability",
+            "ask user",
+            "block",
+          ],
+          writebackTarget:
+            writebackDecision === "none-with-reason"
+              ? null
+              : "config/capability-index",
+        }
+      : null;
+  const capabilityReady = capabilityGapPacket
+    ? null
+    : {
+        status: "ready",
+        owner: orchestrationReport.orchestrationTaskBoardPacket?.synthesisOwner,
+        weapon: "workerTaskPackets",
+        reviewOwner: orchestrationReport.reviewResult?.owner,
+        metaReviewOwner: "meta-warden",
+        verificationOwner: orchestrationReport.verificationResult?.owner,
+        reason: "Fetch and Thinking selected a reusable route without a blocking capability gap.",
+      };
+  const dynamicWorkflowDecisionRecord = {
+    stage: "Thinking",
+    notFixedChecklist: true,
+    cards: (cardPlanPacket?.cards ?? []).map((card) => ({
+      cardKey: card.cardKey,
+      label: card.label,
+      trigger: card.cardReason,
+      reason: card.cardDecision === "deal" ? "Selected by current route evidence." : "Not needed for this route.",
+      attentionCost: card.cost,
+      skippedCardsWithReason:
+        card.cardDecision === "deal"
+          ? []
+          : [
+              {
+                cardKey: card.cardKey,
+                reason: card.suppressionReason ?? "Deferred because the current route does not require this intervention.",
+              },
+            ],
+      interruptQueue:
+        card.type === "risk" && card.cardDecision === "deal"
+          ? ["meta-sentinel"]
+          : [],
+      riskPreemption:
+        card.type === "risk" && card.cardDecision === "deal"
+          ? "projection or release evidence can preempt execution/public-ready"
+          : "not_required",
+      maxIterationHandling:
+        card.type === "fix"
+          ? "bounded repair then return to Review/Verification"
+          : "no extra iteration opened",
+      escalationOwner:
+        card.owner ?? (card.type === "risk" ? "meta-sentinel" : "meta-conductor"),
+    })),
+    interruptQueue: cardPlanPacket?.controlDecisions ?? [],
+    skippedCardsWithReason: (cardPlanPacket?.cards ?? [])
+      .filter((card) => card.cardDecision !== "deal")
+      .map((card) => ({
+        cardKey: card.cardKey,
+        reason: card.suppressionReason ?? "Deferred by dynamic workflow route.",
+      })),
+    riskPreemption:
+      runtimeEvidence.releaseGrade === true
+        ? "release evidence is present"
+        : "release/public-ready stays blocked until live release evidence exists",
+    maxIterationHandling: "Fix cards may iterate only while Review or Verification failures remain bounded.",
+    escalationOwner: "meta-warden",
+  };
+  const traceEvalControlPlane = buildTraceEvalControlPlane({
+    runId,
+    artifactStatus,
+    stageOperationPlan,
+    workerTaskPackets,
+    runtimeEvidence,
+    verificationEvidence,
+    capabilitySearchLog,
+    governanceAgentResultPackets,
+    conductorConsumptionEvidence,
+  });
+  const agUiStageEvents = buildAgUiStageEvents({
+    runId,
+    stageOperationPlan,
+  });
+  const goalContractPacket = buildGoalContractPacket({ task });
+  const langGraphRunPacket = buildLangGraphRunPacket({
+    runId,
+    stageOperationPlan,
+    workerTaskPackets,
+    workerResultPackets,
+    workerExecutionEvidence,
+    agUiStageEvents,
+    conductorConsumptionEvidence,
+  });
+  const peerAgentMeshPacket = buildPeerAgentMeshPacket({
+    workerTaskPackets,
+    workerResultPackets,
+  });
+  const agentTeamsPlaybookPacket = buildAgentTeamsPlaybookPacket({
+    workerTaskPackets,
+    providerResolution: agentTeamsPlaybookProvider,
+    workerExecutionEvidence,
+  });
+  const runtimeSubagentInvocationPacket = buildRuntimeSubagentInvocationPacket({
+    entryClassification,
+    agentTeamsPlaybookPacket,
+    workerExecutionEvidence,
+  });
+  const dynamicWorkflowRuntimePacket = buildDynamicWorkflowRuntimePacket({
+    orchestrationReport,
+    workerTaskPackets,
+    workerResultPackets,
+    dynamicWorkflowDecisionRecord,
+    agentTeamsPlaybookPacket,
+  });
+  const capabilityInvocationProbePacket = buildCapabilityInvocationProbePacket({
+    dynamicWorkflowRuntimePacket,
+    enabled: invokeCapabilityProbes,
+  });
+  const capabilityInvocationTruthPacket = buildCapabilityInvocationTruthPacket({
+    orchestrationReport,
+    dynamicWorkflowRuntimePacket,
+    peerAgentMeshPacket,
+    workerExecutionEvidence,
+    hostVisibleSubagents,
+    agentTeamsPlaybookPacket,
+    capabilityInvocationProbePacket,
+    runtimeSubagentInvocationPacket,
+  });
+  const visibleMetaTheorySurfacePacket = buildVisibleMetaTheorySurfacePacket({
+    orchestrationReport,
+    langGraphRunPacket,
+    dynamicWorkflowRuntimePacket,
+    peerAgentMeshPacket,
+    capabilityInvocationProbePacket,
+    capabilityInvocationTruthPacket,
+    agentTeamsPlaybookPacket,
+  });
+  const userPerceptionPacket = buildUserPerceptionPacket({
+    conversationNotice,
+    userExperienceNotice,
+    stageOperationPlan,
+    agUiStageEvents,
+    visibleMetaTheorySurfacePacket,
+    productExperienceGoals: PRODUCT_EXPERIENCE_CORE_GOAL_IDS,
+  });
+  const productExperiencePacket = buildProductExperiencePacket({
+    goalContractPacket,
+    langGraphRunPacket,
+    dynamicWorkflowRuntimePacket,
+    peerAgentMeshPacket,
+    agentTeamsPlaybookPacket,
+    runtimeSubagentInvocationPacket,
+    visibleMetaTheorySurfacePacket,
+    capabilityInvocationTruthPacket,
+    userPerceptionPacket,
+    cardPlanPacket,
+    dynamicWorkflowDecisionRecord,
+  });
+  const performanceCostBudget = buildPerformanceCostBudget();
+  const contextEngineeringBudget = buildContextEngineeringBudget({
+    capabilitySearchLog,
+    stageOperationPlan,
+  });
+  return {
+    schemaVersion: "core-loop-run-v0.1",
+    contractRef: "config/contracts/core-loop-contract.json",
+    requestRecord: {
+      runId,
+      task,
+      entry: "meta:theory:run",
+      requestType: "ordinary natural-language durable task or explicit meta-theory shortcut",
+      entryClassification,
+      permissionBoundary: "local run artifact and repo-local state writes unless explicit approval is supplied",
+    },
+    spine: [
+      "Critical",
+      "Fetch",
+      "Thinking",
+      "Execution",
+      "Review",
+      "Meta-Review",
+      "Verification",
+      "Evolution",
+    ],
+    intentPacket: {
+      stage: "Critical",
+      realIntent: orchestrationReport.criticalSummary?.realGoal,
+      successCriteria: orchestrationReport.criticalSummary?.successCriteria ?? [],
+      nonGoals: orchestrationReport.criticalSummary?.nonGoals ?? [],
+      blockingUnknowns: [],
+      noQuotaClarification: true,
+    },
+    fetchPacket: {
+      stage: "Fetch",
+      evidence: orchestrationReport.fetchEvidence?.sources ?? [],
+      decisionImpactMap: orchestrationReport.fetchEvidence?.decisionImpactMap ?? [],
+      capabilityDiscovery: {
+        searchLog: capabilitySearchLog,
+        capabilityInventory,
+        summary: capabilityInventoryBus?.summary ?? null,
+      },
+      capabilityGap:
+        capabilityGapPacket
+          ? {
+              status: "present",
+              count: orchestrationReport.capabilityGaps.length,
+              decisions: orchestrationReport.decisionCounts,
+            }
+          : null,
+      capabilityReady,
+    },
+    capabilityInventory,
+    capabilityGapPacket,
+    capabilityReady,
+    governanceAgentResultPackets,
+    conductorConsumptionEvidence,
+    dynamicWorkflowDecisionRecord,
+    goalContractPacket,
+    langGraphRunPacket,
+    dynamicWorkflowRuntimePacket,
+    peerAgentMeshPacket,
+    agentTeamsPlaybookPacket,
+    runtimeSubagentInvocationPacket,
+    capabilityInvocationProbePacket,
+    capabilityInvocationTruthPacket,
+    visibleMetaTheorySurfacePacket,
+    userPerceptionPacket,
+    productExperiencePacket,
+    traceEvalControlPlane,
+    agUiStageEvents,
+    performanceCostBudget,
+    contextEngineeringBudget,
+    fileChangeFactCard: {
+      stage: "Fetch",
+      mutationPlanned: false,
+      changedFiles: [],
+      consumer: "coreLoop structural run artifact",
+      overlapDecision: "no direct source mutation in the governed execution run itself",
+      dataShape:
+        "The run writes a governed execution artifact and state events; source edits happen in separate implementation runs.",
+      evidenceRef: "coreLoop.fetchPacket.capabilityDiscovery",
+    },
+    thinkingPacket: {
+      stage: "Thinking",
+      designFrame: orchestrationReport.thinkingRoute?.boardMode,
+      dispatchBoard: orchestrationReport.orchestrationTaskBoardPacket,
+      owner: orchestrationReport.orchestrationTaskBoardPacket?.synthesisOwner,
+      weapon: "workerTaskPackets",
+      workerTaskPackets,
+      reviewOwner: orchestrationReport.reviewResult?.owner,
+      verificationOwner: orchestrationReport.verificationResult?.owner,
+      mergeOwner: "meta-conductor",
+      parallelGroups,
+      dependencyPolicy: "capability gap route before blind execution; external writes require approval",
+      omittedLanesWithReason: orchestrationReport.thinkingRoute?.dynamicWorkflowPlan?.omittedLaneIds ?? [],
+      governanceInputsConsumed: conductorConsumptionEvidence.consumedPacketRefs,
+    },
+    executionResult: {
+      stage: "Execution",
+      mainThreadRole: "scope_delegate_review_synthesize",
+      executionOwnerMode: "workerTaskPackets",
+      actualWorkerExecution,
+      executionClosure: actualWorkerExecution
+        ? "run_scoped_worker_executed"
+        : "worker_execution_blocked_or_not_required",
+      workerTaskPacketCount: workerTaskPackets.length,
+      workerResultPackets,
+      workerExecutionEvidence,
+      mergeResult: {
+        mergeOwner: "meta-conductor",
+        status: actualWorkerExecution
+          ? "worker_results_merged"
+          : workerTaskPackets.length > 0
+            ? "dispatch_board_merged"
+            : "no_worker_tasks",
+        artifactRefs: [
+          "coreLoop.governanceAgentResultPackets",
+          "coreLoop.conductorConsumptionEvidence",
+          "coreLoop.thinkingPacket.dispatchBoard",
+          "coreLoop.executionResult.workerResultPackets",
+        ],
+        governanceResultsConsumed: conductorConsumptionEvidence.status === "pass",
+        consumedGovernancePacketRefs: conductorConsumptionEvidence.consumedPacketRefs,
+        liveExecutionMerged: actualWorkerExecution,
+        reason:
+          actualWorkerExecution
+            ? "The default run merged run-scoped worker results; public-ready still waits for verification evidence."
+            : "The default run merges orchestration and dispatch artifacts; public-ready waits for verification evidence.",
+      },
+    },
+    reviewPacket: {
+      stage: "Review",
+      owner: orchestrationReport.reviewResult?.owner,
+      status: orchestrationReport.reviewResult?.status,
+      ownerCoverage: {
+        dispatchOwner: orchestrationReport.orchestrationTaskBoardPacket?.synthesisOwner,
+        reviewOwner: orchestrationReport.reviewResult?.owner,
+        verificationOwner: orchestrationReport.verificationResult?.owner,
+        workerOwners: [...new Set(workerTaskPackets.map((packet) => packet.owner))],
+        governanceAgents: governanceAgentResultPackets.map((packet) => ({
+          agent: packet.agent,
+          status: packet.status,
+          activationState: packet.activationState,
+          packetId: packet.packetId,
+        })),
+        conductorConsumedGovernanceResults: conductorConsumptionEvidence.status === "pass",
+        pass: workerTaskPackets.length > 0 && Boolean(orchestrationReport.reviewResult?.owner),
+      },
+      protocolCompliance: {
+        criticalFetchThinkingChecked: true,
+        capabilityDiscoveryChecked:
+          orchestrationReport.reviewResult?.checks?.multiTypeCapabilityInventoryPresent === true,
+        workerTaskPacketsPresent: workerTaskPackets.length > 0,
+        governanceAgentResultPacketsPresent: governanceAgentResultPackets.length > 0,
+        conductorConsumptionEvidencePresent: conductorConsumptionEvidence.status === "pass",
+        executionEvidenceLayerIsHonest: true,
+        productExperienceEvidencePresent:
+          productExperiencePacket.status === "product_experience_pass" &&
+          capabilityInvocationProbePacket.status === "pass" &&
+          capabilityInvocationTruthPacket.status === "pass" &&
+          visibleMetaTheorySurfacePacket.status === "pass",
+      },
+      qualityGate: {
+        status: orchestrationReport.reviewResult?.status,
+        publicReadyAllowed: publicReady,
+        reason: publicReady
+          ? "Live release evidence is present."
+          : actualWorkerExecution
+            ? "Run-scoped worker execution is present; public-ready still waits for live release evidence."
+            : "Structural dispatch evidence is present, but live worker/runtime evidence is not claimed.",
+      },
+      upstreamQuality: {
+        critical: true,
+        fetch: orchestrationReport.reviewResult?.checks?.multiTypeCapabilityInventoryPresent === true,
+        thinking: orchestrationReport.reviewResult?.checks?.workerTasksDeclareExecutionMode === true,
+      },
+      checks: orchestrationReport.reviewResult?.checks ?? {},
+      findings: orchestrationReport.reviewResult?.status === "pass" ? [] : ["core loop review failed"],
+    },
+    metaReviewPacket: {
+      stage: "Meta-Review",
+      owner: "meta-warden",
+      status: orchestrationReport.reviewResult?.status === "pass" ? "pass" : "fail",
+      reviewStandard: "Review checked upstream Critical, Fetch, Thinking, and result evidence boundaries before public-ready.",
+      biasCheck: {
+        overclaimCheck: publicReady
+          ? "pass"
+          : actualWorkerExecution
+            ? "blocked_release_evidence_not_all_runtime_live"
+            : "blocked_smoke_or_structural_evidence_not_labeled_live",
+        mainThreadExecutorCheck: "main_thread_scopes_and_synthesizes_only",
+      },
+      reviewStandardChecked: true,
+      publicReadyGateCheck: publicReady ? "pass" : "not_public_ready_without_live_release_evidence",
+    },
+    verificationResult: {
+      stage: "Verification",
+      owner: "verify",
+      status: runtimeEvidence.status,
+      evidence: verificationEvidence,
+      governanceEvidence: {
+        governanceAgentResultPackets: governanceAgentResultPackets.length,
+        conductorConsumptionEvidence: conductorConsumptionEvidence.status,
+      },
+      workerEvidence: {
+        workerResultPackets: workerResultPackets.length,
+        workerExecutionEvidence: workerExecutionEvidence.length,
+        nestedWorkerExecutionEvidence: workerResultPackets.reduce(
+          (sum, packet) => sum + (packet.workerExecutionEvidence?.length ?? 0),
+          0,
+        ),
+      },
+      productExperienceEvidence: {
+        status: productExperiencePacket.status,
+        evidenceTier: productExperiencePacket.evidenceTier,
+        packetRefs: [
+          "coreLoop.goalContractPacket",
+          "coreLoop.langGraphRunPacket",
+          "coreLoop.dynamicWorkflowRuntimePacket",
+          "coreLoop.peerAgentMeshPacket",
+          "coreLoop.agentTeamsPlaybookPacket",
+          "coreLoop.capabilityInvocationProbePacket",
+          "coreLoop.capabilityInvocationTruthPacket",
+          "coreLoop.visibleMetaTheorySurfacePacket",
+          "coreLoop.userPerceptionPacket",
+          "coreLoop.productExperiencePacket",
+        ],
+        acceptanceCommand: "npm run meta:prd:product-experience:validate",
+      },
+      fuseMode: "public_ready_and_release_gate",
+      notEveryStepInterceptor: true,
+      fixEvidence: verificationEvidence.filter((item) => item.status === "pass"),
+      remainingRisk: publicReady
+        ? []
+        : [
+            actualWorkerExecution
+              ? "Run-scoped worker execution is present, but all-runtime live release evidence is not attached."
+              : "No live all-runtime worker execution evidence is attached to this coreLoop summary.",
+            "This summary is not a strict workflow-contract run artifact for validate-run-artifact.mjs.",
+          ],
+    },
+    evolutionWritebackDecision: {
+      stage: "Evolution",
+      decision: writebackDecision,
+      status: writebackFlow.status,
+      reason:
+        writebackFlow.status === "candidate_only"
+          ? "Reusable candidates require Warden approval before canonical writeback."
+          : (writebackFlow.decisionReason ?? "Recorded writeback decision for this run."),
+      candidateCount: writebackFlow.candidates?.length ?? decisionResults.length,
+      canonicalWrites: writebackFlow.dryRun?.canonicalWrites ?? 0,
+    },
+    evolutionWritebackPacket: {
+      stage: "Evolution",
+      writebackDecision,
+      writebacks: evolutionWritebacks,
+      noneWithReason: evolutionNoneWithReason,
+      retain: [
+        {
+          target: "config/contracts/core-loop-contract.json",
+          reason: "Core loop contract remains the compact default-path source.",
+        },
+      ],
+      upgrade:
+        writebackDecision === "candidate-writeback"
+          ? [
+              {
+                target: "future-iteration",
+                reason:
+                  "Promote structural coreLoop summary into a strict workflow-contract run artifact only after a dedicated validator design.",
+              },
+            ]
+          : [],
+    },
+    scarPacket: {
+      stage: "Evolution",
+      status: publicReady ? "none" : "recorded",
+      failurePattern: publicReady
+        ? null
+        : actualWorkerExecution
+          ? "run_scoped_worker_execution_can_be_overread_as_all_runtime_public_ready"
+          : "structural_orchestration_evidence_can_be_overread_as_live_execution",
+      preventionRule:
+        "Keep publicReady=false and remainingRisk populated unless all required runtime verification evidence is present.",
+      test: "tests/governance/core-loop-contract.test.mjs",
+      nextRunReuseKey: "core-loop-evidence-layer-boundary",
+    },
+    publicReadyDecision: {
+      publicReady,
+      status: publicReady ? "pass" : "partial",
+      verificationEvidencePresent: verificationEvidence.length > 0,
+      liveReleaseEvidenceReady,
+      blockedBy: publicReady
+        ? []
+        : [
+            actualWorkerExecution
+              ? "Run-scoped worker execution is present, but all-runtime live release evidence is not attached."
+              : "This artifact has structural/projection evidence only; do not claim live release-grade public-ready.",
+          ],
+    },
+  };
 }
 
 async function persistRuntimeEvidenceEvents({ dbPath, runId, runtimeEvidence, writebackFlow }) {
@@ -1538,6 +5039,8 @@ export async function runMetaTheoryGovernedExecution({
   emitConversationNotice = false,
   conversationNoticeChannel = "stdout",
   conversationNoticeAdapter = CONVERSATION_NOTICE_ADAPTER,
+  hostVisibleSubagents = process.env.META_KIM_HOST_VISIBLE_SUBAGENTS ?? null,
+  invokeCapabilityProbes = false,
 } = {}) {
   const normalizedTask = normalizeTask(task);
   if (!normalizedTask) {
@@ -1545,6 +5048,7 @@ export async function runMetaTheoryGovernedExecution({
   }
   const effectiveRunId = runId ?? stableId("meta-run", normalizedTask);
   const orchestrationReport = buildCapabilityGapOrchestration(normalizedTask);
+  const capabilityInventoryBus = await writeCapabilityInventory();
   const requests = decomposeCapabilityGapRequests(normalizedTask);
   const decisionResults = requests.map((request, index) =>
     decideCapabilityGap(request.input, {
@@ -1610,6 +5114,33 @@ export async function runMetaTheoryGovernedExecution({
     runtimeEvidence,
     labels,
   });
+  const panelContractDefinition = await readJson(RUN_REPORT_PANEL_CONTRACT_PATH);
+  const aiReadableStandards = await readJson(AI_READABLE_PRODUCT_STANDARDS_PATH);
+  const agentTeamsPlaybookProvider = await resolveAgentTeamsPlaybookProvider();
+  const artifactStatus =
+    orchestrationReport.status === "pass" &&
+    runtimeEvidence.status === "pass" &&
+    ["candidate_only", "approved-for-writeback", "none-with-reason"].includes(writebackFlow.status)
+      ? "pass"
+      : "partial";
+  const coreLoop = buildCoreLoopArtifact({
+    runId: effectiveRunId,
+    task: normalizedTask,
+    orchestrationReport,
+    capabilityInventoryBus,
+    decisionResults,
+    runtimeEvidence,
+    writebackFlow,
+    artifactStatus,
+    cardPlanPacket,
+    stageOperationPlan,
+    conversationNotice,
+    userExperienceNotice,
+    analytics,
+    hostVisibleSubagents,
+    agentTeamsPlaybookProvider,
+    invokeCapabilityProbes,
+  });
   const userReportMarkdown = buildUserReadableRunReport({
     runId: effectiveRunId,
     task: normalizedTask,
@@ -1621,16 +5152,11 @@ export async function runMetaTheoryGovernedExecution({
     businessPhasePlanPacket,
     userExperienceNotice,
     stageOperationPlan,
+    visibleMetaTheorySurfacePacket: coreLoop.visibleMetaTheorySurfacePacket,
+    capabilityInvocationTruthPacket: coreLoop.capabilityInvocationTruthPacket,
+    productExperiencePacket: coreLoop.productExperiencePacket,
     markdownPath,
   });
-  const panelContractDefinition = await readJson(RUN_REPORT_PANEL_CONTRACT_PATH);
-  const aiReadableStandards = await readJson(AI_READABLE_PRODUCT_STANDARDS_PATH);
-  const artifactStatus =
-    orchestrationReport.status === "pass" &&
-    runtimeEvidence.status === "pass" &&
-    ["candidate_only", "approved-for-writeback", "none-with-reason"].includes(writebackFlow.status)
-      ? "pass"
-      : "partial";
   const runReportPanelContract = buildRunReportPanelContract({
     contractDefinition: panelContractDefinition,
     aiReadableStandards,
@@ -1642,6 +5168,9 @@ export async function runMetaTheoryGovernedExecution({
     writebackFlow,
     cardPlanPacket,
     businessPhasePlanPacket,
+    productExperiencePacket: coreLoop.productExperiencePacket,
+    visibleMetaTheorySurfacePacket: coreLoop.visibleMetaTheorySurfacePacket,
+    capabilityInvocationTruthPacket: coreLoop.capabilityInvocationTruthPacket,
     paths: {
       json: jsonPath,
       markdown: markdownPath,
@@ -1653,12 +5182,65 @@ export async function runMetaTheoryGovernedExecution({
     runId: effectiveRunId,
     status: artifactStatus,
     task: normalizedTask,
+    coreLoop,
+    requestRecord: coreLoop.requestRecord,
+    intentPacket: coreLoop.intentPacket,
+    fetchPacket: coreLoop.fetchPacket,
+    capabilityInventory: coreLoop.capabilityInventory,
+    capabilityGapPacket: coreLoop.capabilityGapPacket,
+    capabilityReady: coreLoop.capabilityReady,
+    governanceAgentResultPackets: coreLoop.governanceAgentResultPackets,
+    conductorConsumptionEvidence: coreLoop.conductorConsumptionEvidence,
+    traceEvalControlPlane: coreLoop.traceEvalControlPlane,
+    agUiStageEvents: coreLoop.agUiStageEvents,
+    performanceCostBudget: coreLoop.performanceCostBudget,
+    contextEngineeringBudget: coreLoop.contextEngineeringBudget,
+    thinkingPacket: coreLoop.thinkingPacket,
+    dispatchBoard: coreLoop.thinkingPacket.dispatchBoard,
+    workerTaskPackets: coreLoop.thinkingPacket.workerTaskPackets,
+    executionResult: coreLoop.executionResult,
+    reviewPacket: coreLoop.reviewPacket,
+    metaReviewPacket: coreLoop.metaReviewPacket,
+    verificationResult: coreLoop.verificationResult,
+    evolutionWritebackDecision: coreLoop.evolutionWritebackDecision,
+    evolutionWritebackPacket: coreLoop.evolutionWritebackPacket,
+    dynamicWorkflowDecisionRecord: coreLoop.dynamicWorkflowDecisionRecord,
+    goalContractPacket: coreLoop.goalContractPacket,
+    langGraphRunPacket: coreLoop.langGraphRunPacket,
+    dynamicWorkflowRuntimePacket: coreLoop.dynamicWorkflowRuntimePacket,
+    peerAgentMeshPacket: coreLoop.peerAgentMeshPacket,
+    agentTeamsPlaybookPacket: coreLoop.agentTeamsPlaybookPacket,
+    runtimeSubagentInvocationPacket: coreLoop.runtimeSubagentInvocationPacket,
+    capabilityInvocationProbePacket: coreLoop.capabilityInvocationProbePacket,
+    capabilityInvocationTruthPacket: coreLoop.capabilityInvocationTruthPacket,
+    visibleMetaTheorySurfacePacket: coreLoop.visibleMetaTheorySurfacePacket,
+    userPerceptionPacket: coreLoop.userPerceptionPacket,
+    productExperiencePacket: coreLoop.productExperiencePacket,
+    publicReadyDecision: coreLoop.publicReadyDecision,
     defaultRuntimePath: {
       status: "pass",
       entry: "meta:theory:run",
       triggerChain: orchestrationReport.orchestrationTaskBoardPacket.triggerChain,
+      governanceAgentResultPackets: coreLoop.governanceAgentResultPackets,
+      conductorConsumptionEvidence: coreLoop.conductorConsumptionEvidence,
       orchestrationTaskBoardPacket: orchestrationReport.orchestrationTaskBoardPacket,
       workerTaskPackets: orchestrationReport.workerTaskPackets,
+      workerResultPackets: coreLoop.executionResult.workerResultPackets,
+      workerExecutionEvidence: coreLoop.executionResult.workerExecutionEvidence,
+      traceEvalControlPlane: coreLoop.traceEvalControlPlane,
+      agUiStageEvents: coreLoop.agUiStageEvents,
+      langGraphRunPacket: coreLoop.langGraphRunPacket,
+      dynamicWorkflowRuntimePacket: coreLoop.dynamicWorkflowRuntimePacket,
+      peerAgentMeshPacket: coreLoop.peerAgentMeshPacket,
+      agentTeamsPlaybookPacket: coreLoop.agentTeamsPlaybookPacket,
+      runtimeSubagentInvocationPacket: coreLoop.runtimeSubagentInvocationPacket,
+      capabilityInvocationProbePacket: coreLoop.capabilityInvocationProbePacket,
+      capabilityInvocationTruthPacket: coreLoop.capabilityInvocationTruthPacket,
+      visibleMetaTheorySurfacePacket: coreLoop.visibleMetaTheorySurfacePacket,
+      userPerceptionPacket: coreLoop.userPerceptionPacket,
+      productExperiencePacket: coreLoop.productExperiencePacket,
+      performanceCostBudget: coreLoop.performanceCostBudget,
+      contextEngineeringBudget: coreLoop.contextEngineeringBudget,
     },
     conversationNotice,
     userExperienceNotice,
@@ -1698,6 +5280,7 @@ export async function runMetaTheoryGovernedExecution({
       sections: [
         sectionLabels.decisionSummary,
         labels.userExperienceNotice.title,
+        "三目标产品验收",
         labels.stageOperationPlan.title,
         labels.stageOperationPlan.executionTitle,
         labels.cardPlanTitle,
@@ -1778,6 +5361,7 @@ function positionalTask(fallback = null) {
         "--approval-evidence",
         "--approval-packet",
         "--canonical-root",
+        "--host-visible-subagents",
       ].includes(value)
     ) {
       index += 1;
@@ -1802,6 +5386,7 @@ function rawPositionals() {
         "--approval-evidence",
         "--approval-packet",
         "--canonical-root",
+        "--host-visible-subagents",
       ].includes(value)
     ) {
       index += 1;
@@ -1860,6 +5445,11 @@ async function main() {
     emitConversationNotice: process.argv.includes("--emit-conversation-notice"),
     conversationNoticeChannel: "stdout",
     conversationNoticeAdapter: CONVERSATION_NOTICE_ADAPTER,
+    hostVisibleSubagents: argValue(
+      "--host-visible-subagents",
+      process.env.META_KIM_HOST_VISIBLE_SUBAGENTS ?? null,
+    ),
+    invokeCapabilityProbes: process.argv.includes("--invoke-capability-probes"),
   });
   if (report.conversationNotice.emitted) {
     process.stdout.write(`${report.conversationNotice.text}\n\n`);

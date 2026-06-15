@@ -20,6 +20,73 @@ const FORMAL_TOOL_PROFILES = Object.freeze(loadFormalToolProfiles());
 const FORMAL_TOOL_NAMES = Object.freeze(FORMAL_TOOL_PROFILES.map((profile) => profile.label));
 const AGENT_PROJECTION_PROFILES = Object.freeze(loadAgentProjectionProfiles());
 
+export const INSTALL_STATUS_CLASSES = Object.freeze([
+  "success",
+  "skipped",
+  "manual",
+  "failed",
+]);
+
+export const INSTALL_STATUS_NEXT_ACTION = Object.freeze({
+  success: "continue",
+  skipped: "continue unless the skipped optional capability is needed",
+  manual: "perform the named manual action, then rerun the check",
+  failed: "fix the reported cause before declaring install or update complete",
+});
+
+export const INSTALL_STATUS_MESSAGE_CLASSES = Object.freeze({
+  okUpdated: "success",
+  warnGitUsableDespiteError: "success",
+  okArchiveInstalled: "success",
+  okCloned: "success",
+  okBasename: "success",
+  allUpToDate: "success",
+  pluginUpdated: "success",
+  codexConfigRestoredAfterEcc: "success",
+  codexChoiceSurfacePreserved: "success",
+  codexChoiceSurfaceRestored: "success",
+  okRemovedObsolete: "success",
+
+  skipExists: "skipped",
+  skipAlreadyInstalled: "skipped",
+  labelUpToDate: "skipped",
+  skillsFilterEmpty: "skipped",
+  skillsFilterNoMatches: "skipped",
+  warnManifestMissing: "skipped",
+  skipGraphifyInstalled: "skipped",
+  graphifyInstallSkippedGuideExists: "skipped",
+  noteSettingsNotAffected: "skipped",
+
+  codexNativePluginManualStep: "manual",
+  cursorNativePluginManualStep: "manual",
+  upstreamProjectLocalSkipped: "manual",
+  codexNativePluginAutoInstallIncomplete: "manual",
+  warnClaNotFound: "manual",
+  pythonNotFound: "manual",
+  pythonNotFoundGraphify: "manual",
+  pythonInstallHint: "manual",
+  pythonInstallHintGraphify: "manual",
+  warnStagingLocked: "manual",
+
+  failManifestLoad: "failed",
+  warnGitInstallFailed: "failed",
+  warnPluginFailed: "failed",
+  warnArchiveFailed: "failed",
+  warnReplaceFailed: "failed",
+  reverseModeValidationFailed: "failed",
+  reverseModeAborted: "failed",
+  warnGraphifySkillFailed: "failed",
+  warnGraphifyPipFailed: "failed",
+});
+
+export function installStatusClassForMessageKey(messageKey) {
+  return INSTALL_STATUS_MESSAGE_CLASSES[messageKey] ?? null;
+}
+
+export function installStatusNextAction(statusClass) {
+  return INSTALL_STATUS_NEXT_ACTION[statusClass] ?? null;
+}
+
 /** Align with setup.mjs LANG_ARG_ALIASES so `--lang zh` resolves to zh-CN. */
 const LANG_ALIASES = { zh: "zh-CN", ja: "ja-JP", ko: "ko-KR" };
 function normalizeLangCode(code) {
@@ -75,6 +142,8 @@ const STRINGS = {
       `Using proxy for git: ${url} (from ${source})`,
     proxyStrippedHint:
       "Loopback proxy env stripped. Use --proxy <url> or set META_KIM_GIT_PROXY to configure proxy.",
+    warnIgnoringLoopbackProxyEnv: (entries) =>
+      `Ignoring loopback proxy env for install: ${entries.join(", ")}`,
     // sync-runtimes.mjs — incremental summary + --check
     canonicalMissingWarn: (filePath) =>
       `[sync-runtimes] Skipping missing canonical file: ${filePath}`,
@@ -127,6 +196,7 @@ const STRINGS = {
     allUpToDate: (label) => `All ${label} up to date`,
     // Plugins
     pluginsHeader: "--- Claude Code plugins (user scope) ---",
+    checkingPluginMarketplaces: "Checking plugin marketplaces...",
     warnClaNotFound:
       "claude CLI not found on PATH — skip plugin install. Install Claude Code CLI, then re-run with --plugins-only.",
     warnPluginFailed: (spec, code) =>
@@ -136,6 +206,7 @@ const STRINGS = {
     labelCannotCheckGitHub: "cannot reach GitHub — skipping version check",
     labelUsingLocalRecord: (v) => `using local record: ${v}`,
     installingPlugin: (spec) => `Installing plugin: ${spec}`,
+    updatingPlugin: (spec) => `Updating plugin: ${spec}`,
     pluginUpdateVersionMismatch: (spec, installedVer, specVer) =>
       `[UPDATE] ${spec} version mismatch: installed ${installedVer}, manifest ${specVer} — reinstalling`,
     pluginUpdateUnknownVersion: (spec) =>
@@ -172,6 +243,43 @@ const STRINGS = {
     done: "Done.",
     noteCodexOpenclaw:
       "Note: Codex/Cursor native plugins must be installed through their host plugin UI; non-native runtimes use skill-directory fallbacks.",
+    upstreamNativeInstallersHeader: "Upstream native installers",
+    pluginBundlesHeader: "Plugin bundles / native plugin handoff",
+    upstreamNativeInstall: (id, runtimeId) =>
+      `${id}: upstream native install for ${runtimeId}`,
+    upstreamProjectLocalSkipped: (id, runtimeId, commandText) =>
+      `${id}: project-local installer skipped during global update; run from each ${runtimeId} project root: ${commandText}`,
+    upstreamCodexConfigPreserveDryRun: (configPath) =>
+      `preserve existing ${configPath} before ECC upstream installer and restore it with add-only ECC merge`,
+    upstreamInstallerFailureReason: (commandText) =>
+      `Run ${commandText} directly to see the upstream installer output.`,
+    codexNativeControlsDryRun: (configPath, requestUserInputFeature) =>
+      `ensure ${configPath} preserves Codex App Browser/Chrome/Computer Use native controls ([features].${requestUserInputFeature}, [features].js_repl, Windows sandbox/notify, openai-bundled marketplace/plugins)`,
+    codexConfigBackupBeforeEcc: (backupPath) =>
+      `Backed up Codex config before ECC upstream installer: ${backupPath}`,
+    codexConfigRestoredAfterEcc: (configPath) =>
+      `Restored user Codex config after ECC upstream installer with add-only ECC merge: ${configPath}`,
+    codexChoiceSurfacePreserved: (configPath) =>
+      `Codex choice surface and App native controls preserved: ${configPath}`,
+    codexConfigBackupBeforeChoiceSurface: (backupPath) =>
+      `Backed up Codex config before restoring choice surface and App native controls: ${backupPath}`,
+    codexChoiceSurfaceRestored: (configPath) =>
+      `Restored Codex choice surface, Windows-safe notify, and App native controls: ${configPath}`,
+    codexNativePluginManualStep: (pluginId) =>
+      `Codex native plugin manual step: run "codex plugin add ${pluginId}@openai-curated" or install it from /plugins.`,
+    cursorNativePluginManualStep: (pluginId) =>
+      `Cursor native plugin manual step: run /add-plugin ${pluginId} in Cursor Agent chat, or install it from Cursor's plugin marketplace. Cursor CLI does not currently expose a non-interactive plugin install command.`,
+    codexPluginAlreadyInstalled: (pluginSpec) =>
+      `Codex plugin ${pluginSpec} already installed`,
+    codexNativePluginAutoInstallIncomplete: (pluginSpec) =>
+      `Optional Codex native plugin auto-install did not complete: codex plugin add ${pluginSpec}. Install it from /plugins or rerun the command manually.`,
+    staleClaudePluginRecordRemoved: (skillId, recordKey) =>
+      `${skillId}: removing stale Claude plugin record ${recordKey}`,
+    graphifyInstallSkippedGuideExists: (platformName) =>
+      `graphify ${platformName} install skipped (guide already has Graphify section)`,
+    usingActiveVenv: (venvPath) => `Using active venv: ${venvPath}`,
+    venvTooOldFallback: (venvPath, versionText) =>
+      `Venv at "${venvPath}" has ${versionText} (need 3.10+). Falling back to system Python.`,
     activeTargets: (targets) => `Active runtime targets: ${targets.join(", ")}`,
     metaKimRoot: (root) => `Meta_Kim repo (canonical source root): ${root}`,
     logSaved: (path) => `Full log saved to: ${path}`,
@@ -295,6 +403,8 @@ const STRINGS = {
       `为 git 配置代理：${url}（来源：${source}）`,
     proxyStrippedHint:
       "已移除回环代理环境变量。使用 --proxy <url> 或设置 META_KIM_GIT_PROXY 环境变量来配置代理。",
+    warnIgnoringLoopbackProxyEnv: (entries) =>
+      `已忽略安装流程中的回环代理环境变量：${entries.join(", ")}`,
     canonicalMissingWarn: (filePath) =>
       `[sync-runtimes] 跳过缺失的 canonical 源文件：${filePath}`,
     syncRuntimesSummaryTitle: "── meta:sync（本轮增量写入摘要）──",
@@ -344,6 +454,7 @@ const STRINGS = {
     okBasename: (name, dest) => `[OK] ${name} -> ${dest}`,
     allUpToDate: (label) => `全部就绪 — ${label}`,
     pluginsHeader: "--- Claude Code 插件（用户范围）---",
+    checkingPluginMarketplaces: "正在检查插件市场...",
     warnClaNotFound:
       "未找到 claude CLI — 跳过插件安装。请先安装 Claude Code CLI，然后运行 --plugins-only。",
     skipAlreadyInstalled: (name) => `${name} — 已安装`,
@@ -351,6 +462,7 @@ const STRINGS = {
     labelCannotCheckGitHub: "无法连接 GitHub — 跳过版本检测",
     labelUsingLocalRecord: (v) => `使用本地记录：${v}`,
     installingPlugin: (spec) => `正在安装插件：${spec}`,
+    updatingPlugin: (spec) => `正在更新插件：${spec}`,
     warnPluginFailed: (spec, code) =>
       `[WARN] 插件安装失败：${spec}（退出码 ${code}）`,
     pluginUpdateVersionMismatch: (spec, installedVer, specVer) =>
@@ -381,6 +493,43 @@ const STRINGS = {
     done: "完成。",
     noteCodexOpenclaw:
       "注意：Codex/Cursor 原生插件必须通过宿主插件 UI 安装；没有原生插件入口的工具端才使用技能目录回退。",
+    upstreamNativeInstallersHeader: "上游原生安装器",
+    pluginBundlesHeader: "插件包 / 原生插件交接",
+    upstreamNativeInstall: (id, runtimeId) =>
+      `${id}：正在为 ${runtimeId} 运行上游原生安装`,
+    upstreamProjectLocalSkipped: (id, runtimeId, commandText) =>
+      `${id}：全局更新不会写入项目本地安装；请在每个 ${runtimeId} 项目根目录运行：${commandText}`,
+    upstreamCodexConfigPreserveDryRun: (configPath) =>
+      `保留现有 ${configPath}；ECC 上游安装后用只追加合并恢复`,
+    upstreamInstallerFailureReason: (commandText) =>
+      `请直接运行 ${commandText} 查看上游安装器输出。`,
+    codexNativeControlsDryRun: (configPath, requestUserInputFeature) =>
+      `确保 ${configPath} 保留 Codex App Browser/Chrome/Computer Use 原生控制（[features].${requestUserInputFeature}、[features].js_repl、Windows sandbox/notify、openai-bundled marketplace/plugins）`,
+    codexConfigBackupBeforeEcc: (backupPath) =>
+      `ECC 上游安装前已备份 Codex 配置：${backupPath}`,
+    codexConfigRestoredAfterEcc: (configPath) =>
+      `已在 ECC 上游安装后用只追加合并恢复用户 Codex 配置：${configPath}`,
+    codexChoiceSurfacePreserved: (configPath) =>
+      `Codex 选择界面和 App 原生控制已保留：${configPath}`,
+    codexConfigBackupBeforeChoiceSurface: (backupPath) =>
+      `恢复选择界面和 App 原生控制前已备份 Codex 配置：${backupPath}`,
+    codexChoiceSurfaceRestored: (configPath) =>
+      `已恢复 Codex 选择界面、Windows 安全通知和 App 原生控制：${configPath}`,
+    codexNativePluginManualStep: (pluginId) =>
+      `Codex 原生插件需手动安装：运行 "codex plugin add ${pluginId}@openai-curated"，或在 /plugins 中安装。`,
+    cursorNativePluginManualStep: (pluginId) =>
+      `Cursor 原生插件需手动安装：在 Cursor Agent 聊天中运行 /add-plugin ${pluginId}，或从 Cursor 插件市场安装。Cursor CLI 当前没有非交互式插件安装命令。`,
+    codexPluginAlreadyInstalled: (pluginSpec) =>
+      `Codex 插件 ${pluginSpec} 已安装`,
+    codexNativePluginAutoInstallIncomplete: (pluginSpec) =>
+      `可选 Codex 原生插件自动安装未完成：codex plugin add ${pluginSpec}。请从 /plugins 安装或手动重试。`,
+    staleClaudePluginRecordRemoved: (skillId, recordKey) =>
+      `${skillId}：正在移除过时的 Claude 插件记录 ${recordKey}`,
+    graphifyInstallSkippedGuideExists: (platformName) =>
+      `跳过 graphify ${platformName} install（指南中已有 Graphify 章节）`,
+    usingActiveVenv: (venvPath) => `使用当前 venv：${venvPath}`,
+    venvTooOldFallback: (venvPath, versionText) =>
+      `venv "${venvPath}" 当前为 ${versionText}（需要 3.10+），改用系统 Python。`,
     activeTargets: (targets) => `当前启用的工具端：${targets.join(", ")}`,
     metaKimRoot: (root) => `Meta_Kim 仓库（正典源根目录）：${root}`,
     logSaved: (path) => `完整日志已保存至：${path}`,
@@ -495,6 +644,8 @@ const STRINGS = {
       `git プロキシ設定: ${url}（来源: ${source}）`,
     proxyStrippedHint:
       "ループバックプロキシ環境変数を削除しました。--proxy <url> または META_KIM_GIT_PROXY 環境変数でプロキシを設定してください。",
+    warnIgnoringLoopbackProxyEnv: (entries) =>
+      `インストール用のループバックプロキシ環境変数を無視しました: ${entries.join(", ")}`,
     canonicalMissingWarn: (filePath) =>
       `[sync-runtimes] 欠落している canonical ファイルをスキップ: ${filePath}`,
     syncRuntimesSummaryTitle: "── meta:sync（増分書き込み要約）──",
@@ -544,6 +695,7 @@ const STRINGS = {
     skipExists: (path) => `存在 ${path}`,
     okBasename: (name, dest) => `[OK] ${name} -> ${dest}`,
     pluginsHeader: "--- Claude Code プラグイン（ユーザー範囲）---",
+    checkingPluginMarketplaces: "プラグインマーケットプレイスを確認中...",
     warnClaNotFound:
       "claude CLI が見つかりません — プラグインインストールをスキップ。Claude Code CLI をインストール後、--plugins-only を再実行してください。",
     skipAlreadyInstalled: (name) => `${name} — インストール済み`,
@@ -552,6 +704,7 @@ const STRINGS = {
       "GitHub に接続できません — バージョンチェックをスキップ",
     labelUsingLocalRecord: (v) => `ローカルレコードを使用：${v}`,
     installingPlugin: (spec) => `プラグインをインストール中：${spec}`,
+    updatingPlugin: (spec) => `プラグインを更新中：${spec}`,
     warnPluginFailed: (spec, code) =>
       `[WARN] プラグインインストール失敗：${spec}（終了 ${code}）`,
     pluginUpdateVersionMismatch: (spec, installedVer, specVer) =>
@@ -584,6 +737,43 @@ const STRINGS = {
     done: "完了。",
     noteCodexOpenclaw:
       "注意：Codex/Cursor のネイティブプラグインは各ホストのプラグイン UI からインストールしてください。ネイティブ入口がないランタイムのみスキルディレクトリにフォールバックします。",
+    upstreamNativeInstallersHeader: "上流ネイティブインストーラー",
+    pluginBundlesHeader: "プラグインバンドル / ネイティブプラグイン引き渡し",
+    upstreamNativeInstall: (id, runtimeId) =>
+      `${id}: ${runtimeId} 向け上流ネイティブインストールを実行中`,
+    upstreamProjectLocalSkipped: (id, runtimeId, commandText) =>
+      `${id}: グローバル更新ではプロジェクトローカルインストールを変更しません。各 ${runtimeId} プロジェクトルートで実行してください: ${commandText}`,
+    upstreamCodexConfigPreserveDryRun: (configPath) =>
+      `既存の ${configPath} を保持し、ECC 上流インストール後に追加のみのマージで復元します`,
+    upstreamInstallerFailureReason: (commandText) =>
+      `上流インストーラー出力を確認するには ${commandText} を直接実行してください。`,
+    codexNativeControlsDryRun: (configPath, requestUserInputFeature) =>
+      `${configPath} が Codex App Browser/Chrome/Computer Use のネイティブ制御（[features].${requestUserInputFeature}, [features].js_repl, Windows sandbox/notify, openai-bundled marketplace/plugins）を保持することを確認します`,
+    codexConfigBackupBeforeEcc: (backupPath) =>
+      `ECC 上流インストール前に Codex 設定をバックアップしました: ${backupPath}`,
+    codexConfigRestoredAfterEcc: (configPath) =>
+      `ECC 上流インストール後、追加のみのマージでユーザー Codex 設定を復元しました: ${configPath}`,
+    codexChoiceSurfacePreserved: (configPath) =>
+      `Codex choice surface と App ネイティブ制御を保持しました: ${configPath}`,
+    codexConfigBackupBeforeChoiceSurface: (backupPath) =>
+      `choice surface と App ネイティブ制御の復元前に Codex 設定をバックアップしました: ${backupPath}`,
+    codexChoiceSurfaceRestored: (configPath) =>
+      `Codex choice surface、Windows-safe notify、App ネイティブ制御を復元しました: ${configPath}`,
+    codexNativePluginManualStep: (pluginId) =>
+      `Codex ネイティブプラグインは手動手順です: "codex plugin add ${pluginId}@openai-curated" を実行するか /plugins からインストールしてください。`,
+    cursorNativePluginManualStep: (pluginId) =>
+      `Cursor ネイティブプラグインは手動手順です: Cursor Agent チャットで /add-plugin ${pluginId} を実行するか、Cursor のプラグインマーケットからインストールしてください。Cursor CLI は現在、非対話プラグインインストールを公開していません。`,
+    codexPluginAlreadyInstalled: (pluginSpec) =>
+      `Codex プラグイン ${pluginSpec} はインストール済み`,
+    codexNativePluginAutoInstallIncomplete: (pluginSpec) =>
+      `任意の Codex ネイティブプラグイン自動インストールが完了しませんでした: codex plugin add ${pluginSpec}。/plugins からインストールするか手動で再実行してください。`,
+    staleClaudePluginRecordRemoved: (skillId, recordKey) =>
+      `${skillId}: 古い Claude プラグインレコード ${recordKey} を削除中`,
+    graphifyInstallSkippedGuideExists: (platformName) =>
+      `graphify ${platformName} install をスキップ（ガイドに Graphify セクションが既にあります）`,
+    usingActiveVenv: (venvPath) => `アクティブな venv を使用: ${venvPath}`,
+    venvTooOldFallback: (venvPath, versionText) =>
+      `venv "${venvPath}" は ${versionText}（3.10+ が必要）です。システム Python にフォールバックします。`,
     activeTargets: (targets) =>
       `アクティブランタイムターゲット：${targets.join(", ")}`,
     metaKimRoot: (root) => `Meta_Kim リポジトリ（正典ソースルート）：${root}`,
@@ -708,6 +898,8 @@ const STRINGS = {
       `git 프록시 설정: ${url}（출처: ${source}）`,
     proxyStrippedHint:
       "루프백 프록시 환경변수가 제거되었습니다. --proxy <url> 또는 META_KIM_GIT_PROXY 환경변수로 프록시를 설정하세요.",
+    warnIgnoringLoopbackProxyEnv: (entries) =>
+      `설치에서 루프백 프록시 환경변수를 무시했습니다: ${entries.join(", ")}`,
     canonicalMissingWarn: (filePath) =>
       `[sync-runtimes] 누락된 canonical 파일을 건너뜁니다: ${filePath}`,
     syncRuntimesSummaryTitle: "── meta:sync（증분 쓰기 요약）──",
@@ -756,6 +948,7 @@ const STRINGS = {
     skipExists: (path) => `존재함 ${path}`,
     okBasename: (name, dest) => `[OK] ${name} -> ${dest}`,
     pluginsHeader: "--- Claude Code 플러그인 (사용자 범위) ---",
+    checkingPluginMarketplaces: "플러그인 마켓플레이스 확인 중...",
     warnClaNotFound:
       "claude CLI를 찾을 수 없음 — 플러그인 설치 건너뜀. Claude Code CLI를 설치한 후 --plugins-only를 다시 실행하세요.",
     skipAlreadyInstalled: (name) => `${name} — 이미 설치됨`,
@@ -763,6 +956,7 @@ const STRINGS = {
     labelCannotCheckGitHub: "GitHub 연결 불가 — 버전 확인 건너뜀",
     labelUsingLocalRecord: (v) => `로컬 레코드 사용：${v}`,
     installingPlugin: (spec) => `플러그인 설치 중：${spec}`,
+    updatingPlugin: (spec) => `플러그인 업데이트 중：${spec}`,
     warnPluginFailed: (spec, code) =>
       `[WARN] 플러그인 설치 실패：${spec}（종료 코드 ${code}）`,
     pluginUpdateVersionMismatch: (spec, installedVer, specVer) =>
@@ -795,6 +989,43 @@ const STRINGS = {
     done: "완료.",
     noteCodexOpenclaw:
       "참고: Codex/Cursor 네이티브 플러그인은 각 호스트의 플러그인 UI에서 설치해야 합니다. 네이티브 진입점이 없는 런타임만 스킬 디렉토리 fallback을 사용합니다.",
+    upstreamNativeInstallersHeader: "업스트림 네이티브 설치기",
+    pluginBundlesHeader: "플러그인 번들 / 네이티브 플러그인 안내",
+    upstreamNativeInstall: (id, runtimeId) =>
+      `${id}: ${runtimeId}용 업스트림 네이티브 설치 실행 중`,
+    upstreamProjectLocalSkipped: (id, runtimeId, commandText) =>
+      `${id}: 전역 업데이트에서는 프로젝트 로컬 설치를 변경하지 않습니다. 각 ${runtimeId} 프로젝트 루트에서 실행하세요: ${commandText}`,
+    upstreamCodexConfigPreserveDryRun: (configPath) =>
+      `기존 ${configPath}를 보존하고 ECC 업스트림 설치 후 추가 전용 병합으로 복원합니다`,
+    upstreamInstallerFailureReason: (commandText) =>
+      `업스트림 설치기 출력을 보려면 ${commandText}를 직접 실행하세요.`,
+    codexNativeControlsDryRun: (configPath, requestUserInputFeature) =>
+      `${configPath}가 Codex App Browser/Chrome/Computer Use 네이티브 제어([features].${requestUserInputFeature}, [features].js_repl, Windows sandbox/notify, openai-bundled marketplace/plugins)를 보존하는지 확인합니다`,
+    codexConfigBackupBeforeEcc: (backupPath) =>
+      `ECC 업스트림 설치 전에 Codex 설정을 백업했습니다: ${backupPath}`,
+    codexConfigRestoredAfterEcc: (configPath) =>
+      `ECC 업스트림 설치 후 사용자 Codex 설정을 추가 전용 병합으로 복원했습니다: ${configPath}`,
+    codexChoiceSurfacePreserved: (configPath) =>
+      `Codex choice surface 및 App 네이티브 제어를 보존했습니다: ${configPath}`,
+    codexConfigBackupBeforeChoiceSurface: (backupPath) =>
+      `choice surface 및 App 네이티브 제어 복원 전에 Codex 설정을 백업했습니다: ${backupPath}`,
+    codexChoiceSurfaceRestored: (configPath) =>
+      `Codex choice surface, Windows-safe notify 및 App 네이티브 제어를 복원했습니다: ${configPath}`,
+    codexNativePluginManualStep: (pluginId) =>
+      `Codex 네이티브 플러그인은 수동 단계가 필요합니다: "codex plugin add ${pluginId}@openai-curated"를 실행하거나 /plugins에서 설치하세요.`,
+    cursorNativePluginManualStep: (pluginId) =>
+      `Cursor 네이티브 플러그인은 수동 단계가 필요합니다: Cursor Agent 채팅에서 /add-plugin ${pluginId}를 실행하거나 Cursor 플러그인 마켓플레이스에서 설치하세요. Cursor CLI는 현재 비대화형 플러그인 설치 명령을 제공하지 않습니다.`,
+    codexPluginAlreadyInstalled: (pluginSpec) =>
+      `Codex 플러그인 ${pluginSpec} 설치됨`,
+    codexNativePluginAutoInstallIncomplete: (pluginSpec) =>
+      `선택적 Codex 네이티브 플러그인 자동 설치가 완료되지 않았습니다: codex plugin add ${pluginSpec}. /plugins에서 설치하거나 명령을 다시 실행하세요.`,
+    staleClaudePluginRecordRemoved: (skillId, recordKey) =>
+      `${skillId}: 오래된 Claude 플러그인 레코드 ${recordKey} 제거 중`,
+    graphifyInstallSkippedGuideExists: (platformName) =>
+      `graphify ${platformName} install 건너뜀(가이드에 Graphify 섹션이 이미 있음)`,
+    usingActiveVenv: (venvPath) => `활성 venv 사용: ${venvPath}`,
+    venvTooOldFallback: (venvPath, versionText) =>
+      `venv "${venvPath}"는 ${versionText}입니다(3.10+ 필요). 시스템 Python으로 전환합니다.`,
     activeTargets: (targets) => `활성 런타임 대상：${targets.join(", ")}`,
     metaKimRoot: (root) => `Meta_Kim 저장소 (정본 소스 루트)：${root}`,
     logSaved: (path) => `전체 로그 저장 위치：${path}`,
@@ -928,7 +1159,11 @@ const REPORT_STRINGS = {
     localCommitsNotOnOriginMain: "Local commits not on origin/main",
     workingTreeDelta: "Working tree delta",
     currentGithubDeltaFromPrd: "Current GitHub delta from PRD",
-    blockedOrNotDone: "Blocked or not done",
+    blockedOrNotDone: "Primary release gaps or not done",
+    compatibilityFollowUp: "Compatibility follow-up",
+    releaseBoundary: "Release boundary",
+    cannotClaimGithubComplete: "cannotClaimGithubComplete",
+    cannotClaimAllToolCompatibility: "cannotClaimAllToolCompatibility",
     completedParallelBacklogEvidence: "Completed parallel backlog evidence",
     missing: "(missing)",
     capabilityGaps: "Capability gaps",
@@ -946,6 +1181,7 @@ const REPORT_STRINGS = {
     blocked: "Blocked",
     workerTask: "WorkerTask",
     candidate: "Candidate",
+    branch: "Branch",
     type: "Type",
     target: "Target",
     dryRunWrites: "Dry-run writes",
@@ -1290,7 +1526,11 @@ const REPORT_STRINGS = {
     localCommitsNotOnOriginMain: "本地未进入 origin/main 的提交",
     workingTreeDelta: "工作区改动",
     currentGithubDeltaFromPrd: "PRD 中记录的当前 GitHub 差距",
-    blockedOrNotDone: "阻塞或未完成",
+    blockedOrNotDone: "主发布差距或未完成",
+    compatibilityFollowUp: "兼容后续项",
+    releaseBoundary: "发布边界",
+    cannotClaimGithubComplete: "不能宣称 GitHub 完成",
+    cannotClaimAllToolCompatibility: "不能宣称全工具端兼容完成",
     completedParallelBacklogEvidence: "已完成并行 backlog 证据",
     missing: "（缺失）",
     capabilityGaps: "能力缺口",
@@ -1651,6 +1891,10 @@ const REPORT_STRINGS = {
     workingTreeDelta: "作業ツリー差分",
     currentGithubDeltaFromPrd: "PRD 上の現在の GitHub ギャップ",
     blockedOrNotDone: "ブロックまたは未完了",
+    compatibilityFollowUp: "互換性フォローアップ",
+    releaseBoundary: "リリース境界",
+    cannotClaimGithubComplete: "cannotClaimGithubComplete",
+    cannotClaimAllToolCompatibility: "cannotClaimAllToolCompatibility",
     completedParallelBacklogEvidence: "完了済み並列 backlog 証拠",
     missing: "（欠落）",
     capabilityGaps: "能力ギャップ",
@@ -2015,6 +2259,10 @@ const REPORT_STRINGS = {
     workingTreeDelta: "작업 트리 변경",
     currentGithubDeltaFromPrd: "PRD 의 현재 GitHub 격차",
     blockedOrNotDone: "차단 또는 미완료",
+    compatibilityFollowUp: "호환성 후속 항목",
+    releaseBoundary: "릴리스 경계",
+    cannotClaimGithubComplete: "cannotClaimGithubComplete",
+    cannotClaimAllToolCompatibility: "cannotClaimAllToolCompatibility",
     completedParallelBacklogEvidence: "완료된 병렬 backlog 증거",
     missing: "（누락）",
     capabilityGaps: "능력 격차",

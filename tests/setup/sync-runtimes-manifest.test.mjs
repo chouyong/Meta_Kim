@@ -9,6 +9,7 @@ import {
   applyRuntimePaths,
   buildCodexAgent,
   buildCodexBusinessRoleAgent,
+  buildCodexProjectConfig,
   buildCodexRuntimeAdapterAgent,
   buildCodexSkillContent,
   buildCursorAgent,
@@ -20,7 +21,10 @@ import {
 } from "../../scripts/sync-runtimes.mjs";
 import { mergeRepoClaudeSettings } from "../../scripts/claude-settings-merge.mjs";
 import { CATEGORIES } from "../../scripts/install-manifest.mjs";
-import { buildHookPromptAdapterSource } from "../../scripts/runtime-hook-mapping.mjs";
+import {
+  buildCodexHooksJson,
+  buildHookPromptAdapterSource,
+} from "../../scripts/runtime-hook-mapping.mjs";
 
 const REPO = path.resolve("/fake/repo");
 
@@ -54,7 +58,11 @@ describe("sync-runtimes / inferProjectCategory", () => {
     );
   });
 
-  test("maps Codex slash commands to project settings category", () => {
+  test("maps runtime slash commands to project settings category", () => {
+    assert.equal(
+      inferProjectCategory(p(".claude/commands/meta-theory.md"), REPO),
+      CATEGORIES.G,
+    );
     assert.equal(
       inferProjectCategory(p(".codex/commands/meta-theory.md"), REPO),
       CATEGORIES.G,
@@ -210,6 +218,37 @@ describe("sync-runtimes / inferProjectPurpose", () => {
 });
 
 describe("sync-runtimes / Codex project hooks", () => {
+  test("project Codex config preserves local MCP while enabling native choice surface", () => {
+    const existingProjectConfig = [
+      "[mcp_servers.meta-kim-runtime]",
+      'args = ["scripts/mcp/meta-runtime-server.mjs"]',
+      'command = "node"',
+      "",
+    ].join("\n");
+    const configExample = [
+      'approval_policy = "on-request"',
+      'sandbox_mode = "workspace-write"',
+      "",
+      "[features]",
+      "default_mode_request_user_input = true",
+      "",
+      "[agents]",
+      "max_threads = 6",
+      "max_depth = 1",
+      "",
+    ].join("\n");
+
+    const out = buildCodexProjectConfig(existingProjectConfig, configExample, {
+      platformName: "linux",
+      codexHome: "/tmp/codex-home",
+    });
+
+    assert.match(out, /\[mcp_servers\.meta-kim-runtime\]/);
+    assert.match(out, /scripts\/mcp\/meta-runtime-server\.mjs/);
+    assert.match(out, /\[features\][\s\S]*default_mode_request_user_input = true/);
+    assert.match(out, /\[features\][\s\S]*js_repl = true/);
+  });
+
   test("registers the enforce-agent-dispatch deny gate before context hooks", () => {
     const config = buildCodexProjectHooksJson();
     const preToolUse = config.hooks.PreToolUse;
@@ -269,7 +308,7 @@ describe("sync-runtimes / Codex project hooks", () => {
               },
               {
                 type: "command",
-                command: "node .claude/hooks/block-dangerous-bash.mjs",
+                command: "node .claude/hooks/enforce-agent-dispatch.mjs",
               },
             ],
           },
@@ -300,29 +339,48 @@ describe("sync-runtimes / Codex project hooks", () => {
     );
 
     assert.ok(commands.includes("node .claude/hooks/graphify-context.mjs"));
-    assert.ok(commands.includes("node .claude/hooks/block-dangerous-bash.mjs"));
+    assert.ok(commands.includes("node .claude/hooks/enforce-agent-dispatch.mjs"));
     assert.equal(commands.some((command) => command.includes("CMD=$(python3")), false);
   });
 
-  test("wires MCP memory across start, prompt, and stop", () => {
+  test("project Codex hooks leave global-only packages out", () => {
     const config = buildCodexProjectHooksJson();
 
-    assert.match(
-      config.hooks.SessionStart[0].hooks[0].command,
-      /meta-kim-memory-save\.mjs.*session-start/,
-    );
-    assert.match(
-      config.hooks.UserPromptSubmit[0].hooks[0].command,
-      /meta-kim-memory-save\.mjs.*user-prompt/,
-    );
-    assert.match(
-      config.hooks.Stop[0].hooks[0].command,
-      /meta-kim-memory-save\.mjs.*stop/,
-    );
+    // Memory and prompt-adapter wiring stay global-only. Project-scope
+    // SessionStart/UserPromptSubmit/Stop blocks may still exist for the
+    // medusa AI-context surface hook, but must carry no memory/adapter hooks.
+    const allCommands = JSON.stringify(config);
+    assert.doesNotMatch(allCommands, /meta-kim-memory-save\.mjs/);
+    assert.doesNotMatch(allCommands, /hookprompt-adapter\.mjs/);
+    assert.doesNotMatch(allCommands, /planning-with-files-adapter\.mjs/);
   });
 
-  test("can wire HookPrompt through a Codex adapter", () => {
-    const config = buildCodexProjectHooksJson({
+  test("wires meta-theory Skill activation to the spine hook", () => {
+    const config = buildCodexProjectHooksJson();
+    const skillEntry = config.hooks.Skill.find((entry) =>
+      entry.hooks?.some((hook) =>
+        hook.command?.includes("activate-meta-theory-spine.mjs"),
+      ),
+    );
+
+    assert(skillEntry, "meta-theory spine hook should be registered");
+    assert.equal(skillEntry.matcher, "meta-theory");
+    assert.equal(skillEntry.hooks[0].timeout, 5);
+  });
+
+  test("Cursor prompt hooks can bootstrap explicit meta-theory prompts", () => {
+    const config = buildCursorProjectHooksJson();
+    const beforeSubmit = config.hooks.beforeSubmitPrompt;
+
+    assert.match(beforeSubmit[0].command, /activate-meta-theory-spine\.mjs/);
+    assert.equal(beforeSubmit[0].timeout, 5);
+    assert.doesNotMatch(JSON.stringify(config), /meta-kim-memory-save\.mjs/);
+    assert.doesNotMatch(JSON.stringify(config), /hookprompt-adapter\.mjs/);
+    assert.doesNotMatch(JSON.stringify(config), /planning-with-files-adapter\.mjs/);
+  });
+
+  test("can wire HookPrompt through a global Codex adapter", () => {
+    const config = buildCodexHooksJson({
       hookPromptAdapterPath: ".codex/hooks/hookprompt-adapter.mjs",
     });
 
@@ -376,6 +434,26 @@ describe("sync-runtimes / OpenClaw template portability", () => {
     assert.match(templateRaw, /__REPO_ROOT__\/openclaw\/workspaces/);
     assert.match(templateRaw, /__REPO_ROOT__\/openclaw\/skills/);
     assert.doesNotMatch(templateRaw, /before_tool_call/);
+  });
+
+  test("Cursor and OpenClaw expose project-understanding deep Fetch entry contracts", async () => {
+    const cursorRule = await readFsFile(
+      "canonical/runtime-assets/cursor/rules/meta-theory-dispatch.mdc",
+      "utf8",
+    );
+    const openclawHeartbeat = await readFsFile(
+      "canonical/runtime-assets/openclaw/HEARTBEAT.template.md",
+      "utf8",
+    );
+    const syncRuntime = await readFsFile("scripts/sync-runtimes.mjs", "utf8");
+
+    for (const source of [cursorRule, openclawHeartbeat, syncRuntime]) {
+      assert.match(source, /npm run meta:theory:run/);
+      assert.match(source, /project understanding|project-understanding/i);
+      assert.match(source, /Graphify/);
+      assert.match(source, /blocked_to_fetch/);
+      assert.match(source, /MCP/);
+    }
   });
 });
 
@@ -562,21 +640,13 @@ Body instructions`;
 
 describe("sync-runtimes / Cursor project hooks", () => {
   test("uses Cursor native lowerCamel lifecycle hooks", () => {
-    const config = buildCursorProjectHooksJson({
-      hookPromptAdapterPath: ".cursor/hooks/hookprompt-adapter.mjs",
-    });
+    const config = buildCursorProjectHooksJson();
 
-    assert.match(
-      config.hooks.sessionStart[0].command,
-      /meta-kim-memory-save\.mjs.*session-start/,
-    );
+    // beforeSubmitPrompt leads with the spine hook; the medusa surface hook
+    // may follow it, but no memory/adapter hooks belong in project scope.
     assert.match(
       config.hooks.beforeSubmitPrompt[0].command,
-      /meta-kim-memory-save\.mjs.*user-prompt/,
-    );
-    assert.ok(
-      config.hooks.beforeSubmitPrompt.some((h) => /hookprompt-adapter\.mjs/.test(h.command)),
-      `expected hookprompt-adapter in beforeSubmitPrompt, got: ${config.hooks.beforeSubmitPrompt.map((h) => h.command).join(", ")}`,
+      /activate-meta-theory-spine\.mjs/,
     );
 
     const preToolUse = config.hooks.preToolUse;
@@ -601,10 +671,11 @@ describe("sync-runtimes / Cursor project hooks", () => {
     );
     assert(graphifyEntry, "graphify-context should still be registered");
 
-    assert.match(
-      config.hooks.stop[0].command,
-      /meta-kim-memory-save\.mjs.*stop/,
-    );
+    // sessionStart/stop may exist for the medusa surface hook, but must carry
+    // no memory/adapter commands.
+    assert.doesNotMatch(JSON.stringify(config), /meta-kim-memory-save\.mjs/);
+    assert.doesNotMatch(JSON.stringify(config), /hookprompt-adapter\.mjs/);
+    assert.doesNotMatch(JSON.stringify(config), /planning-with-files-adapter\.mjs/);
   });
 });
 

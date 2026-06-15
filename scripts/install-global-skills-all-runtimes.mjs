@@ -1742,7 +1742,7 @@ async function backupCodexConfigBeforeUpstream(snapshot) {
   const backupPath = `${snapshot.configPath}.meta-kim.pre-ecc.bak`;
   await fs.copyFile(snapshot.configPath, backupPath);
   console.log(
-    `${C.yellow}↻${C.reset} ${C.dim}Backed up Codex config before ECC upstream installer: ${backupPath}${C.reset}`,
+    `${C.yellow}↻${C.reset} ${C.dim}${t.codexConfigBackupBeforeEcc(backupPath)}${C.reset}`,
   );
   return backupPath;
 }
@@ -1759,7 +1759,7 @@ async function restoreCodexConfigAfterUpstream(snapshot, runtimeHome) {
   if (upstreamText === next) return false;
   await fs.writeFile(snapshot.configPath, next, "utf8");
   console.log(
-    `${C.green}✓${C.reset} ${C.dim}Restored user Codex config after ECC upstream installer with add-only ECC merge: ${snapshot.configPath}${C.reset}`,
+    `${C.green}✓${C.reset} ${C.dim}${t.codexConfigRestoredAfterEcc(snapshot.configPath)}${C.reset}`,
   );
   return true;
 }
@@ -1773,7 +1773,7 @@ async function installUpstreamCliSpecs(runtimeHomes, activeTargets) {
   const emitHeader = () => {
     if (hasOutput) return;
     hasOutput = true;
-    console.log(`\n${C.bold}${AMBER}Upstream native installers${C.reset}`);
+    console.log(`\n${C.bold}${AMBER}${t.upstreamNativeInstallersHeader}${C.reset}`);
   };
 
   for (const spec of specs) {
@@ -1798,11 +1798,15 @@ async function installUpstreamCliSpecs(runtimeHomes, activeTargets) {
 
       emitHeader();
       if (targetMode === "project") {
-        const message = `${spec.id}: run from each ${runtimeId} project root: ${commandText}`;
+        const message = t.upstreamProjectLocalSkipped(
+          spec.id,
+          runtimeId,
+          commandText,
+        );
         if (dryRun) {
           console.log(t.dryRun(message));
         } else {
-          console.warn(`${C.yellow}⚠${C.reset} ${message}`);
+          console.log(`${C.yellow}⊘${C.reset} ${message}`);
         }
         continue;
       }
@@ -1812,7 +1816,9 @@ async function installUpstreamCliSpecs(runtimeHomes, activeTargets) {
         if (runtimeId === "codex") {
           console.log(
             t.dryRun(
-              `preserve existing ${path.join(runtimeHome, "config.toml")} before ECC upstream installer and restore it with add-only ECC merge`,
+              t.upstreamCodexConfigPreserveDryRun(
+                path.join(runtimeHome, "config.toml"),
+              ),
             ),
           );
         }
@@ -1820,7 +1826,7 @@ async function installUpstreamCliSpecs(runtimeHomes, activeTargets) {
       }
 
       console.log(
-        `${C.cyan}→${C.reset} ${spec.id}: upstream native install for ${runtimeId}`,
+        `${C.cyan}→${C.reset} ${t.upstreamNativeInstall(spec.id, runtimeId)}`,
       );
       const codexConfigSnapshot = await readCodexConfigSnapshot(
         runtimeId,
@@ -1842,7 +1848,7 @@ async function installUpstreamCliSpecs(runtimeHomes, activeTargets) {
           category: "unknown",
           failureText: `upstream installer exited ${result.status}`,
           fallback: "none",
-          reason: `Run ${commandText} directly to see the upstream installer output.`,
+          reason: t.upstreamInstallerFailureReason(commandText),
         });
       }
     }
@@ -1856,7 +1862,7 @@ async function ensureCodexChoiceSurfaceAfterInstall(runtimeHomes, activeTargets)
   if (dryRun) {
     console.log(
       t.dryRun(
-        `ensure ${configPath} preserves Codex App Browser/Chrome/Computer Use native controls ([features].${CODEX_REQUEST_USER_INPUT_FEATURE}, [features].js_repl, Windows sandbox/notify, openai-bundled marketplace/plugins)`,
+        t.codexNativeControlsDryRun(configPath, CODEX_REQUEST_USER_INPUT_FEATURE),
       ),
     );
     return;
@@ -1873,7 +1879,7 @@ async function ensureCodexChoiceSurfaceAfterInstall(runtimeHomes, activeTargets)
 
   if (previous === next) {
     console.log(
-      `${C.green}✓${C.reset} ${C.dim}Codex choice surface and App native controls preserved: ${configPath}${C.reset}`,
+      `${C.green}✓${C.reset} ${C.dim}${t.codexChoiceSurfacePreserved(configPath)}${C.reset}`,
     );
     return;
   }
@@ -1882,26 +1888,26 @@ async function ensureCodexChoiceSurfaceAfterInstall(runtimeHomes, activeTargets)
     const backupPath = `${configPath}.meta-kim.bak`;
     await fs.copyFile(configPath, backupPath);
     console.log(
-      `${C.yellow}↻${C.reset} ${C.dim}Backed up Codex config before restoring choice surface and App native controls: ${backupPath}${C.reset}`,
+      `${C.yellow}↻${C.reset} ${C.dim}${t.codexConfigBackupBeforeChoiceSurface(backupPath)}${C.reset}`,
     );
   }
 
   await fs.writeFile(configPath, next, "utf8");
   console.log(
-    `${C.green}✓${C.reset} ${C.dim}Restored Codex choice surface, Windows-safe notify, and App native controls: ${configPath}${C.reset}`,
+    `${C.green}✓${C.reset} ${C.dim}${t.codexChoiceSurfaceRestored(configPath)}${C.reset}`,
   );
 }
 
 function printNativePluginInstallHint(runtimeId, pluginId) {
   if (runtimeId === "codex") {
     console.log(
-      `${C.yellow}⊘${C.reset} ${C.dim}Codex native plugin required: run "codex plugin add ${pluginId}@openai-curated" or install it from /plugins.${C.reset}`,
+      `${C.yellow}⊘${C.reset} ${C.dim}${t.codexNativePluginManualStep(pluginId)}${C.reset}`,
     );
     return;
   }
   if (runtimeId === "cursor") {
     console.log(
-      `${C.yellow}⊘${C.reset} ${C.dim}Cursor native plugin required: run /add-plugin ${pluginId} in Cursor Agent chat, or install it from Cursor's plugin marketplace. Cursor ${C.reset}${C.dim}CLI ${C.reset}${C.dim}does not currently expose a non-interactive plugin install command.${C.reset}`,
+      `${C.yellow}⊘${C.reset} ${C.dim}${t.cursorNativePluginManualStep(pluginId)}${C.reset}`,
     );
   }
 }
@@ -1939,7 +1945,7 @@ function installCodexNativePlugin(pluginId) {
 
   if (codexPluginInstalled(pluginId, marketplaceId)) {
     console.log(
-      `${C.green}✓${C.reset} ${C.dim}Codex plugin ${pluginId}@${marketplaceId} already installed${C.reset}`,
+      `${C.green}✓${C.reset} ${C.dim}${t.codexPluginAlreadyInstalled(`${pluginId}@${marketplaceId}`)}${C.reset}`,
     );
     return true;
   }
@@ -1960,8 +1966,8 @@ function installCodexNativePlugin(pluginId) {
   );
   if (result.status === 0) return true;
 
-  console.warn(
-    `${C.yellow}⚠${C.reset} ${C.dim}Optional Codex native plugin install failed: codex plugin add ${pluginId}@${marketplaceId}. Install it from /plugins or rerun the command manually.${C.reset}`,
+  console.log(
+    `${C.yellow}⊘${C.reset} ${C.dim}${t.codexNativePluginAutoInstallIncomplete(`${pluginId}@${marketplaceId}`)}${C.reset}`,
   );
   return false;
 }
@@ -1993,7 +1999,7 @@ async function installPluginBundlesForNonClaudeRuntimes(
     if (hasOutput) return;
     hasOutput = true;
     console.log(
-      `\n${C.bold}${AMBER}Plugin bundles (sparse-checkout fallback)${C.reset}`,
+      `\n${C.bold}${AMBER}${t.pluginBundlesHeader}${C.reset}`,
     );
   };
 
@@ -2193,7 +2199,7 @@ async function installClaudePlugins() {
       ),
     );
     if (neededMarketplaces.size > 0) {
-      console.log(`\n${C.dim}  Checking plugin marketplaces...${C.reset}`);
+      console.log(`\n${C.dim}  ${t.checkingPluginMarketplaces}${C.reset}`);
       for (const mktId of neededMarketplaces) {
         console.log(
           t.dryRun(
@@ -2203,7 +2209,8 @@ async function installClaudePlugins() {
       }
     }
     for (const spec of CLAUDE_PLUGIN_SPECS) {
-      console.log(t.dryRun(`claude plugin install ${spec}`));
+      const command = updateMode ? "update" : "install";
+      console.log(t.dryRun(`claude plugin ${command} ${spec}`));
     }
     return true;
   }
@@ -2250,7 +2257,7 @@ async function installClaudePlugins() {
   );
 
   if (neededMarketplaces.size > 0) {
-    console.log(`\n${C.dim}  Checking plugin marketplaces...${C.reset}`);
+    console.log(`\n${C.dim}  ${t.checkingPluginMarketplaces}${C.reset}`);
 
     // Probe currently-registered marketplaces
     const mktListOut = spawnSync(
@@ -2341,15 +2348,20 @@ async function installClaudePlugins() {
     "plugins",
     "installed_plugins.json",
   );
-  try {
-    if (existsSync(installedPluginsPath)) {
-      const raw = readFileSync(installedPluginsPath, "utf8");
-      installedPluginsFile = JSON.parse(raw);
-      if (!installedPluginsFile.plugins) installedPluginsFile.plugins = {};
+  function readInstalledPluginsFromDisk() {
+    try {
+      if (existsSync(installedPluginsPath)) {
+        const raw = readFileSync(installedPluginsPath, "utf8");
+        const parsed = JSON.parse(raw);
+        if (!parsed.plugins) parsed.plugins = {};
+        return parsed;
+      }
+    } catch {
+      // If file missing or corrupt, fall through with fresh structure.
     }
-  } catch {
-    // If file missing or corrupt, fall through with fresh structure
+    return { version: 2, plugins: {} };
   }
+  installedPluginsFile = readInstalledPluginsFromDisk();
 
   for (const repoSpec of SKILL_REPOS.filter((s) => s.claudePlugin)) {
     const canonicalSpec = repoSpec.claudePlugin;
@@ -2358,7 +2370,7 @@ async function installClaudePlugins() {
         if (key === canonicalSpec) continue;
         if (!key.startsWith(`${legacyName}@`)) continue;
         console.warn(
-          `${C.yellow}⚠${C.reset} ${repoSpec.id}: removing stale Claude plugin record ${key}`,
+          `${C.yellow}⚠${C.reset} ${t.staleClaudePluginRecordRemoved(repoSpec.id, key)}`,
         );
         delete installedPluginsFile.plugins[key];
       }
@@ -2497,8 +2509,15 @@ async function installClaudePlugins() {
       console.log(t.dryRun(`claude plugin install ${spec}`));
       continue;
     }
-    console.log(`${C.cyan}→${C.reset} ${t.installingPlugin(spec)}`);
-    const p = spawnSync("claude", ["plugin", "install", spec], {
+    const pluginCommand = updateMode && localRecord ? "update" : "install";
+    console.log(
+      `${C.cyan}→${C.reset} ${
+        pluginCommand === "update"
+          ? t.updatingPlugin(spec)
+          : t.installingPlugin(spec)
+      }`,
+    );
+    const p = spawnSync("claude", ["plugin", pluginCommand, spec], {
       stdio: "inherit",
       shell: claudeShellOpt,
     });
@@ -2514,6 +2533,14 @@ async function installClaudePlugins() {
     // Record installed version so --update mode can detect future mismatches.
     // Both update-mode reinstalls and first-time installs write here.
     if (p.status === 0) {
+      // Prefer the plugin manager's own updated record. This preserves install
+      // paths and commit SHAs after `claude plugin update`.
+      const refreshedInstalledPluginsFile = readInstalledPluginsFromDisk();
+      if (refreshedInstalledPluginsFile.plugins?.[spec]?.[0]) {
+        installedPluginsFile = refreshedInstalledPluginsFile;
+        continue;
+      }
+
       // Priority: (1) GitHub API version, (2) parse version from installPath dir name.
       // installPath format: ~/.claude/plugins/cache/{marketplace}/{name}/{version}/
       // The directory name IS the version — more reliable than GitHub API rate limits.
@@ -3301,7 +3328,7 @@ async function main() {
 
   if (strippedLoopbackProxyEnv.length > 0) {
     console.warn(
-      `${C.yellow}⚠${C.reset} Ignoring loopback proxy env for install: ${strippedLoopbackProxyEnv.join(", ")}`,
+      `${C.yellow}⚠${C.reset} ${t.warnIgnoringLoopbackProxyEnv(strippedLoopbackProxyEnv)}`,
     );
   }
 
@@ -3390,10 +3417,10 @@ async function main() {
             versionText:
               venvCheck.stdout?.trim() || venvCheck.stderr?.trim() || "",
           };
-          console.log(`${C.dim}  Using active venv: ${venvPath}${C.reset}`);
+          console.log(`${C.dim}  ${t.usingActiveVenv(venvPath)}${C.reset}`);
         } else {
           console.warn(
-            `${C.yellow}⚠${C.reset} ${C.dim}Venv at "${venvPath}" has ${parsed?.raw ?? "unknown"} (need 3.10+). Falling back to system Python.${C.reset}`,
+            `${C.yellow}⚠${C.reset} ${C.dim}${t.venvTooOldFallback(venvPath, parsed?.raw ?? "unknown")}${C.reset}`,
           );
         }
       }
@@ -3406,7 +3433,7 @@ async function main() {
       const ensureGraphifyWiring = () => {
         if (guideAlreadyHasGraphifySection("claude")) {
           console.log(
-            `${C.yellow}⊘${C.reset} ${C.dim}graphify claude install skipped (guide already has Graphify section)${C.reset}`,
+            `${C.yellow}⊘${C.reset} ${C.dim}${t.graphifyInstallSkippedGuideExists("claude")}${C.reset}`,
           );
         } else {
           runPythonModule(
@@ -3434,7 +3461,7 @@ async function main() {
       if (pipShow.status === 0) {
         const version =
           extractPipShowVersion(readProcessText(pipShow)) ?? "unknown";
-        console.log(`[SKIP] ${t.skipGraphifyInstalled(version)}`);
+        console.log(`${C.yellow}⊘${C.reset} ${C.dim}${t.skipGraphifyInstalled(version)}${C.reset}`);
         ensureGraphifyWiring();
       } else {
         console.log(t.installingGraphify);
@@ -3662,7 +3689,15 @@ async function deployHookConfigFiles(spec, runtimeHome, runtimeId) {
     const srcPath = path.join(tmp, ...configFile.split("/").filter(Boolean));
     if (await pathExists(srcPath)) {
       const destPath = path.join(runtimeHome, path.basename(configFile));
-      await fs.copyFile(srcPath, destPath);
+      if (
+        spec.id === "planning-with-files" &&
+        path.basename(configFile) === "hooks.json" &&
+        ["codex", "cursor"].includes(runtimeId)
+      ) {
+        await mergePlanningHookConfigFile(srcPath, destPath);
+      } else {
+        await fs.copyFile(srcPath, destPath);
+      }
       console.log(
         `${C.green}✓${C.reset} ${spec.id} ${path.basename(configFile)} -> ${runtimeHome} ${C.dim}(from ${configFile})${C.reset}`,
       );
@@ -3672,6 +3707,79 @@ async function deployHookConfigFiles(spec, runtimeHome, runtimeId) {
   } finally {
     await fs.rm(tmp, { recursive: true, force: true });
   }
+}
+
+function normalizeHookCommand(command) {
+  return String(command ?? "").replace(/\\/g, "/").trim();
+}
+
+function hookCommandAlreadyRegistered(existingBlocks, generatedHook) {
+  const generatedCommand = normalizeHookCommand(generatedHook?.command);
+  if (!generatedCommand) {
+    return false;
+  }
+  return existingBlocks.some((block) =>
+    (block.hooks ?? [block]).some(
+      (hook) => normalizeHookCommand(hook?.command) === generatedCommand,
+    ),
+  );
+}
+
+function appendMissingHookBlock(existingBlocks, generatedBlock) {
+  const generatedHooks = generatedBlock.hooks ?? [generatedBlock];
+  const missingHooks = generatedHooks.filter(
+    (hook) => !hookCommandAlreadyRegistered(existingBlocks, hook),
+  );
+  if (missingHooks.length === 0) {
+    return existingBlocks;
+  }
+  if (generatedBlock.hooks && existingBlocks.length > 0) {
+    const targetIndex = existingBlocks.findIndex(
+      (block) => (block.matcher ?? "") === (generatedBlock.matcher ?? ""),
+    );
+    const index = targetIndex >= 0 ? targetIndex : 0;
+    const targetBlock = existingBlocks[index];
+    const targetHooks = targetBlock.hooks ?? [targetBlock];
+    existingBlocks[index] = {
+      ...targetBlock,
+      hooks: [...targetHooks, ...missingHooks],
+    };
+    return existingBlocks;
+  }
+  return [...existingBlocks, ...missingHooks];
+}
+
+function mergePlanningHooksJson(existing, generated) {
+  const next = { ...(generated ?? {}), ...(existing ?? {}) };
+  next.hooks = { ...((generated ?? {}).hooks ?? {}), ...((existing ?? {}).hooks ?? {}) };
+  for (const [event, generatedBlocks] of Object.entries((generated ?? {}).hooks ?? {})) {
+    const existingBlocks = Array.isArray(next.hooks[event])
+      ? [...next.hooks[event]]
+      : [];
+    const blocks = Array.isArray(generatedBlocks) ? generatedBlocks : [generatedBlocks];
+    next.hooks[event] = blocks.reduce(appendMissingHookBlock, existingBlocks);
+  }
+  return next;
+}
+
+async function mergePlanningHookConfigFile(srcPath, destPath) {
+  let generated = {};
+  let existing = {};
+  try {
+    generated = JSON.parse(await fs.readFile(srcPath, "utf8"));
+  } catch {
+    await fs.copyFile(srcPath, destPath);
+    return;
+  }
+  if (await pathExists(destPath)) {
+    try {
+      existing = JSON.parse(await fs.readFile(destPath, "utf8"));
+    } catch {
+      existing = {};
+    }
+  }
+  const merged = mergePlanningHooksJson(existing, generated);
+  await fs.writeFile(destPath, `${JSON.stringify(merged, null, 2)}\n`, "utf8");
 }
 
 function codexPlanningHookCommand(runtimeHome, scriptName) {
@@ -3750,6 +3858,50 @@ function buildCodexPlanningHooksJson(runtimeHome) {
   };
 }
 
+function hookCommandContains(block, marker) {
+  return (block.hooks ?? [block]).some((hook) =>
+    String(hook.command ?? "").includes(marker),
+  );
+}
+
+function mergeCodexPlanningHooksJson(existing, generated) {
+  const next = { ...(existing ?? {}), hooks: { ...((existing ?? {}).hooks ?? {}) } };
+  for (const [event, generatedBlocks] of Object.entries(generated.hooks ?? {})) {
+    const existingBlocks = Array.isArray(next.hooks[event])
+      ? [...next.hooks[event]]
+      : [];
+    for (const generatedBlock of generatedBlocks) {
+      const generatedHooks = generatedBlock.hooks ?? [generatedBlock];
+      const missingHooks = generatedHooks.filter((hook) => {
+        const marker = path.basename(String(hook.command ?? ""));
+        return marker && !existingBlocks.some((block) => hookCommandContains(block, marker));
+      });
+      if (missingHooks.length === 0) {
+        continue;
+      }
+
+      const matcher = generatedBlock.matcher;
+      const targetIndex = existingBlocks.findIndex((block) =>
+        matcher ? block.matcher === matcher : !block.matcher,
+      );
+      if (targetIndex >= 0) {
+        const target = existingBlocks[targetIndex];
+        existingBlocks[targetIndex] = {
+          ...target,
+          hooks: [...(target.hooks ?? []), ...missingHooks],
+        };
+      } else {
+        existingBlocks.push({
+          ...generatedBlock,
+          hooks: missingHooks,
+        });
+      }
+    }
+    next.hooks[event] = existingBlocks;
+  }
+  return next;
+}
+
 function buildCodexPlanningHookAdapterPy() {
   return [
     "#!/usr/bin/env python3",
@@ -3820,13 +3972,15 @@ function buildCodexPlanningHookAdapterPy() {
     "def _count_statuses(plan_file: Path) -> tuple[int, int, int, int]:",
     "    lines = _read_lines(plan_file)",
     '    total = sum(1 for line in lines if re.match(r"^#{2,3}\\s+Phase\\b", line))',
-    '    complete = sum(1 for line in lines if "**Status:** complete" in line)',
-    '    in_progress = sum(1 for line in lines if "**Status:** in_progress" in line)',
-    '    pending = sum(1 for line in lines if "**Status:** pending" in line)',
-    "    if complete == 0 and in_progress == 0 and pending == 0:",
-    '        complete = sum(1 for line in lines if "[complete]" in line)',
-    '        in_progress = sum(1 for line in lines if "[in_progress]" in line)',
-    '        pending = sum(1 for line in lines if "[pending]" in line)',
+    '    complete_primary = sum(1 for line in lines if "**Status:** complete" in line)',
+    '    in_progress_primary = sum(1 for line in lines if "**Status:** in_progress" in line)',
+    '    pending_primary = sum(1 for line in lines if "**Status:** pending" in line)',
+    '    complete_inline = sum(1 for line in lines if "[complete]" in line)',
+    '    in_progress_inline = sum(1 for line in lines if "[in_progress]" in line)',
+    '    pending_inline = sum(1 for line in lines if "[pending]" in line)',
+    "    complete = max(complete_primary, complete_inline)",
+    "    in_progress = max(in_progress_primary, in_progress_inline)",
+    "    pending = max(pending_primary, pending_inline)",
     "    return total, complete, in_progress, pending",
     "",
     "",
@@ -3876,6 +4030,8 @@ function buildCodexPlanningHookAdapterPy() {
     "    if not plan_file.is_file():",
     '        return "", ""',
     "    total, complete, _in_progress, _pending = _count_statuses(plan_file)",
+    "    if total <= 0:",
+    '        return "", ""',
     "    if complete == total and total > 0:",
     '        message = f"[planning-with-files] ALL PHASES COMPLETE ({complete}/{total}). If the user has additional work, add new phases to task_plan.md before starting."',
     "    else:",
@@ -4096,19 +4252,19 @@ function buildCodexStopWrapperPy() {
     '    stdout, _ = adapter.run_shell_script("stop.sh", root)',
     "    result = adapter.parse_json(stdout)",
     "",
+    '    decision = result.get("decision")',
+    '    if decision and decision != "allow":',
+    "        adapter.emit_json(result)",
+    "        return",
+    "",
     '    message = result.get("followup_message")',
     "    if not isinstance(message, str) or not message:",
     "        return",
     "",
-    '    if "ALL PHASES COMPLETE" in message:',
-    '        adapter.emit_json({"systemMessage": message})',
+    '    if "(0/0" in message:',
     "        return",
     "",
-    '    if bool(payload.get("stop_hook_active")):',
-    '        adapter.emit_json({"systemMessage": message})',
-    "        return",
-    "",
-    '    adapter.emit_json({"decision": "block", "reason": message})',
+    '    adapter.emit_json({"systemMessage": message})',
     "",
     "",
     'if __name__ == "__main__":',
@@ -4202,9 +4358,22 @@ async function patchCodexPlanningHooksForPlatform(spec, runtimeHome, runtimeId) 
     return;
   }
 
+  const hooksJsonPath = path.join(runtimeHome, "hooks.json");
+  let existingHooksJson = {};
+  if (await pathExists(hooksJsonPath)) {
+    try {
+      existingHooksJson = JSON.parse(await fs.readFile(hooksJsonPath, "utf8"));
+    } catch {
+      existingHooksJson = {};
+    }
+  }
+  const mergedHooksJson = mergeCodexPlanningHooksJson(
+    existingHooksJson,
+    buildCodexPlanningHooksJson(runtimeHome),
+  );
   await fs.writeFile(
-    path.join(runtimeHome, "hooks.json"),
-    `${JSON.stringify(buildCodexPlanningHooksJson(runtimeHome), null, 2)}\n`,
+    hooksJsonPath,
+    `${JSON.stringify(mergedHooksJson, null, 2)}\n`,
     "utf8",
   );
   await fs.writeFile(

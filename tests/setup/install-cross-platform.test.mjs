@@ -27,20 +27,26 @@ const eccSkill = skillsManifest.skills.find((skill) => skill.id === "ecc");
 describe("install platform config", () => {
   test("quick deploy copies root runtime guide files", () => {
     const source = readFileSync(path.join(repoRoot, "setup.mjs"), "utf8");
-    const match = source.match(
+    const deployMatch = source.match(
       /function deployPlatformFiles\(platformId, targetDir\) \{[\s\S]*?\n\}/,
     );
-    assert.ok(match, "deployPlatformFiles body not found");
-    const body = match[0];
+    const rootsMatch = source.match(
+      /function projectDeployRootsForPlatform\(platformId\) \{[\s\S]*?\n\}/,
+    );
+    assert.ok(deployMatch, "deployPlatformFiles body not found");
+    assert.ok(rootsMatch, "projectDeployRootsForPlatform body not found");
+    const deployBody = deployMatch[0];
+    const rootsBody = rootsMatch[0];
 
-    assert.match(body, /copyIfExists\("CLAUDE\.md", "CLAUDE\.md"\)/);
-    assert.match(body, /copyIfExists\("AGENTS\.md", "AGENTS\.md"\)/);
-    assert.match(body, /platformId === "claude" \|\| platformId === "all"/);
-    assert.match(body, /platformId === "openclaw"/);
-    assert.match(body, /platformId === "codex"/);
-    assert.match(body, /platformId === "cursor"/);
+    assert.match(deployBody, /projectDeployRootsForPlatform\(platformId\)/);
+    assert.match(rootsBody, /add\("CLAUDE\.md"\)/);
+    assert.match(rootsBody, /add\("AGENTS\.md"\)/);
+    assert.match(rootsBody, /platformId === "claude" \|\| platformId === "all"/);
+    assert.match(rootsBody, /platformId === "openclaw"/);
+    assert.match(rootsBody, /platformId === "codex"/);
+    assert.match(rootsBody, /platformId === "cursor"/);
     assert.equal(
-      body.match(/copyIfExists\("AGENTS\.md", "AGENTS\.md"\)/g)?.length,
+      rootsBody.match(/add\("AGENTS\.md"\)/g)?.length,
       1,
     );
   });
@@ -103,7 +109,7 @@ describe("install platform config", () => {
     assert.equal(eccSkill.repo, "affaan-m/ECC");
     assert.equal(eccSkill.claudePlugin, "ecc@ecc");
     assert.equal(eccSkill.installMethod, "upstreamCli");
-    assert.equal(eccSkill.upstreamPackage, "ecc-universal@2.0.0-rc.1");
+    assert.equal(eccSkill.upstreamPackage, "ecc-universal@latest");
     assert.equal(eccSkill.upstreamProfile, "core");
     assert.deepEqual(eccSkill.legacyNames, ["everything-claude-code"]);
     assert.equal(eccSkill.platformSupport.codex.status, "native");
@@ -170,9 +176,64 @@ describe("install platform config", () => {
     assert.ok(adapterFunction);
     assert.match(adapterFunction, /"import re"/);
     assert.match(adapterFunction, /#\{2,3\}\\\\s\+Phase\\\\b/);
+    assert.match(adapterFunction, /complete = max\(complete_primary, complete_inline\)/);
+    assert.match(adapterFunction, /in_progress = max\(in_progress_primary, in_progress_inline\)/);
+    assert.match(adapterFunction, /if total <= 0:/);
     assert.doesNotMatch(
       adapterFunction,
       /total = sum\(1 for line in lines if "### Phase" in line\)/,
+    );
+  });
+
+  test("Codex planning Stop hook does not block on advisory progress messages", () => {
+    const source = readFileSync(
+      path.join(repoRoot, "scripts", "install-global-skills-all-runtimes.mjs"),
+      "utf8",
+    );
+    const stopWrapper = source.match(
+      /function buildCodexStopWrapperPy[\s\S]*?\n}\n/,
+    )?.[0];
+
+    assert.ok(stopWrapper);
+    assert.match(stopWrapper, /decision = result\.get\("decision"\)/);
+    assert.match(stopWrapper, /adapter\.emit_json\(result\)/);
+    assert.match(stopWrapper, /adapter\.emit_json\(\{"systemMessage": message\}\)/);
+    assert.ok(stopWrapper.includes('if "(0/0" in message:'));
+    assert.doesNotMatch(
+      stopWrapper,
+      /adapter\.emit_json\(\{"decision": "block", "reason": message\}\)/,
+    );
+  });
+
+  test("Codex planning hook registration preserves existing hooks.json entries", () => {
+    const source = readFileSync(
+      path.join(repoRoot, "scripts", "install-global-skills-all-runtimes.mjs"),
+      "utf8",
+    );
+    const deployFunction = source.match(
+      /async function deployHookConfigFiles[\s\S]*?\n}\n\nfunction normalizeHookCommand/,
+    )?.[0];
+    const mergeFunction = source.match(
+      /function mergeCodexPlanningHooksJson[\s\S]*?\n}\n/,
+    )?.[0];
+    const patchFunction = source.match(
+      /async function patchCodexPlanningHooksForPlatform[\s\S]*?\n}\n/,
+    )?.[0];
+
+    assert.ok(deployFunction);
+    assert.ok(mergeFunction);
+    assert.ok(patchFunction);
+    assert.match(deployFunction, /spec\.id === "planning-with-files"/);
+    assert.match(deployFunction, /mergePlanningHookConfigFile\(srcPath, destPath\)/);
+    assert.doesNotMatch(deployFunction, /await fs\.copyFile\(srcPath, destPath\);\s*console\.log/);
+    assert.match(mergeFunction, /existingBlocks/);
+    assert.match(mergeFunction, /missingHooks/);
+    assert.match(mergeFunction, /hookCommandContains/);
+    assert.match(patchFunction, /existingHooksJson/);
+    assert.match(patchFunction, /mergeCodexPlanningHooksJson/);
+    assert.doesNotMatch(
+      patchFunction,
+      /JSON\.stringify\(buildCodexPlanningHooksJson\(runtimeHome\), null, 2\)/,
     );
   });
 
@@ -237,7 +298,7 @@ describe("python launcher selection", () => {
       { command: "python3", args: [] },
       { command: "python", args: [] },
     ];
-    assert.deepEqual(pythonCandidates("darwin"), expected);
-    assert.deepEqual(pythonCandidates("linux"), expected);
+    assert.deepEqual(pythonCandidates("darwin").slice(0, 2), expected);
+    assert.deepEqual(pythonCandidates("linux").slice(0, 2), expected);
   });
 });
