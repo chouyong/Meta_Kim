@@ -8,6 +8,27 @@ The changelog explains what changed and why it matters. It intentionally avoids 
 
 ## [Unreleased]
 
+## [2.8.39] - 2026-06-16
+
+### Changed
+
+- **Card Dealing Accuracy Standard** - Upgraded `cardPlanPacket` to v0.2 so every card records a deal/suppress/defer/skip/interrupt/escalate decision with an 80-point standard, quantitative signals, evidence refs, and falsification checks.
+- **User-Visible Card Trigger Reason** - Added a concise run-start and report line explaining why card dealing triggered, how many cards activated, and whether the minimum score passed.
+- **Contract-Backed Card Proof** - Made `dealStandard` a required `cardPlanPacket` field, aligned generated card shells/sources/silence/control decisions with the workflow contract, and refreshed validator fixtures.
+- **Deep Research-Style Card Review** - Bound each card decision to decision impact and counterfactual checks, so unused cards suppress with evidence instead of lingering as vague defers.
+- **Global Discovery Readiness** - Synced the updated meta-theory skill into project and global runtime homes, then refreshed the global capability inventory for Claude Code, Codex, OpenClaw, and Cursor.
+
+### Verification
+
+- `node --test tests/meta-theory/14-card-deck-complete.test.mjs tests/meta-theory/34-run-deliverables.test.mjs tests/meta-theory/12-ten-step-workflow.test.mjs tests/meta-theory/07-contract-compliance.test.mjs`
+- `node scripts/run-meta-theory-governed-execution.mjs --task "帮我做个小红书营销自动发布器" --run-id card-proof --emit-conversation-notice`
+- `npm run meta:check`
+- `npm run meta:test:meta-theory`
+- `npm run discover:global`
+- `npm run meta:sync:global`
+- `npm run meta:check:global`
+- `npm run meta:release:smoke`
+
 ## [2.8.38] - 2026-06-16
 
 ### Changed

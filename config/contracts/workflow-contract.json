@@ -104,12 +104,14 @@
       "maxLineCharacters": 120,
       "covers": [
         "8_stage_spine",
-        "11_phase_business_workflow"
+        "11_phase_business_workflow",
+        "card_dealing"
       ],
       "requiredFields": [
         "summary",
         "spineReason",
         "workflowReason",
+        "cardReason",
         "evidenceRefs"
       ],
       "rule": "When the 8-stage spine or 11-phase business workflow triggers, show a concise human-readable reason at the start. It must explain why governance is used without dumping packets or long internal reasoning."
@@ -753,6 +755,42 @@
         "public_display_blocked",
         "no_clear_intervention_gain"
       ],
+      "dealAccuracyStandard": {
+        "schemaVersion": "card-deal-standard-v0.1",
+        "passThreshold": 80,
+        "decisionStateEnum": [
+          "accurate_deal",
+          "accurate_interrupt",
+          "accurate_suppress",
+          "accurate_defer",
+          "accurate_skip",
+          "accurate_escalate",
+          "weak_deal",
+          "weak_interrupt",
+          "unsupported_suppress",
+          "unsupported_defer",
+          "unsupported_skip",
+          "weak_escalate"
+        ],
+        "requiredFields": [
+          "decisionState",
+          "accuracyScore",
+          "passThreshold",
+          "expectedDecision",
+          "activationRule",
+          "quantitativeSignals",
+          "evidenceRefs",
+          "falsificationChecks"
+        ],
+        "signalRequiredFields": [
+          "signal",
+          "observed",
+          "expected",
+          "pass"
+        ],
+        "rule": "Every card must prove why it was dealt, suppressed, deferred, skipped, interrupted, or escalated. Deck presence or hardcoded order is not enough evidence.",
+        "deepResearchBinding": "Use key signals, evidence refs, falsification checks, and decision impact like deep-research claim evidence cards."
+      },
       "defaultNoCardPolicy": "prefer_silence_without_clear_intervention_gain"
     },
     "userLanguagePolicy": {
@@ -2059,6 +2097,7 @@
         "dealerMode",
         "cards",
         "deliveryShells",
+        "dealStandard",
         "silenceDecision",
         "controlDecisions",
         "defaultShellId"

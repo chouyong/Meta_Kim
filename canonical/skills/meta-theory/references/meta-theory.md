@@ -380,6 +380,21 @@ must stay `pending_external_input` until user acceptance exists.
 
 ---
 
+## Card dealing accuracy (summary)
+
+The card deck is not accepted by card count or hardcoded order. Each card
+decision must record whether it was dealt, suppressed, deferred, skipped,
+interrupted, or escalated; pass an 80-point accuracy score; cite evidence; and
+include falsification checks.
+
+The run-start user surface should briefly explain how many cards became active,
+whether an interrupt card preempted the deck, and the minimum deal accuracy
+score. Do not expose raw packets as the visible reason.
+
+> Detail: `references/rhythm-orchestration.md`
+
+---
+
 ## Eight-module SOUL design
 
 | # | Module | Role | Quality bar |

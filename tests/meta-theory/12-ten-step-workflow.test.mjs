@@ -97,7 +97,14 @@ describe("Part A: 11-phase business workflow structure", async () => {
     assert.equal(policy.maxLineCharacters, 120);
     assert.ok(policy.covers?.includes("8_stage_spine"));
     assert.ok(policy.covers?.includes("11_phase_business_workflow"));
-    for (const field of ["summary", "spineReason", "workflowReason", "evidenceRefs"]) {
+    assert.ok(policy.covers?.includes("card_dealing"));
+    for (const field of [
+      "summary",
+      "spineReason",
+      "workflowReason",
+      "cardReason",
+      "evidenceRefs",
+    ]) {
       assert.ok(policy.requiredFields?.includes(field), `missing field: ${field}`);
     }
     assert.match(policy.rule ?? "", /concise human-readable reason/i);

@@ -236,6 +236,193 @@ const BUSINESS_PHASES = Object.freeze([
 ]);
 
 const BUSINESS_PHASE_TRIGGER_THRESHOLD = 80;
+const CARD_DEAL_ACCURACY_THRESHOLD = 80;
+
+function isActiveCardDecision(decision) {
+  return decision === "deal" || decision === "interrupt_insert" || decision === "escalate";
+}
+
+function cardDealSignal(signal, observed, expected, pass) {
+  return {
+    signal,
+    observed,
+    expected,
+    pass: Boolean(pass),
+  };
+}
+
+function scoreCardDealSignals(signals) {
+  if (!Array.isArray(signals) || signals.length === 0) {
+    return 0;
+  }
+  const passed = signals.filter((item) => item.pass).length;
+  return Math.round((passed / signals.length) * 100);
+}
+
+function cardDecisionState({ decision, accuracyScore }) {
+  const passes = accuracyScore >= CARD_DEAL_ACCURACY_THRESHOLD;
+  if (decision === "deal") return passes ? "accurate_deal" : "weak_deal";
+  if (decision === "interrupt_insert") return passes ? "accurate_interrupt" : "weak_interrupt";
+  if (decision === "suppress") return passes ? "accurate_suppress" : "unsupported_suppress";
+  if (decision === "defer") return passes ? "accurate_defer" : "unsupported_defer";
+  if (decision === "skip") return passes ? "accurate_skip" : "unsupported_skip";
+  return passes ? "accurate_escalate" : "weak_escalate";
+}
+
+function buildCardDealEvaluation({ card, decision, context }) {
+  const expectedActiveByCard = {
+    clarify: true,
+    "shrink-scope": context.workerCount > 1,
+    options: context.capabilityCount > 1,
+    execute: context.workerCount > 0,
+    verify: context.runtimeRecordCount > 0,
+    fix: context.reviewStatus !== "pass",
+    rollback: context.hasBlockedGap,
+    risk: context.runtimeRisk,
+    nudge: context.userNextStepNeeded,
+    pause: context.digestWindowNeeded || context.highCostActiveBeforePause >= 3,
+  };
+  const evidenceRefsByCard = {
+    clarify: ["criticalSummary.successCriteria", "taskClassification"],
+    "shrink-scope": ["workerTaskPackets.length", "orchestrationTaskBoardPacket.tasks"],
+    options: ["fetchEvidence.capabilityInventory", "thinkingRoute"],
+    execute: ["workerTaskPackets", "dispatchBoard"],
+    verify: ["runtimeProjectionEvidence.results", "verificationResult"],
+    fix: ["reviewResult.status", "reviewResult.findings"],
+    rollback: ["capabilityGaps.blocked", "rollbackPlanPacket"],
+    risk: ["runtimeProjectionEvidence.results.strictReleasePass", "controlDecisions"],
+    nudge: ["summaryPacket.nextAction", "businessPhasePlanPacket.closure"],
+    pause: ["silenceDecision", "businessPhasePlanPacket.closure.userAcceptanceRequired"],
+  };
+  const falsificationChecksByCard = {
+    clarify: ["If intent and acceptance are already locked and no route can change, Clarify should suppress."],
+    "shrink-scope": ["If workerCount <= 1, Shrink scope must suppress rather than pretend scope pressure exists."],
+    options: ["If only one viable capability route exists, Options must suppress or record no-branching choice."],
+    execute: ["If workerTaskPackets are empty, Execute must suppress or block."],
+    verify: ["If no execution/projection claim exists, Verify must suppress rather than invent proof work."],
+    fix: ["If Review passes with zero findings, Fix must suppress."],
+    rollback: ["If no blocked gap or blast-radius growth exists, Rollback must suppress."],
+    risk: ["If runtime/release/security evidence has no risk signal, Risk must suppress."],
+    nudge: ["If there is no next action or user-facing value, Nudge must suppress."],
+    pause: ["If there is no digest window, user decision, or high-cost streak, Pause must suppress."],
+  };
+  const expectedActive = expectedActiveByCard[card.id] === true;
+  const activeDecision = isActiveCardDecision(decision);
+  const expectedDecision =
+    card.id === "risk" && expectedActive
+      ? "interrupt_insert"
+      : expectedActive
+        ? "deal"
+        : "suppress";
+  const signals = [
+    cardDealSignal("card rule exists", Boolean(card.trigger), true, Boolean(card.trigger)),
+    cardDealSignal(
+      "precondition observed",
+      { card: card.id, expectedActive },
+      "matches current route evidence",
+      typeof expectedActive === "boolean",
+    ),
+    cardDealSignal(
+      "decision matches precondition",
+      { decision, expectedDecision },
+      expectedDecision,
+      decision === expectedDecision,
+    ),
+    cardDealSignal(
+      "evidence refs present",
+      evidenceRefsByCard[card.id]?.length ?? 0,
+      ">=1",
+      (evidenceRefsByCard[card.id]?.length ?? 0) >= 1,
+    ),
+    cardDealSignal(
+      "attention policy respected",
+      { cost: card.cost, activeDecision },
+      "suppress when no clear intervention gain; deal only when value beats attention cost",
+      expectedActive === activeDecision,
+    ),
+  ];
+  const accuracyScore = scoreCardDealSignals(signals);
+  return {
+    schemaVersion: "card-deal-evaluation-v0.1",
+    decisionState: cardDecisionState({ decision, accuracyScore }),
+    accuracyScore,
+    passThreshold: CARD_DEAL_ACCURACY_THRESHOLD,
+    expectedDecision,
+    activationRule: card.trigger,
+    quantitativeSignals: signals,
+    evidenceRefs: evidenceRefsByCard[card.id] ?? [],
+    falsificationChecks: falsificationChecksByCard[card.id] ?? [],
+  };
+}
+
+function cardShellForDelivery(deliveryShell) {
+  const shellMap = {
+    chat_status: "conversation",
+    markdown_report: "file",
+    decision_card: "conversation",
+    worker_task_packet: "packet",
+    json_artifact: "packet",
+    intentional_silence: "silent_hold",
+  };
+  return shellMap[deliveryShell] ?? "summary";
+}
+
+function deliveryShellProfile(deliveryShellId) {
+  const profiles = {
+    chat_status: {
+      shellType: "structured_status",
+      presentationMode: "direct",
+      exposureLevel: "public",
+      interventionForm: "conversation",
+      audience: "user",
+      contentBoundary: "compact status only",
+    },
+    markdown_report: {
+      shellType: "artifact_link",
+      presentationMode: "digest",
+      exposureLevel: "public",
+      interventionForm: "file_write",
+      audience: "user",
+      contentBoundary: "readable report, no raw packet dump",
+    },
+    decision_card: {
+      shellType: "structured_status",
+      presentationMode: "direct",
+      exposureLevel: "review",
+      interventionForm: "conversation",
+      audience: "user",
+      contentBoundary: "branch-changing option summary",
+    },
+    worker_task_packet: {
+      shellType: "technical_detail",
+      presentationMode: "deferred",
+      exposureLevel: "internal",
+      interventionForm: "task_packet",
+      audience: "owner",
+      contentBoundary: "run-scoped worker contract",
+    },
+    json_artifact: {
+      shellType: "technical_detail",
+      presentationMode: "deferred",
+      exposureLevel: "review",
+      interventionForm: "file_write",
+      audience: "reviewer",
+      contentBoundary: "machine-readable evidence artifact",
+    },
+    intentional_silence: {
+      shellType: "one_line",
+      presentationMode: "quiet",
+      exposureLevel: "public",
+      interventionForm: "none",
+      audience: "user",
+      contentBoundary: "brief status while waiting for user",
+    },
+  };
+  return {
+    deliveryShellId,
+    ...(profiles[deliveryShellId] ?? profiles.markdown_report),
+  };
+}
 
 function businessPhaseSignal(signal, observed, expected, pass) {
   return {
@@ -1000,9 +1187,12 @@ export async function buildWardenWritebackFlow({
 
 function buildCardPlanPacket({ runId, orchestrationReport, runtimeEvidence }) {
   const workerCount = orchestrationReport.workerTaskPackets.length;
+  const capabilityCount = orchestrationReport.fetchEvidence.capabilityInventory.length;
+  const runtimeRecordCount = runtimeEvidence.results.length;
   const hasBlockedGap = orchestrationReport.capabilityGaps.some((gap) => gap.blocked);
   const runtimeRisk = runtimeEvidence.results.some((item) => item.strictReleasePass === false);
-  const dealOrder = [
+  const reviewStatus = orchestrationReport.reviewResult.status;
+  const activeOrder = [
     "clarify",
     ...(workerCount > 1 ? ["shrink-scope"] : []),
     "options",
@@ -1010,14 +1200,40 @@ function buildCardPlanPacket({ runId, orchestrationReport, runtimeEvidence }) {
     "execute",
     "verify",
     ...(hasBlockedGap ? ["rollback"] : []),
-    ...(orchestrationReport.reviewResult.status !== "pass" ? ["fix"] : []),
+    ...(reviewStatus !== "pass" ? ["fix"] : []),
     "nudge",
     "pause",
   ];
-  const orderIndex = new Map(dealOrder.map((id, index) => [id, index]));
+  const orderIndex = new Map(activeOrder.map((id, index) => [id, index]));
+  const highCostActiveBeforePause = activeOrder
+    .filter((id) => id !== "pause")
+    .map((id) => CARD_DECK_TEMPLATE.find((card) => card.id === id)?.cost)
+    .filter((cost) => cost === "high").length;
+  const context = {
+    workerCount,
+    capabilityCount,
+    runtimeRecordCount,
+    hasBlockedGap,
+    runtimeRisk,
+    reviewStatus,
+    userNextStepNeeded: true,
+    digestWindowNeeded: true,
+    highCostActiveBeforePause,
+  };
   const cards = CARD_DECK_TEMPLATE.map((card) => {
-    const dealt = orderIndex.has(card.id);
+    const active = orderIndex.has(card.id);
     const choiceSurfaceCard = card.id === "options" || card.id === "clarify";
+    const cardDecision =
+      card.id === "risk" && active
+        ? "interrupt_insert"
+        : active
+          ? "deal"
+          : "suppress";
+    const decisionEvaluation = buildCardDealEvaluation({
+      card,
+      decision: cardDecision,
+      context,
+    });
     return {
       cardId: `${runId}-${card.id}`,
       cardKey: card.id,
@@ -1025,17 +1241,23 @@ function buildCardPlanPacket({ runId, orchestrationReport, runtimeEvidence }) {
       type: card.type,
       cardType: card.cardType,
       cardIntent: card.cardIntent,
-      cardDecision: dealt ? "deal" : "defer",
-      cardAudience: card.id === "pause" ? "user" : "dispatcher",
-      cardTiming: dealt ? "next_stage" : "after_dependency",
-      cardShell: card.deliveryShell,
+      cardDecision,
+      cardAudience:
+        card.id === "pause" || card.id === "clarify" || card.id === "options"
+          ? "user"
+          : card.id === "verify"
+            ? "reviewer"
+            : "governance",
+      cardTiming: active ? (card.id === "risk" ? "on_risk" : "next_stage") : "after_dependency",
+      cardShell: cardShellForDelivery(card.deliveryShell),
       cardPriority: card.priority,
       cost: card.cost,
       cardReason: card.trigger,
       action: card.action,
-      cardSource: "canonical/skills/meta-theory/references/rhythm-orchestration.md",
-      cardSuppressed: false,
-      suppressionReason: null,
+      cardSource: "meta-conductor",
+      cardSourceRef: "canonical/skills/meta-theory/references/rhythm-orchestration.md",
+      cardSuppressed: cardDecision === "suppress",
+      suppressionReason: cardDecision === "suppress" ? "no_clear_intervention_gain" : null,
       deliveryShellId: card.deliveryShell,
       choiceSurface:
         choiceSurfaceCard
@@ -1049,14 +1271,23 @@ function buildCardPlanPacket({ runId, orchestrationReport, runtimeEvidence }) {
         : "status/artifact card only; no user decision surface required.",
       owner: card.id === "risk" || card.id === "rollback" ? "meta-sentinel" : "meta-conductor",
       mapsToSpine: card.mapsToSpine,
-      dealIndex: dealt ? orderIndex.get(card.id) + 1 : null,
+      dealIndex: active ? orderIndex.get(card.id) + 1 : null,
+      decisionEvaluation,
     };
   });
   const dealtCards = cards
-    .filter((card) => card.cardDecision === "deal")
+    .filter((card) => isActiveCardDecision(card.cardDecision))
     .sort((a, b) => a.dealIndex - b.dealIndex);
+  const dealScores = cards.map((card) => card.decisionEvaluation.accuracyScore);
+  const dealCoveragePass = cards.every(
+    (card) =>
+      card.decisionEvaluation.accuracyScore >= card.decisionEvaluation.passThreshold &&
+      !["weak_deal", "weak_interrupt", "unsupported_suppress", "unsupported_defer", "unsupported_skip", "weak_escalate"].includes(
+        card.decisionEvaluation.decisionState,
+      ),
+  );
   return {
-    schemaVersion: "card-plan-v0.1",
+    schemaVersion: "card-plan-v0.2",
     packetName: "cardPlanPacket",
     dealerOwner: "meta-conductor",
     dealerMode: "conductor-primary-warden-escalation",
@@ -1064,12 +1295,30 @@ function buildCardPlanPacket({ runId, orchestrationReport, runtimeEvidence }) {
     visibleByDefault: true,
     deckSummary:
       "Conductor deals cards to pace governed work; Warden gates, Sentinel/Prism can interrupt, and Pause is explicit silence.",
+    dealStandard: {
+      schemaVersion: "card-deal-standard-v0.1",
+      passThreshold: CARD_DEAL_ACCURACY_THRESHOLD,
+      minimumScore: Math.min(...dealScores),
+      averageScore: Math.round(
+        dealScores.reduce((sum, score) => sum + score, 0) / dealScores.length,
+      ),
+      coveragePass: dealCoveragePass,
+      activeCount: dealtCards.length,
+      suppressedCount: cards.filter((card) => card.cardDecision === "suppress").length,
+      interruptCount: cards.filter((card) => card.cardDecision === "interrupt_insert").length,
+      rule:
+        "Every card must prove why it is dealt, suppressed, deferred, skipped, interrupted, or escalated with quantitative signals, evidence refs, and falsification checks.",
+      deepResearchAnalogy:
+        "Like claimEvidenceCards, card dealing requires key signals, counterfactual checks, and decision impact instead of a hardcoded deck label.",
+    },
     dealOrder: dealtCards.map((card) => card.cardKey),
     cards,
-    deliveryShells: [...new Set(cards.map((card) => card.deliveryShellId))],
+    deliveryShells: [...new Set(cards.map((card) => card.deliveryShellId))].map(
+      (deliveryShellId) => deliveryShellProfile(deliveryShellId),
+    ),
     silenceDecision: {
-      silenceDecision: dealOrder.includes("pause") ? "deal_pause_card" : "not_needed",
-      noInterventionPreferred: dealOrder.includes("pause"),
+      silenceDecision: activeOrder.includes("pause") ? "intentional_silence" : "none",
+      noInterventionPreferred: activeOrder.includes("pause"),
       interruptionJustified: false,
       deferUntil: "after_status_summary_or_user_reply",
       reasonForSilence:
@@ -1078,20 +1327,28 @@ function buildCardPlanPacket({ runId, orchestrationReport, runtimeEvidence }) {
     controlDecisions: [
       {
         decisionId: `${runId}-forced-pause-rule`,
-        decisionType: "pause_after_high_cost_streak",
-        skipReason: null,
+        decisionType: activeOrder.includes("pause") ? "override" : "skip",
+        skipReason: activeOrder.includes("pause") ? null : "not_applicable",
         interruptReason: null,
-        overrideReason: null,
+        overrideReason: activeOrder.includes("pause") ? "governance_owner_insert" : null,
         insertedGovernanceOwner: "meta-conductor",
+        emergencyGovernanceTriggered: false,
+        returnsToStage: "Review",
+        rejoinCondition: "after_status_summary_or_user_reply",
         rule: "After three consecutive high-cost cards, insert Pause before dealing new work.",
       },
       {
         decisionId: `${runId}-risk-preempt-rule`,
-        decisionType: runtimeRisk ? "interrupt_insert" : "skip",
-        skipReason: runtimeRisk ? null : "No runtime risk preempt required in this run.",
-        interruptReason: runtimeRisk ? "projection_smoke_is_not_release_grade_live_evidence" : null,
+        decisionType: runtimeRisk ? "interrupt" : "skip",
+        skipReason: runtimeRisk ? null : "not_applicable",
+        interruptReason: runtimeRisk ? "global_impact" : null,
         overrideReason: null,
         insertedGovernanceOwner: runtimeRisk ? "meta-sentinel" : "meta-conductor",
+        emergencyGovernanceTriggered: runtimeRisk,
+        returnsToStage: "Fetch",
+        rejoinCondition: runtimeRisk
+          ? "risk owner records rollback and verification boundary"
+          : "no runtime risk preempt required",
         rule: "Risk preempts Execute when runtime, release, security, or external capability evidence changes route safety.",
       },
     ],
@@ -1100,7 +1357,15 @@ function buildCardPlanPacket({ runId, orchestrationReport, runtimeEvidence }) {
       dealt: dealtCards.length,
       deckSize: cards.length,
       activeCards: dealtCards.map((card) => card.label),
+      suppressedCards: cards
+        .filter((card) => card.cardDecision === "suppress")
+        .map((card) => card.label),
+      interruptCards: cards
+        .filter((card) => card.cardDecision === "interrupt_insert")
+        .map((card) => card.label),
       forcedPauseRule: "3 consecutive high-cost cards -> Pause",
+      dealAccuracy: `${Math.min(...dealScores)}/${CARD_DEAL_ACCURACY_THRESHOLD}`,
+      dealCoveragePass,
       interruptSources: ["meta-sentinel", "meta-prism", "user", "system"],
     },
   };
@@ -1279,7 +1544,7 @@ function buildBusinessFlowBlueprintPacket({ businessPhasePlanPacket }) {
   };
 }
 
-function buildGovernanceStartReasonPacket({ orchestrationReport, businessPhasePlanPacket }) {
+function buildGovernanceStartReasonPacket({ orchestrationReport, businessPhasePlanPacket, cardPlanPacket }) {
   const capabilityCount = orchestrationReport.fetchEvidence.capabilityInventory.length;
   const workerTaskCount = orchestrationReport.workerTaskPackets.length;
   const phaseCount = businessPhasePlanPacket.phaseCount;
@@ -1289,6 +1554,8 @@ function buildGovernanceStartReasonPacket({ orchestrationReport, businessPhasePl
     `触发 8 阶段：这是可执行治理任务，已发现 ${capabilityCount} 类能力和 ${workerTaskCount} 个工作单元，需要先锁意图、查证据、定路线，再执行审查验证。`;
   const workflowReason =
     `触发 11 阶段：本次要闭合交付链，${phaseCount} 个业务阶段已按触发规则评分，最低 ${minimumScore}/80，覆盖=${coveragePass ? "通过" : "未通过"}。`;
+  const cardReason =
+    `触发发牌：${cardPlanPacket.visibleSummary.dealt}/${cardPlanPacket.visibleSummary.deckSize} 张牌进入节奏控制，最低 ${cardPlanPacket.dealStandard.minimumScore}/80，覆盖=${cardPlanPacket.dealStandard.coveragePass ? "通过" : "未通过"}。`;
   return {
     schemaVersion: "governance-start-reason-v0.1",
     status: "pass",
@@ -1298,9 +1565,11 @@ function buildGovernanceStartReasonPacket({ orchestrationReport, businessPhasePl
     summary: "进入 Meta-Theory：任务需要治理闭环，不只是直接执行。",
     spineReason,
     workflowReason,
+    cardReason,
     evidenceRefs: [
       "fetchEvidence.capabilityInventory",
       "workerTaskPackets",
+      "cardPlanPacket.dealStandard",
       "businessPhasePlanPacket.triggerStandard",
     ],
   };
@@ -1339,6 +1608,7 @@ function buildConversationNotice({
     `- 开始原因: ${governanceStartReasonPacket.summary}`,
     `- 8 阶段: ${governanceStartReasonPacket.spineReason}`,
     `- 11 阶段: ${governanceStartReasonPacket.workflowReason}`,
+    `- 发牌: ${governanceStartReasonPacket.cardReason}`,
     `- ${labels.conversationNotice.stageProgress}: ${labels.conversationNotice.stageProgressDetail}`,
     `- ${labels.conversationNotice.route}: ${labels.conversationNotice.routeDetail(capabilityCount)}`,
     "- Meta-Theory visible surface: orchestration, Dynamic Workflow, capability inventory beyond Skill, capability invocation truth, Peer Agent Mesh, and LangGraph-style graph must be shown in the readable report.",
@@ -1616,6 +1886,7 @@ function buildUserReadableRunReport({
     `- ${governanceStartReasonPacket.summary}`,
     `- 8 阶段: ${governanceStartReasonPacket.spineReason}`,
     `- 11 阶段: ${governanceStartReasonPacket.workflowReason}`,
+    `- 发牌: ${governanceStartReasonPacket.cardReason}`,
     "",
     `## ${labels.userExperienceNotice.title}`,
     "",
@@ -1748,12 +2019,13 @@ function buildUserReadableRunReport({
       cardPlanPacket.visibleSummary.deckSize,
       cardPlanPacket.visibleSummary.forcedPauseRule
     )}`,
+    `- Deal standard: minimum ${cardPlanPacket.dealStandard.minimumScore}/${cardPlanPacket.dealStandard.passThreshold}, coverage=${cardPlanPacket.dealStandard.coveragePass ? "pass" : "fail"}`,
     `- ${labels.cardDealer}: ${cardPlanPacket.dealerOwner}`,
-    `| ${labels.card} | ${labels.status} | ${labels.owner} | ${labels.cardShell} | ${labels.cardWhy} |`,
-    "|---|---|---|---|---|",
+    `| ${labels.card} | ${labels.status} | Decision | Score | ${labels.owner} | ${labels.cardShell} | ${labels.cardWhy} |`,
+    "|---|---|---|---|---|---|---|",
     ...cardPlanPacket.cards.map(
       (card) =>
-        `| ${card.label} | ${card.cardDecision} | ${card.owner} | ${card.deliveryShellId} | ${String(card.cardReason).replaceAll("|", "\\|")} |`
+        `| ${card.label} | ${card.cardDecision} | ${card.decisionEvaluation.decisionState} | ${card.decisionEvaluation.accuracyScore}/${card.decisionEvaluation.passThreshold} | ${card.owner} | ${card.deliveryShellId} | ${String(card.cardReason).replaceAll("|", "\\|")} |`
     ),
     "",
     `## ${labels.businessPhasePlanTitle}`,
@@ -1987,8 +2259,17 @@ function buildRunReportPanelContract({
     cardPlan: {
       dealerOwner: cardPlanPacket.dealerOwner,
       deckSize: cardPlanPacket.cards.length,
+      dealStandard: cardPlanPacket.dealStandard,
       dealtCount: cardPlanPacket.visibleSummary.dealt,
       activeCards: cardPlanPacket.visibleSummary.activeCards,
+      suppressedCards: cardPlanPacket.visibleSummary.suppressedCards,
+      interruptCards: cardPlanPacket.visibleSummary.interruptCards,
+      decisionStates: Object.fromEntries(
+        cardPlanPacket.cards.map((card) => [
+          card.cardKey,
+          card.decisionEvaluation.decisionState,
+        ]),
+      ),
       forcedPauseRule: cardPlanPacket.visibleSummary.forcedPauseRule,
     },
     businessPhasePlan: {
@@ -4935,10 +5216,12 @@ function buildCoreLoopArtifact({
       cardKey: card.cardKey,
       label: card.label,
       trigger: card.cardReason,
-      reason: card.cardDecision === "deal" ? "Selected by current route evidence." : "Not needed for this route.",
+      reason: isActiveCardDecision(card.cardDecision)
+        ? "Selected by current route evidence."
+        : "Not needed for this route.",
       attentionCost: card.cost,
       skippedCardsWithReason:
-        card.cardDecision === "deal"
+        isActiveCardDecision(card.cardDecision)
           ? []
           : [
               {
@@ -4947,11 +5230,11 @@ function buildCoreLoopArtifact({
               },
             ],
       interruptQueue:
-        card.type === "risk" && card.cardDecision === "deal"
+        card.type === "risk" && isActiveCardDecision(card.cardDecision)
           ? ["meta-sentinel"]
           : [],
       riskPreemption:
-        card.type === "risk" && card.cardDecision === "deal"
+        card.type === "risk" && isActiveCardDecision(card.cardDecision)
           ? "projection or release evidence can preempt execution/public-ready"
           : "not_required",
       maxIterationHandling:
@@ -4963,7 +5246,7 @@ function buildCoreLoopArtifact({
     })),
     interruptQueue: cardPlanPacket?.controlDecisions ?? [],
     skippedCardsWithReason: (cardPlanPacket?.cards ?? [])
-      .filter((card) => card.cardDecision !== "deal")
+      .filter((card) => !isActiveCardDecision(card.cardDecision))
       .map((card) => ({
         cardKey: card.cardKey,
         reason: card.suppressionReason ?? "Deferred by dynamic workflow route.",
@@ -5473,6 +5756,7 @@ export async function runMetaTheoryGovernedExecution({
   const governanceStartReasonPacket = buildGovernanceStartReasonPacket({
     orchestrationReport,
     businessPhasePlanPacket,
+    cardPlanPacket,
   });
   await persistDecisionRuns({ dbPath, decisionResults });
   const analytics = await persistRuntimeEvidenceEvents({

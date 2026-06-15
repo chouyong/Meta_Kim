@@ -8,6 +8,27 @@
 
 ## [Unreleased]
 
+## [2.8.39] - 2026-06-16
+
+### 变更
+
+- **发牌准确性标准** - 将 `cardPlanPacket` 升级到 v0.2；每张牌都必须记录 deal/suppress/defer/skip/interrupt/escalate 决策，并带 80 分标准、量化信号、证据引用和反证检查。
+- **用户可见发牌原因** - 在 run-start 和报告里新增精简说明：为什么触发发牌、多少张牌进入节奏控制、最低分是否通过。
+- **契约化发牌证明** - 将 `dealStandard` 设为 `cardPlanPacket` 必填字段，对齐生成的 card shell/source/silence/control decision，并刷新 validator fixtures。
+- **Deep Research 风格发牌审查** - 每张牌的判断都绑定决策影响和反事实检查；不需要的牌会带证据 suppress，不再只是模糊 defer。
+- **全局发现就绪** - 已把更新后的 meta-theory skill 同步到项目和全局 runtime home，并刷新 Claude Code、Codex、OpenClaw、Cursor 的全局能力库存。
+
+### 验证
+
+- `node --test tests/meta-theory/14-card-deck-complete.test.mjs tests/meta-theory/34-run-deliverables.test.mjs tests/meta-theory/12-ten-step-workflow.test.mjs tests/meta-theory/07-contract-compliance.test.mjs`
+- `node scripts/run-meta-theory-governed-execution.mjs --task "帮我做个小红书营销自动发布器" --run-id card-proof --emit-conversation-notice`
+- `npm run meta:check`
+- `npm run meta:test:meta-theory`
+- `npm run discover:global`
+- `npm run meta:sync:global`
+- `npm run meta:check:global`
+- `npm run meta:release:smoke`
+
 ## [2.8.38] - 2026-06-16
 
 ### 变更

@@ -213,7 +213,19 @@
         "rejoinCondition": "security-sensitive auth diff has been reviewed"
       }
     ],
-    "defaultShellId": "shell-structured-status"
+    "defaultShellId": "shell-structured-status",
+    "dealStandard": {
+      "schemaVersion": "card-deal-standard-v0.1",
+      "passThreshold": 80,
+      "minimumScore": 100,
+      "averageScore": 100,
+      "coveragePass": true,
+      "activeCount": 2,
+      "suppressedCount": 1,
+      "interruptCount": 0,
+      "rule": "Deck presence or hardcoded order is not enough evidence; each fixture card decision must retain measurable deal-standard coverage.",
+      "deepResearchAnalogy": "Like deep-research claim evidence cards, fixture card decisions need a visible standard rather than packet presence only."
+    }
   },
   "dispatchEnvelopePacket": {
     "ownerAgent": "auth-specialist",
