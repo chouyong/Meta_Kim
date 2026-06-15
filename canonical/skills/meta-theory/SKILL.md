@@ -75,6 +75,29 @@ When fan-out eligible, Thinking must produce `workerTaskPackets` before Executio
 
 **MANDATORY**: Use the current runtime adapter's verified native choice surface at key decision points. Keep the canonical card contract platform-neutral; renderer-specific schemas and tool names belong in runtime references such as `runtime-claude.md` or `runtime-codex.md`, not in the generic contract. For Codex and Claude Code, required branch-changing decisions must use `request_user_input` or `AskUserQuestion`; if that native interactive surface is unavailable, empty, rejected, stripped, or not deferred to host UI, block before Execution and return to Critical/Thinking. Only compatibility runtimes may fall back to a localized chat decision card, and that fallback must not be reported as a Codex or Claude Code popup.
 
+## Global-First Project Bootstrap
+
+When this skill is reached from a global installation and the current project is missing or stale for Meta_Kim project-level projections, do not make the human maintain global and project state manually. Run the project bootstrap probe first, then ask through the runtime-native choice surface before writing.
+
+Source chain for project-level files:
+
+```text
+installed Meta_Kim package root
+-> canonical/ and config/sync.json
+-> generated runtime mirrors inside the installed package
+-> setup.mjs --project-bootstrap dry-run/apply
+-> current project .meta-kim/state/default/project-bootstrap.json
+```
+
+Required behavior:
+
+- Before project writes, run a dry-run probe such as `meta-kim project bootstrap --dry-run --project-dir <current-project> --json` or `node setup.mjs --project-bootstrap --dry-run --project-dir <current-project> --json` from the installed Meta_Kim package root.
+- The dry-run output must expose `sourceChain`, target state, active targets, file actions, merge policies, skipped files, and stale manifest status. If `sourceChain` is missing, return to Fetch; do not design or apply from memory.
+- If the target needs initialization or update, ask the user through Claude Code `AskUserQuestion` or Codex `request_user_input` before `--apply`. Compatibility runtimes may show a localized decision card, but that is not Claude/Codex native proof.
+- Apply only after confirmation or an explicit trusted-auto policy. The apply path must create a backup under `.meta-kim/backups/project-bootstrap/<timestamp>` before overwriting or merging existing files and must write `.meta-kim/state/default/project-bootstrap.json`.
+- Preserve user-owned content: JSON configs use additive preserve-user-state merge; existing `AGENTS.md` and `CLAUDE.md` keep user text and receive or update only a Meta_Kim managed block; `.codex/config.toml`, credentials, project trust state, local runtime state, and workspace state are never copied as project bootstrap files.
+- Stale, readonly, permission-denied, or conflicting managed-block cases are not success. Record the blocker, show the next safe action, and do not claim project bootstrap pass until a fresh probe or apply result proves it.
+
 **When to ask:**
 
 | Stage | When to Ask | Example |
@@ -85,9 +108,11 @@ When fan-out eligible, Thinking must produce `workerTaskPackets` before Executio
 | Review | Issues found that need user preference to resolve | "Quality concern: rebuild or patch?" |
 
 **Question format:**
-- 2–4 meaningful options with clear trade-offs
+- Use the active runtime-native maximum meaningful option count; Meta_Kim must not add a lower option cap of its own
 - One recommended default labeled clearly
 - User's language, not internal packet field names
+- For Codex, inspect the active `request_user_input` schema and use its maximum accepted meaningful option count. If the active host exposes 2-3 options per question, use up to 3; if a future or different host exposes more, use that larger maximum. If semantic options exceed the active host maximum, show the strongest host-maximum set and record omitted alternatives instead of retrying an oversized payload unchanged.
+- The native payload is a structured decision panel: preserve AI understanding, AI additions, Capability route, Candidate paths, expected result, advantages, disadvantages/risk, and verification impact when those fields affect the decision.
 - Stop and wait — do not proceed until the user answers
 
 **Do not ask:**

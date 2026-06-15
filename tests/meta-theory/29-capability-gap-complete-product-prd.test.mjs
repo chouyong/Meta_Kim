@@ -101,6 +101,32 @@ describe("29 — Capability Gap complete product PRD", () => {
     }
   });
 
+  test("records v0.63 P-111 global-first lazy project bootstrap acceptance", () => {
+    for (const marker of [
+      "版本：v0.63",
+      "v0.63 全局优先项目懒初始化",
+      "P-111",
+      "lazyProjectBootstrap",
+      "setup.mjs --project-bootstrap",
+      "meta-kim project bootstrap",
+      "dry-run 必须输出 `sourceChain`",
+      "package root",
+      "canonical roots",
+      "`config/sync.json`",
+      "runtime mirrors",
+      "project target",
+      "apply 前必须有 native choice 或 trusted-auto 依据",
+      "`.meta-kim/state/default/project-bootstrap.json`",
+      "`AGENTS.md` / `CLAUDE.md` 只写 Meta_Kim managed block",
+      "`.claude/settings.json`、`.codex/hooks.json`、`.cursor/hooks.json`、`.mcp.json` 保护式 merge",
+      "`.codex/config.toml`、credentials、project trust、本地 runtime state 永不作为项目级来源复制",
+      "项目级来源链必须从 installed package root -> canonical/config/sync.json -> generated runtime mirrors -> `setup.mjs --project-bootstrap` -> project manifest 全程可 Fetch",
+      "不能把 dry-run JSON 冒充 popup",
+    ]) {
+      assert.match(prd, new RegExp(marker), `missing v0.63 P-111 marker ${marker}`);
+    }
+  });
+
   test("keeps human-readable natural-language entry work in the single PRD source", () => {
     for (const marker of [
       "版本：v0.37",

@@ -244,6 +244,11 @@ describe("graphify idempotent wiring (contract)", () => {
     assert.match(src, /stdio: "ignore"/);
     assert.match(src, /META_KIM_POST_COPY_AUTO === "off"/);
     assert.match(src, /catch \{\s*\/\/ Post-copy auto-init is opportunistic/s);
+    assert.match(src, /startProjectBootstrapProbe/);
+    assert.match(src, /"--project-bootstrap", "--dry-run", "--project-dir", cwd, "--json"/);
+    assert.match(src, /"project", "bootstrap", "--dry-run", "--project-dir", cwd, "--json"/);
+    assert.match(src, /project-bootstrap-probe\.json/);
+    assert.doesNotMatch(src, /"--apply"/);
   });
 
   test("setup.mjs skips guide-mutating graphify platform install when guide section exists", () => {

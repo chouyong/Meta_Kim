@@ -68,6 +68,91 @@
       ]
     }
   },
+  "lazyProjectBootstrap": {
+    "mode": "global_first_first_trigger_project_projection",
+    "entrypoints": [
+      "meta-kim project bootstrap --dry-run --project-dir <dir>",
+      "meta-kim project bootstrap --apply --project-dir <dir>",
+      "node setup.mjs --project-bootstrap --dry-run --project-dir <dir>",
+      "node setup.mjs --project-bootstrap --apply --project-dir <dir>"
+    ],
+    "sourceChain": {
+      "globalEntrypoint": "bin/meta-kim.mjs",
+      "packageRoot": "installed Meta_Kim package root",
+      "canonicalRoots": [
+        "canonical/agents",
+        "canonical/skills",
+        "canonical/runtime-assets",
+        "config/contracts",
+        "config/capability-index"
+      ],
+      "syncManifest": "config/sync.json",
+      "runtimeMirrorSource": "generated runtime projection folders inside the installed package root",
+      "projectTarget": "current working project directory selected by --project-dir or host cwd"
+    },
+    "firstTriggerFlow": [
+      "run dry-run probe from the global skill or command",
+      "present Claude Code AskUserQuestion or Codex request_user_input before apply when the runtime exposes the native choice surface",
+      "fall back only for compatibility runtimes and never call fallback a primary native popup",
+      "run apply only after user confirmation or an explicit trusted-auto policy",
+      "write project manifest under .meta-kim/state/default/project-bootstrap.json"
+    ],
+    "projectFilePolicies": {
+      "create": [
+        "missing generated runtime projections",
+        "missing project-level meta-theory skill mirror",
+        "missing project-level capability indexes"
+      ],
+      "merge": [
+        ".claude/settings.json",
+        ".mcp.json",
+        ".codex/hooks.json",
+        ".cursor/hooks.json",
+        ".cursor/mcp.json",
+        "openclaw/openclaw.template.json"
+      ],
+      "managedTextBlock": [
+        "AGENTS.md",
+        "CLAUDE.md"
+      ],
+      "neverTouch": [
+        ".claude/settings.local.json",
+        ".claude/project-task-state.json",
+        ".claude/scheduled_tasks.lock",
+        ".codex/config.toml",
+        "openclaw/**/.openclaw/workspace-state.json",
+        "credentials",
+        "project trust state"
+      ]
+    },
+    "rollback": {
+      "requiredBeforeApply": true,
+      "backupRootPattern": ".meta-kim/backups/project-bootstrap/<timestamp>",
+      "manifest": "backup-manifest.json",
+      "mustRecord": [
+        "relPath",
+        "mergePolicy",
+        "backupRelPath"
+      ]
+    },
+    "scenarioAcceptance": [
+      "empty project dry-run exposes sourceChain and writes nothing",
+      "empty project apply creates project projections and manifest",
+      "existing user AGENTS.md or CLAUDE.md keeps user text and adds a managed block",
+      "existing hooks and MCP config keep user entries and append Meta_Kim-managed entries",
+      ".codex/config.toml remains global-owned and is never copied into project bootstrap",
+      "stale project manifest reports stale before update",
+      "readonly or permission-denied apply returns failed/blocked and must not claim bootstrap pass",
+      "conflicting managed block is replaced only inside Meta_Kim markers"
+    ],
+    "forbiddenOutcomes": [
+      "silent project writes before dry-run and user confirmation",
+      "project-level source described without packageRoot/canonical/syncManifest/runtimeMirror chain",
+      "AGENTS.md or CLAUDE.md blind overwrite when the target already has user content",
+      "copying .codex/config.toml as project bootstrap source",
+      "claiming compatibility fallback as Claude Code or Codex native choice proof"
+    ]
+  },
   "hookPromptProtocol": {
     "requiredLayers": [
       {

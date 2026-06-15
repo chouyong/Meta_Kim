@@ -80,6 +80,21 @@ describe("project deploy protection", () => {
     assert.match(mergeBody, /mergeHookConfigPreserveBase\(base, generated\)/);
   });
 
+  test("project deploy protects existing AGENTS.md and CLAUDE.md with managed text blocks", () => {
+    const deployFileBody = functionBody("copyProjectDeployFile");
+    const textMergeBody = functionBody("mergeManagedTextBlockPreserveBase");
+    const markerBody = functionBody("managedTextBlockMarkers");
+
+    assert.match(source, /const DEPLOY_PROTECTED_TEXT_PATHS = new Set/);
+    assert.match(source, /"AGENTS\.md"/);
+    assert.match(source, /"CLAUDE\.md"/);
+    assert.match(deployFileBody, /DEPLOY_PROTECTED_TEXT_PATHS\.has\(rel\)/);
+    assert.match(deployFileBody, /mergeProtectedProjectDeployTextFile/);
+    assert.match(markerBody, /BEGIN \$\{id\}/);
+    assert.match(textMergeBody, /managedTextBlockMarkers\(relPath\)/);
+    assert.match(textMergeBody, /replace\(blockRe, block\)/);
+  });
+
   test("recursive project deploy computes relative paths from the repo root", () => {
     const deployBody = functionBody("deployPlatformFiles");
     const recursiveBody = functionBody("copyDirRecursive");

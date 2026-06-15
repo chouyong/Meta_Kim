@@ -78,6 +78,38 @@ test("Codex host merge contract matches implementation constants", () => {
   );
 });
 
+test("lazy project bootstrap contract keeps source chain, merge, and rollback explicit", () => {
+  assert.equal(
+    CONTRACT.lazyProjectBootstrap.mode,
+    "global_first_first_trigger_project_projection",
+  );
+  assert.ok(
+    CONTRACT.lazyProjectBootstrap.entrypoints.includes(
+      "meta-kim project bootstrap --dry-run --project-dir <dir>",
+    ),
+  );
+  assert.equal(CONTRACT.lazyProjectBootstrap.sourceChain.globalEntrypoint, "bin/meta-kim.mjs");
+  assert.equal(CONTRACT.lazyProjectBootstrap.sourceChain.syncManifest, "config/sync.json");
+  assert.ok(
+    CONTRACT.lazyProjectBootstrap.sourceChain.canonicalRoots.includes("canonical/skills"),
+  );
+  assert.ok(
+    CONTRACT.lazyProjectBootstrap.projectFilePolicies.merge.includes(".codex/hooks.json"),
+  );
+  assert.ok(
+    CONTRACT.lazyProjectBootstrap.projectFilePolicies.managedTextBlock.includes("AGENTS.md"),
+  );
+  assert.ok(
+    CONTRACT.lazyProjectBootstrap.projectFilePolicies.neverTouch.includes(".codex/config.toml"),
+  );
+  assert.equal(CONTRACT.lazyProjectBootstrap.rollback.requiredBeforeApply, true);
+  assert.ok(
+    CONTRACT.lazyProjectBootstrap.forbiddenOutcomes.includes(
+      "project-level source described without packageRoot/canonical/syncManifest/runtimeMirror chain",
+    ),
+  );
+});
+
 test("HookPrompt protocol contract binds source, adapter, host, and model-visible fields", () => {
   const codexSource = buildHookPromptAdapterSource("codex");
   const cursorSource = buildHookPromptAdapterSource("cursor");

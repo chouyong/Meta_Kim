@@ -8,6 +8,29 @@ The changelog explains what changed and why it matters. It intentionally avoids 
 
 ## [Unreleased]
 
+## [2.8.33] - 2026-06-15
+
+### Added
+
+- **Global-First Project Bootstrap** - Added `meta-kim project bootstrap` and `npm run meta:project:bootstrap` so a global Meta_Kim install can dry-run and apply project-level Claude Code / Codex projections without asking users to manually maintain both global and project state.
+- **First-Trigger Bootstrap Probe** - Extended the meta-theory activation hook to run a dry-run project bootstrap probe on first meta-theory activation and save source-chain evidence without silently applying project files.
+- **Lazy Bootstrap Acceptance Tests** - Added fixture coverage for empty projects, existing user config, stale manifests, read-only failures, managed-block replacement, protected JSON merge, backup manifests, and `.codex/config.toml` never-touch behavior.
+
+### Changed
+
+- **Project Source Chain Evidence** - Project bootstrap plans now expose the installed package root, canonical roots, `config/sync.json`, generated runtime mirrors, target project, file actions, merge policies, and skipped files before any write.
+- **Runtime Choice Surfaces** - Updated Claude Code and Codex choice-surface contracts to preserve structured decision-panel semantics while using the active host schema's maximum meaningful option count instead of a Meta_Kim hard cap.
+- **Capability Routing** - Moved capability discovery to canonical/index-first routing and prevented Codex and Claude Code routes from binding the other runtime's project agent adapters as callable execution owners.
+
+### Verification
+
+- `npm run meta:check`
+- `npm run meta:test:setup`
+- `npm run meta:test:governance`
+- `npm run meta:runtime:safety:validate`
+- `npm run meta:release:smoke`
+- `git diff --check`
+
 ## [2.8.32] - 2026-06-15
 
 ### Changed

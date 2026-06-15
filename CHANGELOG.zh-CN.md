@@ -8,6 +8,29 @@
 
 ## [Unreleased]
 
+## [2.8.33] - 2026-06-15
+
+### 新增
+
+- **全局优先项目懒初始化** - 新增 `meta-kim project bootstrap` 和 `npm run meta:project:bootstrap`，让全局安装的 Meta_Kim 可以先 dry-run 再 apply 项目级 Claude Code / Codex 投影，用户不需要手动维护全局和项目两套状态。
+- **首次触发 Bootstrap 探针** - 扩展 meta-theory activation hook：首次触发 meta-theory 时会运行项目 bootstrap dry-run probe，并保存 source-chain 证据，但不会静默写入项目文件。
+- **懒初始化验收测试** - 新增空项目、已有用户配置、旧 manifest、只读失败、managed block 替换、保护式 JSON merge、备份 manifest、`.codex/config.toml` 永不触碰等场景覆盖。
+
+### 变更
+
+- **项目级来源链证据** - 项目 bootstrap plan 现在会在任何写入前暴露 installed package root、canonical roots、`config/sync.json`、生成的 runtime mirrors、目标项目、文件动作、merge policy 和 skipped files。
+- **运行时原生选择面** - 更新 Claude Code 和 Codex 的 choice-surface 合同，保留结构化决策面板语义，并使用当前 host schema 的最大有意义选项数，不再使用 Meta_Kim 自己的硬编码上限。
+- **能力路由** - 能力发现改为 canonical/index-first 路由，并防止 Codex 和 Claude Code 把对方 runtime 的 project agent adapter 误当作可调用执行 owner。
+
+### 验证
+
+- `npm run meta:check`
+- `npm run meta:test:setup`
+- `npm run meta:test:governance`
+- `npm run meta:runtime:safety:validate`
+- `npm run meta:release:smoke`
+- `git diff --check`
+
 ## [2.8.32] - 2026-06-15
 
 ### 变更

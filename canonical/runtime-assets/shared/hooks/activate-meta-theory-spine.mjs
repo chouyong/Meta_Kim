@@ -1,6 +1,6 @@
 import process from "node:process";
 import { spawnSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { readJsonFromStdin } from "./utils.mjs";
 import {
@@ -68,12 +68,77 @@ function startPostCopyAutoInit() {
   }
 }
 
+function projectBootstrapProbeCommands() {
+  const args = ["--project-bootstrap", "--dry-run", "--project-dir", cwd, "--json"];
+  const commands = [];
+  const envRoot = process.env.META_KIM_PACKAGE_ROOT;
+  if (envRoot && existsSync(join(envRoot, "setup.mjs"))) {
+    commands.push({
+      command: process.execPath,
+      args: [join(envRoot, "setup.mjs"), ...args],
+      cwd: envRoot,
+    });
+  }
+
+  if (existsSync(join(cwd, "setup.mjs"))) {
+    commands.push({
+      command: process.execPath,
+      args: [join(cwd, "setup.mjs"), ...args],
+      cwd,
+    });
+  }
+
+  commands.push({
+    command: "meta-kim",
+    args: ["project", "bootstrap", "--dry-run", "--project-dir", cwd, "--json"],
+    cwd,
+    shell: process.platform === "win32",
+  });
+  return commands;
+}
+
+function startProjectBootstrapProbe() {
+  if (process.env.META_KIM_PROJECT_BOOTSTRAP_PROBE === "off") return;
+
+  for (const candidate of projectBootstrapProbeCommands()) {
+    try {
+      const result = spawnSync(candidate.command, candidate.args, {
+        cwd: candidate.cwd,
+        encoding: "utf8",
+        windowsHide: true,
+        timeout: 4000,
+        shell: Boolean(candidate.shell),
+        env: {
+          ...process.env,
+          META_KIM_PROJECT_BOOTSTRAP_PROBE: "1",
+        },
+      });
+      if (result.status !== 0 || !result.stdout?.trim()) continue;
+
+      const artifactPath = join(
+        cwd,
+        ".meta-kim",
+        "state",
+        "default",
+        "project-bootstrap-probe.json",
+      );
+      mkdirSync(join(cwd, ".meta-kim", "state", "default"), { recursive: true });
+      writeFileSync(artifactPath, result.stdout.trimEnd() + "\n", "utf8");
+      return;
+    } catch {
+      // The probe is evidence gathering only. Missing global CLI or permission
+      // errors must not prevent the meta-theory spine from starting.
+    }
+  }
+}
+
 const skillName = getSkillName();
 if (!isMetaTheoryTrigger()) {
   process.exit(0);
 }
 
 startPostCopyAutoInit();
+startProjectBootstrapProbe();
 
 const existing = await readSpineState(cwd);
 if (existing && existing.active) {

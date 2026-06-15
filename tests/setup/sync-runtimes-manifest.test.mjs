@@ -9,6 +9,7 @@ import {
   applyRuntimePaths,
   buildCodexAgent,
   buildCodexBusinessRoleAgent,
+  buildCodexProjectConfig,
   buildCodexRuntimeAdapterAgent,
   buildCodexSkillContent,
   buildCursorAgent,
@@ -217,6 +218,37 @@ describe("sync-runtimes / inferProjectPurpose", () => {
 });
 
 describe("sync-runtimes / Codex project hooks", () => {
+  test("project Codex config preserves local MCP while enabling native choice surface", () => {
+    const existingProjectConfig = [
+      "[mcp_servers.meta-kim-runtime]",
+      'args = ["scripts/mcp/meta-runtime-server.mjs"]',
+      'command = "node"',
+      "",
+    ].join("\n");
+    const configExample = [
+      'approval_policy = "on-request"',
+      'sandbox_mode = "workspace-write"',
+      "",
+      "[features]",
+      "default_mode_request_user_input = true",
+      "",
+      "[agents]",
+      "max_threads = 6",
+      "max_depth = 1",
+      "",
+    ].join("\n");
+
+    const out = buildCodexProjectConfig(existingProjectConfig, configExample, {
+      platformName: "linux",
+      codexHome: "/tmp/codex-home",
+    });
+
+    assert.match(out, /\[mcp_servers\.meta-kim-runtime\]/);
+    assert.match(out, /scripts\/mcp\/meta-runtime-server\.mjs/);
+    assert.match(out, /\[features\][\s\S]*default_mode_request_user_input = true/);
+    assert.match(out, /\[features\][\s\S]*js_repl = true/);
+  });
+
   test("registers the enforce-agent-dispatch deny gate before context hooks", () => {
     const config = buildCodexProjectHooksJson();
     const preToolUse = config.hooks.PreToolUse;

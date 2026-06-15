@@ -12,6 +12,8 @@
  *   node setup.mjs --project-dir <dir> [--project-dir <dir>]
  *                                # Also export project-level runtime files to one or more projects
  *   node setup.mjs --all-projects # Reuse saved project directories for export/update
+ *   node setup.mjs --project-bootstrap --project-dir <dir> [--dry-run|--apply] [--json]
+ *                                # Global-first first-trigger project bootstrap
  *
  * Optional prompts (off by default — install uses scope "both" and skips proxy UI):
  *   --prompt-install-scope      # Ask repo vs home vs both
@@ -85,6 +87,10 @@ const isWin = platform() === "win32";
 const args = process.argv.slice(2);
 const updateMode = args.includes("--update") || args.includes("-u");
 const checkOnly = args.includes("--check");
+const projectBootstrapMode = args.includes("--project-bootstrap");
+const projectBootstrapDryRun = args.includes("--dry-run");
+const projectBootstrapApply = args.includes("--apply");
+const jsonOutputMode = args.includes("--json");
 const silentMode = args.includes("--silent") || !process.stdout.isTTY;
 const useSavedProjectDirsMode =
   args.includes("--all-projects") || args.includes("--update-projects");
@@ -3040,6 +3046,8 @@ const DEPLOY_PROTECTED_JSON_PATHS = new Set([
   "openclaw/openclaw.template.json",
 ]);
 
+const DEPLOY_PROTECTED_TEXT_PATHS = new Set(["AGENTS.md", "CLAUDE.md"]);
+
 const DEPLOY_SKIP_CONFIG_PATHS = new Set([
   ".codex/config.toml",
 ]);
@@ -3077,6 +3085,32 @@ function readJsonObjectIfExists(filePath) {
 
 function writeJsonObject(filePath, value) {
   writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`, "utf8");
+}
+
+function managedTextBlockMarkers(relPath) {
+  const id = `META_KIM MANAGED BLOCK: ${normalizeDeployRelPath(relPath)}`;
+  return {
+    begin: `<!-- BEGIN ${id} -->`,
+    end: `<!-- END ${id} -->`,
+  };
+}
+
+function mergeManagedTextBlockPreserveBase(base, generated, relPath) {
+  const existing = String(base ?? "");
+  const nextBlock = String(generated ?? "").trimEnd();
+  if (!existing.trim()) return `${nextBlock}\n`;
+  if (existing.trimEnd() === nextBlock) return `${nextBlock}\n`;
+
+  const { begin, end } = managedTextBlockMarkers(relPath);
+  const block = `${begin}\n${nextBlock}\n${end}`;
+  const escapedBegin = begin.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const escapedEnd = end.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const blockRe = new RegExp(`${escapedBegin}[\\s\\S]*?${escapedEnd}`);
+
+  if (blockRe.test(existing)) {
+    return `${existing.replace(blockRe, block).trimEnd()}\n`;
+  }
+  return `${existing.trimEnd()}\n\n${block}\n`;
 }
 
 function rewriteProjectDirRefs(raw, targetDir) {
@@ -3276,12 +3310,27 @@ function mergeProtectedProjectDeployFile(srcPath, destPath, relPath, targetDir) 
   return 1;
 }
 
+function mergeProtectedProjectDeployTextFile(srcPath, destPath, relPath, targetDir) {
+  const rel = normalizeDeployRelPath(relPath);
+  const generated = rewriteProjectDirRefs(readFileSync(srcPath, "utf8"), targetDir);
+  if (!existsSync(destPath)) {
+    writeFileSync(destPath, generated.endsWith("\n") ? generated : `${generated}\n`, "utf8");
+    return 1;
+  }
+  const base = readFileSync(destPath, "utf8");
+  writeFileSync(destPath, mergeManagedTextBlockPreserveBase(base, generated, rel), "utf8");
+  return 1;
+}
+
 function copyProjectDeployFile(srcPath, destPath, relPath, targetDir) {
   const rel = normalizeDeployRelPath(relPath);
   if (shouldSkipProjectDeployPath(rel)) return 0;
   mkdirSync(dirname(destPath), { recursive: true });
   if (DEPLOY_PROTECTED_JSON_PATHS.has(rel)) {
     return mergeProtectedProjectDeployFile(srcPath, destPath, rel, targetDir);
+  }
+  if (DEPLOY_PROTECTED_TEXT_PATHS.has(rel)) {
+    return mergeProtectedProjectDeployTextFile(srcPath, destPath, rel, targetDir);
   }
   cpSync(srcPath, destPath);
   return 1;
@@ -3309,6 +3358,272 @@ function copyDirRecursive(src, dest, context = {}) {
   return count;
 }
 
+function projectDeployRootsForPlatform(platformId) {
+  const roots = [];
+  const add = (srcRel, destRel = srcRel) => roots.push({ srcRel, destRel });
+  if (platformId === "claude" || platformId === "all") {
+    add("CLAUDE.md");
+  }
+  if (
+    platformId === "openclaw" ||
+    platformId === "codex" ||
+    platformId === "cursor" ||
+    platformId === "all"
+  ) {
+    add("AGENTS.md");
+  }
+
+  if (platformId === "claude" || platformId === "all") {
+    add(".claude");
+    if (existsSync(join(PROJECT_DIR, ".mcp.json"))) add(".mcp.json");
+  }
+  if (platformId === "openclaw" || platformId === "all") {
+    add("openclaw");
+  }
+  if (platformId === "codex" || platformId === "all") {
+    add(".codex");
+    add(".agents");
+  }
+  if (platformId === "cursor" || platformId === "all") {
+    add(".cursor");
+  }
+  return roots;
+}
+
+function collectDeployFilePlansFromRoot(srcRoot, destRoot, context = {}) {
+  if (!existsSync(srcRoot)) return [];
+  const sourceRoot = context.sourceRoot || srcRoot;
+  const targetDir = context.targetDir || destRoot;
+  const plans = [];
+  if (!statSync(srcRoot).isDirectory()) {
+    const relPath = normalizeDeployRelPath(relative(sourceRoot, srcRoot));
+    const destPath = join(targetDir, relPath);
+    plans.push(projectDeployFilePlan(srcRoot, destPath, relPath));
+    return plans;
+  }
+  for (const entry of readdirSync(srcRoot, { withFileTypes: true })) {
+    const srcPath = join(srcRoot, entry.name);
+    const relPath = normalizeDeployRelPath(relative(sourceRoot, srcPath));
+    const destPath = join(targetDir, relPath);
+    if (entry.isDirectory()) {
+      plans.push(
+        ...collectDeployFilePlansFromRoot(srcPath, destPath, {
+          sourceRoot,
+          targetDir,
+        }),
+      );
+    } else {
+      plans.push(projectDeployFilePlan(srcPath, destPath, relPath));
+    }
+  }
+  return plans;
+}
+
+function projectDeployFilePlan(srcPath, destPath, relPath) {
+  const rel = normalizeDeployRelPath(relPath);
+  const skipped = shouldSkipProjectDeployPath(rel);
+  const protectedJson = DEPLOY_PROTECTED_JSON_PATHS.has(rel);
+  const protectedText = DEPLOY_PROTECTED_TEXT_PATHS.has(rel);
+  const exists = existsSync(destPath);
+  const mergePolicy = skipped
+    ? "never_touch"
+    : protectedJson
+      ? "additive_preserve_user_state_json"
+      : protectedText && exists
+        ? "managed_block_preserve_user_text"
+        : exists
+          ? "generated_projection_replace"
+          : "generated_projection_create";
+  return {
+    relPath: rel,
+    source: normalizeDeployRelPath(relative(PROJECT_DIR, srcPath)),
+    exists,
+    action: skipped
+      ? "skip"
+      : exists && (protectedJson || protectedText)
+        ? "merge"
+        : exists
+          ? "replace"
+          : "create",
+    mergePolicy,
+  };
+}
+
+function collectProjectDeployPlan(activeTargets, targetDir) {
+  const plans = [];
+  const seen = new Set();
+  for (const platformId of activeTargets) {
+    for (const root of projectDeployRootsForPlatform(platformId)) {
+      const src = join(PROJECT_DIR, root.srcRel);
+      const dest = join(targetDir, root.destRel);
+      for (const plan of collectDeployFilePlansFromRoot(src, dest, {
+        sourceRoot: PROJECT_DIR,
+        targetDir,
+      })) {
+        if (seen.has(plan.relPath)) continue;
+        seen.add(plan.relPath);
+        plans.push(plan);
+      }
+    }
+  }
+  return plans.sort((left, right) => left.relPath.localeCompare(right.relPath));
+}
+
+function readPackageVersion() {
+  try {
+    return JSON.parse(readFileSync(join(PROJECT_DIR, "package.json"), "utf8")).version ?? "unknown";
+  } catch {
+    return "unknown";
+  }
+}
+
+function readSyncSourceChain() {
+  const syncPath = join(PROJECT_DIR, "config", "sync.json");
+  let sync = {};
+  try {
+    sync = JSON.parse(readFileSync(syncPath, "utf8"));
+  } catch {
+    sync = {};
+  }
+  return {
+    packageRoot: PROJECT_DIR,
+    binEntrypoint: "bin/meta-kim.mjs",
+    setupEntrypoint: "setup.mjs --project-bootstrap",
+    syncManifest: "config/sync.json",
+    canonicalRoots: sync.canonicalRoots ?? {},
+    generatedTargets: sync.generatedTargets ?? {},
+    projectProjectionSource:
+      "Generated runtime mirrors are read from the installed Meta_Kim package root after canonical sync.",
+  };
+}
+
+function projectBootstrapManifestPath(targetDir) {
+  return join(targetDir, ".meta-kim", "state", "default", "project-bootstrap.json");
+}
+
+function readProjectBootstrapManifest(targetDir) {
+  const manifestPath = projectBootstrapManifestPath(targetDir);
+  if (!existsSync(manifestPath)) return null;
+  try {
+    return JSON.parse(readFileSync(manifestPath, "utf8"));
+  } catch {
+    return null;
+  }
+}
+
+function projectBootstrapStatus(targetDir, activeTargets, filePlans) {
+  const existingManifest = readProjectBootstrapManifest(targetDir);
+  const version = readPackageVersion();
+  const actionable = filePlans.filter((plan) => plan.action !== "skip");
+  const missingCount = actionable.filter((plan) => !plan.exists).length;
+  const mergeCount = actionable.filter((plan) => plan.action === "merge").length;
+  const replaceCount = actionable.filter((plan) => plan.action === "replace").length;
+  const stale =
+    Boolean(existingManifest) &&
+    existingManifest.metaKimVersion &&
+    existingManifest.metaKimVersion !== version;
+  return {
+    status: stale
+      ? "stale"
+      : missingCount > 0
+        ? "missing"
+        : replaceCount > 0 || mergeCount > 0
+          ? "ready_with_existing_config"
+          : "ready",
+    metaKimVersion: version,
+    targetDir,
+    activeTargets,
+    counts: {
+      total: filePlans.length,
+      create: actionable.filter((plan) => plan.action === "create").length,
+      merge: mergeCount,
+      replace: replaceCount,
+      skip: filePlans.filter((plan) => plan.action === "skip").length,
+      missing: missingCount,
+    },
+    previousManifest: existingManifest
+      ? {
+          metaKimVersion: existingManifest.metaKimVersion ?? null,
+          appliedAt: existingManifest.appliedAt ?? null,
+          activeTargets: existingManifest.activeTargets ?? [],
+        }
+      : null,
+  };
+}
+
+function buildProjectBootstrapPlan(activeTargets, targetDir) {
+  const filePlans = collectProjectDeployPlan(activeTargets, targetDir);
+  return {
+    schemaVersion: "meta-kim-project-bootstrap-plan-v0.1",
+    mode: "dry-run",
+    sourceChain: readSyncSourceChain(),
+    state: projectBootstrapStatus(targetDir, activeTargets, filePlans),
+    files: filePlans,
+    decisions: {
+      defaultTargets: "config/sync.json defaultTargets; current default is Claude Code + Codex unless --targets overrides it.",
+      protectedMerge: "JSON configs use additive preserve-user-state merge; AGENTS.md/CLAUDE.md use managed text blocks; .codex/config.toml is skipped because Codex native controls belong to global host config.",
+      firstTriggerFlow:
+        "Global skill runs dry-run first, asks through the runtime native choice surface, then runs --apply only after user confirmation or trusted-auto policy.",
+    },
+  };
+}
+
+function createProjectBootstrapBackup(targetDir, filePlans) {
+  const existing = filePlans.filter(
+    (plan) => plan.action !== "skip" && existsSync(join(targetDir, plan.relPath)),
+  );
+  if (existing.length === 0) {
+    return { created: false, fileCount: 0, entries: [] };
+  }
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const backupRoot = join(targetDir, ".meta-kim", "backups", "project-bootstrap", stamp);
+  const entries = [];
+  for (const plan of existing) {
+    const from = join(targetDir, plan.relPath);
+    const to = join(backupRoot, plan.relPath);
+    mkdirSync(dirname(to), { recursive: true });
+    cpSync(from, to);
+    entries.push({
+      relPath: plan.relPath,
+      mergePolicy: plan.mergePolicy,
+      backupRelPath: normalizeDeployRelPath(relative(targetDir, to)),
+    });
+  }
+  const manifest = {
+    schemaVersion: "meta-kim-project-bootstrap-backup-v0.1",
+    createdAt: new Date().toISOString(),
+    targetDir,
+    entries,
+  };
+  writeJsonObject(join(backupRoot, "backup-manifest.json"), manifest);
+  return {
+    created: true,
+    backupRoot,
+    backupRelPath: normalizeDeployRelPath(relative(targetDir, backupRoot)),
+    fileCount: entries.length,
+    entries,
+  };
+}
+
+function writeProjectBootstrapManifest(targetDir, plan, backup) {
+  const manifestPath = projectBootstrapManifestPath(targetDir);
+  const manifest = {
+    schemaVersion: "meta-kim-project-bootstrap-v0.1",
+    appliedAt: new Date().toISOString(),
+    metaKimVersion: readPackageVersion(),
+    activeTargets: plan.state.activeTargets,
+    sourceChain: plan.sourceChain,
+    stateBeforeApply: plan.state,
+    protectedMergeDecisions: plan.decisions,
+    backup,
+    managedFiles: plan.files.filter((file) => file.action !== "skip"),
+    skippedFiles: plan.files.filter((file) => file.action === "skip"),
+  };
+  mkdirSync(dirname(manifestPath), { recursive: true });
+  writeJsonObject(manifestPath, manifest);
+  return manifestPath;
+}
+
 function deployPlatformFiles(platformId, targetDir) {
   let fileCount = 0;
   const copyIfExists = (srcRel, destRel) => {
@@ -3327,32 +3642,8 @@ function deployPlatformFiles(platformId, targetDir) {
     }
   };
 
-  if (platformId === "claude" || platformId === "all") {
-    copyIfExists("CLAUDE.md", "CLAUDE.md");
-  }
-  if (
-    platformId === "openclaw" ||
-    platformId === "codex" ||
-    platformId === "cursor" ||
-    platformId === "all"
-  ) {
-    copyIfExists("AGENTS.md", "AGENTS.md");
-  }
-
-  if (platformId === "claude" || platformId === "all") {
-    copyIfExists(".claude", ".claude");
-    if (existsSync(join(PROJECT_DIR, ".mcp.json")))
-      copyIfExists(".mcp.json", ".mcp.json");
-  }
-  if (platformId === "openclaw" || platformId === "all") {
-    copyIfExists("openclaw", "openclaw");
-  }
-  if (platformId === "codex" || platformId === "all") {
-    copyIfExists(".codex", ".codex");
-    copyIfExists(".agents", ".agents");
-  }
-  if (platformId === "cursor" || platformId === "all") {
-    copyIfExists(".cursor", ".cursor");
+  for (const root of projectDeployRootsForPlatform(platformId)) {
+    copyIfExists(root.srcRel, root.destRel);
   }
   return fileCount;
 }
@@ -6145,7 +6436,76 @@ function showModeInfo() {
   );
 }
 
+async function runProjectBootstrapCli() {
+  if (projectBootstrapApply && projectBootstrapDryRun) {
+    throw new Error("--project-bootstrap cannot use --apply and --dry-run together");
+  }
+  const targetContext = await resolveTargetContext(args);
+  const activeTargets = targetContext.activeTargets;
+  const targetDirs = cliProjectDeployDirs.length > 0 ? cliProjectDeployDirs : [process.cwd()];
+  const applyMode = projectBootstrapApply && !projectBootstrapDryRun;
+  const results = [];
+
+  for (const targetDir of targetDirs) {
+    const plan = buildProjectBootstrapPlan(activeTargets, targetDir);
+    if (!applyMode) {
+      results.push(plan);
+      continue;
+    }
+
+    const backup = createProjectBootstrapBackup(targetDir, plan.files);
+    if (!existsSync(targetDir)) {
+      mkdirSync(targetDir, { recursive: true });
+    }
+    for (const platformId of activeTargets) {
+      deployPlatformFiles(platformId, targetDir);
+    }
+    const postCopyBootstrap = writePostCopyBootstrap(targetDir, activeTargets);
+    const manifestPath = writeProjectBootstrapManifest(targetDir, plan, backup);
+    const afterPlan = buildProjectBootstrapPlan(activeTargets, targetDir);
+    results.push({
+      ...afterPlan,
+      mode: "apply",
+      applied: true,
+      backup,
+      manifestPath,
+      postCopyBootstrap,
+    });
+  }
+
+  const summary = {
+    schemaVersion: "meta-kim-project-bootstrap-result-v0.1",
+    mode: applyMode ? "apply" : "dry-run",
+    ok: true,
+    resultCount: results.length,
+    results,
+  };
+
+  if (jsonOutputMode) {
+    console.log(JSON.stringify(summary, null, 2));
+    return;
+  }
+
+  for (const result of results) {
+    const counts = result.state.counts;
+    console.log(`Meta_Kim project bootstrap ${summary.mode}: ${result.state.targetDir}`);
+    console.log(`  status=${result.state.status} targets=${result.state.activeTargets.join(",")}`);
+    console.log(
+      `  create=${counts.create} merge=${counts.merge} replace=${counts.replace} skip=${counts.skip}`,
+    );
+    console.log(`  source=${result.sourceChain.setupEntrypoint} from ${result.sourceChain.syncManifest}`);
+    if (result.manifestPath) {
+      console.log(`  manifest=${result.manifestPath}`);
+    }
+  }
+}
+
 async function main() {
+  if (projectBootstrapMode) {
+    await runProjectBootstrapCli();
+    process.exit(0);
+  }
+
   // Show logo before language selection
   bannerLogo();
 

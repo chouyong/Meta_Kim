@@ -337,6 +337,66 @@ for (const [messageKey, statusClass] of Object.entries(INSTALL_STATUS_MESSAGE_CL
   );
 }
 
+hasAll(
+  contract.lazyProjectBootstrap?.entrypoints ?? [],
+  [
+    "meta-kim project bootstrap --dry-run --project-dir <dir>",
+    "meta-kim project bootstrap --apply --project-dir <dir>",
+  ],
+  "lazy project bootstrap entrypoints",
+);
+hasAll(
+  Object.keys(contract.lazyProjectBootstrap?.sourceChain ?? {}),
+  [
+    "globalEntrypoint",
+    "packageRoot",
+    "canonicalRoots",
+    "syncManifest",
+    "runtimeMirrorSource",
+    "projectTarget",
+  ],
+  "lazy project bootstrap source chain",
+);
+hasAll(
+  contract.lazyProjectBootstrap?.projectFilePolicies?.merge ?? [],
+  [".claude/settings.json", ".codex/hooks.json", ".cursor/hooks.json", ".mcp.json"],
+  "lazy project bootstrap protected merge files",
+);
+hasAll(
+  contract.lazyProjectBootstrap?.projectFilePolicies?.managedTextBlock ?? [],
+  ["AGENTS.md", "CLAUDE.md"],
+  "lazy project bootstrap managed text block files",
+);
+hasAll(
+  contract.lazyProjectBootstrap?.projectFilePolicies?.neverTouch ?? [],
+  [".codex/config.toml", "credentials", "project trust state"],
+  "lazy project bootstrap never-touch files",
+);
+assert(
+  contract.lazyProjectBootstrap?.rollback?.requiredBeforeApply === true,
+  "lazy project bootstrap must require backup before apply",
+);
+hasAll(
+  contract.lazyProjectBootstrap?.scenarioAcceptance ?? [],
+  [
+    "empty project dry-run exposes sourceChain and writes nothing",
+    "existing user AGENTS.md or CLAUDE.md keeps user text and adds a managed block",
+    ".codex/config.toml remains global-owned and is never copied into project bootstrap",
+    "stale project manifest reports stale before update",
+  ],
+  "lazy project bootstrap scenario acceptance",
+);
+hasAll(
+  contract.lazyProjectBootstrap?.forbiddenOutcomes ?? [],
+  [
+    "silent project writes before dry-run and user confirmation",
+    "project-level source described without packageRoot/canonical/syncManifest/runtimeMirror chain",
+    "AGENTS.md or CLAUDE.md blind overwrite when the target already has user content",
+    "copying .codex/config.toml as project bootstrap source",
+  ],
+  "lazy project bootstrap forbidden outcomes",
+);
+
 for (const doc of [checklist, pullRequestTemplate]) {
   hasAll(
     doc,
