@@ -8,6 +8,27 @@ The changelog explains what changed and why it matters. It intentionally avoids 
 
 ## [Unreleased]
 
+## [2.8.38] - 2026-06-16
+
+### Changed
+
+- **11-Phase Trigger Standard** - Upgraded `businessPhasePlanPacket` to v0.2 so every phase records a trigger/skip/block/wait decision, score, evidence refs, quantitative signals, and falsification checks instead of passing because eleven phase names were listed.
+- **Business Workflow Coverage Truth** - Replaced the old phase-count-only coverage string with contract-aligned `complete` / `incomplete` judgment plus `coverageDetail`, so "recorded" and "accurately triggered" are no longer conflated.
+- **Concise Start Reason** - Added a run-start user-facing explanation for why the 8-stage spine and 11-phase workflow triggered, kept short and evidence-backed rather than exposing internal packets.
+- **Deep Research-Style Phase Proof** - Bound phase decisions to key signals, counterfactual checks, and decision evidence; accurate skips such as Revision and pending Feedback are now explicitly represented.
+- **Report Visibility** - Added trigger state, trigger score, and start-reason visibility to the user-readable meta-theory report and CLI conversation notice.
+
+### Verification
+
+- `node --test tests/meta-theory/34-run-deliverables.test.mjs`
+- `node --test tests/meta-theory/12-ten-step-workflow.test.mjs tests/meta-theory/09-run-artifact-validator.test.mjs`
+- `npm run meta:check`
+- `npm run meta:test:meta-theory`
+- `npm run discover:global`
+- `npm run meta:check:global`
+- `npm run meta:release:smoke`
+- `git diff --check`
+
 ## [2.8.37] - 2026-06-16
 
 ### Changed

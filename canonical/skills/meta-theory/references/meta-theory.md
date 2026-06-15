@@ -358,6 +358,16 @@ Four dimensions for shell choice:
 > Phases 1–3 = “it moves.” 4–11 = “it matures.”
 > No review → blind rush. No verification → theater. No evolution → repeat mistakes.
 
+### Trigger accuracy
+
+The 11-phase workflow is not accepted by `phaseCount=11`. Each phase decision
+must record `trigger`, `skip`, `block`, or `wait`, pass an 80-point trigger
+score, cite evidence, and include falsification checks. Correctly skipped or
+waiting phases still count only when the evidence explains the decision.
+
+Examples: `revision` can be `accurate_skip` after a clean Review; `feedback`
+must stay `pending_external_input` until user acceptance exists.
+
 ### Complexity routing
 
 | Complexity | Rule | Business phases |

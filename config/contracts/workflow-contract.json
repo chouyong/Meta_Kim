@@ -96,6 +96,24 @@
         "allowedDecisions": ["writeback", "none"]
       }
     },
+    "startReasonPolicy": {
+      "schemaVersion": "governance-start-reason-v0.1",
+      "required": true,
+      "placement": "run_start",
+      "audience": "user",
+      "maxLineCharacters": 120,
+      "covers": [
+        "8_stage_spine",
+        "11_phase_business_workflow"
+      ],
+      "requiredFields": [
+        "summary",
+        "spineReason",
+        "workflowReason",
+        "evidenceRefs"
+      ],
+      "rule": "When the 8-stage spine or 11-phase business workflow triggers, show a concise human-readable reason at the start. It must explain why governance is used without dumping packets or long internal reasoning."
+    },
     "phases": [
       "direction",
       "planning",
@@ -109,6 +127,44 @@
       "evolve",
       "mirror"
     ],
+    "phaseTriggerStandard": {
+      "schemaVersion": "business-phase-trigger-standard-v0.1",
+      "passThreshold": 80,
+      "decisionEnum": [
+        "trigger",
+        "skip",
+        "block",
+        "wait"
+      ],
+      "activationStateEnum": [
+        "triggered",
+        "accurate_skip",
+        "blocked_with_evidence",
+        "pending_external_input",
+        "weak_trigger",
+        "unsupported_skip",
+        "blocked_without_enough_evidence",
+        "pending_without_enough_evidence"
+      ],
+      "requiredFields": [
+        "decision",
+        "activationState",
+        "triggerScore",
+        "passThreshold",
+        "activationRule",
+        "quantitativeSignals",
+        "evidenceRefs",
+        "falsificationChecks"
+      ],
+      "signalRequiredFields": [
+        "signal",
+        "observed",
+        "expected",
+        "pass"
+      ],
+      "rule": "Every business phase must prove why it triggered, skipped, blocked, or waits. phaseCount=11 is never enough evidence by itself.",
+      "deepResearchBinding": "Use key signals, evidence refs, falsification checks, and decision impact in the same spirit as deep-research claim evidence."
+    },
     "markerPhases": [
       "meta_review",
       "verify",

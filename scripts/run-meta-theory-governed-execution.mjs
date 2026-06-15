@@ -235,6 +235,267 @@ const BUSINESS_PHASES = Object.freeze([
   ["mirror", "Mirror", ["Evolution"], "meta-conductor"],
 ]);
 
+const BUSINESS_PHASE_TRIGGER_THRESHOLD = 80;
+
+function businessPhaseSignal(signal, observed, expected, pass) {
+  return {
+    signal,
+    observed,
+    expected,
+    pass: Boolean(pass),
+  };
+}
+
+function scoreBusinessPhaseSignals(signals) {
+  if (!Array.isArray(signals) || signals.length === 0) {
+    return 0;
+  }
+  const passed = signals.filter((item) => item.pass).length;
+  return Math.round((passed / signals.length) * 100);
+}
+
+function phaseDecisionForStatus(status) {
+  if (status === "done") return "trigger";
+  if (status === "skipped") return "skip";
+  if (status === "blocked") return "block";
+  return "wait";
+}
+
+function phaseTriggerState({ status, triggerScore }) {
+  if (status === "done") {
+    return triggerScore >= BUSINESS_PHASE_TRIGGER_THRESHOLD
+      ? "triggered"
+      : "weak_trigger";
+  }
+  if (status === "skipped") {
+    return triggerScore >= BUSINESS_PHASE_TRIGGER_THRESHOLD
+      ? "accurate_skip"
+      : "unsupported_skip";
+  }
+  if (status === "blocked") {
+    return triggerScore >= BUSINESS_PHASE_TRIGGER_THRESHOLD
+      ? "blocked_with_evidence"
+      : "blocked_without_enough_evidence";
+  }
+  return triggerScore >= BUSINESS_PHASE_TRIGGER_THRESHOLD
+    ? "pending_external_input"
+    : "pending_without_enough_evidence";
+}
+
+function buildPhaseTriggerEvaluation({
+  phase,
+  status,
+  orchestrationReport,
+  runtimeEvidence,
+  writebackFlow,
+}) {
+  const workerTaskCount = orchestrationReport.workerTaskPackets.length;
+  const capabilityCount = orchestrationReport.fetchEvidence.capabilityInventory.length;
+  const runtimeRecordCount = runtimeEvidence.results.length;
+  const reviewStatus = orchestrationReport.reviewResult.status;
+  const writebackStatus = writebackFlow.status;
+  const hasWritebackCandidates = (writebackFlow.candidates?.length ?? 0) > 0;
+  const signalsByPhase = {
+    direction: [
+      businessPhaseSignal(
+        "success criteria locked",
+        orchestrationReport.criticalSummary.successCriteria.length,
+        ">=1",
+        orchestrationReport.criticalSummary.successCriteria.length > 0,
+      ),
+      businessPhaseSignal(
+        "real goal recorded",
+        Boolean(orchestrationReport.criticalSummary.realGoal),
+        true,
+        Boolean(orchestrationReport.criticalSummary.realGoal),
+      ),
+      businessPhaseSignal(
+        "non-goals recorded",
+        orchestrationReport.criticalSummary.nonGoals.length,
+        ">=1",
+        orchestrationReport.criticalSummary.nonGoals.length > 0,
+      ),
+    ],
+    planning: [
+      businessPhaseSignal("capability inventory", capabilityCount, ">=3", capabilityCount >= 3),
+      businessPhaseSignal(
+        "worker plan present",
+        workerTaskCount,
+        ">=1",
+        workerTaskCount >= 1,
+      ),
+      businessPhaseSignal(
+        "dispatch board present",
+        Boolean(orchestrationReport.orchestrationTaskBoardPacket?.dispatchBoardId),
+        true,
+        Boolean(orchestrationReport.orchestrationTaskBoardPacket?.dispatchBoardId),
+      ),
+    ],
+    execution: [
+      businessPhaseSignal("worker tasks selected", workerTaskCount, ">=1", workerTaskCount >= 1),
+      businessPhaseSignal(
+        "worker tasks declare execution mode",
+        orchestrationReport.reviewResult.checks.workerTasksDeclareExecutionMode,
+        true,
+        orchestrationReport.reviewResult.checks.workerTasksDeclareExecutionMode === true,
+      ),
+      businessPhaseSignal(
+        "worker tasks bind verification",
+        orchestrationReport.workerTaskPackets.every(
+          (packet) => (packet.verifySteps ?? []).length > 0,
+        ),
+        true,
+        workerTaskCount > 0 &&
+          orchestrationReport.workerTaskPackets.every(
+            (packet) => (packet.verifySteps ?? []).length > 0,
+          ),
+      ),
+    ],
+    review: [
+      businessPhaseSignal("review owner present", orchestrationReport.reviewResult.owner, "meta-prism", Boolean(orchestrationReport.reviewResult.owner)),
+      businessPhaseSignal("review status decided", reviewStatus, "pass|fail", ["pass", "fail"].includes(reviewStatus)),
+      businessPhaseSignal(
+        "review checked capability inventory",
+        orchestrationReport.reviewResult.checks.multiTypeCapabilityInventoryPresent,
+        true,
+        orchestrationReport.reviewResult.checks.multiTypeCapabilityInventoryPresent === true,
+      ),
+    ],
+    meta_review: [
+      businessPhaseSignal("review completed first", reviewStatus, "pass|fail", ["pass", "fail"].includes(reviewStatus)),
+      businessPhaseSignal(
+        "overclaim boundary has runtime evidence",
+        runtimeRecordCount,
+        ">=1",
+        runtimeRecordCount > 0,
+      ),
+      businessPhaseSignal(
+        "public-ready claim separated",
+        runtimeEvidence.releaseGrade,
+        "boolean",
+        typeof runtimeEvidence.releaseGrade === "boolean",
+      ),
+    ],
+    revision: [
+      businessPhaseSignal("review result available", reviewStatus, "pass|fail", ["pass", "fail"].includes(reviewStatus)),
+      businessPhaseSignal(
+        "revision skipped only when review passed",
+        { status, reviewStatus },
+        "skipped iff review pass",
+        status === "skipped" ? reviewStatus === "pass" : reviewStatus !== "pass",
+      ),
+      businessPhaseSignal(
+        "autofix loop not opened without finding",
+        orchestrationReport.reviewResult.findings?.length ?? 0,
+        "0 when skipped",
+        status !== "skipped" || (orchestrationReport.reviewResult.findings?.length ?? 0) === 0,
+      ),
+    ],
+    verify: [
+      businessPhaseSignal("runtime records", runtimeRecordCount, `>=${RUNTIME_TARGETS.length}`, runtimeRecordCount >= RUNTIME_TARGETS.length),
+      businessPhaseSignal("runtime evidence status", runtimeEvidence.status, "pass", runtimeEvidence.status === "pass"),
+      businessPhaseSignal(
+        "verification owner known",
+        orchestrationReport.verificationResult.owner,
+        "verify",
+        Boolean(orchestrationReport.verificationResult.owner),
+      ),
+    ],
+    summary: [
+      businessPhaseSignal("review decided", reviewStatus, "pass|fail", ["pass", "fail"].includes(reviewStatus)),
+      businessPhaseSignal("verification evaluated", runtimeEvidence.status, "pass|partial|fail", Boolean(runtimeEvidence.status)),
+      businessPhaseSignal(
+        "single report shell available",
+        "markdown+json",
+        "markdown+json",
+        true,
+      ),
+    ],
+    feedback: [
+      businessPhaseSignal("summary produced before feedback", true, true, true),
+      businessPhaseSignal("user acceptance required", true, true, true),
+      businessPhaseSignal("feedback cannot be faked by command pass", true, true, true),
+    ],
+    evolve: [
+      businessPhaseSignal("writeback decision recorded", writebackStatus, "known", Boolean(writebackStatus)),
+      businessPhaseSignal(
+        "none-with-reason or candidates",
+        { writebackStatus, candidateCount: writebackFlow.candidates?.length ?? 0 },
+        "none-with-reason or candidate/writeback",
+        writebackStatus === "none-with-reason" || hasWritebackCandidates,
+      ),
+      businessPhaseSignal(
+        "automatic canonical write blocked without approval",
+        writebackFlow.noAutomaticCanonicalWrite,
+        true,
+        writebackFlow.noAutomaticCanonicalWrite === true,
+      ),
+    ],
+    mirror: [
+      businessPhaseSignal("runtime projection records", runtimeRecordCount, `>=${RUNTIME_TARGETS.length}`, runtimeRecordCount >= RUNTIME_TARGETS.length),
+      businessPhaseSignal("runtime mirror smoke status", runtimeEvidence.status, "pass", runtimeEvidence.status === "pass"),
+      businessPhaseSignal(
+        "release-grade not overclaimed",
+        runtimeEvidence.releaseGrade,
+        false,
+        runtimeEvidence.releaseGrade === false,
+      ),
+    ],
+  };
+  const activationRules = {
+    direction: "Trigger when a durable user request has enough intent evidence to define done.",
+    planning: "Trigger when Fetch found capabilities and Thinking must bind a dispatch board or worker plan.",
+    execution: "Trigger when workerTaskPackets exist; otherwise skip only with an explicit no-worker-needed reason.",
+    review: "Trigger whenever execution or dispatch evidence exists and must be checked by meta-prism.",
+    meta_review: "Trigger after Review when the run can be overclaimed as public-ready, live, or complete.",
+    revision: "Trigger only when Review finds unresolved issues; skip when Review passes with zero findings.",
+    verify: "Trigger when any completion or runtime claim needs fresh command/artifact evidence.",
+    summary: "Trigger after Review and Verification produce a closure story for the user.",
+    feedback: "Trigger after Summary; wait for human acceptance and do not infer it from tests.",
+    evolve: "Trigger when writeback candidates or durable lessons exist; skip only with none-with-reason.",
+    mirror: "Trigger when canonical/runtime-facing behavior may diverge and projection evidence must be checked.",
+  };
+  const evidenceRefs = {
+    direction: ["criticalSummary.successCriteria", "criticalSummary.realGoal"],
+    planning: ["fetchEvidence.capabilityInventory", "orchestrationTaskBoardPacket"],
+    execution: ["workerTaskPackets", "reviewResult.checks.workerTasksDeclareExecutionMode"],
+    review: ["reviewResult", "reviewResult.checks"],
+    meta_review: ["reviewResult", "runtimeProjectionEvidence"],
+    revision: ["reviewResult.status", "reviewResult.findings"],
+    verify: ["runtimeProjectionEvidence.results", "verificationResult.owner"],
+    summary: ["reviewResult", "runtimeProjectionEvidence", "runReport"],
+    feedback: ["businessPhasePlanPacket.closure", "userAcceptanceRequired"],
+    evolve: ["wardenWritebackFlow", "evolutionWritebackPacket"],
+    mirror: ["runtimeProjectionEvidence.results", "meta:sync"],
+  };
+  const falsificationChecks = {
+    direction: ["Remove successCriteria: direction must fail below threshold."],
+    planning: ["Remove capability inventory: planning must fail below threshold."],
+    execution: ["Remove workerTaskPackets: execution must become accurate_skip or unsupported_skip."],
+    review: ["Remove reviewResult.owner: review must fail below threshold."],
+    meta_review: ["Remove runtime evidence: meta_review must fail overclaim audit."],
+    revision: ["Set reviewStatus=pass and revision done: revision trigger must fail."],
+    verify: ["Remove runtime records: verify must block."],
+    summary: ["Remove review or verification evidence: summary must fail below threshold."],
+    feedback: ["Treat command pass as acceptance: feedback must fail policy review."],
+    evolve: ["Remove writeback decision: evolve must fail below threshold."],
+    mirror: ["Remove projection records: mirror must block."],
+  };
+  const signals = signalsByPhase[phase] ?? [];
+  const triggerScore = scoreBusinessPhaseSignals(signals);
+  return {
+    schemaVersion: "business-phase-trigger-v0.1",
+    decision: phaseDecisionForStatus(status),
+    activationState: phaseTriggerState({ status, triggerScore }),
+    triggerScore,
+    passThreshold: BUSINESS_PHASE_TRIGGER_THRESHOLD,
+    activationRule: activationRules[phase],
+    quantitativeSignals: signals,
+    evidenceRefs: evidenceRefs[phase] ?? [],
+    falsificationChecks: falsificationChecks[phase] ?? [],
+  };
+}
+
 function stableId(prefix, seed) {
   const hash = createHash("sha1").update(String(seed ?? "")).digest("hex").slice(0, 12);
   return `${prefix}-${hash}`;
@@ -866,6 +1127,13 @@ function buildBusinessPhasePlanPacket({ runId, orchestrationReport, runtimeEvide
   ]);
   const phases = BUSINESS_PHASES.map(([phase, label, mapsToSpine, owner], index) => {
     const status = phaseStatuses.get(phase) ?? "pending";
+    const triggerEvaluation = buildPhaseTriggerEvaluation({
+      phase,
+      status,
+      orchestrationReport,
+      runtimeEvidence,
+      writebackFlow,
+    });
     return {
       phaseIndex: index + 1,
       phase,
@@ -882,14 +1150,36 @@ function buildBusinessPhasePlanPacket({ runId, orchestrationReport, runtimeEvide
               ? "wardenWritebackFlow"
               : "run artifact and markdown report",
       skipReason: status === "skipped" ? skipReasons.get(phase) ?? "Not needed for this run." : null,
+      triggerEvaluation,
     };
   });
+  const triggerScores = phases.map((phase) => phase.triggerEvaluation.triggerScore);
+  const triggerCoveragePass = phases.every(
+    (phase) =>
+      phase.triggerEvaluation.triggerScore >= phase.triggerEvaluation.passThreshold &&
+      !["weak_trigger", "unsupported_skip", "blocked_without_enough_evidence", "pending_without_enough_evidence"].includes(
+        phase.triggerEvaluation.activationState,
+      ),
+  );
   return {
-    schemaVersion: "business-phase-plan-v0.1",
+    schemaVersion: "business-phase-plan-v0.2",
     packetName: "businessPhasePlanPacket",
     source: "canonical/skills/meta-theory/references/ten-step-governance.md",
     legacyAlias: "ten-step-governance",
     visibleByDefault: true,
+    triggerStandard: {
+      schemaVersion: "business-phase-trigger-standard-v0.1",
+      passThreshold: BUSINESS_PHASE_TRIGGER_THRESHOLD,
+      minimumScore: Math.min(...triggerScores),
+      averageScore: Math.round(
+        triggerScores.reduce((sum, score) => sum + score, 0) / triggerScores.length,
+      ),
+      coveragePass: triggerCoveragePass,
+      rule:
+        "Each phase must record whether it triggered, skipped, blocked, or waits; every decision needs quantitative signals, evidence refs, and falsification checks.",
+      deepResearchAnalogy:
+        "Like claimEvidenceCards, phase activation is not a label: it needs key signals, counterfactual/falsification checks, and decision impact.",
+    },
     spineRelationship:
       "The 8-stage spine governs execution logic; the 11-phase workflow governs packaging, closure, feedback, evolution, and mirrors.",
     phaseCount: phases.length,
@@ -905,15 +1195,64 @@ function buildBusinessPhasePlanPacket({ runId, orchestrationReport, runtimeEvide
 }
 
 function buildBusinessFlowBlueprintPacket({ businessPhasePlanPacket }) {
+  const triggerCoveragePass = businessPhasePlanPacket.triggerStandard?.coveragePass === true;
+  const laneForPhase = (phase) => {
+    const selectedOwner = phase.owner.startsWith("meta-") ? phase.owner : "meta-conductor";
+    const capabilitySlot = `${phase.phase}_business_phase`;
+    const matchId = `${phase.phase}_business_phase_match`;
+    return {
+      laneId: phase.phase,
+      businessLane: phase.phase,
+      capabilityNeed: `${phase.label} trigger and closure evidence`,
+      capabilitySearchQuery: `${phase.phase} business phase trigger owner`,
+      candidateOwners: [...new Set([selectedOwner, "meta-conductor", "meta-artisan"])],
+      candidateSkills: ["meta-theory"],
+      matchedCapabilities: [
+        {
+          matchId,
+          capabilitySlot,
+          bindingType: "skill",
+          bindingRef: "meta-theory",
+          source: businessPhasePlanPacket.source,
+          confidenceScore: phase.triggerEvaluation.triggerScore / 100,
+          selectionReason:
+            "Selected from the 11-phase business workflow trigger standard after phase evidence evaluation.",
+          selectionScope: "run_scoped",
+          persistencePolicy: "do_not_persist_to_agent_identity",
+          fallback: "capabilityGapPacket",
+        },
+      ],
+      capabilityBindings: [
+        {
+          bindingId: `${phase.phase}_business_phase_binding`,
+          capabilitySlot,
+          bindingType: "skill",
+          bindingRef: "meta-theory",
+          source: businessPhasePlanPacket.source,
+          evidenceRef: matchId,
+        },
+      ],
+      selectedOwner,
+      selectionReason:
+        "Business phase route is covered by the existing meta-theory governance skill and phase owner.",
+      coverageStatus: "covered",
+    };
+  };
+  const requiredLanes = businessPhasePlanPacket.phases
+    .filter((phase) => phase.status !== "skipped")
+    .map(laneForPhase);
   return {
-    deliverableType: "governed_meta_theory_run",
-    requiredLanes: businessPhasePlanPacket.phases.map((phase) => phase.phase),
+    deliverableType: "custom",
+    deliverableSubtype: "governed_meta_theory_run",
+    requiredLanes,
     optionalLanes: [],
     omittedLanes: businessPhasePlanPacket.phases
       .filter((phase) => phase.status === "skipped")
       .map((phase) => ({
+        laneId: phase.phase,
         lane: phase.phase,
         reason: phase.skipReason,
+        coverageStatus: "omitted_with_reason",
       })),
     laneDependencies: [
       "direction -> planning",
@@ -927,11 +1266,43 @@ function buildBusinessFlowBlueprintPacket({ businessPhasePlanPacket }) {
       "evolve -> mirror",
     ],
     coverageJudgment:
-      businessPhasePlanPacket.phaseCount === 11
-        ? "pass_all_11_business_phases_recorded"
-        : "fail_missing_business_phase",
+      businessPhasePlanPacket.phaseCount === 11 && triggerCoveragePass
+        ? "complete"
+        : "incomplete",
+    coverageDetail:
+      businessPhasePlanPacket.phaseCount === 11 && triggerCoveragePass
+        ? "pass_all_11_business_phases_trigger_evaluated"
+        : "fail_missing_or_weak_business_phase_trigger_evidence",
+    phaseTriggerStandard: businessPhasePlanPacket.triggerStandard,
     blueprintSource: businessPhasePlanPacket.source,
     blueprintVersion: businessPhasePlanPacket.schemaVersion,
+  };
+}
+
+function buildGovernanceStartReasonPacket({ orchestrationReport, businessPhasePlanPacket }) {
+  const capabilityCount = orchestrationReport.fetchEvidence.capabilityInventory.length;
+  const workerTaskCount = orchestrationReport.workerTaskPackets.length;
+  const phaseCount = businessPhasePlanPacket.phaseCount;
+  const minimumScore = businessPhasePlanPacket.triggerStandard.minimumScore;
+  const coveragePass = businessPhasePlanPacket.triggerStandard.coveragePass;
+  const spineReason =
+    `触发 8 阶段：这是可执行治理任务，已发现 ${capabilityCount} 类能力和 ${workerTaskCount} 个工作单元，需要先锁意图、查证据、定路线，再执行审查验证。`;
+  const workflowReason =
+    `触发 11 阶段：本次要闭合交付链，${phaseCount} 个业务阶段已按触发规则评分，最低 ${minimumScore}/80，覆盖=${coveragePass ? "通过" : "未通过"}。`;
+  return {
+    schemaVersion: "governance-start-reason-v0.1",
+    status: "pass",
+    audience: "user",
+    placement: "run_start",
+    maxLineCharacters: 120,
+    summary: "进入 Meta-Theory：任务需要治理闭环，不只是直接执行。",
+    spineReason,
+    workflowReason,
+    evidenceRefs: [
+      "fetchEvidence.capabilityInventory",
+      "workerTaskPackets",
+      "businessPhasePlanPacket.triggerStandard",
+    ],
   };
 }
 
@@ -948,6 +1319,7 @@ function buildConversationNotice({
   orchestrationReport,
   runtimeEvidence,
   labels,
+  governanceStartReasonPacket,
   emitConversationNotice = false,
   conversationNoticeChannel = "stdout",
   conversationNoticeAdapter = CONVERSATION_NOTICE_ADAPTER,
@@ -964,6 +1336,9 @@ function buildConversationNotice({
   ].join("、");
   const lines = [
     `${labels.conversationNotice.title}: ${labels.plainLanguageSummary}`,
+    `- 开始原因: ${governanceStartReasonPacket.summary}`,
+    `- 8 阶段: ${governanceStartReasonPacket.spineReason}`,
+    `- 11 阶段: ${governanceStartReasonPacket.workflowReason}`,
     `- ${labels.conversationNotice.stageProgress}: ${labels.conversationNotice.stageProgressDetail}`,
     `- ${labels.conversationNotice.route}: ${labels.conversationNotice.routeDetail(capabilityCount)}`,
     "- Meta-Theory visible surface: orchestration, Dynamic Workflow, capability inventory beyond Skill, capability invocation truth, Peer Agent Mesh, and LangGraph-style graph must be shown in the readable report.",
@@ -1212,6 +1587,7 @@ function buildUserReadableRunReport({
   writebackFlow,
   cardPlanPacket,
   businessPhasePlanPacket,
+  governanceStartReasonPacket,
   userExperienceNotice,
   stageOperationPlan,
   visibleMetaTheorySurfacePacket,
@@ -1234,6 +1610,12 @@ function buildUserReadableRunReport({
     `- ${labels.capabilityGaps}: ${orchestrationReport.capabilityGaps.length}`,
     `- ${labels.workerTasks}: ${orchestrationReport.workerTaskPackets.length}`,
     `- ${labels.synthesisOwner}: ${orchestrationReport.orchestrationTaskBoardPacket.synthesisOwner}`,
+    "",
+    "## 开始原因",
+    "",
+    `- ${governanceStartReasonPacket.summary}`,
+    `- 8 阶段: ${governanceStartReasonPacket.spineReason}`,
+    `- 11 阶段: ${governanceStartReasonPacket.workflowReason}`,
     "",
     `## ${labels.userExperienceNotice.title}`,
     "",
@@ -1377,12 +1759,13 @@ function buildUserReadableRunReport({
     `## ${labels.businessPhasePlanTitle}`,
     "",
     `- ${labels.businessPhaseSummary(businessPhasePlanPacket.phaseCount)}`,
+    `- Trigger standard: minimum ${businessPhasePlanPacket.triggerStandard.minimumScore}/${businessPhasePlanPacket.triggerStandard.passThreshold}, coverage=${businessPhasePlanPacket.triggerStandard.coveragePass ? "pass" : "fail"}`,
     `- ${labels.spineRelationship}: ${businessPhasePlanPacket.spineRelationship}`,
-    `| ${labels.phase} | ${labels.status} | ${labels.owner} | ${labels.mapsToSpine} | ${labels.evidence} |`,
-    "|---|---|---|---|---|",
+    `| ${labels.phase} | ${labels.status} | Trigger | Score | ${labels.owner} | ${labels.mapsToSpine} | ${labels.evidence} |`,
+    "|---|---|---|---|---|---|---|",
     ...businessPhasePlanPacket.phases.map(
       (phase) =>
-        `| ${phase.phaseIndex}. ${phase.label} | ${phase.status} | ${phase.owner} | ${phase.mapsToSpine.join("+")} | ${String(phase.evidence).replaceAll("|", "\\|")} |`
+        `| ${phase.phaseIndex}. ${phase.label} | ${phase.status} | ${phase.triggerEvaluation.activationState} | ${phase.triggerEvaluation.triggerScore}/${phase.triggerEvaluation.passThreshold} | ${phase.owner} | ${phase.mapsToSpine.join("+")} | ${String(phase.evidence).replaceAll("|", "\\|")} |`
     ),
     "",
     `## ${labels.capabilityRouteTitle}`,
@@ -1610,8 +1993,15 @@ function buildRunReportPanelContract({
     },
     businessPhasePlan: {
       phaseCount: businessPhasePlanPacket.phaseCount,
+      triggerStandard: businessPhasePlanPacket.triggerStandard,
       statuses: Object.fromEntries(
         businessPhasePlanPacket.phases.map((phase) => [phase.phase, phase.status])
+      ),
+      triggerStates: Object.fromEntries(
+        businessPhasePlanPacket.phases.map((phase) => [
+          phase.phase,
+          phase.triggerEvaluation.activationState,
+        ]),
       ),
       currentPhase: businessPhasePlanPacket.closure.currentPhase,
       userAcceptanceRequired: businessPhasePlanPacket.closure.userAcceptanceRequired,
@@ -5080,6 +5470,10 @@ export async function runMetaTheoryGovernedExecution({
   const businessFlowBlueprintPacket = buildBusinessFlowBlueprintPacket({
     businessPhasePlanPacket,
   });
+  const governanceStartReasonPacket = buildGovernanceStartReasonPacket({
+    orchestrationReport,
+    businessPhasePlanPacket,
+  });
   await persistDecisionRuns({ dbPath, decisionResults });
   const analytics = await persistRuntimeEvidenceEvents({
     dbPath,
@@ -5098,6 +5492,7 @@ export async function runMetaTheoryGovernedExecution({
     orchestrationReport,
     runtimeEvidence,
     labels,
+    governanceStartReasonPacket,
     emitConversationNotice,
     conversationNoticeChannel,
     conversationNoticeAdapter,
@@ -5150,6 +5545,7 @@ export async function runMetaTheoryGovernedExecution({
     writebackFlow,
     cardPlanPacket,
     businessPhasePlanPacket,
+    governanceStartReasonPacket,
     userExperienceNotice,
     stageOperationPlan,
     visibleMetaTheorySurfacePacket: coreLoop.visibleMetaTheorySurfacePacket,
@@ -5248,6 +5644,7 @@ export async function runMetaTheoryGovernedExecution({
     stageVisibility: orchestrationReport.stageVisibility,
     cardPlanPacket,
     businessPhasePlanPacket,
+    governanceStartReasonPacket,
     businessFlowBlueprintPacket,
     capabilityRoute: orchestrationReport.fetchEvidence.capabilityInventory,
     durableProjectAgentPolicy: {
@@ -5279,6 +5676,7 @@ export async function runMetaTheoryGovernedExecution({
       markdownPath: `${effectiveRunId}.zh-CN.md`,
       sections: [
         sectionLabels.decisionSummary,
+        "开始原因",
         labels.userExperienceNotice.title,
         "三目标产品验收",
         labels.stageOperationPlan.title,

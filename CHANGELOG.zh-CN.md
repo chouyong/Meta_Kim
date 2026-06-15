@@ -8,6 +8,27 @@
 
 ## [Unreleased]
 
+## [2.8.38] - 2026-06-16
+
+### 变更
+
+- **11 阶段触发标准** - 将 `businessPhasePlanPacket` 升级到 v0.2；每个阶段都必须记录 trigger/skip/block/wait 决策、评分、证据引用、量化信号和反证检查，不再因为列出 11 个阶段名就通过。
+- **业务流覆盖真实性** - 用契约对齐的 `complete` / `incomplete` 判断和 `coverageDetail` 替换旧的 phase-count-only 字符串，避免把“已记录”和“准确触发”混在一起。
+- **精简开场原因** - 新增 run-start 用户可读说明，解释为什么触发 8 阶段 spine 和 11 阶段业务流；说明保持短句，并绑定证据，不倾倒内部 packet。
+- **Deep Research 风格阶段证据** - 阶段判断现在绑定关键信号、反事实检查和决策证据；例如 Revision 的准确跳过、Feedback 的外部等待会被明确表示。
+- **报告可见性** - 用户可读 meta-theory 报告和 CLI conversation notice 现在会显示触发状态、触发评分和开场原因。
+
+### 验证
+
+- `node --test tests/meta-theory/34-run-deliverables.test.mjs`
+- `node --test tests/meta-theory/12-ten-step-workflow.test.mjs tests/meta-theory/09-run-artifact-validator.test.mjs`
+- `npm run meta:check`
+- `npm run meta:test:meta-theory`
+- `npm run discover:global`
+- `npm run meta:check:global`
+- `npm run meta:release:smoke`
+- `git diff --check`
+
 ## [2.8.37] - 2026-06-16
 
 ### 变更
