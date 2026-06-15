@@ -2,6 +2,7 @@ import { describe, test } from "node:test";
 import assert from "node:assert/strict";
 import {
   chmodSync,
+  existsSync,
   mkdtempSync,
   mkdirSync,
   readFileSync,
@@ -127,7 +128,7 @@ describe("graphify idempotent wiring (contract)", () => {
 
     assert.match(
       src,
-      /async function installPythonTools\(\s*activeTargets,\s*inUpdateMode = false,\s*targetDir = PROJECT_DIR,\s*\)/,
+      /async function installPythonTools\(\s*activeTargets,\s*inUpdateMode = false,\s*targetDir = PROJECT_DIR,\s*options = \{\},\s*\)/,
     );
     assert.match(src, /const graphifyDir = resolve\(targetDir\)/);
     assert.match(src, /join\(graphifyDir, "\.git"\)/);
@@ -153,16 +154,23 @@ describe("graphify idempotent wiring (contract)", () => {
     assert.notEqual(start, -1);
     assert.notEqual(end, -1);
     const body = src.slice(start, end);
+    const applyStart = src.indexOf("async function applyProjectBootstrapToDir(");
+    const applyEnd = src.indexOf("function classifyProjectBootstrapError", applyStart);
+    assert.notEqual(applyStart, -1);
+    assert.notEqual(applyEnd, -1);
+    const applyBody = src.slice(applyStart, applyEnd);
 
     assert.match(src, /const POST_COPY_BOOTSTRAP_FILENAME = "meta-kim-post-copy\.mjs"/);
-    assert.match(body, /writePostCopyBootstrap\(targetDir, activeTargets\)/);
+    assert.match(body, /applyProjectBootstrapToDir\(activeTargets, targetDir\)/);
+    assert.match(applyBody, /writePostCopyBootstrap\(targetDir, activeTargets\)/);
+    assert.match(applyBody, /writeProjectBootstrapManifest\(targetDir, plan, backup\)/);
     assert.match(body, /printPostCopyBootstrapHint\(\)/);
     assert.doesNotMatch(body, /installGraphify/);
     assert.doesNotMatch(body, /installPythonTools\(activeTargets, false, targetDir\)/);
     assert.ok(
-      body.indexOf("deployPlatformFiles(platformId, targetDir)") <
-        body.indexOf("writePostCopyBootstrap(targetDir, activeTargets)"),
-      "the bootstrap must be written after runtime files are copied",
+      applyBody.indexOf("deployPlatformFiles(platformId, targetDir)") <
+        applyBody.indexOf("writePostCopyBootstrap(targetDir, activeTargets)"),
+      "the project bootstrap apply path must write post-copy bootstrap after runtime files are copied",
     );
   });
 
@@ -244,11 +252,48 @@ describe("graphify idempotent wiring (contract)", () => {
     assert.match(src, /stdio: "ignore"/);
     assert.match(src, /META_KIM_POST_COPY_AUTO === "off"/);
     assert.match(src, /catch \{\s*\/\/ Post-copy auto-init is opportunistic/s);
-    assert.match(src, /startProjectBootstrapProbe/);
     assert.match(src, /"--project-bootstrap", "--dry-run", "--project-dir", cwd, "--json"/);
     assert.match(src, /"project", "bootstrap", "--dry-run", "--project-dir", cwd, "--json"/);
-    assert.match(src, /project-bootstrap-probe\.json/);
+    assert.match(src, /runProjectBootstrapProbe/);
+    assert.match(src, /projectBootstrapNeedsConfirmation/);
+    assert.match(src, /additionalContext/);
+    assert.doesNotMatch(src, /project-bootstrap-probe\.json/);
     assert.doesNotMatch(src, /"--apply"/);
+  });
+
+  test("meta-theory activation hook does not write project state before bootstrap confirmation", () => {
+    const tempDir = mkdtempSync(path.join(os.tmpdir(), "meta-kim-activation-no-write-"));
+    try {
+      const hookPath = path.join(
+        root,
+        "canonical/runtime-assets/shared/hooks/activate-meta-theory-spine.mjs",
+      );
+      const result = spawnSync(process.execPath, [hookPath], {
+        cwd: tempDir,
+        input: JSON.stringify({
+          tool_name: "Skill",
+          tool_input: { skill_name: "meta-theory" },
+        }),
+        encoding: "utf8",
+        timeout: 120_000,
+        windowsHide: true,
+        env: {
+          ...process.env,
+          META_KIM_PACKAGE_ROOT: root,
+        },
+      });
+
+      assert.equal(result.status, 0, result.stderr || result.stdout);
+      assert.equal(existsSync(path.join(tempDir, ".meta-kim")), false);
+      const output = JSON.parse(result.stdout);
+      assert.match(
+        output.hookSpecificOutput.additionalContext,
+        /project bootstrap dry-run found this directory is not ready/,
+      );
+      assert.match(output.hookSpecificOutput.additionalContext, /request_user_input/);
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
   });
 
   test("setup.mjs skips guide-mutating graphify platform install when guide section exists", () => {

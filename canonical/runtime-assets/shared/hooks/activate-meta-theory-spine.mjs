@@ -1,6 +1,6 @@
 import process from "node:process";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { readJsonFromStdin } from "./utils.mjs";
 import {
@@ -97,8 +97,8 @@ function projectBootstrapProbeCommands() {
   return commands;
 }
 
-function startProjectBootstrapProbe() {
-  if (process.env.META_KIM_PROJECT_BOOTSTRAP_PROBE === "off") return;
+function runProjectBootstrapProbe() {
+  if (process.env.META_KIM_PROJECT_BOOTSTRAP_PROBE === "off") return null;
 
   for (const candidate of projectBootstrapProbeCommands()) {
     try {
@@ -114,22 +114,38 @@ function startProjectBootstrapProbe() {
         },
       });
       if (result.status !== 0 || !result.stdout?.trim()) continue;
-
-      const artifactPath = join(
-        cwd,
-        ".meta-kim",
-        "state",
-        "default",
-        "project-bootstrap-probe.json",
-      );
-      mkdirSync(join(cwd, ".meta-kim", "state", "default"), { recursive: true });
-      writeFileSync(artifactPath, result.stdout.trimEnd() + "\n", "utf8");
-      return;
+      return JSON.parse(result.stdout);
     } catch {
       // The probe is evidence gathering only. Missing global CLI or permission
       // errors must not prevent the meta-theory spine from starting.
     }
   }
+  return null;
+}
+
+function projectBootstrapNeedsConfirmation(summary) {
+  return (summary?.results ?? []).some(
+    (result) => result?.state?.requiresConfirmation === true,
+  );
+}
+
+function emitProjectBootstrapContext(summary) {
+  const result = summary?.results?.[0];
+  if (!result) return;
+  const context = [
+    "Meta_Kim project bootstrap dry-run found this directory is not ready for project governance.",
+    `status=${result.state?.status ?? "unknown"} targets=${(result.state?.activeTargets ?? []).join(",")}`,
+    `reason=${result.state?.confirmationReason ?? "project bootstrap confirmation required"}`,
+    "Before applying project files, use the dry-run choiceSurface with Claude Code AskUserQuestion or Codex request_user_input; do not write project bootstrap files without confirmation.",
+  ].join("\n");
+  process.stdout.write(
+    `${JSON.stringify({
+      hookSpecificOutput: {
+        hookEventName: payload?.hook_event_name ?? "Skill",
+        additionalContext: context,
+      },
+    })}\n`,
+  );
 }
 
 const skillName = getSkillName();
@@ -138,7 +154,11 @@ if (!isMetaTheoryTrigger()) {
 }
 
 startPostCopyAutoInit();
-startProjectBootstrapProbe();
+const projectBootstrapProbe = runProjectBootstrapProbe();
+if (projectBootstrapNeedsConfirmation(projectBootstrapProbe)) {
+  emitProjectBootstrapContext(projectBootstrapProbe);
+  process.exit(0);
+}
 
 const existing = await readSpineState(cwd);
 if (existing && existing.active) {

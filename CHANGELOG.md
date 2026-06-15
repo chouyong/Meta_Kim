@@ -8,6 +8,17 @@ The changelog explains what changed and why it matters. It intentionally avoids 
 
 ## [Unreleased]
 
+## [2.8.34] - 2026-06-16
+
+### Changed
+
+- **Install Scope Boundary** - Restored the default install/update model to "global reusable capabilities + current project projection", now explicitly target-selected: the Enter default projects Claude Code + Codex, while Cursor and OpenClaw project files appear only when those formal projection compatibility targets are selected.
+- **Open-Source Runtime Projection Boundary** - Added a release validator that keeps generated runtime projection directories such as `.codex/`, `.agents/`, `.claude/`, `.cursor/`, and `openclaw/` out of GitHub source and package files, while documenting that Codex adapter/business-role TOML files are local host projections rather than governance agents.
+- **Platform Compatibility Tiers** - Made the install contract and verification output distinguish formal projections, dependency-owned targets, and candidate probes, while public docs avoid repeating upstream dependency install matrices as Meta_Kim support claims.
+- **Public Platform Wording** - Updated README badges, platform tables, and cross-platform mapping copy so default formal projections, explicit formal compatibility projections, and candidate compatibility probes are visible separately; refreshed Qoder official doc links and added Cline's official Skills primitive to the catalog.
+- **Project Governance UX** - Updated the PRD, setup, and README copy so global skills are reusable discovery entrypoints, project governance requires dry-run bootstrap confirmation, and `AGENTS.md` is described as platform-specific context rather than a universal Codex/Cursor/OpenClaw entrypoint.
+- **Install Scope Verification** - Added `npm run meta:install-scope:verify` to exercise temp global homes and temp project bootstraps, then report global-layer and project-layer surfaces by platform.
+
 ## [2.8.33] - 2026-06-15
 
 ### Added

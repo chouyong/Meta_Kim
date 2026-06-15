@@ -8,6 +8,17 @@
 
 ## [Unreleased]
 
+## [2.8.34] - 2026-06-16
+
+### 变更
+
+- **安装范围边界** - 恢复并明确默认安装/更新模型：全局通用能力 + 当前项目投影，并修正为按目标平台选择落地；默认回车只投影 Claude Code + Codex，Cursor / OpenClaw 只有作为“正式投影兼容目标”被显式选择时才生成项目文件。
+- **开源 runtime 投影边界** - 新增发布验证器，确保 `.codex/`、`.agents/`、`.claude/`、`.cursor/`、`openclaw/` 等生成的 runtime projection 不进入 GitHub source 或 package files，并明确 Codex adapter / business-role TOML 只是本地宿主投影，不是治理 agent 源码。
+- **平台兼容分层** - 安装契约和验证输出现在会区分正式投影、依赖项目目标和候选 probe；公开文档不再重复上游依赖项目的安装矩阵，也不把它写成 Meta_Kim 支持承诺。
+- **公开平台口径** - 更新 README 徽章、平台支持表和跨平台映射说明，让默认正式投影、显式正式兼容投影、候选兼容 probe 分开可见；同步刷新 Qoder 官方文档链接，并把 Cline 官方 Skills primitive 纳入 catalog。
+- **项目治理体验** - 更新 PRD、setup 与 README 文案：全局 skill 只是可复用的发现入口，其他目录必须先 dry-run 项目 bootstrap 并确认后才允许写入项目文件；`AGENTS.md` 只按平台特性作为上下文资产描述，不再被写成 Codex/Cursor/OpenClaw 的统一入口。
+- **安装范围验证** - 新增 `npm run meta:install-scope:verify`，用临时全局 home 和临时项目 bootstrap 实测各平台项目投影边界，并输出全局层 / 项目层分类结果。
+
 ## [2.8.33] - 2026-06-15
 
 ### 新增
