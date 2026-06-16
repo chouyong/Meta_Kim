@@ -789,6 +789,7 @@ const PROJECT_CLAUDE_HOOK_FILES = new Set([
   "enforce-agent-dispatch.mjs",
   "graphify-context.mjs",
   "hook-i18n.mjs",
+  "medusa-postscan-enqueue.mjs",
   "post-console-log-warn.mjs",
   "post-format.mjs",
   "post-typecheck.mjs",
