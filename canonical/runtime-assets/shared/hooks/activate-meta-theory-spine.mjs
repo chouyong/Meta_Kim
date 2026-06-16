@@ -1,7 +1,8 @@
 import process from "node:process";
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { dirname, join } from "node:path";
 import { readJsonFromStdin } from "./utils.mjs";
 import {
   readSpineState,
@@ -16,6 +17,7 @@ const toolInput = payload?.tool_input ?? {};
 const packageRootArgIndex = process.argv.indexOf("--package-root");
 const packageRootArg =
   packageRootArgIndex >= 0 ? process.argv[packageRootArgIndex + 1] : null;
+const dayKey = new Date().toISOString().slice(0, 10);
 
 const EXPLICIT_META_THEORY_RE =
   /(?:^|\b)(?:\/?meta-theory|meta theory|run meta theory|execute meta theory)(?:\b|$)|元理论/u;
@@ -38,6 +40,11 @@ const PROJECT_BOOTSTRAP_PROBE_DISABLED = {
   disabled: true,
   results: [],
 };
+const UPDATE_REMINDER_DAYS = Number.parseInt(
+  process.env.META_KIM_UPDATE_REMINDER_DAYS || "14",
+  10,
+);
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
 function getPromptText() {
   const candidates = [
@@ -159,6 +166,136 @@ function startPostCopyAutoInit() {
   }
 }
 
+function candidatePackageRoot() {
+  const envRoot = packageRootArg || process.env.META_KIM_PACKAGE_ROOT;
+  if (envRoot && existsSync(join(envRoot, "package.json"))) return envRoot;
+  if (existsSync(join(cwd, "package.json")) && existsSync(join(cwd, "setup.mjs"))) return cwd;
+  return null;
+}
+
+function readPackageVersionAt(root) {
+  if (!root) return "unknown";
+  try {
+    return JSON.parse(readFileSync(join(root, "package.json"), "utf8")).version ?? "unknown";
+  } catch {
+    return "unknown";
+  }
+}
+
+function readPackageUpdateTimestamp(root) {
+  if (!root) return null;
+  const manifestPath = join(root, ".meta-kim", "install-manifest.json");
+  try {
+    const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+    const timestamp = manifest.updatedAt || manifest.createdAt;
+    if (timestamp && !Number.isNaN(new Date(timestamp).getTime())) return timestamp;
+  } catch {
+    // Fall back to package.json mtime when the install manifest is unavailable.
+  }
+  try {
+    return statSync(join(root, "package.json")).mtime.toISOString();
+  } catch {
+    return null;
+  }
+}
+
+function buildPackageUpdateReminder() {
+  const root = candidatePackageRoot();
+  const lastUpdatedAt = readPackageUpdateTimestamp(root);
+  if (!root || !lastUpdatedAt || !Number.isFinite(UPDATE_REMINDER_DAYS)) {
+    return {
+      flag: "unknown",
+      packageRoot: root,
+      packageVersion: readPackageVersionAt(root),
+      lastUpdatedAt,
+      thresholdDays: UPDATE_REMINDER_DAYS,
+    };
+  }
+  const ageDays = Math.max(
+    0,
+    Math.floor((Date.now() - new Date(lastUpdatedAt).getTime()) / MS_PER_DAY),
+  );
+  const flag = ageDays >= UPDATE_REMINDER_DAYS ? "stale_14d" : "fresh";
+  return {
+    flag,
+    packageRoot: root,
+    packageVersion: readPackageVersionAt(root),
+    lastUpdatedAt,
+    ageDays,
+    thresholdDays: UPDATE_REMINDER_DAYS,
+  };
+}
+
+function formatPackageUpdateReminder(reminder) {
+  if (reminder?.flag !== "stale_14d") return null;
+  return [
+    `Meta_Kim installed package has not been updated for ${reminder.ageDays} days.`,
+    "GitHub package.json version is the public latest baseline, but this project can only compare against the locally installed package until you update it.",
+    "If you installed with git clone, run `git pull --ff-only` in the Meta_Kim source package, then `npm run meta:setup:update` or `node setup.mjs --update`.",
+    "If you installed with npx, rerun the npx install/update command, then run project bootstrap dry-run before applying project files.",
+  ].join("\n");
+}
+
+function dailyProbeCachePath() {
+  const stateDir =
+    process.env.META_KIM_GLOBAL_STATE_DIR || join(homedir(), ".meta-kim", "state");
+  return join(stateDir, "project-bootstrap-daily-probe.json");
+}
+
+function readDailyProbeCache() {
+  if (process.env.META_KIM_PROJECT_BOOTSTRAP_DAILY_CACHE === "off") return null;
+  try {
+    return JSON.parse(readFileSync(dailyProbeCachePath(), "utf8"));
+  } catch {
+    return null;
+  }
+}
+
+function writeDailyProbeCache(summary, status = "checked", packageUpdateReminder = null) {
+  if (process.env.META_KIM_PROJECT_BOOTSTRAP_DAILY_CACHE === "off") return;
+  const root = candidatePackageRoot();
+  const filePath = dailyProbeCachePath();
+  const result = summary?.results?.[0] ?? null;
+  const reminder = packageUpdateReminder || buildPackageUpdateReminder();
+  const updateFlag = result?.state?.requiresConfirmation
+    ? "needs_confirmation"
+    : status === "unavailable"
+      ? "unknown"
+      : "current_or_no_confirmation";
+  const record = {
+    schemaVersion: "meta-kim-project-bootstrap-daily-probe-v0.1",
+    dateKey: dayKey,
+    checkedAt: new Date().toISOString(),
+    status,
+    updateFlag,
+    packageRoot: root,
+    packageVersion: readPackageVersionAt(root),
+    packageLastUpdatedAt: reminder.lastUpdatedAt,
+    packageUpdateAgeDays: reminder.ageDays ?? null,
+    packageUpdateReminderFlag: reminder.flag,
+    packageUpdateReminderThresholdDays: reminder.thresholdDays,
+    projectDir: cwd,
+    projectStatus: result?.state?.status ?? null,
+    activeTargets: result?.state?.activeTargets ?? [],
+    requiresConfirmation: result?.state?.requiresConfirmation ?? false,
+  };
+  try {
+    mkdirSync(dirname(filePath), { recursive: true });
+    writeFileSync(filePath, `${JSON.stringify(record, null, 2)}\n`, "utf8");
+  } catch {
+    // Daily probe cache is only a UX throttle. Cache write failures must not
+    // prevent a real dry-run probe or governed execution.
+  }
+}
+
+function dailyProbeCacheFresh() {
+  const cache = readDailyProbeCache();
+  if (!cache || cache.dateKey !== dayKey) return false;
+  const root = candidatePackageRoot();
+  const version = readPackageVersionAt(root);
+  return Boolean(cache.updateFlag) && cache.packageVersion === version;
+}
+
 function projectBootstrapProbeCommands() {
   const args = ["--project-bootstrap", "--dry-run", "--project-dir", cwd, "--json"];
   const commands = [];
@@ -212,13 +349,26 @@ function projectBootstrapManifestExists() {
 function emitProjectBootstrapProbeUnavailable() {
   const context = [
     "Meta_Kim project bootstrap could not run from this prompt entry.",
-    "reason=project bootstrap dry-run unavailable; no project files were written.",
-    "Run `meta-kim project bootstrap --dry-run --project-dir . --json` or reinstall/update Meta_Kim global hooks with package-root evidence before governed execution.",
+    "reason=project bootstrap dry-run unavailable; version status is unknown and no project files were written.",
+    "Run `meta-kim project bootstrap --dry-run --project-dir . --json` from the installed package, or reinstall/update through npx/git clone before applying project files.",
   ].join("\n");
+  const hookEventName = payload?.hook_event_name ?? "UserPromptSubmit";
   process.stdout.write(
     `${JSON.stringify({
       hookSpecificOutput: {
-        hookEventName: payload?.hook_event_name ?? "UserPromptSubmit",
+        hookEventName,
+        additionalContext: context,
+      },
+    })}\n`,
+  );
+}
+
+function emitAdditionalContext(context) {
+  const hookEventName = payload?.hook_event_name ?? "UserPromptSubmit";
+  process.stdout.write(
+    `${JSON.stringify({
+      hookSpecificOutput: {
+        hookEventName,
         additionalContext: context,
       },
     })}\n`,
@@ -259,19 +409,37 @@ function projectBootstrapNeedsConfirmation(summary) {
   );
 }
 
-function emitProjectBootstrapContext(summary) {
+function emitProjectBootstrapContext(summary, packageUpdateReminder = null) {
   const result = summary?.results?.[0];
   if (!result) return;
-  const context = [
+  const hookEventName = payload?.hook_event_name ?? "Skill";
+  const contextParts = [
     "Meta_Kim project bootstrap dry-run found this directory is not ready for project governance.",
     `status=${result.state?.status ?? "unknown"} targets=${(result.state?.activeTargets ?? []).join(",")}`,
     `reason=${result.state?.confirmationReason ?? "project bootstrap confirmation required"}`,
     "Before applying project files, use the dry-run choiceSurface with Claude Code AskUserQuestion or Codex request_user_input; do not write project bootstrap files without confirmation.",
-  ].join("\n");
+  ];
+  const reminderContext = formatPackageUpdateReminder(packageUpdateReminder);
+  if (reminderContext) contextParts.push(reminderContext);
+  const context = contextParts.join("\n");
+  if (hookEventName === "UserPromptSubmit") {
+    process.stdout.write(
+      `${JSON.stringify({
+        decision: "block",
+        reason: context,
+        suppressOriginalPrompt: false,
+        hookSpecificOutput: {
+          hookEventName,
+          additionalContext: context,
+        },
+      })}\n`,
+    );
+    return;
+  }
   process.stdout.write(
     `${JSON.stringify({
       hookSpecificOutput: {
-        hookEventName: payload?.hook_event_name ?? "Skill",
+        hookEventName,
         additionalContext: context,
       },
     })}\n`,
@@ -285,22 +453,35 @@ if (!activation.triggered) {
 
 startPostCopyAutoInit();
 const canonicalPackageRoot = isCanonicalPackageRoot();
-const projectBootstrapProbe = canonicalPackageRoot ? null : runProjectBootstrapProbe();
+const dailyCacheFresh = dailyProbeCacheFresh();
+const packageUpdateReminder = dailyCacheFresh ? null : buildPackageUpdateReminder();
+const packageUpdateReminderContext = formatPackageUpdateReminder(packageUpdateReminder);
+const projectBootstrapProbe =
+  canonicalPackageRoot || dailyCacheFresh ? null : runProjectBootstrapProbe();
 if (
   projectBootstrapProbeUnavailable(projectBootstrapProbe) &&
   !canonicalPackageRoot &&
+  !dailyCacheFresh &&
   !projectBootstrapManifestExists()
 ) {
+  writeDailyProbeCache(null, "unavailable", packageUpdateReminder);
   emitProjectBootstrapProbeUnavailable();
   process.exit(0);
 }
 if (projectBootstrapNeedsConfirmation(projectBootstrapProbe)) {
-  emitProjectBootstrapContext(projectBootstrapProbe);
+  writeDailyProbeCache(projectBootstrapProbe, "needs_confirmation", packageUpdateReminder);
+  emitProjectBootstrapContext(projectBootstrapProbe, packageUpdateReminder);
   process.exit(0);
+}
+if (!projectBootstrapProbeUnavailable(projectBootstrapProbe)) {
+  writeDailyProbeCache(projectBootstrapProbe, "ready_or_no_confirmation", packageUpdateReminder);
 }
 
 const existing = await readSpineState(cwd);
 if (existing && existing.active) {
+  if (packageUpdateReminderContext) {
+    emitAdditionalContext(packageUpdateReminderContext);
+  }
   process.exit(0);
 }
 
@@ -310,4 +491,7 @@ const state = createInitialState({
 });
 
 await writeSpineState(cwd, state);
+if (packageUpdateReminderContext) {
+  emitAdditionalContext(packageUpdateReminderContext);
+}
 process.exit(0);

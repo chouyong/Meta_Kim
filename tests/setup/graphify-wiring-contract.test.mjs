@@ -261,11 +261,17 @@ describe("graphify idempotent wiring (contract)", () => {
     assert.match(src, /runProjectBootstrapProbe/);
     assert.match(src, /projectBootstrapNeedsConfirmation/);
     assert.match(src, /additionalContext/);
+    assert.match(src, /decision: "block"/);
+    assert.match(src, /suppressOriginalPrompt: false/);
     assert.match(src, /critical_fetch_thinking_review_requested/);
     assert.match(src, /natural_language_durable_work/);
     assert.match(claudeSettings, /"UserPromptSubmit"/);
     assert.match(claudeSettings, /activate-meta-theory-spine\.mjs/);
-    assert.doesNotMatch(src, /project-bootstrap-probe\.json/);
+    assert.match(src, /project-bootstrap-daily-probe\.json/);
+    assert.match(src, /updateFlag/);
+    assert.match(src, /packageUpdateReminderFlag/);
+    assert.match(src, /META_KIM_UPDATE_REMINDER_DAYS/);
+    assert.match(src, /META_KIM_PROJECT_BOOTSTRAP_DAILY_CACHE/);
     assert.doesNotMatch(src, /"--apply"/);
   });
 
@@ -288,12 +294,14 @@ describe("graphify idempotent wiring (contract)", () => {
         env: {
           ...process.env,
           META_KIM_PACKAGE_ROOT: root,
+          META_KIM_PROJECT_BOOTSTRAP_DAILY_CACHE: "off",
         },
       });
 
       assert.equal(result.status, 0, result.stderr || result.stdout);
       assert.equal(existsSync(path.join(tempDir, ".meta-kim")), false);
       const output = JSON.parse(result.stdout);
+      assert.equal(output.decision, undefined);
       assert.match(
         output.hookSpecificOutput.additionalContext,
         /project bootstrap dry-run found this directory is not ready/,
@@ -321,11 +329,18 @@ describe("graphify idempotent wiring (contract)", () => {
         encoding: "utf8",
         timeout: 120_000,
         windowsHide: true,
+        env: {
+          ...process.env,
+          META_KIM_PROJECT_BOOTSTRAP_DAILY_CACHE: "off",
+        },
       });
 
       assert.equal(result.status, 0, result.stderr || result.stdout);
       assert.equal(existsSync(path.join(tempDir, ".meta-kim")), false);
       const output = JSON.parse(result.stdout);
+      assert.equal(output.decision, "block");
+      assert.match(output.reason, /project bootstrap dry-run found this directory is not ready/);
+      assert.match(output.reason, /status=missing/);
       assert.match(
         output.hookSpecificOutput.additionalContext,
         /project bootstrap dry-run found this directory is not ready/,
@@ -334,6 +349,126 @@ describe("graphify idempotent wiring (contract)", () => {
       assert.match(output.hookSpecificOutput.additionalContext, /request_user_input/);
     } finally {
       rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  test("project bootstrap prompt-entry probe is throttled once per day across projects", () => {
+    const firstProject = mkdtempSync(path.join(os.tmpdir(), "meta-kim-daily-probe-a-"));
+    const secondProject = mkdtempSync(path.join(os.tmpdir(), "meta-kim-daily-probe-b-"));
+    const globalStateDir = mkdtempSync(path.join(os.tmpdir(), "meta-kim-global-state-"));
+    try {
+      const hookPath = path.join(
+        root,
+        "canonical/runtime-assets/shared/hooks/activate-meta-theory-spine.mjs",
+      );
+      const hookInput = JSON.stringify({
+        hook_event_name: "UserPromptSubmit",
+        prompt:
+          "critical and fetch thinking and review 帮我修复项目入口，完成后实机测试",
+      });
+      const env = {
+        ...process.env,
+        META_KIM_GLOBAL_STATE_DIR: globalStateDir,
+      };
+
+      const first = spawnSync(process.execPath, [hookPath, "--package-root", root], {
+        cwd: firstProject,
+        input: hookInput,
+        encoding: "utf8",
+        timeout: 120_000,
+        windowsHide: true,
+        env,
+      });
+      assert.equal(first.status, 0, first.stderr || first.stdout);
+      const firstOutput = JSON.parse(first.stdout);
+      assert.equal(firstOutput.decision, "block");
+      assert.match(firstOutput.reason, /status=missing/);
+
+      const cachePath = path.join(globalStateDir, "project-bootstrap-daily-probe.json");
+      const cache = JSON.parse(readFileSync(cachePath, "utf8"));
+      assert.equal(cache.status, "needs_confirmation");
+      assert.equal(cache.updateFlag, "needs_confirmation");
+      assert.equal(cache.projectStatus, "missing");
+      assert.equal(cache.packageVersion, JSON.parse(readFileSync(path.join(root, "package.json"), "utf8")).version);
+
+      const second = spawnSync(process.execPath, [hookPath, "--package-root", root], {
+        cwd: secondProject,
+        input: hookInput,
+        encoding: "utf8",
+        timeout: 120_000,
+        windowsHide: true,
+        env,
+      });
+      assert.equal(second.status, 0, second.stderr || second.stdout);
+      assert.equal(second.stdout.trim(), "");
+      assert.equal(
+        existsSync(path.join(secondProject, ".meta-kim", "state", "default", "spine", "spine-state.json")),
+        true,
+      );
+      assert.equal(existsSync(path.join(secondProject, ".meta-kim", "state", "default", "project-bootstrap.json")), false);
+    } finally {
+      rmSync(firstProject, { recursive: true, force: true });
+      rmSync(secondProject, { recursive: true, force: true });
+      rmSync(globalStateDir, { recursive: true, force: true });
+    }
+  });
+
+  test("old installed package reminder is non-blocking and recorded in the daily cache", () => {
+    const tempDir = mkdtempSync(path.join(os.tmpdir(), "meta-kim-update-reminder-project-"));
+    const fakePackageRoot = mkdtempSync(path.join(os.tmpdir(), "meta-kim-old-package-"));
+    const globalStateDir = mkdtempSync(path.join(os.tmpdir(), "meta-kim-update-reminder-state-"));
+    try {
+      const oldTimestamp = new Date(Date.now() - 15 * 24 * 60 * 60 * 1000).toISOString();
+      mkdirSync(path.join(fakePackageRoot, ".meta-kim"), { recursive: true });
+      writeFileSync(
+        path.join(fakePackageRoot, "package.json"),
+        JSON.stringify({ name: "meta-kim", version: "9.9.9" }),
+      );
+      writeFileSync(
+        path.join(fakePackageRoot, ".meta-kim", "install-manifest.json"),
+        JSON.stringify({ updatedAt: oldTimestamp }),
+      );
+      const hookPath = path.join(
+        root,
+        "canonical/runtime-assets/shared/hooks/activate-meta-theory-spine.mjs",
+      );
+
+      const result = spawnSync(process.execPath, [hookPath, "--package-root", fakePackageRoot], {
+        cwd: tempDir,
+        input: JSON.stringify({
+          hook_event_name: "UserPromptSubmit",
+          prompt: "critical and fetch thinking and review 帮我检查并修复项目",
+        }),
+        encoding: "utf8",
+        timeout: 120_000,
+        windowsHide: true,
+        env: {
+          ...process.env,
+          META_KIM_PROJECT_BOOTSTRAP_PROBE: "off",
+          META_KIM_GLOBAL_STATE_DIR: globalStateDir,
+        },
+      });
+
+      assert.equal(result.status, 0, result.stderr || result.stdout);
+      const output = JSON.parse(result.stdout);
+      assert.equal(output.decision, undefined);
+      assert.match(output.hookSpecificOutput.additionalContext, /has not been updated for 15 days/);
+      assert.match(output.hookSpecificOutput.additionalContext, /GitHub package\.json version is the public latest baseline/);
+      assert.equal(
+        existsSync(path.join(tempDir, ".meta-kim", "state", "default", "spine", "spine-state.json")),
+        true,
+      );
+      const cache = JSON.parse(
+        readFileSync(path.join(globalStateDir, "project-bootstrap-daily-probe.json"), "utf8"),
+      );
+      assert.equal(cache.packageVersion, "9.9.9");
+      assert.equal(cache.packageUpdateReminderFlag, "stale_14d");
+      assert.equal(cache.packageUpdateReminderThresholdDays, 14);
+      assert.equal(cache.packageUpdateAgeDays, 15);
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+      rmSync(fakePackageRoot, { recursive: true, force: true });
+      rmSync(globalStateDir, { recursive: true, force: true });
     }
   });
 

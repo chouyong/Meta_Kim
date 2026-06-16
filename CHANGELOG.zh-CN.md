@@ -8,6 +8,25 @@
 
 ## [Unreleased]
 
+## [2.8.42] - 2026-06-16
+
+### 解决的问题
+
+本次解决的是：项目 bootstrap 不能把所有生成路径都当成可替换文件，同时用户也需要分清 GitHub、已安装源包、项目 manifest 到底谁是更新基准。真实项目里可能已经有用户自己的 hooks、commands、agents、skills、MCP 配置、rules 或本地运行状态。现在项目更新会把“是否有新 Meta_Kim 版本”和“这个文件能不能安全写入”拆开，版本比较保持简单，同时避免投射同步覆盖用户自有文件。
+
+### 变更
+
+- **Claude 项目 Bootstrap 可见性** - `activate-meta-theory-spine.mjs` 现在会在 Claude Code `UserPromptSubmit` 的项目 bootstrap 确认场景返回 `decision: "block"`；非 prompt hook 事件仍保持上下文注入。该 hook 仍然只做 dry-run，确认前不会写项目文件。
+- **项目写入所有权边界** - Project bootstrap 现在把共享配置视为只 merge，本地状态永不触碰，Meta_Kim 命名空间或 manifest 已管理文件才可替换，未知既有文件会进入 conflict 并阻断 `--apply`。
+- **版本号作为唯一更新状态** - 只有 `metaKimVersion` 不同才算 stale/update；目标 runtime 改变和同版本文件漂移会分别显示为 `target_scope_changed` 或 `repair_required`。
+- **冲突可见的选择面板** - Dry-run 现在把 `writePreview.projectConflicts` 和 `projectWrites` 分开；有冲突时默认建议先检查，并把 source probe 失败表达为“版本状态未知”，而不是强行当成更新阻断。
+- **每日探测判断标准** - Prompt-entry 项目 bootstrap 探测现在按 `dateKey + updateFlag + packageVersion` 节流；也就是当天已经知道“是否需要更新/确认”后减少跨窗口/跨项目重复提醒，但显式 dry-run/apply 仍保持实时检查。
+- **已安装源包提醒** - Prompt-entry activation 会记录 `packageLastUpdatedAt`、`packageUpdateAgeDays`、`packageUpdateReminderFlag`；如果已安装源包 14 天没有更新，会给非阻塞提醒，让用户先刷新 npx/git-clone 源包，再对项目文件执行 dry-run/apply。
+
+### 验证
+
+- `node --test tests/setup/graphify-wiring-contract.test.mjs`
+
 ## [2.8.41] - 2026-06-16
 
 ### 解决的问题

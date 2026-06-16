@@ -8,6 +8,25 @@ The changelog explains the user-facing problem or risk each release solved, what
 
 ## [Unreleased]
 
+## [2.8.42] - 2026-06-16
+
+### Solved Problem
+
+This release addresses the project-bootstrap risk where Meta_Kim could treat every generated path as safely replaceable, while also leaving users unsure whether GitHub, the installed source package, or the project manifest was the update baseline. Existing projects may already have their own hooks, commands, agents, skills, MCP config, rules, or local runtime state. Project updates now separate "is a new Meta_Kim version available?" from "is this file safe to write?", so version comparison stays simple while user-owned files are not overwritten by projection sync.
+
+### Changed
+
+- **Claude Project Bootstrap Visibility** - `activate-meta-theory-spine.mjs` now returns `decision: "block"` for Claude Code `UserPromptSubmit` project-bootstrap confirmation cases, while keeping non-prompt hook events on context injection. The hook still performs only a dry-run and never writes project files before confirmation.
+- **Ownership-Safe Project Writes** - Project bootstrap now treats shared configs as merge-only, local state as never-touch, Meta_Kim namespaced or manifest-managed files as replaceable, and unknown existing files as conflicts that block `--apply`.
+- **Version-Only Update Status** - A different `metaKimVersion` is the only stale/update signal. Target-scope changes and same-version file drift are reported separately as `target_scope_changed` or `repair_required`.
+- **Conflict-Aware Choice Surface** - Dry-runs now expose `writePreview.projectConflicts` separately from `projectWrites`, recommend inspection when conflicts exist, and keep source-probe failures as "version status unknown" rather than a forced update block.
+- **Daily Probe Standard** - Prompt-entry project bootstrap probes are throttled by `dateKey + updateFlag + packageVersion`. This reduces repeated cross-window/project prompts after the update-needed flag is known while keeping explicit dry-run/apply checks fresh.
+- **Installed Source Reminder** - Prompt-entry activation records `packageLastUpdatedAt`, `packageUpdateAgeDays`, and `packageUpdateReminderFlag`; when the installed source package has not been updated for 14 days, Meta_Kim gives a non-blocking reminder to refresh the npx/git-clone source before applying project files.
+
+### Verification
+
+- `node --test tests/setup/graphify-wiring-contract.test.mjs`
+
 ## [2.8.41] - 2026-06-16
 
 ### Solved Problem
