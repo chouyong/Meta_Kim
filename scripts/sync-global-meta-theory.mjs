@@ -75,6 +75,7 @@ const GLOBAL_HOOK_PACKAGE_FILES = new Set([
   "stop-compaction.mjs",
   "stop-console-log-audit.mjs",
   "stop-completion-guard.mjs",
+  "spine-state.mjs",
   "utils.mjs",
 ]);
 const RETIRED_HOOK_FILES = ["pre-git-push-confirm.mjs"];
