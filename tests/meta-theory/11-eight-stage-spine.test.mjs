@@ -1120,7 +1120,12 @@ describe("Part E: valid run artifact contains all 8-stage products", async () =>
       fixture.cardPlanPacket,
       "valid-run.json must have cardPlanPacket",
     );
-    assert.ok(fixture.cardPlanPacket.cards, "cardPlanPacket must have cards");
+    assert.ok(fixture.cardPlanPacket.cardEvents, "cardPlanPacket must have cardEvents");
+    assert.ok(fixture.cardPlanPacket.cardTypeCatalog, "cardPlanPacket must have cardTypeCatalog");
+    assert.ok(
+      fixture.cardPlanPacket.cardTypeDecisions,
+      "cardPlanPacket must have cardTypeDecisions",
+    );
   });
 
   test("valid-run.json fixture contains dispatchEnvelopePacket", async () => {
