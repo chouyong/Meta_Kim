@@ -2186,7 +2186,9 @@
       "requiredFields": [
         "dealerOwner",
         "dealerMode",
-        "cards",
+        "cardEvents",
+        "cardTypeCatalog",
+        "cardTypeDecisions",
         "deliveryShells",
         "dealStandard",
         "silenceDecision",
