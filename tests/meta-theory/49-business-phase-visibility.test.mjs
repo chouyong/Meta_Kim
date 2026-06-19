@@ -47,7 +47,7 @@ describe("49 - 11-phase business workflow visibility", () => {
     }
   });
 
-  test("CLI emits 11-phase status notice by default", async () => {
+  test("CLI emits 11-phase status notice when explicitly requested", async () => {
     const tempDir = await mkdtemp(path.join(os.tmpdir(), "meta-kim-11-phase-cli-"));
     try {
       const result = spawnSync(
@@ -62,6 +62,7 @@ describe("49 - 11-phase business workflow visibility", () => {
           tempDir,
           "--db",
           path.join(tempDir, "runs.sqlite"),
+          "--emit-conversation-notice",
         ],
         { cwd: process.cwd(), encoding: "utf8" }
       );
