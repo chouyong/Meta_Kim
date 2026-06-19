@@ -140,6 +140,31 @@ function isBashSpineStateWrite() {
   if (toolName !== "Bash") return false;
   const command = String(toolInput?.command || "");
   if (!command.trim()) return false;
+  if (isLegacyShellSpineStateWrite(command)) {
+    return true;
+  }
+
+  const segments = bashReadonlyInternals
+    .splitSegments(command)
+    .map((segment) => segment.trim())
+    .filter(Boolean);
+  if (!segments.length) return false;
+
+  let sawSpineWrite = false;
+  for (const segment of segments) {
+    if (isReadOnlyBash(segment)) {
+      continue;
+    }
+    if (!isSpineStateWriteSegment(segment)) {
+      return false;
+    }
+    sawSpineWrite = true;
+  }
+
+  return sawSpineWrite;
+}
+
+function isLegacyShellSpineStateWrite(command) {
   const normalized = command.replace(/\\/g, "/").toLowerCase();
   const stateDir = SPINE_STATE_DIR.replace(/\\/g, "/").toLowerCase();
   const touchesSpine =
@@ -149,6 +174,69 @@ function isBashSpineStateWrite() {
   if (!touchesSpine) return false;
 
   return /(^|[\s|;&])(?:set-content|out-file|add-content|new-item|remove-item|move-item|copy-item)\b|[>]{1,2}/i.test(command);
+}
+
+function isSpineStateWriteSegment(segment) {
+  const normalized = segment.replace(/\\/g, "/").toLowerCase();
+  const stateDir = SPINE_STATE_DIR.replace(/\\/g, "/").toLowerCase();
+  const touchesSpine =
+    normalized.includes(`${stateDir}/`) ||
+    normalized.includes(".meta-kim/state/default/spine/") ||
+    normalized.includes("spine-state.json");
+  if (!touchesSpine) return false;
+
+  const hasShellWritePrimitive =
+    /(^|[\s|;&])(?:set-content|out-file|add-content|new-item|remove-item|move-item|copy-item)\b|[>]{1,2}/i.test(
+      segment,
+    );
+  if (hasShellWritePrimitive) {
+    return true;
+  }
+
+  return isNodeRepairOnlyFetchRecordWrite(segment);
+}
+
+function isNodeRepairOnlyFetchRecordWrite(segment) {
+  const stripped = bashReadonlyInternals
+    .stripEnvPrefix(segment.trim())
+    .join(" ");
+  const normalized = stripped.replace(/\\/g, "/").toLowerCase();
+  if (!/^(?:node|node\.exe)(?:\s|$)/.test(normalized)) return false;
+  if (!nodeWriteFileSyncTargetsSpineState(stripped)) return false;
+  if (!normalized.includes("writefilesync")) return false;
+  if (!normalized.includes("fetchrecord")) return false;
+  if (!normalized.includes("repaironly")) return false;
+  if (!normalized.includes("executionclearance")) return false;
+  return /executionclearance\s*[:=]\s*false/i.test(stripped);
+}
+
+function nodeWriteFileSyncTargetsSpineState(scriptText) {
+  const normalized = scriptText.replace(/\\/g, "/");
+  if (
+    /writeFileSync\s*\(\s*["'][^"']*spine-state\.json["']/i.test(normalized)
+  ) {
+    return true;
+  }
+
+  const spinePathVariables = new Set();
+  const assignmentPattern =
+    /\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*["']([^"']*spine-state\.json)["']/gi;
+  for (const match of normalized.matchAll(assignmentPattern)) {
+    spinePathVariables.add(match[1]);
+  }
+
+  for (const variableName of spinePathVariables) {
+    const escaped = variableName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const writePattern = new RegExp(
+      `writeFileSync\\s*\\(\\s*${escaped}\\s*,`,
+      "i",
+    );
+    if (writePattern.test(normalized)) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 function isPlanningFile() {

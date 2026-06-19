@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import {
   existsSync,
+  cpSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -22,7 +23,7 @@ function runSyncCheck(targets) {
   return (result.stdout || "") + (result.stderr || "");
 }
 
-function runSyncCheckResult(targets) {
+function runSyncCheckResult(targets, extraEnv = {}) {
   const result = spawnSync(
     process.execPath,
     [
@@ -36,10 +37,19 @@ function runSyncCheckResult(targets) {
       cwd: repoRoot,
       encoding: "utf8",
       stdio: ["ignore", "pipe", "pipe"],
+      env: { ...process.env, ...extraEnv },
     },
   );
 
   return result;
+}
+
+function createTempSourceRepoFixture() {
+  const tempRoot = mkdtempSync(join(os.tmpdir(), "meta-kim-source-repo-"));
+  cpSync(join(repoRoot, "package.json"), join(tempRoot, "package.json"));
+  cpSync(join(repoRoot, "config"), join(tempRoot, "config"), { recursive: true });
+  cpSync(join(repoRoot, "canonical"), join(tempRoot, "canonical"), { recursive: true });
+  return tempRoot;
 }
 
 function runSyncGlobal(targets, extraEnv = {}) {
@@ -63,41 +73,42 @@ function runSyncGlobal(targets, extraEnv = {}) {
 
 describe("runtime hook sync contract", () => {
   test("source repo project check treats absent runtime projections as expected", () => {
-    const result = runSyncCheckResult("claude,codex,cursor,openclaw");
-    assert.equal(result.status, 0, result.stderr || result.stdout);
+    const tempRoot = createTempSourceRepoFixture();
+    try {
+      const result = runSyncCheckResult("claude,codex,cursor,openclaw", {
+        META_KIM_REPO_ROOT: tempRoot,
+      });
+      assert.equal(result.status, 0, result.stderr || result.stdout);
 
-    const summary = JSON.parse(result.stdout);
-    assert.equal(summary.status, "source_repo_project_projections_absent");
-    assert.equal(summary.total, 0);
-    assert.equal(summary.sourceRepoProjectProjections.expectedAbsent, true);
-    assert.equal(summary.staleFiles.length, 0);
-    assert.ok(summary.sourceRepoProjectProjections.skippedStaleFiles > 0);
+      const summary = JSON.parse(result.stdout);
+      assert.equal(summary.status, "source_repo_project_projections_absent");
+      assert.equal(summary.total, 0);
+      assert.equal(summary.sourceRepoProjectProjections.expectedAbsent, true);
+      assert.equal(summary.staleFiles.length, 0);
+      assert.ok(summary.sourceRepoProjectProjections.skippedStaleFiles > 0);
+    } finally {
+      rmSync(tempRoot, { recursive: true, force: true });
+    }
   });
 
   test("source repo project check ignores empty projection directories", () => {
-    const claudeRoot = join(repoRoot, ".claude");
+    const tempRoot = createTempSourceRepoFixture();
+    const claudeRoot = join(tempRoot, ".claude");
     const emptyHooksDir = join(claudeRoot, "hooks");
-    const rootExisted = existsSync(claudeRoot);
-    const hooksExisted = existsSync(emptyHooksDir);
 
     try {
-      if (!hooksExisted) {
-        mkdirSync(emptyHooksDir, { recursive: true });
-      }
+      mkdirSync(emptyHooksDir, { recursive: true });
 
-      const result = runSyncCheckResult("claude");
+      const result = runSyncCheckResult("claude", {
+        META_KIM_REPO_ROOT: tempRoot,
+      });
       assert.equal(result.status, 0, result.stderr || result.stdout);
 
       const summary = JSON.parse(result.stdout);
       assert.equal(summary.status, "source_repo_project_projections_absent");
       assert.equal(summary.total, 0);
     } finally {
-      if (!hooksExisted) {
-        rmSync(emptyHooksDir, { recursive: true, force: true });
-      }
-      if (!rootExisted) {
-        rmSync(claudeRoot, { recursive: true, force: true });
-      }
+      rmSync(tempRoot, { recursive: true, force: true });
     }
   });
 

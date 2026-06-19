@@ -91,5 +91,5 @@ for (const doc of REQUIRED_PUBLIC_DOCS) {
 }
 
 console.log(
-  `public docs assets valid: ${referenced.size} README image assets and ${REQUIRED_PUBLIC_DOCS.length} project manual(s) checked`,
+  `public docs image assets valid: ${referenced.size} README image assets and ${REQUIRED_PUBLIC_DOCS.length} project manual(s) checked`,
 );

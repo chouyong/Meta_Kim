@@ -2211,6 +2211,47 @@ describe("Part F2: choice surface runtime gate", async () => {
     assert.match(businessWrite.stdout, /permissionDecision/);
   });
 
+  test("Fetch self-lock allows repair-only Node fetchRecord spine-state write", () => {
+    const state = {
+      ...createInitialState({
+        taskClassification: "meta_theory_auto",
+        triggerReason: "test",
+      }),
+      currentStage: "fetch",
+      dispatchChain: {
+        fetch: ["meta-sentinel"],
+      },
+    };
+    delete state.fetchRecord;
+
+    const repairWrite = runEnforceHook(state, {
+      tool_name: "Bash",
+      tool_input: {
+        command:
+          "node -e \"const fs=require('fs'); " +
+          "const p='.meta-kim/state/test/spine/spine-state.json'; " +
+          "const s=JSON.parse(fs.readFileSync(p,'utf8')); " +
+          "s.fetchRecord={status:'repair_only_fetch_record',repairOnly:true,capabilitySearchPerformed:false,executionClearance:false,researchRequired:false,researchValidationPerformed:false}; " +
+          "fs.writeFileSync(p, JSON.stringify(s, null, 2));\"",
+      },
+    });
+    assert.equal(repairWrite.status, 0);
+    assert.doesNotMatch(repairWrite.stdout, /permissionDecision/);
+
+    const businessNodeWrite = runEnforceHook(state, {
+      tool_name: "Bash",
+      tool_input: {
+        command:
+          "node -e \"const fs=require('fs'); " +
+          "const p='src/main.go'; " +
+          "const note='spine-state.json fetchRecord repairOnly executionClearance:false'; " +
+          "fs.writeFileSync(p, note);\"",
+      },
+    });
+    assert.equal(businessNodeWrite.status, 0);
+    assert.match(businessNodeWrite.stdout, /permissionDecision/);
+  });
+
   test("simpleMode residue in spine state cannot skip dispatch governance", () => {
     const state = {
       ...createInitialState({
