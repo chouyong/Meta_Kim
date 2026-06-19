@@ -30,6 +30,14 @@ describe("Claude settings hook command rendering", () => {
       commands.some((entry) => entry.includes("pre-git-push-confirm.mjs")),
       false,
     );
+    assert.equal(
+      commands.some((entry) => entry.includes("stop-save-progress.mjs")),
+      true,
+    );
+    assert.equal(
+      commands.some((entry) => entry.includes("stop-compaction.mjs")),
+      true,
+    );
   });
 
   test("Claude global hook template keeps native HookPrompt before Meta_Kim spine", () => {
@@ -130,13 +138,13 @@ describe("Claude settings hook command rendering", () => {
     const merged = mergeGlobalMetaKimHooksIntoSettings(
       {
         hooks: {
-          Stop: [
+          PostToolUse: [
             {
               hooks: [
                 {
                   type: "command",
                   command:
-                    'node "C:/Users/Example/.claude/hooks/meta-kim/stop-compaction.mjs"',
+                    'node "C:/Users/Example/.claude/hooks/meta-kim/post-format.mjs"',
                 },
               ],
             },
@@ -146,7 +154,7 @@ describe("Claude settings hook command rendering", () => {
       template,
     );
 
-    assert.equal(merged.hooks.Stop, undefined);
+    assert.equal(merged.hooks.PostToolUse, undefined);
     assert.match(
       JSON.stringify(merged.hooks),
       /block-dangerous-bash\.mjs/,
@@ -345,4 +353,5 @@ describe("Claude settings hook command rendering", () => {
     assert.doesNotMatch(JSON.stringify(merged.hooks), /meta-kim-memory-save\.mjs/);
     assert.match(JSON.stringify(merged.hooks), /graphify-context\.mjs/);
   });
+
 });

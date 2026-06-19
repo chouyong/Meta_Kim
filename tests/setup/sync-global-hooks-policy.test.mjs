@@ -78,6 +78,8 @@ describe("sync-global-meta-theory hook policy", () => {
         "activate-meta-theory-spine.mjs",
         "block-dangerous-bash.mjs",
         "spine-state.mjs",
+        "stop-save-progress.mjs",
+        "stop-memory-save.mjs",
         "utils.mjs",
       ]) {
         await readFile(path.join(hookDir, fileName), "utf8");
@@ -106,6 +108,17 @@ describe("sync-global-meta-theory hook policy", () => {
         JSON.stringify(promptHooks),
         /hookprompt-adapter\.mjs/,
         "Claude must not wrap native HookPrompt through the Meta_Kim adapter",
+      );
+      const stopHooks = settings.hooks?.Stop?.flatMap(
+        (block) => block.hooks ?? [],
+      ) ?? [];
+      assert.ok(
+        stopHooks.some((hook) => hook.command.includes("stop-save-progress.mjs")),
+        "global Claude settings must register the continuation progress Stop hook",
+      );
+      assert.ok(
+        stopHooks.some((hook) => hook.command.includes("stop-compaction.mjs")),
+        "global Claude settings must register governed compaction Stop hook",
       );
     });
   });
@@ -346,7 +359,9 @@ describe("sync-global-meta-theory hook policy", () => {
 
       await runScript(["--targets", "claude", "--with-global-hooks"], env);
       const repaired = JSON.parse(await readFile(settingsPath, "utf8"));
-      assert.equal(repaired.hooks.Stop, undefined);
+      const repairedStop = JSON.stringify(repaired.hooks.Stop ?? []);
+      assert.doesNotMatch(repairedStop, /missing-retired-hook\.mjs/);
+      assert.match(repairedStop, /stop-save-progress\.mjs/);
     });
   });
 

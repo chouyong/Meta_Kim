@@ -837,6 +837,7 @@ const GLOBAL_META_KIM_HOOK_PACKAGE_FILES = new Set([
   "activate-meta-theory-spine.mjs",
   "bash-readonly-whitelist.mjs",
   "block-dangerous-bash.mjs",
+  "ecc-permission-cache-wrapper.mjs",
   "enforce-agent-dispatch.mjs",
   "graphify-context.mjs",
   "post-console-log-warn.mjs",
@@ -845,6 +846,8 @@ const GLOBAL_META_KIM_HOOK_PACKAGE_FILES = new Set([
   "stop-compaction.mjs",
   "stop-completion-guard.mjs",
   "stop-console-log-audit.mjs",
+  "stop-memory-save.mjs",
+  "stop-save-progress.mjs",
   "stop-spine-cleanup.mjs",
   "subagent-context.mjs",
   "utils.mjs",
@@ -2311,10 +2314,6 @@ async function syncClaudeProjection(
   canonicalSkills,
   changedFiles,
 ) {
-  // Global-hooks migration: remove project-level Meta_Kim hook files in
-  // <target>/.claude/hooks/ so that ~/.claude/hooks/meta-kim/ becomes the
-  // single source of truth. No backup (per project policy). User-authored
-  // hook files (not on the whitelist) are preserved.
   const {
     claudeAgentsProjectionDir,
     claudeSkillsProjectionDir,
@@ -2324,10 +2323,16 @@ async function syncClaudeProjection(
     claudeMcpProjectionPath,
     displayPaths,
   } = dirs;
-  const inRepoRoot = claudeSettingsProjectionPath.includes(repoRoot);
   const globalScope = dirs.scope === "global";
-  if (inRepoRoot) {
-    await removeProjectMetaKimHooks(dirs.claudeHooksProjectionDir, "claude");
+  const targetHasMetaRuntimeServer =
+    typeof claudeMcpProjectionPath === "string" &&
+    claudeMcpProjectionPath.includes(repoRoot);
+  if (globalScope) {
+    await syncGlobalHookPackage(
+      claudeHooksProjectionDir,
+      displayPaths.claudeHooks,
+      changedFiles,
+    );
   }
 
   for (const agent of agents) {
@@ -2366,7 +2371,7 @@ async function syncClaudeProjection(
     changedFiles.push(`${displayPaths.claudeCommands}/meta-theory.md`);
   }
 
-  if (!inRepoRoot) {
+  if (!globalScope) {
     const hookEntries = (
       await fs.readdir(canonicalClaudeHooksDir, { withFileTypes: true })
     )
@@ -2437,7 +2442,7 @@ async function syncClaudeProjection(
   let finalSettingsContent;
   const canonicalParsed = JSON.parse(settingsContent);
 
-  if (inRepoRoot) {
+  if (!globalScope) {
     let base = {};
     try {
       const prev = await fs.readFile(claudeSettingsProjectionPath, "utf8");
@@ -2480,10 +2485,9 @@ async function syncClaudeProjection(
     changedFiles.push(displayPaths.claudeSettings);
   }
   if (claudeMcpProjectionPath) {
-    // Only write meta-kim-runtime MCP config when inside the Meta_Kim repo.
-    // The MCP server script (scripts/mcp/meta-runtime-server.mjs) only exists
-    // inside this repo — writing it to external projects breaks MCP startup.
-    if (inRepoRoot) {
+    // Only write meta-kim-runtime MCP config when the target contains the
+    // server script; writing that command elsewhere breaks MCP startup.
+    if (targetHasMetaRuntimeServer) {
       const renderedMcpContent = renderMetaKimRuntimeMcp(mcpContent, repoRoot);
       if (
         (await writeGeneratedFile(claudeMcpProjectionPath, renderedMcpContent))

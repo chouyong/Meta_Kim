@@ -204,7 +204,7 @@ describe("setup update default flow", () => {
     assert.match(source, /projectCleanupMode/);
     assert.match(source, /runProjectCleanupCli/);
     assert.match(source, /--cleanup-projects/);
-    assert.match(source, /includeSelfCleanup/);
+    assert.doesNotMatch(source, /includeSelfCleanup/);
     assert.match(source, /if \(deployDirs\.length > 0\) \{\s*await copyToDeployDirs\(activeTargets, deployDirs\);/);
     assert.match(source, /copyToDeployDirs\(activeTargets, targetDirs\)/);
     assert.match(source, /projectDeployProtectionNote/);
@@ -320,10 +320,10 @@ describe("setup update default flow", () => {
       /reportProjectAssetCleanup\(cleanup, \{ reason: "global_redundancy" \}\)/,
       "global cleanup must keep global redundancy wording",
     );
-    assert.match(
+    assert.doesNotMatch(
       cleanupSource,
       /resolve\(targetDir\) !== resolve\(PROJECT_DIR\)/,
-      "global cleanup must skip the self-host Meta_Kim source workspace by default",
+      "global cleanup must not skip the Meta_Kim source workspace by default",
     );
   });
 

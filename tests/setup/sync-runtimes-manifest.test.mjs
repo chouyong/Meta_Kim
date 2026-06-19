@@ -343,6 +343,15 @@ describe("sync-runtimes / Codex project hooks", () => {
     assert.equal(commands.some((command) => command.includes("CMD=$(python3")), false);
   });
 
+  test("Claude sync branches on requested scope instead of repository identity", async () => {
+    const source = await readFsFile("scripts/sync-runtimes.mjs", "utf8");
+
+    assert.doesNotMatch(source, /includeProjectHooks/);
+    assert.match(source, /const globalScope = dirs\.scope === "global"/);
+    assert.match(source, /if \(!globalScope\) \{[\s\S]*mergeRepoClaudeSettings/);
+    assert.match(source, /else \{[\s\S]*mergeGlobalMetaKimHooksIntoSettings/);
+  });
+
   test("project Codex hooks leave global-only packages out", () => {
     const config = buildCodexProjectHooksJson({ packageRoot: "D:/Meta_Kim" });
 
