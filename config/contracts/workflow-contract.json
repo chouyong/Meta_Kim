@@ -129,6 +129,112 @@
       "evolve",
       "mirror"
     ],
+    "decisionContextPolicy": {
+      "schemaVersion": "decision-context-policy-v0.1",
+      "requiredDecisionRecordFields": [
+        "scopeType",
+        "scopeId",
+        "responsibility",
+        "decisionQuestion",
+        "informationToCollect",
+        "candidateOptions",
+        "recommendationOrNextState",
+        "userChoiceImpact",
+        "evidenceRefs"
+      ],
+      "scopeTypes": [
+        "spine_stage",
+        "business_phase",
+        "meta_phase",
+        "business_lane",
+        "capability_route",
+        "owner_weapon_dependency",
+        "runtime_os_support",
+        "tool_or_provider",
+        "verification_path",
+        "evolution_writeback",
+        "user_interaction_surface"
+      ],
+      "rule": "Decision context is produced at every responsibility boundary, not only by Fetch and not only by the eight-stage spine. Each decision record must explain what the current owner is responsible for deciding, what information changes that decision, which options exist, and when the user must choose."
+    },
+    "phaseDecisionSemantics": {
+      "schemaVersion": "business-phase-decision-semantics-v0.1",
+      "requiredPhaseFields": [
+        "responsibility",
+        "decisionQuestion",
+        "informationToCollect",
+        "decisionOutputs"
+      ],
+      "phases": {
+        "direction": {
+          "responsibility": "lock the business outcome, value, audience, success standard, and non-goals",
+          "decisionQuestion": "What should this run optimize for, and what should it explicitly not do?",
+          "informationToCollect": ["user pain", "business value", "audience", "success standard", "non-goals"],
+          "decisionOutputs": ["outcome direction", "acceptance standard", "scope boundary"]
+        },
+        "planning": {
+          "responsibility": "choose business lanes, owners, dependencies, ordering, and omitted lanes",
+          "decisionQuestion": "Which lanes are required, optional, omitted, blocked, or parallelizable for this deliverable?",
+          "informationToCollect": ["deliverable type", "lane candidates", "capability needs", "dependencies", "risk and cost"],
+          "decisionOutputs": ["businessFlowBlueprintPacket", "laneDependencies", "omittedLanes"]
+        },
+        "execution": {
+          "responsibility": "carry out the selected plan while detecting route-changing discoveries",
+          "decisionQuestion": "Can the selected plan continue, or did execution reveal a new branch that needs user choice?",
+          "informationToCollect": ["worker evidence", "side effects", "new blockers", "scope changes", "artifact state"],
+          "decisionOutputs": ["continue", "pause", "return to planning", "record execution evidence"]
+        },
+        "review": {
+          "responsibility": "decide whether output and upstream stages meet the quality bar",
+          "decisionQuestion": "Should the result be accepted, revised, blocked, or sent back for a user trade-off choice?",
+          "informationToCollect": ["quality findings", "upstream completeness", "acceptance fit", "risk trade-offs"],
+          "decisionOutputs": ["accept", "revise", "block", "ask preference"]
+        },
+        "meta_review": {
+          "responsibility": "audit the Review standard and public-ready or release-grade claims",
+          "decisionQuestion": "Is the review trustworthy enough for the claim being made?",
+          "informationToCollect": ["review coverage", "bias risks", "evidence tier", "public-ready intent"],
+          "decisionOutputs": ["approve review standard", "return to review", "downgrade claim", "block overclaim"]
+        },
+        "revision": {
+          "responsibility": "choose the smallest correction that resolves accepted findings without drifting scope",
+          "decisionQuestion": "Which findings must be fixed now, which are deferred, and what should not be rewritten?",
+          "informationToCollect": ["accepted findings", "revision cost", "scope boundary", "regression risk"],
+          "decisionOutputs": ["revision plan", "deferred findings", "scope guard"]
+        },
+        "verify": {
+          "responsibility": "decide which evidence proves the claim and which claims remain partial",
+          "decisionQuestion": "What fresh evidence closes the run, and what remains unverified or blocked?",
+          "informationToCollect": ["test results", "runtime evidence", "artifact proof", "remaining risk"],
+          "decisionOutputs": ["verified", "partial", "blocked", "accepted risk"]
+        },
+        "summary": {
+          "responsibility": "decide what the user needs to know to accept, hand off, or continue",
+          "decisionQuestion": "What result, evidence, limitation, and next action should be visible to the user?",
+          "informationToCollect": ["primary deliverable", "verification status", "remaining risks", "handoff needs"],
+          "decisionOutputs": ["closure summary", "known limits", "next action"]
+        },
+        "feedback": {
+          "responsibility": "decide whether user feedback changes goal, scope, acceptance, or next iteration",
+          "decisionQuestion": "Does feedback accept the result, request revision, or create a new goal?",
+          "informationToCollect": ["user acceptance", "requested changes", "new constraints", "dissatisfaction signals"],
+          "decisionOutputs": ["accepted", "revise", "new goal", "blocked awaiting input"]
+        },
+        "evolve": {
+          "responsibility": "decide what reusable lesson or capability gap should be retained",
+          "decisionQuestion": "What should change for future runs, and what explicitly should not be written back?",
+          "informationToCollect": ["review scars", "verification gaps", "capability gaps", "reusable patterns"],
+          "decisionOutputs": ["writeback", "none-with-reason", "scarPacket", "capabilityGapPacket"]
+        },
+        "mirror": {
+          "responsibility": "decide which runtime, document, graph, or public surfaces must be refreshed",
+          "decisionQuestion": "Which mirrors need update to keep source, projections, and user-visible surfaces consistent?",
+          "informationToCollect": ["changed source paths", "projection targets", "public surfaces", "graph freshness"],
+          "decisionOutputs": ["sync required", "graph rebuild required", "mirror skipped with reason", "public surface updated"]
+        }
+      },
+      "rule": "Business-phase decisions must match the phase responsibility. A phase may not report generic decisionImpact text that could belong to any other phase."
+    },
     "phaseTriggerStandard": {
       "schemaVersion": "business-phase-trigger-standard-v0.1",
       "passThreshold": 80,
@@ -250,6 +356,35 @@
       "propose",
       "report"
     ],
+    "phaseDecisionSemantics": {
+      "schemaVersion": "meta-phase-decision-semantics-v0.1",
+      "requiredPhaseFields": [
+        "responsibility",
+        "decisionQuestion",
+        "informationToCollect",
+        "decisionOutputs"
+      ],
+      "phases": {
+        "analyze": {
+          "responsibility": "diagnose the governance problem and evidence boundary",
+          "decisionQuestion": "What is the real governance problem and which evidence changes that diagnosis?",
+          "informationToCollect": ["user correction", "current contract", "runtime evidence", "contradictions"],
+          "decisionOutputs": ["diagnosis", "evidence boundary", "blocked assumptions"]
+        },
+        "propose": {
+          "responsibility": "compare possible governance changes before mutation",
+          "decisionQuestion": "Which change path best fits the diagnosis, and what alternatives are rejected?",
+          "informationToCollect": ["candidate changes", "risk", "testability", "compatibility"],
+          "decisionOutputs": ["recommended change", "rejected alternatives", "test plan"]
+        },
+        "report": {
+          "responsibility": "make the decision, evidence, and remaining risk readable to the maintainer",
+          "decisionQuestion": "What should the maintainer choose, accept, verify, or defer after this meta run?",
+          "informationToCollect": ["diff summary", "verification result", "remaining risk", "follow-up options"],
+          "decisionOutputs": ["decision report", "verification status", "next decision"]
+        }
+      }
+    },
     "labels": {
       "zh-CN": {
         "analyze": "Meta Analysis (zh-CN)",
@@ -2038,8 +2173,47 @@
         "Fetch",
         "Thinking",
         "Execution",
-        "Review"
+        "Review",
+        "Meta-Review",
+        "Verification",
+        "Evolution",
+        "business_phase",
+        "meta_phase",
+        "business_lane",
+        "capability_route",
+        "owner_weapon_dependency",
+        "runtime_os_support",
+        "tool_or_provider",
+        "verification_path",
+        "evolution_writeback",
+        "user_interaction_surface"
       ],
+      "decisionImpactScopePolicy": {
+        "description": "stageAffected is historical naming. It may point to a spine stage or to a non-spine responsibility boundary where information changes the user's decision.",
+        "spineStageValues": [
+          "Critical",
+          "Fetch",
+          "Thinking",
+          "Execution",
+          "Review",
+          "Meta-Review",
+          "Verification",
+          "Evolution"
+        ],
+        "nonSpineValues": [
+          "business_phase",
+          "meta_phase",
+          "business_lane",
+          "capability_route",
+          "owner_weapon_dependency",
+          "runtime_os_support",
+          "tool_or_provider",
+          "verification_path",
+          "evolution_writeback",
+          "user_interaction_surface"
+        ],
+        "rule": "Decision impact coverage must include the responsibility boundary that changes the user's choice. Do not collapse all evidence into Fetch or Thinking when another stage, phase, lane, capability, tool, verification, or evolution boundary owns the decision."
+      },
       "researchCapabilityDiscovery": {
         "requiredFields": [
           "requiredCapabilities",
