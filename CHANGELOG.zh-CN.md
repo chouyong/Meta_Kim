@@ -8,6 +8,28 @@
 
 ## [Unreleased]
 
+## [2.8.45] - 2026-06-20
+
+### 解决的问题
+
+本次发布补上 Meta_Kim 的 Dynamic Workflow / LangGraph-style governed execution 声明与用户可检查证据之间的断层。默认发布面现在记录最新的 hook 自锁修复，确保私有项目 manual 不进入开源 source 集合，并附带一份 full-pass governed execution artifact，用来证明能力发现、worker fan-out、host invocation truth 与 Verification 已经跑通；同时不把它越级说成 release-grade live all-runtime ready。
+
+### 变更
+
+- **Dynamic Workflow 证据闭环** - 复测 `C:/Users/Kim/AppData/Local/Temp/meta-kim-host-full-db9a8dd9aa5c43418aba89f7b210bd57/artifacts/goalpro-codex-host-full-proof.json`，确认其中包含 `fetchPacket`、`capabilityInventory`、`capabilityRoute`、`dynamicWorkflowRuntimePacket`、`langGraphRunPacket`、`workerTaskPackets`、`workerResultPackets` 与 `verificationPacket`。
+- **Host Invocation Truth** - 确认真实 Codex host 证据覆盖 `spawn_agent_result`、`agent_team_result` 与 `skill_application`，并有 MCP、command/script、runtime-tool 三类 fresh local probes；artifact 中 `realInvocationCoverage.missingFamilies` 为空。
+- **Hook 自锁修复** - Fetch 阶段 dispatch gate 现在可以受限修复自己的 `fetchRecord` 状态，同时在能力发现和 execution clearance 前仍然阻止业务文件写入。
+- **开源 Source 边界** - 从公开 source 树移除私有 manual 文档，并让 README 引用保持在受支持的公开文档面上。
+- **发布元数据对齐** - 将包元数据提升到 `2.8.45`，确保 source tree、tag 和 GitHub Release 指向同一版本。
+
+### 验证
+
+- `npm run meta:validate:run -- C:/Users/Kim/AppData/Local/Temp/meta-kim-host-full-db9a8dd9aa5c43418aba89f7b210bd57/artifacts/goalpro-codex-host-full-proof.json`
+- `npm run meta:test:meta-theory`
+- `npm run meta:release:smoke`
+- `git diff --check`
+- Public-ready 边界保持诚实：`publicReadyDecision.publicReady = false`，因为本次没有附带 release-grade live all-runtime evidence。
+
 ## [2.8.44] - 2026-06-19
 
 ### 解决的问题

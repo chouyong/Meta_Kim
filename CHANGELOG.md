@@ -8,6 +8,28 @@ The changelog explains the user-facing problem or risk each release solved, what
 
 ## [Unreleased]
 
+## [2.8.45] - 2026-06-20
+
+### Solved Problem
+
+This release closes the gap between Meta_Kim's Dynamic Workflow / LangGraph-style governed execution claims and the evidence users can inspect. The default release surface now records the latest hook self-lock repair, keeps private project manuals outside the open-source source set, and ships with a full-pass governed execution artifact that proves capability discovery, worker fan-out, host invocation truth, and verification without upgrading the claim to release-grade live all-runtime readiness.
+
+### Changed
+
+- **Dynamic Workflow Evidence Closure** - Verified the governed execution artifact at `C:/Users/Kim/AppData/Local/Temp/meta-kim-host-full-db9a8dd9aa5c43418aba89f7b210bd57/artifacts/goalpro-codex-host-full-proof.json`, including `fetchPacket`, `capabilityInventory`, `capabilityRoute`, `dynamicWorkflowRuntimePacket`, `langGraphRunPacket`, `workerTaskPackets`, `workerResultPackets`, and `verificationPacket`.
+- **Host Invocation Truth** - Confirmed real Codex host evidence for `spawn_agent_result`, `agent_team_result`, and `skill_application`, plus fresh local probes for MCP, command/script, and runtime-tool families; `realInvocationCoverage.missingFamilies` is empty in the artifact.
+- **Hook Self-Lock Repair** - The Fetch-stage dispatch gate can now repair its own constrained `fetchRecord` state without opening business-file mutation before capability discovery and execution clearance exist.
+- **Open-Source Source Boundary** - Removed private manual documents from the public source tree and kept README references aligned with the supported public documentation surface.
+- **Release Metadata Alignment** - Bumped the package metadata to `2.8.45` so the source tree, tag, and GitHub release point at the same version.
+
+### Verification
+
+- `npm run meta:validate:run -- C:/Users/Kim/AppData/Local/Temp/meta-kim-host-full-db9a8dd9aa5c43418aba89f7b210bd57/artifacts/goalpro-codex-host-full-proof.json`
+- `npm run meta:test:meta-theory`
+- `npm run meta:release:smoke`
+- `git diff --check`
+- Public-ready boundary retained: `publicReadyDecision.publicReady = false` because release-grade live all-runtime evidence is not attached.
+
 ## [2.8.44] - 2026-06-19
 
 ### Solved Problem
