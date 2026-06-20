@@ -395,6 +395,10 @@ async function assertCanonicalSkillFrontmatter() {
   }
 }
 
+function renderGlobalCommandContent(raw) {
+  return raw.replaceAll("__META_KIM_PACKAGE_ROOT__", repoRoot.replace(/\\/g, "/"));
+}
+
 async function copyCodexMetaTheoryCommand() {
   const commandsDir = path.join(runtimeHomes.codex.dir, "commands");
   const targetPath = path.join(commandsDir, "meta-theory.md");
@@ -405,7 +409,11 @@ async function copyCodexMetaTheoryCommand() {
     );
   }
   await fs.mkdir(commandsDir, { recursive: true });
-  await fs.copyFile(codexMetaTheoryCommandSource, targetPath);
+  await fs.writeFile(
+    targetPath,
+    renderGlobalCommandContent(await fs.readFile(codexMetaTheoryCommandSource, "utf8")),
+    "utf8",
+  );
   recordSafe((rec) =>
     rec.recordFile(targetPath, {
       source: "sync-global-meta-theory",
@@ -426,7 +434,11 @@ async function copyClaudeMetaTheoryCommand() {
     );
   }
   await fs.mkdir(commandsDir, { recursive: true });
-  await fs.copyFile(claudeMetaTheoryCommandSource, targetPath);
+  await fs.writeFile(
+    targetPath,
+    renderGlobalCommandContent(await fs.readFile(claudeMetaTheoryCommandSource, "utf8")),
+    "utf8",
+  );
   recordSafe((rec) =>
     rec.recordFile(targetPath, {
       source: "sync-global-meta-theory",
@@ -1075,7 +1087,9 @@ async function runCheck() {
       "commands",
       "meta-theory.md",
     );
-    const sourceRaw = await fs.readFile(claudeMetaTheoryCommandSource, "utf8");
+    const sourceRaw = renderGlobalCommandContent(
+      await fs.readFile(claudeMetaTheoryCommandSource, "utf8"),
+    );
     const targetRaw = (await pathExists(commandPath))
       ? await fs.readFile(commandPath, "utf8")
       : null;
@@ -1094,7 +1108,9 @@ async function runCheck() {
       "commands",
       "meta-theory.md",
     );
-    const sourceRaw = await fs.readFile(codexMetaTheoryCommandSource, "utf8");
+    const sourceRaw = renderGlobalCommandContent(
+      await fs.readFile(codexMetaTheoryCommandSource, "utf8"),
+    );
     const targetRaw = (await pathExists(commandPath))
       ? await fs.readFile(commandPath, "utf8")
       : null;

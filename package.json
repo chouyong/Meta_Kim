@@ -82,6 +82,7 @@
     "meta:gap:score-candidates": "node scripts/score-capability-candidates.mjs",
     "meta:gap:complex-inputs": "node scripts/run-complex-capability-gap-inputs.mjs",
     "meta:theory:run": "node scripts/run-meta-theory-governed-execution.mjs",
+    "meta:theory:run:notice": "node scripts/run-meta-theory-governed-execution.mjs --emit-conversation-notice",
     "meta:theory:demo": "node scripts/run-meta-theory-governed-execution.mjs \"What should this project become as a product?\"",
     "meta:theory:report": "node scripts/run-meta-theory-governed-execution.mjs --read",
     "meta:theory:deliverables": "node scripts/generate-meta-theory-run-deliverables.mjs",

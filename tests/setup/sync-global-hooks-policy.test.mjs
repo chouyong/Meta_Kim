@@ -240,6 +240,18 @@ describe("sync-global-meta-theory hook policy", () => {
       assert.match(skill, /`\.claude\/hooks\/`/);
       assert.doesNotMatch(skill, /Claude Code 用[\s\S]{0,120}`\.codex\/hooks\/`/);
 
+      const command = await readFile(
+        path.join(root, "codex", "commands", "meta-theory.md"),
+        "utf8",
+      );
+      assert.ok(
+        command.includes(REPO_ROOT.replace(/\\/g, "/")),
+        "global Codex command must render the installed Meta_Kim package root",
+      );
+      assert.doesNotMatch(command, /__META_KIM_PACKAGE_ROOT__/);
+      assert.match(command, /run-meta-theory-governed-execution\.mjs/);
+      assert.match(command, /--emit-conversation-notice/);
+
       const check = await runScript(["--check", "--targets", "codex"], env);
       assert.match(check.stdout, /Codex global skill/);
       assert.match(check.stdout, /Codex global hooks skipped/);
