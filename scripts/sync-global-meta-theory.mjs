@@ -183,24 +183,18 @@ async function resolveTargets() {
     dir: path.join(runtimeHomes[targetId].dir, "skills", "meta-theory"),
   }));
 
-  cleanupTargets = [
-    {
-      label: "legacy Claude Code flat skill",
-      dir: path.join(runtimeHomes.claude.dir, "skills", "meta-theory.md"),
-    },
-    {
-      label: "legacy Codex flat skill",
-      dir: path.join(runtimeHomes.codex.dir, "skills", "meta-theory.md"),
-    },
-    {
-      label: "legacy OpenClaw flat skill",
-      dir: path.join(runtimeHomes.openclaw.dir, "skills", "meta-theory.md"),
-    },
-    {
-      label: "legacy Cursor flat skill",
-      dir: path.join(runtimeHomes.cursor.dir, "skills", "meta-theory.md"),
-    },
-  ];
+  const legacyFlatSkillLabels = {
+    claude: "legacy Claude Code flat skill",
+    codex: "legacy Codex flat skill",
+    openclaw: "legacy OpenClaw flat skill",
+    cursor: "legacy Cursor flat skill",
+  };
+  cleanupTargets = selectedTargetIds.map((targetId) => ({
+    label:
+      legacyFlatSkillLabels[targetId] ??
+      `legacy ${targetContext.profiles[targetId]?.label ?? targetId} flat skill`,
+    dir: path.join(runtimeHomes[targetId].dir, "skills", "meta-theory.md"),
+  }));
 }
 
 async function* walkFiles(rootDir) {
@@ -1148,7 +1142,6 @@ async function runSync() {
   manifestRecorder = openRecorder({
     scope: "global",
     metaKimVersion: process.env.META_KIM_VERSION ?? null,
-    replaceSources: ["sync-global-meta-theory"],
   });
 
   for (const target of cleanupTargets) {

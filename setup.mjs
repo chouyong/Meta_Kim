@@ -4638,7 +4638,7 @@ function removeUntrackedProjectPath(targetDir, relPath, skipped, options = {}) {
   return true;
 }
 
-function pruneEmptyProjectDirs(targetDir, relPath) {
+function pruneEmptyProjectDirs(targetDir, relPath, removedDirs = null) {
   let currentDir = dirname(join(targetDir, normalizeDeployRelPath(relPath)));
   const root = resolve(targetDir);
   while (currentDir !== root && isPathInsideDir(currentDir, root)) {
@@ -4650,7 +4650,11 @@ function pruneEmptyProjectDirs(targetDir, relPath) {
       throw error;
     }
     if (entries.length > 0) return;
+    const removedRel = normalizeDeployRelPath(relative(targetDir, currentDir));
     rmSync(currentDir, { recursive: true, force: true });
+    if (Array.isArray(removedDirs) && removedRel) {
+      removedDirs.push(removedRel);
+    }
     currentDir = dirname(currentDir);
   }
 }
@@ -5085,7 +5089,7 @@ function removeMetaKimProjectLocalState(targetDir) {
     }
     if (!removeUntrackedProjectPath(targetDir, rel, skipped)) continue;
     removed.push(rel);
-    pruneEmptyProjectDirs(targetDir, rel);
+    pruneEmptyProjectDirs(targetDir, rel, removed);
   }
   return { removed, skipped };
 }
