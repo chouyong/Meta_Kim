@@ -6,6 +6,37 @@
 
 更新说明先解释本次解决的用户痛点或风险，再说明为了解决它改了什么、为什么重要。过细的内部任务编号、低价值 backlog id 和实现流水账不放在这里；需要精确证据时，请看 Git 历史、测试、生成报告和 PRD 产物。
 
+## [2.8.50] - 2026-06-22
+
+### 解决的问题
+
+Meta_Kim 已经有规则、validator 和架构说明，但维护者仍然不容易一眼看清：哪些机制真的跑起来了，哪些只是结构或文档，用户可见证据到哪里为止。这样会带来产品风险：Dynamic Workflow、LangGraph-style 控制、Graphify、MCP Memory、evolution 写回、自动化和开源健康，可能被说成同一层“已完成”。
+
+本次还修清了自动化发布边界。自动化可以帮忙收集证据、减少重复动作，但发布判断、Critical/Fetch/Thinking/Review 质量判断和 public-ready 声明，必须继续由人基于证据作决定。
+
+### 变更
+
+- **产品治理证据分层** - governed execution 现在把自动化辅助、人类决策阶段、自测证据、host/native 证据和产品体验状态分层记录。
+- **诚实的产品体验 validator** - 产品体验校验可以在不弹出 native choice 的情况下通过可信自测；但默认 host/native 边界没有 live host 证据时仍保持 `partial`。
+- **Dynamic Workflow 与 LangGraph-style 覆盖** - meta-theory 测试覆盖图式 state、nodes、edges、checkpoint/replay、动态 lane 绑定、agent-team packet 解析和 dispatch envelope 证据。
+- **Graphify 产品化** - Graphify CLI 更清楚地暴露 query、path、explain、check、rebuild 流程，使图谱成为导航和验证辅助，而不是上下文倾倒。
+- **Evolution 写回门** - evolution writeback 现在区分真实写回目标和明确的 `none-with-reason`，避免把临时记录误说成可持续学习闭环。
+- **Global hooks 与 MCP Memory 边界** - 全局 hook 同步和 MCP Memory 说明更清楚地区分注册、生命周期 hook、服务健康和本地记忆写入。
+- **开源健康** - 新增 GitHub community health 与维护文件，包括贡献、安全、代码归属和依赖更新入口，不要求 GitHub Actions workflow。
+
+### 验证
+
+- 合并前 `npm run meta:verify:all`
+- `node scripts/graphify-cli.mjs rebuild --force`
+- `npm run meta:graphify:check`
+- `node scripts/validate-product-experience-core-goals.mjs`
+- `npm run meta:release:smoke`
+- Codex App 新对话一句话模糊发布审计
+- `npm run meta:capabilities:smoke`
+- `npm run meta:test:meta-theory`
+- `npm run meta:test:integration`
+- `git diff --check`
+
 ## [2.8.49] - 2026-06-21
 
 ### 解决的问题

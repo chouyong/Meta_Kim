@@ -6,6 +6,37 @@ This file is the reader-facing release history for Meta_Kim.
 
 The changelog explains the user-facing problem or risk each release solved, what changed to solve it, and why the change matters. It intentionally avoids long internal task ledgers, low-signal backlog ids, and implementation trivia. When exact evidence is needed, use the repository history, tests, generated reports, and PRD artifacts.
 
+## [2.8.50] - 2026-06-22
+
+### Solved Problem
+
+Meta_Kim had enough rules, validators, and architecture language to look governed, but a maintainer still could not quickly tell which mechanisms were truly running, which ones were structural-only, and where user-visible evidence stopped. That created a product risk: Dynamic Workflow, LangGraph-style control, Graphify, MCP Memory, evolution writeback, automation, and open-source readiness could be discussed as if they were all equally proven.
+
+The project also needed a clearer release boundary for automation. Automation should help gather evidence and reduce repeat work, but release decisions, Critical/Fetch/Thinking/Review judgment, and public-ready claims must stay human-governed and evidence-backed.
+
+### Changed
+
+- **Product Governance Evidence** - Governed execution now keeps automation assistance, human decision stages, self-test evidence, host/native evidence, and product-experience status in separate layers.
+- **Honest Product Validator** - Product-experience validation can pass trusted self-tests without opening a native popup, while the default host/native boundary remains `partial` when live host evidence is absent.
+- **Dynamic Workflow And LangGraph-Style Coverage** - Meta-theory tests now cover graph-shaped state, nodes, edges, checkpoint/replay behavior, dynamic lane binding, agent-team packet parsing, and dispatch envelope evidence.
+- **Graphify Productization** - Graphify CLI support now better exposes query, path, explain, check, and rebuild flows so the graph works as a navigation and verification aid instead of a context dump.
+- **Evolution Writeback Gate** - Evolution writeback now distinguishes real writeback targets from explicit `none-with-reason`, reducing the chance that a temporary record is mistaken for a sustainable learning loop.
+- **Global Hooks And MCP Memory Boundaries** - Global hook sync and MCP Memory guidance now separate registration, lifecycle hooks, service health, and local memory writes more clearly.
+- **Open-Source Health** - Added GitHub community health and maintenance files, including contribution, security, ownership, and dependency update surfaces, without requiring a GitHub Actions workflow.
+
+### Verification
+
+- `npm run meta:verify:all` before merge
+- `node scripts/graphify-cli.mjs rebuild --force`
+- `npm run meta:graphify:check`
+- `node scripts/validate-product-experience-core-goals.mjs`
+- `npm run meta:release:smoke`
+- Codex App observer thread with one-sentence fuzzy release-audit prompt
+- `npm run meta:capabilities:smoke`
+- `npm run meta:test:meta-theory`
+- `npm run meta:test:integration`
+- `git diff --check`
+
 ## [2.8.49] - 2026-06-21
 
 ### Solved Problem
