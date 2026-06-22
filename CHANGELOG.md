@@ -6,6 +6,33 @@ This file is the reader-facing release history for Meta_Kim.
 
 The changelog explains the user-facing problem or risk each release solved, what changed to solve it, and why the change matters. It intentionally avoids long internal task ledgers, low-signal backlog ids, and implementation trivia. When exact evidence is needed, use the repository history, tests, generated reports, and PRD artifacts.
 
+## [2.8.52] - 2026-06-23
+
+### Solved Problem
+
+After the governed-execution hardening work, Meta_Kim still needed a release pass that tied the merged cleanup back to concrete maintainer risks: maintainers should be able to run the right verification chain without relying on scattered commands, the MCP runtime server should have its required SDK declared explicitly, stale helper scripts should not look like supported public entry points, and fuzzy natural-language acceptance should not be mistaken for live Codex-native proof.
+
+The release also needed the canonical capability index refreshed after the merged source changes, so capability discovery would describe the current source tree instead of the previous release snapshot.
+
+### Changed
+
+- **Staged Verification Runner** - Added the `meta:verify:stages` runner so maintainers can run or resume the release-grade verification chain by named stages from the main working tree.
+- **MCP Runtime Dependency** - Declared `@modelcontextprotocol/sdk` as a package dependency so `scripts/mcp/meta-runtime-server.mjs` can self-test on a fresh install instead of depending on an undeclared local package.
+- **Governed Runner Evidence Repair** - Hardened `--temp-output` coverage and capability-need reporting so generated governed-run artifacts validate while still keeping public-ready and host-invocation evidence boundaries honest.
+- **Dead Script Cleanup** - Removed former cleanup/reporting scripts that no longer had source references, and documented the script-removal rule so obsolete CLIs do not become accidental public API.
+- **Release Evidence Refresh** - Refreshed the canonical capability index, Graphify graph, global hooks, and release checks against the merged `main` state.
+
+### Verification
+
+- `node scripts/mcp/meta-runtime-server.mjs --self-test`
+- `npm run meta:test:meta-theory`
+- `npm run meta:release:smoke`
+- `npm run meta:verify:all`
+- `npm run meta:graphify:check`
+- `npm run meta:check:global:release`
+- Temp-output governed run with a plain fuzzy Chinese release-audit request; artifact validated, spine reached Fetch/Thinking/Review/Verification, and host evidence correctly stayed `partial`.
+- `git diff --check`
+
 ## [2.8.51] - 2026-06-22
 
 ### Solved Problem

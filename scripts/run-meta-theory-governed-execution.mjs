@@ -1823,6 +1823,30 @@ function normalizeRouteBindingType(type) {
   return normalized[type] ?? type ?? "capability_index_query";
 }
 
+function businessLaneCapabilityNeed(packet, laneId) {
+  const candidates = [];
+  for (const value of [
+    packet.capabilityNeed,
+    packet.capabilityRequirements,
+    packet.coreProblem,
+  ]) {
+    if (Array.isArray(value)) {
+      candidates.push(
+        value
+          .map((item) => String(item ?? "").trim())
+          .filter(Boolean)
+          .join("; "),
+      );
+    } else {
+      candidates.push(String(value ?? "").trim());
+    }
+  }
+  return (
+    candidates.find(Boolean) ??
+    `${laneId} capability-first route execution and verification`
+  );
+}
+
 function buildBusinessFlowBlueprintPacket({ businessPhasePlanPacket, orchestrationReport = null }) {
   const triggerCoveragePass = businessPhasePlanPacket.triggerStandard?.coveragePass === true;
   const routeWorkerTasks = orchestrationReport?.workerTaskPackets ?? [];
@@ -1880,11 +1904,7 @@ function buildBusinessFlowBlueprintPacket({ businessPhasePlanPacket, orchestrati
       packet.providerMatch?.selectedProvider ??
       null;
     const selectedBindingType = normalizeRouteBindingType(selectedProvider?.type);
-    const capabilityNeed = Array.isArray(packet.capabilityNeed)
-      ? packet.capabilityNeed.join("; ")
-      : Array.isArray(packet.capabilityRequirements)
-        ? packet.capabilityRequirements.join("; ")
-        : String(packet.capabilityNeed ?? packet.capabilityRequirements ?? packet.coreProblem ?? laneId);
+    const capabilityNeed = businessLaneCapabilityNeed(packet, laneId);
     return {
       laneId,
       businessLane: laneId,

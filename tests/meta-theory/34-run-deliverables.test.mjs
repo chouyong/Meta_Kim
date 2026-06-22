@@ -1059,6 +1059,15 @@ describe("34 — Meta-theory run deliverables", () => {
       await readFile(path.join(summary.temporaryOutput.artifactDir, `${runId}.json`), "utf8")
     );
     assert.equal(artifact.runId, runId);
+    const validation = spawnSync(
+      process.execPath,
+      [
+        "scripts/validate-run-artifact.mjs",
+        path.join(summary.temporaryOutput.artifactDir, `${runId}.json`),
+      ],
+      { cwd: process.cwd(), encoding: "utf8" }
+    );
+    assert.equal(validation.status, 0, validation.stderr || validation.stdout);
 
     const defaultArtifactPath = path.join(
       process.cwd(),

@@ -6,6 +6,33 @@
 
 更新说明先解释本次解决的用户痛点或风险，再说明为了解决它改了什么、为什么重要。过细的内部任务编号、低价值 backlog id 和实现流水账不放在这里；需要精确证据时，请看 Git 历史、测试、生成报告和 PRD 产物。
 
+## [2.8.52] - 2026-06-23
+
+### 解决的问题
+
+governed execution 强化合并后，Meta_Kim 还需要一次发布收口，把这批 cleanup 和维护者真实风险对齐：维护者应该能从 main 工作区跑正确的验证链，不再依赖散落命令；MCP runtime server 需要显式声明 SDK 依赖；过期 helper scripts 不应该继续像公开入口一样留在仓库里；普通自然语言模糊验收也不能被误报成 Codex native live proof。
+
+这次发布还需要刷新 canonical capability index，让能力发现描述当前合并后的源码树，而不是上一个 release 的快照。
+
+### 变更
+
+- **分阶段验证 runner** - 新增 `meta:verify:stages`，维护者可以直接在 main 工作区按阶段运行或续跑发布级验证链。
+- **MCP runtime 依赖显式化** - 将 `@modelcontextprotocol/sdk` 声明为 package dependency，使 `scripts/mcp/meta-runtime-server.mjs` 在 fresh install 后也能 self-test，不再依赖本机偶然存在的包。
+- **governed runner 证据修复** - 加固 `--temp-output` 覆盖和 capability-need 输出，保证 governed-run artifact 能通过验证，同时继续诚实区分 public-ready 与 host-invocation 证据边界。
+- **死脚本清理** - 移除已无源码引用的旧 cleanup/reporting scripts，并在脚本文档中写清删除规则，避免过期 CLI 变成意外的公开 API。
+- **发布证据刷新** - 基于合并后的 `main` 刷新 canonical capability index、Graphify 图谱、global hooks 和 release checks。
+
+### 验证
+
+- `node scripts/mcp/meta-runtime-server.mjs --self-test`
+- `npm run meta:test:meta-theory`
+- `npm run meta:release:smoke`
+- `npm run meta:verify:all`
+- `npm run meta:graphify:check`
+- `npm run meta:check:global:release`
+- 使用普通中文模糊发布审计请求跑 temp-output governed run；artifact 已验证，spine 到达 Fetch/Thinking/Review/Verification，同时 host evidence 按真实情况保持 `partial`。
+- `git diff --check`
+
 ## [2.8.51] - 2026-06-22
 
 ### 解决的问题

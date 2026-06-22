@@ -829,10 +829,9 @@ Interactive update flow:
 | `npm run meta:sync` | Sync from canonical sources to all four runtimes |
 | `npm run meta:check:runtimes` | Check whether the four runtimes are in sync |
 | `npm run meta:validate` | Validate repository integrity |
-| `npm run meta:install-scope:verify` | Verify global/project install boundaries |
-| `npm run meta:project-cache:verify` | Verify global hooks generate project-local cache files |
 | `npm run meta:verify:all` | Full validation, including runtime smoke checks |
-| `npm run meta:doctor:governance` | Governance health check |
+
+Additional governance and scope checks (`meta:install-scope:verify`, `meta:project-cache:verify`, `meta:doctor:governance`) are listed in `AGENTS.md`.
 
 ### Where the active rules live
 
@@ -889,14 +888,10 @@ Sparse-checkout fallback trees land in `~/.<runtime>/skills/<id>/`; native ECC i
 
 | Command | Purpose |
 | --- | --- |
-| `npm run meta:validate:run -- <file.json>` | Validate governed run artifacts |
-| `npm run meta:eval:agents` | Lightweight runtime smoke test |
-| `npm run meta:eval:agents:live` | Live prompt-backed acceptance |
 | `npm run meta:probe:clis` | Probe local CLI tools |
 | `npm run meta:test:mcp` | MCP self-test |
-| `npm run meta:index:runs -- <dir>` | Index validated run artifacts |
-| `npm run meta:query:runs -- --owner <agent>` | Query the run index |
-| `npm run migrate:meta-kim -- <dir> --apply` | Import an older prompt pack |
+
+More advanced commands (`meta:validate:run`, `meta:eval:agents`, `meta:eval:agents:live`, `meta:index:runs`, `meta:query:runs`, `migrate:meta-kim`) are in `AGENTS.md`.
 
 ---
 

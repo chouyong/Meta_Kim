@@ -996,6 +996,9 @@ function shouldSkipHook(state, userPrompt) {
 
   // Priority 1: Explicit environment variable (user override)
   if (envSkip && envSkip !== "empty" && envSkip !== "0" && envSkip !== "false") {
+    process.stderr.write(
+      `[meta-kim] META_KIM_HOOK_SKIP active — governance hooks bypassed (source=env_var)\n`,
+    );
     return {
       shouldSkip: true,
       reason: formatSkipReason("env_var"),
