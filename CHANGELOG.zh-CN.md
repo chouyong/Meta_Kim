@@ -6,6 +6,33 @@
 
 更新说明先解释本次解决的用户痛点或风险，再说明为了解决它改了什么、为什么重要。过细的内部任务编号、低价值 backlog id 和实现流水账不放在这里；需要精确证据时，请看 Git 历史、测试、生成报告和 PRD 产物。
 
+## [2.8.54] - 2026-06-23
+
+### 解决的问题
+
+观察态 hook 仍会让维护发布变成“自己锁自己”。用户已经明确要求提交、推送、发布新版本并更新说明时，同一轮 run 里 `git push` 或 GitHub Release 命令仍可能被拦，因为 hook 只看到高风险外部副作用，没有看到用户的发布授权。它还会把 Graphify / 搜索命令里引号包住的 `git push`、`gh release` 搜索词误判成真实发布命令。
+
+### 变更
+
+- **显式观察态发布意图** - prompt 激活时，如果用户 wording 明确包含提交 / 推送 / 发布 / 版本发布，会写入短期的 user-explicit external publish intent。
+- **窄发布放行** - 在这个 intent 下，观察态只放行非强推的 `git push` 和 GitHub Release `view/create/edit/upload`；`npm publish`、安装、强推和破坏性命令仍继续拦截。
+- **搜索词误伤修复** - read-only 搜索和 Graphify 查询不会再因为引号里的搜索文本提到 `git push` 或 `gh release` 而被当成高风险命令。
+- **全局 hook 同步证据** - 修复后的 hook package 已用 `--with-global-hooks` 同步到本机 Claude Code 和 Codex 全局 hook 目录，并用 release 版全局检查确认。
+
+### 验证
+
+- `node --check canonical/runtime-assets/claude/hooks/enforce-agent-dispatch.mjs`
+- `node --check canonical/runtime-assets/claude/hooks/activate-meta-theory-spine.mjs`
+- `node --check canonical/runtime-assets/shared/hooks/activate-meta-theory-spine.mjs`
+- `node --test tests/meta-theory/11-eight-stage-spine.test.mjs`
+- `npm run meta:prd:stage-runtime-control:validate`
+- `npm run meta:sync`
+- `node scripts/sync-global-meta-theory.mjs --with-global-hooks`
+- `npm run meta:check`
+- `npm run meta:check:global:release`
+- `npm run meta:graphify:check`
+- `git diff --check`
+
 ## [2.8.53] - 2026-06-23
 
 ### 解决的问题

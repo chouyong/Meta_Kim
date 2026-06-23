@@ -57,6 +57,7 @@
   "factGatePolicy": {
     "singleExecutionLease": true,
     "observedMode": "advisory_not_blocking",
+    "observedExplicitPublishIntent": "allows_narrow_git_push_and_github_release_only",
     "managedMode": "required_before_mutation",
     "mustNotBecomeIndependentHookLoop": true,
     "fileChangeFactCardBelongsTo": "Fetch/Thinking execution lease"
@@ -109,6 +110,8 @@
     "observed_state_allows_ordinary_local_mutation",
     "observed_state_allows_local_git_stage_commit",
     "observed_state_denies_high_risk_external_side_effects",
+    "observed_state_ignores_high_risk_words_inside_quoted_readonly_search_text",
+    "observed_state_allows_explicit_user_authorized_git_release_commands_only",
     "stale_legacy_active_state_rotates_on_new_prompt"
   ],
   "verificationCommand": "npm run meta:prd:stage-runtime-control:validate"

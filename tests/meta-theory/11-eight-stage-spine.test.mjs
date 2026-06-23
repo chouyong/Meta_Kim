@@ -1298,6 +1298,30 @@ describe("Part F2: choice surface runtime gate", async () => {
     assert.equal(nextState.stageRuntimeControl?.factGatePolicy, "managed_gate_required_for_public_ready");
   });
 
+  test("auto prompt activation records explicit external publish intent for release wording", () => {
+    for (const runtime of ["shared", "claude"]) {
+      const { result, nextState } = runActivateHook(
+        null,
+        {
+          prompt:
+            "critical and fetch thinking and review 提交 推送 发布新版本 更新更新说明",
+        },
+        { runtime },
+      );
+
+      assert.equal(result.status, 0, `${runtime}: ${result.stderr}`);
+      assert.equal(
+        nextState.stageRuntimeControl?.externalPublishIntent?.status,
+        "user_explicit",
+      );
+      assert.deepEqual(
+        nextState.stageRuntimeControl?.externalPublishIntent?.allowedCommandFamilies,
+        ["git_push", "github_release"],
+      );
+      assert.ok(nextState.stageRuntimeControl?.externalPublishIntent?.promptFingerprint);
+    }
+  });
+
   test("auto prompt activation rotates stale legacy active state for a new prompt", () => {
     const legacy = {
       ...createInitialState({
@@ -1541,16 +1565,76 @@ describe("Part F2: choice surface runtime gate", async () => {
       currentStage: "critical",
     };
 
-    const result = runEnforceHook(state, {
-      tool_name: "Bash",
-      tool_input: {
-        command:
-          "graphify query \"Meta_Kim hook blocks git add during local stage\" --budget 1000",
-      },
-    });
+    for (const command of [
+      "graphify query \"Meta_Kim hook blocks git push and gh release during release\" --budget 1000",
+      "rg \"git push origin main\" canonical tests",
+      "Get-Content CHANGELOG.md | Select-String \"gh release create\"",
+    ]) {
+      const result = runEnforceHook(state, {
+        tool_name: "Bash",
+        tool_input: { command },
+      });
 
-    assert.equal(result.status, 0);
-    assert.doesNotMatch(result.stdout, /permissionDecision/);
+      assert.equal(result.status, 0, command);
+      assert.doesNotMatch(result.stdout, /permissionDecision/, command);
+    }
+  });
+
+  test("observed hook state allows explicit user-authorized release commands only", () => {
+    const state = {
+      ...createInitialState({
+        taskClassification: "meta_theory_auto",
+        triggerReason: "test",
+        activationMode: "hook_observed",
+        driverMode: "hook_observed",
+        hookGateMode: "advisory",
+        latestUserInputLanguage: "zh-CN",
+      }),
+      currentStage: "critical",
+    };
+    state.stageRuntimeControl.externalPublishIntent = {
+      status: "user_explicit",
+      source: "prompt_intake",
+      scope: "git_remote_and_github_release",
+      createdAt: new Date().toISOString(),
+      expiresAfterMinutes: 240,
+      allowedCommandFamilies: ["git_push", "github_release"],
+      deniedCommandFamilies: [
+        "npm_publish",
+        "package_install",
+        "destructive_git",
+        "force_push",
+      ],
+    };
+
+    for (const command of [
+      "git push origin main",
+      "git push origin v2.8.54",
+      "gh release create v2.8.54 --title v2.8.54 --notes-file CHANGELOG.md",
+      "gh release view v2.8.54 --json tagName",
+    ]) {
+      const result = runEnforceHook(state, {
+        tool_name: "Bash",
+        tool_input: { command },
+      });
+      assert.equal(result.status, 0, command);
+      assert.doesNotMatch(result.stdout, /permissionDecision/, command);
+      assert.match(result.stderr, /明确要求提交|Explicit user release intent/, command);
+    }
+
+    for (const command of [
+      "git push --force origin main",
+      "npm publish",
+      "npm install left-pad",
+    ]) {
+      const result = runEnforceHook(state, {
+        tool_name: "Bash",
+        tool_input: { command },
+      });
+      assert.equal(result.status, 0, command);
+      assert.match(result.stdout, /permissionDecision/, command);
+      assert.match(result.stdout, /高风险|external side-effect/, command);
+    }
   });
 
   test("observed hook state allows PowerShell read-only pipelines", () => {

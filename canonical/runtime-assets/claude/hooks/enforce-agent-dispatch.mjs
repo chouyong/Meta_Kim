@@ -727,6 +727,19 @@ function observedModeHighRiskReason(state, command = "") {
   );
 }
 
+function observedModeAuthorizedReleaseNotice(state) {
+  if (isZh(state)) {
+    return (
+      "[Meta_Kim] 已识别到本轮用户明确要求提交/推送/发布；观察态只放行 git push 和 GitHub Release，" +
+      "不放行 npm publish、强推、安装或破坏性命令。"
+    );
+  }
+  return (
+    "[Meta_Kim] Explicit user release intent detected for this run; observed mode only allows " +
+    "git push and GitHub Release commands, not npm publish, force push, installs, or destructive commands."
+  );
+}
+
 function stripQuotedShellText(value) {
   const raw = String(value || "");
   let result = "";
@@ -759,12 +772,27 @@ function stripQuotedShellText(value) {
   return result;
 }
 
+function isQuotedInspectionSegment(segment) {
+  const stripped = stripQuotedShellText(segment).trim().toLowerCase();
+  if (!stripped) return true;
+  return /^(?:graphify\s+query|rg\b|grep\b|egrep\b|fgrep\b|select-string\b|sls\b|find\b|git\s+grep\b|npm\s+search\b|npm\s+view\b)/i.test(
+    stripped,
+  );
+}
+
 function isHighRiskObservedSegment(segment) {
   const lower = stripQuotedShellText(segment).trim().toLowerCase();
   if (!lower) return false;
   const highRiskCommandPattern =
     /^(?:npm\s+(?:install|i|publish)|pnpm\s+(?:install|i|add)|yarn\s+(?:install|add)|cargo\s+(?:install|publish|run)|pip\s+(?:install|uninstall)|git\s+(?:push|pull|fetch|reset|checkout|restore|clean|rebase|merge|rm|mv)\b|gh\s+(?:release|pr\s+merge)|curl\b|wget\b|invoke-webrequest\b|invoke-restmethod\b|iwr\b|irm\b|remove-item\b|rm\s+-|del\b|rmdir\b|setx\b|set-item\s+env)\b/i;
   return highRiskCommandPattern.test(lower);
+}
+
+function isSafeAfterRemovingQuotedText(segment) {
+  const stripped = stripQuotedShellText(segment).trim();
+  if (!stripped) return true;
+  if (isHighRiskObservedSegment(stripped)) return false;
+  return isReadOnlyBash(stripped) || isQuotedInspectionSegment(segment);
 }
 
 function isHighRiskObservedBash(command) {
@@ -778,14 +806,76 @@ function isHighRiskObservedBash(command) {
   const classification = classifyBashCommand(normalized);
   if (classification.readOnly) return false;
   if (!/^dangerous pattern:/i.test(classification.reason || "")) return false;
+  if (segments.every(isSafeAfterRemovingQuotedText)) return false;
   return /install|publish|push|merge|rebase|reset|delete|remove|credential|token|secret|http|curl|wget|invoke-webrequest|invoke-restmethod/i.test(
     classification.reason,
   );
 }
 
+function getObservedExternalPublishIntent(state) {
+  const control = state?.stageRuntimeControl || {};
+  const intent = control.externalPublishIntent || state?.externalPublishIntent || null;
+  if (!intent || intent.status !== "user_explicit") return null;
+
+  const createdAt = Date.parse(intent.createdAt || control.createdAt || state?.triggeredAt || "");
+  const ttlMinutes = Number(intent.expiresAfterMinutes ?? 240);
+  if (
+    Number.isFinite(createdAt) &&
+    Number.isFinite(ttlMinutes) &&
+    ttlMinutes > 0 &&
+    Date.now() - createdAt > ttlMinutes * 60 * 1000
+  ) {
+    return null;
+  }
+  return intent;
+}
+
+function isAuthorizedObservedReleaseSegment(segment) {
+  const lower = stripQuotedShellText(segment).trim().toLowerCase();
+  if (!lower) return true;
+  if (isReadOnlyBash(lower)) return true;
+  if (/^git\s+push\b/.test(lower)) {
+    return !/(?:^|\s)(?:--force|-f|--mirror|--delete)\b/.test(lower);
+  }
+  return /^gh\s+release\s+(?:view|create|edit|upload)\b/.test(lower);
+}
+
+function isAuthorizedObservedExternalPublish(state, toolName, toolInput) {
+  if (toolName !== "Bash") return false;
+  if (!getObservedExternalPublishIntent(state)) return false;
+  const segments = bashReadonlyInternals
+    .splitSegments(String(toolInput?.command || ""))
+    .map((segment) => segment.trim())
+    .filter(Boolean);
+  return segments.length > 0 && segments.every(isAuthorizedObservedReleaseSegment);
+}
+
 function isHighRiskObservedExecution(toolName, toolInput) {
   if (toolName !== "Bash") return false;
   return isHighRiskObservedBash(toolInput?.command || "");
+}
+
+async function allowObservedExternalPublishExecution(state) {
+  const control = state?.stageRuntimeControl || {};
+  const now = new Date().toISOString();
+  const nextState = {
+    ...state,
+    stageRuntimeControl: {
+      ...control,
+      observedNoticeEmittedAt: control.observedNoticeEmittedAt || now,
+      observedNoticePolicy: "emit_once_per_active_state",
+      externalPublishIntent: {
+        ...(control.externalPublishIntent || state?.externalPublishIntent || {}),
+        lastUsedAt: now,
+      },
+    },
+  };
+  await writeSpineState(cwd, nextState);
+  if (!control.observedNoticeEmittedAt) {
+    process.stderr.write(`${observedModeNotice(state)}\n`);
+  }
+  process.stderr.write(`${observedModeAuthorizedReleaseNotice(state)}\n`);
+  process.exit(0);
 }
 
 async function allowObservedModeExecution(state) {
@@ -1483,6 +1573,9 @@ if (isExecutionTool(toolName)) {
 
   if (isHookObservedState(state)) {
     if (isHighRiskObservedExecution(toolName, toolInput)) {
+      if (isAuthorizedObservedExternalPublish(state, toolName, toolInput)) {
+        await allowObservedExternalPublishExecution(state);
+      }
       exitAfterDeny(
         observedModeHighRiskReason(state, String(toolInput?.command || "")),
       );

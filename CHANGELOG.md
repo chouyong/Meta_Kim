@@ -6,6 +6,33 @@ This file is the reader-facing release history for Meta_Kim.
 
 The changelog explains the user-facing problem or risk each release solved, what changed to solve it, and why the change matters. It intentionally avoids long internal task ledgers, low-signal backlog ids, and implementation trivia. When exact evidence is needed, use the repository history, tests, generated reports, and PRD artifacts.
 
+## [2.8.54] - 2026-06-23
+
+### Solved Problem
+
+Observed-mode hooks still made maintainer releases feel self-locking. After a user explicitly asked to commit, push, publish a new version, and update release notes, the same run could still block `git push` or GitHub Release commands because the hook only saw a high-risk external side effect, not the user's release authorization. The hook could also misread quoted search text such as a Graphify query containing `git push` or `gh release` as if the command itself were trying to publish.
+
+### Changed
+
+- **Explicit Observed Release Intent** - Prompt activation now records a short-lived, user-explicit external publish intent when the user's wording clearly asks for commit / push / release / version publication.
+- **Narrow Release Allowance** - Observed mode can now allow only non-force `git push` and GitHub Release `view/create/edit/upload` commands under that intent; `npm publish`, installs, force pushes, and destructive commands remain blocked.
+- **Quoted Search Safety** - Read-only search and graph queries no longer become high-risk just because the quoted search text mentions `git push` or `gh release`.
+- **Global Hook Sync Proof** - The fixed hook package was synced into the local Claude Code and Codex global hook homes with `--with-global-hooks`, and release-grade global hook checks verify those files.
+
+### Verification
+
+- `node --check canonical/runtime-assets/claude/hooks/enforce-agent-dispatch.mjs`
+- `node --check canonical/runtime-assets/claude/hooks/activate-meta-theory-spine.mjs`
+- `node --check canonical/runtime-assets/shared/hooks/activate-meta-theory-spine.mjs`
+- `node --test tests/meta-theory/11-eight-stage-spine.test.mjs`
+- `npm run meta:prd:stage-runtime-control:validate`
+- `npm run meta:sync`
+- `node scripts/sync-global-meta-theory.mjs --with-global-hooks`
+- `npm run meta:check`
+- `npm run meta:check:global:release`
+- `npm run meta:graphify:check`
+- `git diff --check`
+
 ## [2.8.53] - 2026-06-23
 
 ### Solved Problem
