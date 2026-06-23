@@ -6,6 +6,25 @@
 
 更新说明先解释本次解决的用户痛点或风险，再说明为了解决它改了什么、为什么重要。过细的内部任务编号、低价值 backlog id 和实现流水账不放在这里；需要精确证据时，请看 Git 历史、测试、生成报告和 PRD 产物。
 
+## [2.8.55] - 2026-06-23
+
+### 解决的问题
+
+观察态发布修复还剩一个文本载荷边缘：用 PowerShell here-string 写 release notes 时，正文里如果出现 `git push` 或 `gh release`，hook 仍可能把 release-note 文本误判成真实 shell 发布命令。
+
+### 变更
+
+- **Here-string 文本安全** - 观察态高风险检测现在会先剥离 PowerShell here-string 正文，再匹配命令动词，release-note 或搜索文本不会再被误认为可执行发布命令。
+- **可执行 here-string 继续拦截** - `Invoke-Expression` / `iex` 仍被视为高风险，所以把 here-string 管道给 shell 执行仍会被拦。
+
+### 验证
+
+- `node --test tests/meta-theory/11-eight-stage-spine.test.mjs`
+- `npm run meta:release:smoke`
+- `node scripts/run-verify-all.mjs --no-report`
+- `npm run meta:graphify:check`
+- `git diff --check`
+
 ## [2.8.54] - 2026-06-23
 
 ### 解决的问题

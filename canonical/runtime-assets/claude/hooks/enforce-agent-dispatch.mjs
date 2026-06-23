@@ -741,7 +741,9 @@ function observedModeAuthorizedReleaseNotice(state) {
 }
 
 function stripQuotedShellText(value) {
-  const raw = String(value || "");
+  const raw = String(value || "")
+    .replace(/@'[\s\S]*?'@/g, " @''@ ")
+    .replace(/@"[\s\S]*?"@/g, ' @""@ ');
   let result = "";
   let quote = null;
   let escaped = false;
@@ -784,15 +786,14 @@ function isHighRiskObservedSegment(segment) {
   const lower = stripQuotedShellText(segment).trim().toLowerCase();
   if (!lower) return false;
   const highRiskCommandPattern =
-    /^(?:npm\s+(?:install|i|publish)|pnpm\s+(?:install|i|add)|yarn\s+(?:install|add)|cargo\s+(?:install|publish|run)|pip\s+(?:install|uninstall)|git\s+(?:push|pull|fetch|reset|checkout|restore|clean|rebase|merge|rm|mv)\b|gh\s+(?:release|pr\s+merge)|curl\b|wget\b|invoke-webrequest\b|invoke-restmethod\b|iwr\b|irm\b|remove-item\b|rm\s+-|del\b|rmdir\b|setx\b|set-item\s+env)\b/i;
+    /^(?:(?:bash|sh|zsh|pwsh|powershell)(?:\.exe)?\s+(?:-c|-lc|-command|\/c)\b|(?:node|node\.exe)\s+(?:-e|--eval)\b|python(?:3|\.exe)?\s+-c\b|npm\s+(?:install|i|publish)|pnpm\s+(?:install|i|add)|yarn\s+(?:install|add)|cargo\s+(?:install|publish|run)|pip\s+(?:install|uninstall)|git\s+(?:push|pull|fetch|reset|checkout|restore|clean|rebase|merge|rm|mv)\b|gh\s+(?:release|pr\s+merge)|curl\b|wget\b|invoke-webrequest\b|invoke-restmethod\b|invoke-expression\b|iwr\b|irm\b|iex\b|remove-item\b|rm\s+-|del\b|rmdir\b|setx\b|set-item\s+env)\b/i;
   return highRiskCommandPattern.test(lower);
 }
 
 function isSafeAfterRemovingQuotedText(segment) {
   const stripped = stripQuotedShellText(segment).trim();
   if (!stripped) return true;
-  if (isHighRiskObservedSegment(stripped)) return false;
-  return isReadOnlyBash(stripped) || isQuotedInspectionSegment(segment);
+  return !isHighRiskObservedSegment(stripped) || isQuotedInspectionSegment(segment);
 }
 
 function isHighRiskObservedBash(command) {
@@ -807,7 +808,7 @@ function isHighRiskObservedBash(command) {
   if (classification.readOnly) return false;
   if (!/^dangerous pattern:/i.test(classification.reason || "")) return false;
   if (segments.every(isSafeAfterRemovingQuotedText)) return false;
-  return /install|publish|push|merge|rebase|reset|delete|remove|credential|token|secret|http|curl|wget|invoke-webrequest|invoke-restmethod/i.test(
+  return /install|publish|push|merge|rebase|reset|delete|remove|credential|token|secret|http|curl|wget|invoke-webrequest|invoke-restmethod|invoke-expression|iex/i.test(
     classification.reason,
   );
 }

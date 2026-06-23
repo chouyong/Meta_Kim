@@ -6,6 +6,25 @@ This file is the reader-facing release history for Meta_Kim.
 
 The changelog explains the user-facing problem or risk each release solved, what changed to solve it, and why the change matters. It intentionally avoids long internal task ledgers, low-signal backlog ids, and implementation trivia. When exact evidence is needed, use the repository history, tests, generated reports, and PRD artifacts.
 
+## [2.8.55] - 2026-06-23
+
+### Solved Problem
+
+The observed-mode release fix still had one text-payload edge case: PowerShell here-strings used to write release notes could contain words like `git push` or `gh release`, and the hook could still treat that release-note text as if it were a real shell command.
+
+### Changed
+
+- **Here-String Text Safety** - Observed-mode high-risk detection now strips PowerShell here-string bodies before matching command verbs, so release-note or search text is not mistaken for an executable publish command.
+- **Executable Here-String Guard** - `Invoke-Expression` / `iex` remain high-risk, so a here-string piped into shell execution is still blocked.
+
+### Verification
+
+- `node --test tests/meta-theory/11-eight-stage-spine.test.mjs`
+- `npm run meta:release:smoke`
+- `node scripts/run-verify-all.mjs --no-report`
+- `npm run meta:graphify:check`
+- `git diff --check`
+
 ## [2.8.54] - 2026-06-23
 
 ### Solved Problem

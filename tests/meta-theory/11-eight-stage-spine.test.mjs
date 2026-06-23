@@ -1637,6 +1637,53 @@ describe("Part F2: choice surface runtime gate", async () => {
     }
   });
 
+  test("observed hook state ignores high-risk words inside PowerShell here-string data", () => {
+    const state = {
+      ...createInitialState({
+        taskClassification: "meta_theory_auto",
+        triggerReason: "test",
+        activationMode: "hook_observed",
+        driverMode: "hook_observed",
+        hookGateMode: "advisory",
+        latestUserInputLanguage: "zh-CN",
+      }),
+      currentStage: "critical",
+    };
+
+    const notesResult = runEnforceHook(state, {
+      tool_name: "Bash",
+      tool_input: {
+        command:
+          "@'\ngit push origin main\ngh release create v2.8.55\n'@ | Set-Content -LiteralPath '.meta-kim\\state\\default\\release-notes.md' -Encoding UTF8",
+      },
+    });
+
+    assert.equal(notesResult.status, 0);
+    assert.doesNotMatch(notesResult.stdout, /permissionDecision/);
+
+    const executionResult = runEnforceHook(state, {
+      tool_name: "Bash",
+      tool_input: {
+        command: "@'\ngit push origin main\n'@ | Invoke-Expression",
+      },
+    });
+
+    assert.equal(executionResult.status, 0);
+    assert.match(executionResult.stdout, /permissionDecision/);
+    assert.match(executionResult.stdout, /高风险|external side-effect/);
+
+    const shellWrapperResult = runEnforceHook(state, {
+      tool_name: "Bash",
+      tool_input: {
+        command: "bash -lc \"git push origin main\"",
+      },
+    });
+
+    assert.equal(shellWrapperResult.status, 0);
+    assert.match(shellWrapperResult.stdout, /permissionDecision/);
+    assert.match(shellWrapperResult.stdout, /高风险|external side-effect/);
+  });
+
   test("observed hook state allows PowerShell read-only pipelines", () => {
     const state = {
       ...createInitialState({
