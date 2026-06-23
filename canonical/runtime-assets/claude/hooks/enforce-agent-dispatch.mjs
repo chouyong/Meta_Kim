@@ -821,6 +821,7 @@ function isQuotedInspectionSegment(segment) {
 }
 
 function isHighRiskObservedSegment(segment) {
+  if (isReadOnlyBash(segment)) return false;
   const lower = stripQuotedShellText(segment).trim().toLowerCase();
   if (!lower) return false;
   const highRiskCommandPattern =

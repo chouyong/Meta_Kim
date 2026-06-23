@@ -6,6 +6,32 @@ This file is the reader-facing release history for Meta_Kim.
 
 The changelog explains the user-facing problem or risk each release solved, what changed to solve it, and why the change matters. It intentionally avoids long internal task ledgers, low-signal backlog ids, and implementation trivia. When exact evidence is needed, use the repository history, tests, generated reports, and PRD artifacts.
 
+## [2.8.56] - 2026-06-23
+
+### Solved Problem
+
+The audit found three remaining governance-runtime hazards: observed-mode hooks could still block read-only `node -e` Fetch inspections from global hook homes, runtime projection failure classes still depended on words inside human-readable prose, and Graphify could not show Meta_Kim agent-to-agent governance edges even though those edges matter for review.
+
+### Changed
+
+- **Observed Read-Only Node Eval Safety** - `node -e` inspections that only read/parse/print local files are now classified as read-only, while file writes, child processes, network calls, imports, and eval-like execution remain blocked.
+- **Global Hook Sync Proof** - The fixed hook package was synced into local Claude Code and Codex global hook homes with `--with-global-hooks`, so the active runtime hook no longer keeps using a stale read-only whitelist.
+- **Structured Runtime Failure Reasons** - Governed runtime projection evidence now records `failureReasonCode`; failure classes no longer substring-match prose such as `native` or `live`.
+- **Capability Count Semantics** - The repo capability index now separates canonical inventory totals from local runtime projection actual counts, so `totalHooks` / `totalCommands` are not mistaken for mounted hook/command counts.
+- **Graphify Governance Enrichment** - Graphify rebuilds now add Meta_Kim agent-governance edges and a `type` alias for `file_type`, making agent relations and node type consumers auditable.
+
+### Verification
+
+- `node --test tests/meta-theory/11-eight-stage-spine.test.mjs`
+- `node --test tests/meta-theory/32-meta-theory-four-product-targets.test.mjs`
+- `node --test tests/setup/capability-index-inheritance-chain.test.mjs`
+- `node --test tests/setup/graphify-wiring-contract.test.mjs`
+- `npm run meta:release:smoke`
+- `npm run meta:check`
+- `npm run meta:graphify:rebuild`
+- `npm run meta:graphify:check`
+- `git diff --check`
+
 ## [2.8.55] - 2026-06-23
 
 ### Solved Problem

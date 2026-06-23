@@ -1709,6 +1709,43 @@ describe("Part F2: choice surface runtime gate", async () => {
     assert.doesNotMatch(result.stdout, /permissionDecision/);
   });
 
+  test("observed hook state allows read-only Node eval inspection", () => {
+    const state = {
+      ...createInitialState({
+        taskClassification: "meta_theory_auto",
+        triggerReason: "test",
+        activationMode: "hook_observed",
+        driverMode: "hook_observed",
+        hookGateMode: "advisory",
+        latestUserInputLanguage: "zh-CN",
+      }),
+      currentStage: "fetch",
+    };
+
+    const readOnlyResult = runEnforceHook(state, {
+      tool_name: "Bash",
+      tool_input: {
+        command:
+          "node -e \"const fs=require('fs'); const raw=fs.readFileSync('graphify-out/graph.json','utf8'); const graph=JSON.parse(raw); console.log((graph.nodes||[]).length);\"",
+      },
+    });
+
+    assert.equal(readOnlyResult.status, 0);
+    assert.doesNotMatch(readOnlyResult.stdout, /permissionDecision/);
+
+    const writeResult = runEnforceHook(state, {
+      tool_name: "Bash",
+      tool_input: {
+        command:
+          "node -e \"const fs=require('fs'); fs.writeFileSync('tmp.txt','mutated');\"",
+      },
+    });
+
+    assert.equal(writeResult.status, 0);
+    assert.match(writeResult.stdout, /permissionDecision/);
+    assert.match(writeResult.stdout, /高风险|external side-effect/);
+  });
+
   test("observed hook state does not treat install in a file path as high risk", () => {
     const state = {
       ...createInitialState({

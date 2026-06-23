@@ -6,6 +6,32 @@
 
 更新说明先解释本次解决的用户痛点或风险，再说明为了解决它改了什么、为什么重要。过细的内部任务编号、低价值 backlog id 和实现流水账不放在这里；需要精确证据时，请看 Git 历史、测试、生成报告和 PRD 产物。
 
+## [2.8.56] - 2026-06-23
+
+### 解决的问题
+
+这次审计确认还有三类治理运行时风险：观察态 hook 仍可能从全局 hook 目录拦住只读 `node -e` Fetch 检查；runtime projection 的失败分类仍会被人类可读文案里的词影响；Graphify 看不到 Meta_Kim agent 之间的治理边，导致 review 只能看到文件引用，缺少治理关系。
+
+### 变更
+
+- **只读 Node eval 不再误拦** - 只读读取、解析、打印本地文件的 `node -e` 检查现在会被识别为 read-only；写文件、起子进程、网络调用、动态 import 和 eval 类执行仍继续拦截。
+- **全局 hook 同步证据** - 修复后的 hook package 已用 `--with-global-hooks` 同步到本机 Claude Code 和 Codex 全局 hook 目录，当前实际运行的 hook 不再沿用旧 read-only whitelist。
+- **结构化 runtime 失败原因** - governed runtime projection evidence 现在记录 `failureReasonCode`；失败分类不再从 `native` / `live` 这类文案词里猜。
+- **能力数字语义拆开** - repo capability index 现在把 canonical inventory totals 和本机 runtime projection actual counts 分开，避免把 `totalHooks` / `totalCommands` 误读成已挂载 hook/command 数。
+- **Graphify 治理边增强** - Graphify rebuild 会补 Meta_Kim agent-governance edges，并给 `file_type` 补 `type` 兼容字段，让 agent 关系和节点类型消费者都可审计。
+
+### 验证
+
+- `node --test tests/meta-theory/11-eight-stage-spine.test.mjs`
+- `node --test tests/meta-theory/32-meta-theory-four-product-targets.test.mjs`
+- `node --test tests/setup/capability-index-inheritance-chain.test.mjs`
+- `node --test tests/setup/graphify-wiring-contract.test.mjs`
+- `npm run meta:release:smoke`
+- `npm run meta:check`
+- `npm run meta:graphify:rebuild`
+- `npm run meta:graphify:check`
+- `git diff --check`
+
 ## [2.8.55] - 2026-06-23
 
 ### 解决的问题
