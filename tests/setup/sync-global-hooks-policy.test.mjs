@@ -504,11 +504,16 @@ describe("sync-global-meta-theory hook policy", () => {
     const pkg = JSON.parse(
       await readFile(path.join(REPO_ROOT, "package.json"), "utf8"),
     );
+    const verifyRunner = await readFile(
+      path.join(REPO_ROOT, "scripts", "run-verify-all.mjs"),
+      "utf8",
+    );
     assert.match(
       pkg.scripts["meta:check:global:release"],
       /--check.*--with-global-hooks|--with-global-hooks.*--check/,
     );
-    assert.match(pkg.scripts["meta:verify:all"], /meta:check:global:release/);
+    assert.match(pkg.scripts["meta:verify:all"], /run-verify-all\.mjs/);
+    assert.match(verifyRunner, /meta:check:global:release/);
     assert.match(pkg.scripts["meta:verify:all:live"], /eval-meta-agents\.mjs/);
     assert.match(pkg.scripts["meta:verify:all:live"], /--require-all-runtimes/);
     assert.match(pkg.scripts["meta:verify:all:live"], /--live/);

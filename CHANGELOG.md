@@ -14,14 +14,24 @@ Meta_Kim's runtime hook could still make the design-time stages feel like they r
 
 That created the wrong repair loop: the operator needed to finish Fetch and Thinking evidence before Execution, but the hook implied the next step was mandatory Agent dispatch.
 
+The release audit also found several first-run and maintainer-release hazards: `npx github:...` could fail before dependencies were installed, global setup could silently update user-home hook wiring, Codex/Cursor hook runtime detection still relied on path sniffing, MCP Memory failures around port `8000` and Windows Python shims were hard to diagnose, and `meta:verify:all` was still too opaque when a nested validator failed.
+
 ### Changed
 
+- **First-Run Setup Fallback** - `setup.mjs` now falls back to numbered terminal menus when `@inquirer/prompts` is not installed yet, so a fresh GitHub/npx setup can still reach the dependency install path.
+- **Global Hooks Opt-In** - Global reusable capability install no longer treats hooks as default-global. `--with-global-hooks` is now the explicit setup/sync switch for updating Claude/Codex/Cursor hook wiring, and docs/tests keep that boundary visible.
+- **Explicit Hook Runtime Selection** - Generated Claude, Codex, and Cursor hook commands pass explicit runtime arguments; the canonical dispatcher still supports detection as a fallback, but normal projections no longer depend on path sniffing.
+- **Capability Gate Visibility** - Progressive capability gating now exposes grace-window status in hook output, and setup tells maintainers how to choose `warn`, `block`, or `off`.
+- **MCP Memory Diagnostics** - MCP Memory hooks and installer paths honor `MCP_MEMORY_URL` / `META_KIM_MEMORY_PORT`, report likely port owners when startup health checks fail, and keep Windows Python shim failures diagnosable.
+- **Staged Verify Runner** - `meta:verify:all` now uses the staged runner by default, with `--json`, `--from`, report output, per-stage duration, and resumable failure context; the old one-line chain remains as `meta:verify:all:chain`.
+- **State Portability Warning** - `meta:status` reports machine-portability risk for `.meta-kim/state/` so local absolute-path state is not mistaken for shareable project material.
+- **Projection Tier Clarity** - Public docs now describe Claude Code and Codex as default projections while OpenClaw and Cursor remain compatibility projections that require maintainer handshake and native self-test evidence.
 - **Design-Time Stage Semantics** - Critical, Fetch, and Thinking denial messages now say business mutation waits for Execution, while the main thread may continue with read/search, capability discovery, planning/control-plane updates, and spine-state packet writes.
 - **Execution-Only Dispatch Requirement** - The stage runtime control contract now records that Fetch and Thinking in progress do not require Agent dispatch; execution owner/loadout and dispatch evidence remain Execution-stage gates.
 - **Planning Control Plane Allowance** - Claude plan-mode surfaces, task/todo bookkeeping, `.claude/plans/*.md`, and Meta_Kim planning files can update during Fetch without a `fetchRecord`, while ordinary business files remain blocked.
 - **Observed Local Publish Step** - Auto-triggered observed mode now allows local `git add` and `git commit` checkpoints and ignores risky words inside quoted search text, while continuing to block external publish/destructive commands such as `git push`, package installs, and resets.
 - **Hook Payload Path Compatibility** - Hook file-path extraction now handles camelCase and target path variants so runtime planning surfaces are classified by their real target.
-- **Regression Coverage** - Eight-stage spine tests cover the no-Agent design-stage rule, planning control-plane allowance, and the exact business-mutation denial wording that must not tell users to dispatch an Agent.
+- **Run-Scoped Worker Execution Regression Coverage** - Eight-stage spine, setup, MCP Memory, hook-runtime, release-doc, and staged-verify tests cover the no-Agent design-stage rule, planning control-plane allowance, opt-in global hooks, explicit runtime selection, and the exact business-mutation denial wording that must not tell users to dispatch an Agent.
 
 ### Verification
 
@@ -31,7 +41,7 @@ That created the wrong repair loop: the operator needed to finish Fetch and Thin
 - `npm run discover:global`
 - `npm run meta:check`
 - `npm run meta:check:global`
-- `npm run meta:release:smoke`
+- `node scripts/run-verify-all.mjs --no-report`
 - `git diff --check`
 
 ## [2.8.52] - 2026-06-23

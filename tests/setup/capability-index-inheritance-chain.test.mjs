@@ -327,7 +327,11 @@ describe("capability index inheritance chain", () => {
 
   test("release verification refreshes global capability discovery before checks while live eval stays live-only", async () => {
     const pkg = await readJson("package.json");
-    const releaseScript = pkg.scripts?.["meta:verify:all"] ?? "";
+    const releaseScript = await fs.readFile(
+      path.join(repoRoot, "scripts", "run-verify-all.mjs"),
+      "utf8",
+    );
+    assert.match(pkg.scripts?.["meta:verify:all"] ?? "", /run-verify-all\.mjs/);
     assert.match(releaseScript, /npm run discover:global/);
     assert.ok(
       releaseScript.indexOf("npm run discover:global") < releaseScript.indexOf("npm run meta:check"),

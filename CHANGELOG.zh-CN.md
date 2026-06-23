@@ -14,14 +14,24 @@ Meta_Kim 的 runtime hook 仍可能把设计期阶段表现得像是必须先派
 
 这会制造错误修复循环：维护者真正需要补的是 Fetch / Thinking 证据，再进入 Execution；但 hook 暗示下一步必须派 Agent。
 
+本次发布审计还发现几类首跑和维护发布风险：`npx github:...` 可能在依赖安装前就失败；全局安装可能静默改用户 home hook 配置；Codex/Cursor hook runtime 仍依赖路径嗅探；MCP Memory 在 `8000` 端口冲突和 Windows Python shim 场景下诊断不清；`meta:verify:all` 的嵌套命令失败时仍不够好定位。
+
 ### 变更
 
+- **首跑 setup fallback** - `setup.mjs` 在 `@inquirer/prompts` 尚未安装时会退回数字菜单，让 GitHub/npx fresh setup 能继续走到依赖安装流程。
+- **全局 hooks 显式 opt-in** - 全局通用能力安装不再把 hooks 当成默认全局能力；只有传入 `--with-global-hooks` 时才更新 Claude/Codex/Cursor hook wiring，文档和测试同步锁住这个边界。
+- **Hook runtime 显式选择** - 生成的 Claude、Codex、Cursor hook 命令会传入明确 runtime 参数；canonical dispatcher 仍保留 fallback detection，但正常投影不再依赖路径嗅探。
+- **Capability gate 可见性** - progressive capability gate 的 hook 输出会暴露 grace-window 状态，setup 也会提示维护者如何选择 `warn`、`block` 或 `off`。
+- **MCP Memory 诊断增强** - MCP Memory hooks 和安装路径支持 `MCP_MEMORY_URL` / `META_KIM_MEMORY_PORT`，健康检查失败时提示可能占用端口的进程，并让 Windows Python shim 问题更容易定位。
+- **分阶段 verify runner** - `meta:verify:all` 默认改用 staged runner，支持 `--json`、`--from`、报告输出、每阶段耗时和失败续跑；旧单行链保留为 `meta:verify:all:chain`。
+- **state 可移植性提示** - `meta:status` 会提示 `.meta-kim/state/` 的 machine-portability 风险，避免把含本机绝对路径的 state 当成可分享项目材料。
+- **投影层级文案收紧** - 公开文档现在把 Claude Code 和 Codex 描述为默认投影；OpenClaw 和 Cursor 是兼容投影，需要维护者握手和 native self-test evidence。
 - **设计期阶段语义修正** - Critical、Fetch、Thinking 的拒绝文案现在明确说明：业务 mutation 要等 Execution；主线程仍可继续 read/search、capability discovery、planning/control-plane 更新和 spine-state packet 写入。
 - **Agent 要求只属于 Execution** - stage runtime control contract 现在记录 Fetch 和 Thinking 进行中不要求 Agent dispatch；execution owner/loadout 与 dispatch evidence 仍保留为 Execution 阶段门。
 - **计划控制面放行** - Claude plan-mode surface、task/todo bookkeeping、`.claude/plans/*.md` 和 Meta_Kim planning files 可在 Fetch 阶段、没有 `fetchRecord` 时更新；普通业务文件仍然会被拦。
 - **观察态本地发布步骤放行** - 自动触发的观察态现在允许本地 `git add` 和 `git commit` 检查点，也不会因为搜索文本里出现高风险词而误拦；`git push`、包安装、reset 等外部发布或破坏性命令仍继续拦截。
 - **Hook 路径字段兼容** - hook 的 file-path 提取支持 camelCase 和 target path 变体，确保 runtime planning surface 按真实目标路径分类。
-- **回归覆盖** - eight-stage spine 测试覆盖设计期不强制 Agent、planning control-plane 放行，以及业务 mutation 被拦时不得提示用户 dispatch Agent 的精确文案。
+- **Run-scoped Worker 实机执行回归覆盖** - eight-stage spine、setup、MCP Memory、hook runtime、release docs 和 staged verify 测试覆盖设计期不强制 Agent、planning control-plane 放行、全局 hooks opt-in、显式 runtime 选择，以及业务 mutation 被拦时不得提示用户 dispatch Agent 的精确文案。
 
 ### 验证
 
@@ -31,7 +41,7 @@ Meta_Kim 的 runtime hook 仍可能把设计期阶段表现得像是必须先派
 - `npm run discover:global`
 - `npm run meta:check`
 - `npm run meta:check:global`
-- `npm run meta:release:smoke`
+- `node scripts/run-verify-all.mjs --no-report`
 - `git diff --check`
 
 ## [2.8.52] - 2026-06-23

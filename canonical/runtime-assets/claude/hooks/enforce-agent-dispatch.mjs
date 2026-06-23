@@ -71,11 +71,11 @@
  *   META_KIM_CAPABILITY_GATE_GRACE_DAYS
  *     Integer day count for the capability-gate progressive grace window. Default 7.
  *
- *   META_KIM_HOOK_RUNTIME
+ *   META_KIM_HOOK_RUNTIME or --runtime claude|codex|cursor
  *     Override runtime detection for cross-runtime deny() output schema.
  *     Accepted values: "claude" | "codex" | "cursor". If unset, the hook
- *     inspects process.argv[1] for ".codex/", ".cursor/", or ".claude/"
- *     and falls back to Claude.
+ *     checks explicit CLI args, then inspects process.argv[1] for ".codex/",
+ *     ".cursor/", or ".claude/", and falls back to Claude.
  *
  *   CLAUDE_SUBAGENT_TYPE
  *     Runtime-injected hint for the current subagent's type. When this starts
@@ -594,9 +594,10 @@ function shouldAdvanceCriticalToFetch(state, toolName, input) {
  * Detect which runtime is hosting this hook so that deny() can emit the right
  * payload schema. Priority:
  *   1. META_KIM_HOOK_RUNTIME env var (explicit override).
- *   2. Inspect process.argv[1] for a runtime-specific path segment, using
+ *   2. --runtime / --meta-kim-hook-runtime CLI arg (projected hook config).
+ *   3. Inspect process.argv[1] for a runtime-specific path segment, using
  *      path.sep so the check works on both POSIX and Windows.
- *   3. Default to "claude".
+ *   4. Default to "claude".
  *
  * @returns {"claude" | "codex" | "cursor"}
  */
@@ -604,6 +605,23 @@ export function detectHookRuntime() {
   const override = (process.env.META_KIM_HOOK_RUNTIME || "").toLowerCase().trim();
   if (override === "claude" || override === "codex" || override === "cursor") {
     return override;
+  }
+
+  for (let i = 2; i < process.argv.length; i += 1) {
+    const arg = String(process.argv[i] || "").toLowerCase().trim();
+    const next = String(process.argv[i + 1] || "").toLowerCase().trim();
+    const inlineRuntime =
+      arg.startsWith("--runtime=")
+        ? arg.slice("--runtime=".length)
+        : arg.startsWith("--meta-kim-hook-runtime=")
+          ? arg.slice("--meta-kim-hook-runtime=".length)
+          : "";
+    const value =
+      inlineRuntime ||
+      (arg === "--runtime" || arg === "--meta-kim-hook-runtime" ? next : "");
+    if (value === "claude" || value === "codex" || value === "cursor") {
+      return value;
+    }
   }
 
   const scriptPath = normalize(process.argv[1] || "");
@@ -968,6 +986,34 @@ function resolveGracedMode(modeRaw, graceDaysEnvVar, defaultGraceDays, state) {
   return elapsedDays < graceDays ? "warn" : "block";
 }
 
+function describeGracedMode(modeRaw, graceDaysEnvVar, defaultGraceDays, state) {
+  const effectiveMode = resolveGracedMode(modeRaw, graceDaysEnvVar, defaultGraceDays, state);
+  if (modeRaw === "warn" || modeRaw === "block" || modeRaw === "off") {
+    return `effective: "${effectiveMode}"; graceDaysRemaining: n/a`;
+  }
+
+  const graceDaysRaw = parseInt(
+    process.env[graceDaysEnvVar] || String(defaultGraceDays),
+    10,
+  );
+  const graceDays =
+    Number.isFinite(graceDaysRaw) && graceDaysRaw >= 0
+      ? graceDaysRaw
+      : defaultGraceDays;
+  const startedAt =
+    state?.runStartTimestamp || state?.triggeredAt || state?.startedAt || null;
+  if (!startedAt) {
+    return `effective: "${effectiveMode}"; graceDaysRemaining: unknown; graceDays: ${graceDays}; anchor: missing`;
+  }
+  const startedMs = Date.parse(startedAt);
+  if (!Number.isFinite(startedMs)) {
+    return `effective: "${effectiveMode}"; graceDaysRemaining: unknown; graceDays: ${graceDays}; anchor: invalid`;
+  }
+  const elapsedDays = (Date.now() - startedMs) / (1000 * 60 * 60 * 24);
+  const graceDaysRemaining = Math.max(0, Math.ceil(graceDays - elapsedDays));
+  return `effective: "${effectiveMode}"; graceDaysRemaining: ${graceDaysRemaining}; graceDays: ${graceDays}`;
+}
+
 /**
  * Decide which enforcement mode is active right now.
  *
@@ -1258,13 +1304,18 @@ if (isAgentDispatchTool(toolName)) {
           7,
           state,
         );
+        const graceStatus = describeGracedMode(
+          capabilityGateModeRaw,
+          "META_KIM_CAPABILITY_GATE_GRACE_DAYS",
+          7,
+          state,
+        );
 
         const reason =
           `Capability-first violation: fetchRecord.capabilitySearchPerformed must be true ` +
           `before Agent dispatch in stage "${stage}". Search config/capability-index/ + ` +
           `canonical/agents/ first, then update spine state fetchRecord. ` +
-          `Capability gate mode: "${capabilityGateModeRaw}" (effective: "${effectiveMode}"; ` +
-          `default is "progressive"). ` +
+          `Capability gate mode: "${capabilityGateModeRaw}" (${graceStatus}; default is "progressive"). ` +
           `Override with META_KIM_CAPABILITY_GATE=block (immediate), =warn (log only), ` +
           `or =off (disabled, not recommended).`;
 

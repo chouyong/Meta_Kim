@@ -86,6 +86,18 @@ describe("MCP memory cross-runtime hooks", () => {
     assert.doesNotMatch(source, /message:\s*context/);
     assert.match(source, /node:https/);
     assert.match(source, /url\.protocol === "https:" \? https : http/);
+    assert.match(source, /META_KIM_MEMORY_PORT/);
+    assert.match(source, /endpointFromMemoryPort/);
+  });
+
+  test("installer reports configurable endpoints and port owners", () => {
+    const source = readRepoFile("scripts", "install-mcp-memory-hooks.mjs");
+
+    assert.match(source, /configuredMemoryEndpoint/);
+    assert.match(source, /META_KIM_MEMORY_PORT/);
+    assert.match(source, /findProcessUsingPort/);
+    assert.match(source, /netstat/);
+    assert.match(source, /Port \$\{port\} is already used by PID/);
   });
 
   test("shared hook redacts saved secrets and quotes sanitized recall as untrusted", async () => {

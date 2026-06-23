@@ -446,15 +446,16 @@ describe("graphify idempotent wiring (contract)", () => {
 
   test("install uses scoped validation and release validation keeps graphify check", () => {
     const setupSrc = readFileSync(path.join(root, "setup.mjs"), "utf8");
-    const pkg = JSON.parse(
-      readFileSync(path.join(root, "package.json"), "utf8"),
+    const verifyRunner = readFileSync(
+      path.join(root, "scripts", "run-verify-all.mjs"),
+      "utf8",
     );
 
     assert.match(
       setupSrc,
       /"scripts\/validate-project\.mjs"[\s\S]*\["--context", "install"\]/,
     );
-    assert.match(pkg.scripts["meta:verify:all"], /meta:graphify:check/);
+    assert.match(verifyRunner, /meta:graphify:check/);
   });
 
   test("graphify-out remains a local generated artifact, not a package file", () => {
