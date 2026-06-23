@@ -73,8 +73,13 @@ function assertContract() {
   );
   hasAll(
     contract.fetchPolicy?.inProgressMustAllow ?? [],
-    ["repo_search", "capability_scan", "spine_state_write", "planning_control_plane"],
+    ["repo_search", "capability_scan", "spine_state_write", "planning_file_update", "visible_status_notice"],
     "fetchPolicy.inProgressMustAllow",
+  );
+  hasAll(
+    contract.fetchPolicy?.inProgressMustDelay ?? [],
+    ["task_bookkeeping_control_plane_until_fetch_evidence"],
+    "fetchPolicy.inProgressMustDelay",
   );
   hasAll(
     contract.fetchPolicy?.inProgressMustNotRequire ?? [],
@@ -184,7 +189,8 @@ function assertRegressionTests() {
       "Fetch and Thinking in progress do not require Agent dispatch",
       "read-only hook allowance does not auto-advance Critical to Fetch",
       "Fetch stage allows Bash spine-state writes even before fetchRecord exists",
-      "Fetch stage allows planning control-plane updates before fetchRecord exists",
+      "Fetch stage allows planning files before fetchRecord exists",
+      "Fetch stage delays task bookkeeping before Fetch evidence exists",
       "Fetch business mutation denial does not instruct Agent dispatch",
       "Fetch self-lock allows repair-only Node fetchRecord spine-state write",
       `${deprecatedModeMarker} residue in spine state cannot skip dispatch governance`,

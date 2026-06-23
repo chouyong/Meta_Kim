@@ -2478,8 +2478,10 @@ describe("Part F2: choice surface runtime gate", async () => {
     assert.match(result.stdout, /permissionDecision/);
     assert.match(result.stdout, /fetchRecord in spine state/);
     assert.match(result.stdout, /Agent dispatch is not required before Execution/);
+    assert.match(result.stdout, /continue read\/search Fetch evidence/);
     assert.doesNotMatch(result.stdout, /Dispatch them via Agent tool/);
     assert.doesNotMatch(result.stdout, /description must contain the meta-agent name/);
+    assert.doesNotMatch(result.stdout, /planning\/control-plane updates/);
   });
 
   test("queryBypass allows read-only inspection but still denies mutation", () => {
@@ -2723,7 +2725,7 @@ describe("Part F2: choice surface runtime gate", async () => {
     assert.match(mixedBusinessWrite.stdout, /permissionDecision/);
   });
 
-  test("Fetch stage allows planning control-plane updates before fetchRecord exists", () => {
+  test("Fetch stage allows planning files before fetchRecord exists", () => {
     const state = {
       ...createInitialState({
         taskClassification: "meta_theory_auto",
@@ -2754,7 +2756,7 @@ describe("Part F2: choice surface runtime gate", async () => {
     assert.equal(nativePlanBashWrite.status, 0);
     assert.doesNotMatch(nativePlanBashWrite.stdout, /permissionDecision/);
 
-    for (const tool of ["EnterPlanMode", "ExitPlanMode", "TodoWrite"]) {
+    for (const tool of ["EnterPlanMode", "ExitPlanMode"]) {
       const result = runEnforceHook(state, {
         tool_name: tool,
         tool_input: {
@@ -2775,6 +2777,55 @@ describe("Part F2: choice surface runtime gate", async () => {
     });
     assert.equal(businessWriteWithPlanMention.status, 0);
     assert.match(businessWriteWithPlanMention.stdout, /permissionDecision/);
+  });
+
+  test("Fetch stage delays task bookkeeping before Fetch evidence exists", () => {
+    const state = {
+      ...createInitialState({
+        taskClassification: "meta_theory_auto",
+        triggerReason: "test",
+      }),
+      currentStage: "fetch",
+      stageTransitionIntent: "commit",
+    };
+    delete state.fetchRecord;
+
+    for (const tool of ["TaskCreate", "TaskUpdate", "TodoWrite"]) {
+      const result = runEnforceHook(state, {
+        tool_name: tool,
+        tool_input: {
+          plan: "# Plan",
+          todos: [{ content: "Plan the repair", status: "pending" }],
+        },
+      });
+      assert.equal(result.status, 0);
+      assert.match(result.stdout, /permissionDecision/);
+      assert.match(result.stdout, /Task\/todo bookkeeping/);
+      assert.match(result.stdout, /Continue Fetch with read\/search\/capability discovery/);
+      assert.match(result.stdout, /Do not start by creating or updating a task list/);
+    }
+
+    const stateWithFetchEvidence = {
+      ...state,
+      fetchRecord: {
+        capabilitySearchPerformed: true,
+        capabilityMatches: [
+          {
+            name: "runtime hook evidence",
+            score: 3,
+          },
+        ],
+      },
+    };
+
+    const allowedAfterEvidence = runEnforceHook(stateWithFetchEvidence, {
+      tool_name: "TodoWrite",
+      tool_input: {
+        todos: [{ content: "Summarize Fetch evidence", status: "pending" }],
+      },
+    });
+    assert.equal(allowedAfterEvidence.status, 0);
+    assert.doesNotMatch(allowedAfterEvidence.stdout, /permissionDecision/);
   });
 
   test("simpleMode residue in spine state cannot skip dispatch governance", () => {

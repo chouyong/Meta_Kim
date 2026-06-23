@@ -124,16 +124,22 @@ const SPINE_STATE_DIR =
   process.env.META_KIM_SPINE_STATE_DIR || ".meta-kim/state/default/spine";
 const targetPath = extractFilePath(payload) || "";
 const PLANNING_FILES = ["task_plan.md", "findings.md", "progress.md"];
-const CONTROL_PLANE_TOOLS = new Set([
+const PASSIVE_CONTROL_PLANE_TOOLS = new Set([
   "EnterPlanMode",
   "ExitPlanMode",
-  "TaskCreate",
-  "TaskUpdate",
   "TaskList",
   "TaskGet",
   "TaskOutput",
   "TaskStop",
+]);
+const TASK_BOOKKEEPING_TOOLS = new Set([
+  "TaskCreate",
+  "TaskUpdate",
   "TodoWrite",
+]);
+const CONTROL_PLANE_TOOLS = new Set([
+  ...PASSIVE_CONTROL_PLANE_TOOLS,
+  ...TASK_BOOKKEEPING_TOOLS,
 ]);
 
 function normalizeHookPath(value) {
@@ -445,9 +451,41 @@ function formatDesignStageMutationDeny(label, req, state) {
   return (
     `Stage "${label}" is a design-time stage; business mutation is blocked until Execution.` +
     `${missing}${reason} Critical, Fetch, and Thinking can be completed by the main thread; ` +
-    "Agent dispatch is not required before Execution. Allowed next actions: read/search, " +
-    "capability discovery, planning/control-plane updates, or spine-state packet writes. " +
+    "Agent dispatch is not required before Execution. Allowed next actions: continue " +
+    "read/search Fetch evidence, capability discovery, a brief visible chat status, " +
+    "planning-file updates when already useful, or spine-state packet writes. Do not start " +
+    "Fetch by creating or updating a task/todo board before evidence is collected. " +
     `Dispatch chain so far: ${JSON.stringify(state.dispatchChain || {})}`
+  );
+}
+
+function hasFetchEvidenceForTaskBookkeeping(state) {
+  const fetchRecord = state?.fetchRecord;
+  if (!fetchRecord || typeof fetchRecord !== "object") return false;
+  if (fetchRecord.repairOnly || fetchRecord.status === "repair_only_fetch_record") {
+    return false;
+  }
+  return (
+    fetchRecord.capabilitySearchPerformed === true ||
+    (Array.isArray(fetchRecord.evidence) && fetchRecord.evidence.length > 0) ||
+    (Array.isArray(fetchRecord.capabilityMatches) && fetchRecord.capabilityMatches.length > 0)
+  );
+}
+
+function shouldDelayTaskBookkeeping(state) {
+  const stage = String(state?.currentStage || "").toLowerCase();
+  if (stage === "critical") return true;
+  if (stage === "fetch" && !hasFetchEvidenceForTaskBookkeeping(state)) return true;
+  return false;
+}
+
+function formatTaskBookkeepingDelayDeny(toolName, state) {
+  const stage = state?.currentStage || "current design stage";
+  return (
+    `Task/todo bookkeeping via "${toolName}" is delayed during ${stage} until Fetch evidence exists. ` +
+    "Continue Fetch with read/search/capability discovery and a brief visible chat status; " +
+    "write spine-state or planning files only when needed. Do not start by creating or updating " +
+    "a task list before evidence is collected."
   );
 }
 
@@ -1485,8 +1523,18 @@ if (isAgentDispatchTool(toolName)) {
   process.exit(0);
 }
 
-// Control-plane tools: always allow. The fuse is about business mutation and
-// external side effects, not native planning/task bookkeeping.
+// Passive control-plane tools remain allowed. Task/todo bookkeeping is delayed
+// during Critical and pre-evidence Fetch because Claude Code can otherwise
+// churn on native task-list maintenance instead of continuing visible Fetch.
+if (TASK_BOOKKEEPING_TOOLS.has(toolName)) {
+  if (shouldDelayTaskBookkeeping(state)) {
+    exitAfterDeny(formatTaskBookkeepingDelayDeny(toolName, state));
+  }
+  process.exit(0);
+}
+
+// Other control-plane tools are allowed. The fuse is about business mutation
+// and external side effects, not passive native planning surfaces.
 if (CONTROL_PLANE_TOOLS.has(toolName)) {
   process.exit(0);
 }
@@ -1641,7 +1689,8 @@ if (isExecutionTool(toolName)) {
     exitAfterDeny(
       "Current stage: Critical. This stage is for understanding the request and reading project evidence. " +
         "Use repo-inspection commands to enter Fetch, then run baseline verification from Fetch. " +
-        "Allowed now: planning files, spine state writes, and read-only inspection. " +
+        "Allowed now: visible chat status, planning files when already useful, spine state writes, and read-only inspection. " +
+        "Do not create or update task/todo boards before evidence is collected. " +
         `Dispatch chain so far: ${JSON.stringify(state.dispatchChain || {})}`,
     );
   }

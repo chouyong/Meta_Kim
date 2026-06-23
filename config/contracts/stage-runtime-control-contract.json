@@ -72,7 +72,11 @@
       "dependency_discovery",
       "validator_dry_run",
       "spine_state_write",
-      "planning_control_plane"
+      "planning_file_update",
+      "visible_status_notice"
+    ],
+    "inProgressMustDelay": [
+      "task_bookkeeping_control_plane_until_fetch_evidence"
     ],
     "inProgressMustNotRequire": [
       "fetchRecord",
@@ -102,7 +106,8 @@
     "fetch_and_thinking_in_progress_do_not_require_agent_dispatch",
     "read_only_hook_allowance_does_not_auto_advance_stage",
     "fetch_stage_allows_spine_state_write_before_fetchRecord",
-    "fetch_stage_allows_planning_control_plane_before_fetchRecord",
+    "fetch_stage_allows_planning_files_before_fetchRecord",
+    "fetch_stage_delays_task_bookkeeping_before_fetch_evidence",
     "fetch_business_mutation_denial_does_not_instruct_agent_dispatch",
     "fetch_self_lock_allows_repair_only_fetchRecord_write",
     "business_mutation_still_denied_without_execution_readiness",
