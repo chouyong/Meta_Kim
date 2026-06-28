@@ -6,6 +6,30 @@
 
 更新说明先解释本次解决的用户痛点或风险，再说明为了解决它改了什么、为什么重要。过细的内部任务编号、低价值 backlog id 和实现流水账不放在这里；需要精确证据时，请看 Git 历史、测试、生成报告和 PRD 产物。
 
+## [2.8.62] - 2026-06-29
+
+### 解决的问题
+
+`scripts/discover-global-capabilities.mjs` 导出的 `OUTPUT_I18N` 只有英文和中文两块翻译，但项目其它地方（如 `setup.mjs` 的 `LANG_ARG_ALIASES`）宣传支持 `en / zh / ja / ko` 4 个语言。传 `--lang ja` 或 `--lang ko` 实际静默 fallback 到英文，Skills 家族统计的截断提示在英文和中文下都有对应文案，日文和韩文完全没有翻译。这是 v2.8.60（截断文案）和 v2.8.61（setup i18n 抽取）都没补完的缺口。
+
+### 变更
+
+- **`OUTPUT_I18N` 现在覆盖全部 4 个语言** - 增补日文（`ja-JP`）和韩文（`ko-KR`）两块，包含和英文中文同样的 16 个 key：title、byPlatform、hooksByCategory、skillsByFamily、detailsHidden、noMatchingCapabilities、noMatchingCapabilityType、warnings、more、none、scanning、scanningPlatform、errors、detailedInventory、governanceRules、canonicalIndexWritten、localInventoryWritten、canonicalIndexMirrored、searchIndexWritten。
+- **`normalizeOutputLang` 把 ja 和 ko 前缀路由到新块** - `ja*` 映射到 `"ja-JP"`，`ko*` 映射到 `"ko-KR"`；之前两者都 fallback 到英文。
+- **截断文案本地化** - 日文 `more` 写 `等、残り {n} 件は篇幅の都合により非表示`；韩文 `more` 写 `등, 나머지 {n}개 항목은 분량상 표시되지 않음`。`{n}` 仍由 `formatCounts` 替换。
+- **回归保护** - `tests/meta-theory/52-discover-i18n-truncate-format.test.mjs` 加 2 个 case 守护 (a) 源码里有全部 4 语言块；(b) `normalizeOutputLang` 有 `ja → "ja-JP"` 和 `ko → "ko-KR"` 分支。
+
+### 验证
+
+- 实测：`node scripts/discover-global-capabilities.mjs --lang ja | head -5` 现在显示 `🔍 グローバル能力をスキャン中...` 和 `  Claude Code をスキャン中...`；`--lang ko` 显示对应韩文扫描标题。
+- `node --test tests/meta-theory/*.test.mjs` → 1071 pass / 0 fail。
+- 其它 suite → 638 pass / 0 fail。
+- `npm run meta:doctor:governance` → `All governance doctor checks passed`。
+
+### 关于上一版的说明
+
+v2.8.60 引入了截断文案，v2.8.61 抽取了 setup i18n 块，但两个版本都没补完 `discover-global-capabilities.mjs` 的 4 语言覆盖。v2.8.62 把这个收尾。**不 amend v2.8.61 release**——v2.8.61 的 GitHub release 保持原样可追溯。
+
 ## [2.8.61] - 2026-06-29
 
 ### 解决的问题

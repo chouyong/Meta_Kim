@@ -1,6 +1,7 @@
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import process from "node:process";
 
 function scan(langFlag = "--zh") {
@@ -34,5 +35,24 @@ describe("52 — Discover capabilities i18n truncate format", () => {
   test("zh output does not use old 项未显示 wording", () => {
     const out = scan();
     assert.doesNotMatch(out, /项未显示/, "old 项未显示 wording should be replaced");
+  });
+
+  test("OUTPUT_I18N covers all 4 supported languages (en, zh, ja-JP, ko-KR)", () => {
+    const src = readFileSync("scripts/discover-global-capabilities.mjs", "utf8");
+    for (const lang of ["en:", "zh:", '"ja-JP":', '"ko-KR":']) {
+      assert.ok(src.includes(lang), `OUTPUT_I18N must include ${lang} block`);
+    }
+  });
+
+  test("normalizeOutputLang maps ja and ko prefixes to the new ja-JP / ko-KR blocks", () => {
+    const src = readFileSync("scripts/discover-global-capabilities.mjs", "utf8");
+    assert.ok(
+      src.includes('startsWith("ja")) return "ja-JP"'),
+      'must map ja → ja-JP (e.g. `if (raw.startsWith("ja")) return "ja-JP"`)'
+    );
+    assert.ok(
+      src.includes('startsWith("ko")) return "ko-KR"'),
+      'must map ko → ko-KR (e.g. `if (raw.startsWith("ko")) return "ko-KR"`)'
+    );
   });
 });

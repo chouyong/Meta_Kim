@@ -6,6 +6,30 @@ This file is the reader-facing release history for Meta_Kim.
 
 The changelog explains the user-facing problem or risk each release solved, what changed to solve it, and why the change matters. It intentionally avoids long internal task ledgers, low-signal backlog ids, and implementation trivia. When exact evidence is needed, use the repository history, tests, generated reports, and PRD artifacts.
 
+## [2.8.62] - 2026-06-29
+
+### Solved Problem
+
+`scripts/discover-global-capabilities.mjs` exported its `OUTPUT_I18N` with only English and Chinese translation blocks, even though the wider project advertises `en / zh / ja / ko` as the supported language set in `setup.mjs` (`LANG_ARG_ALIASES`). Passing `--lang ja` or `--lang ko` therefore fell back to English silently, and the `Skills by family` truncation marker read `+N more` in both English and Chinese but had no Japanese or Korean translation. This was an oversight from v2.8.60 (truncation wording) and v2.8.61 (setup i18n extraction) — neither release finished the 4-language coverage.
+
+### Changes
+
+- **`OUTPUT_I18N` now covers all 4 supported languages** — Japanese (`ja-JP`) and Korean (`ko-KR`) blocks added with the same 16 keys as English and Chinese: title, byPlatform, hooksByCategory, skillsByFamily, detailsHidden, noMatchingCapabilities, noMatchingCapabilityType, warnings, more, none, scanning, scanningPlatform, errors, detailedInventory, governanceRules, canonicalIndexWritten, localInventoryWritten, canonicalIndexMirrored, searchIndexWritten.
+- **`normalizeOutputLang` routes ja and ko prefixes to the new blocks** — `ja*` maps to `"ja-JP"`, `ko*` maps to `"ko-KR"`; previously both fell back to English.
+- **Truncation wording localized** — the Japanese `more` reads `等、残り {n} 件は篇幅の都合により非表示`; the Korean `more` reads `등, 나머지 {n}개 항목은 분량상 표시되지 않음`. `{n}` is still substituted by `formatCounts`.
+- **Regression coverage** — `tests/meta-theory/52-discover-i18n-truncate-format.test.mjs` adds two cases that pin (a) all four language blocks exist in the source and (b) `normalizeOutputLang` has `ja → "ja-JP"` and `ko → "ko-KR"` branches.
+
+### Verification
+
+- Live run: `node scripts/discover-global-capabilities.mjs --lang ja | head -5` now shows `🔍 グローバル能力をスキャン中...` and `  Claude Code をスキャン中...`; the equivalent `--lang ko` shows the Korean scan banner.
+- `node --test tests/meta-theory/*.test.mjs` → 1071 pass / 0 fail.
+- Other suites → 638 pass / 0 fail.
+- `npm run meta:doctor:governance` → `All governance doctor checks passed`.
+
+### Note on prior release
+
+v2.8.60 introduced the truncation marker and v2.8.61 extracted the setup i18n block, but neither shipped 4-language coverage for `discover-global-capabilities.mjs`. v2.8.62 finishes that work. No v2.8.61 release is amended; the GitHub release for v2.8.61 is left as-is for traceability.
+
 ## [2.8.61] - 2026-06-29
 
 ### Solved Problem
