@@ -6,6 +6,26 @@ This file is the reader-facing release history for Meta_Kim.
 
 The changelog explains the user-facing problem or risk each release solved, what changed to solve it, and why the change matters. It intentionally avoids long internal task ledgers, low-signal backlog ids, and implementation trivia. When exact evidence is needed, use the repository history, tests, generated reports, and PRD artifacts.
 
+## [2.8.61] - 2026-06-29
+
+### Solved Problem
+
+`setup.mjs` had grown to 9 204 lines and embedded a 2 463-line I18N object literal (4 languages × hundreds of keys) directly inside the script. The same translation data effectively lived in two places (`scripts/meta-kim-i18n.mjs` and `setup.mjs`) and the bulk of the script file was a translation table, not orchestration logic. The setup flow's own `LANG_ARG_ALIASES` advertises `en / zh / ja / ko` as the supported language set, but the inline I18N object was the only place the strings actually lived, with no file-level test pinning the single-source-of-truth contract.
+
+### Changes
+
+- **I18N strings extracted to `config/i18n/setup-strings.mjs`** — the 2 463-line 4-language block now lives in its own file. The function is exposed as `export function buildI18N({ MIN_NODE_VERSION })` so the existing `(v) => ... template literals` can still reference `MIN_NODE_VERSION` via closure capture.
+- **`setup.mjs` imports the strings** — the 2 463-line inline object is replaced with `import { buildI18N } from "./config/i18n/setup-strings.mjs"; const I18N = buildI18N({ MIN_NODE_VERSION });`. `setup.mjs` drops from 9 204 to 6 741 lines.
+- **Single source of truth restored** — changing a translation now requires editing exactly one file. `scripts/meta-kim-i18n.mjs` continues to serve other scripts; `config/i18n/setup-strings.mjs` now serves setup.mjs.
+- **Regression coverage** — `tests/meta-theory/53-setup-i18n-extracted.test.mjs` pins the single-source contract: the strings file exists and exports `buildI18N`, `setup.mjs` imports it and contains no inline `const I18N = {`, all 4 languages (`en` / `zh-CN` / `ja-JP` / `ko-KR`) are present, and `setup.mjs` shrank below 7 500 lines.
+
+### Verification
+
+- `node setup.mjs --help` loads cleanly through the new import + closure.
+- `node --test tests/meta-theory/*.test.mjs` → 1071 pass / 0 fail (added 4 cases in suite 53).
+- Other suites → 638 pass / 0 fail.
+- `npm run meta:doctor:governance` → `All governance doctor checks passed`.
+
 ## [2.8.60] - 2026-06-29
 
 ### Solved Problem

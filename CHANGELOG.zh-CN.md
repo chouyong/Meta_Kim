@@ -6,6 +6,26 @@
 
 更新说明先解释本次解决的用户痛点或风险，再说明为了解决它改了什么、为什么重要。过细的内部任务编号、低价值 backlog id 和实现流水账不放在这里；需要精确证据时，请看 Git 历史、测试、生成报告和 PRD 产物。
 
+## [2.8.61] - 2026-06-29
+
+### 解决的问题
+
+`setup.mjs` 已经长到 9204 行，里面嵌了 2463 行的 4 语言 I18N 字符串对象（4 语言 × 几百个 key）。同一份翻译数据实际上散在两个地方（`scripts/meta-kim-i18n.mjs` 和 `setup.mjs`），脚本文件大部分体积是翻译表而不是流程逻辑。`LANG_ARG_ALIASES` 自称支持 `en / zh / ja / ko`，但实际字符串只在那 2463 行里活着，没有文件级测试守护单一源契约。
+
+### 变更
+
+- **I18N 字符串抽到 `config/i18n/setup-strings.mjs`** - 2463 行 4 语言块独立成文件。函数以 `export function buildI18N({ MIN_NODE_VERSION })` 暴露，原 `(v) => ... 模板字面量` 还能通过闭包引用 `MIN_NODE_VERSION`。
+- **`setup.mjs` 改为 import** - 2463 行内联对象换成 `import { buildI18N } from "./config/i18n/setup-strings.mjs"; const I18N = buildI18N({ MIN_NODE_VERSION });`。`setup.mjs` 从 9204 → 6741 行。
+- **单一源恢复** - 改翻译现在只需改一个文件。`scripts/meta-kim-i18n.mjs` 继续服务其它脚本；`config/i18n/setup-strings.mjs` 服务 setup.mjs。
+- **回归保护** - 新增 `tests/meta-theory/53-setup-i18n-extracted.test.mjs`，守护单一源契约：strings 文件存在 + export `buildI18N`；setup.mjs import 它 + 不再有内联 `const I18N = {`；4 语言块全在；setup.mjs 行数 < 7500。
+
+### 验证
+
+- `node setup.mjs --help` 走新 import + 闭包无语法错误。
+- `node --test tests/meta-theory/*.test.mjs` → 1071 pass / 0 fail（53 号加 4 个 case）。
+- 其它 suite → 638 pass / 0 fail。
+- `npm run meta:doctor:governance` → `All governance doctor checks passed`。
+
 ## [2.8.60] - 2026-06-29
 
 ### 解决的问题
