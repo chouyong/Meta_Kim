@@ -6,6 +6,25 @@ This file is the reader-facing release history for Meta_Kim.
 
 The changelog explains the user-facing problem or risk each release solved, what changed to solve it, and why the change matters. It intentionally avoids long internal task ledgers, low-signal backlog ids, and implementation trivia. When exact evidence is needed, use the repository history, tests, generated reports, and PRD artifacts.
 
+## [2.8.58] - 2026-06-28
+
+### Solved Problem
+
+Under `/meta-theory`, engineering tasks never actually selected `agent-teams-playbook` as a fan-out adapter, so the multi-worker parallel pattern was effectively dead. Route analysis kept collapsing to a single-worker fallback branch, and the playbook stayed pinned at `not_required`. At the same time, `workerTaskPacketDrafts` and the upper-layer sourceTasks only consumed `subjectiveUiCapabilityAmplification.lanes`, so engineering work had no second door into multi-lane fan-out. A separate Windows-specific bug in `meta:doctor:governance` made the governance doctor report a false-positive hook mismatch for any project whose `.claude/settings.json` carried the canonical `--runtime` flag on the dispatch-enforcement hook.
+
+### Changes
+
+- **Engineering tasks can split into multiple lanes** - `select-execution-route.mjs` adds `buildParallelExecutionLanes`, which temporarily recognizes independent work units from the task text (paths, explicit `lane` markers, sentence segments) and splits when two or more are present. Worker output and the dispatch board now also recognize this lane source.
+- **Owners must come from runtime-scoped discovery** - `findOwnerForLaneTerms` uses the lane description as a query string and matches against `candidateExecutionAgents` `id + description + own + boundary + trigger`; a match is required, no hard-coded `frontend / backend / test / docs` shortcuts. `compactAgent` now also preserves `description / own / boundary / trigger` so semantic matching has real evidence.
+- **No real owner means skip the lane, never invent one** - When a lane cannot resolve a real owner, it does not enter `workerTaskPacketDrafts`; the route gate naturally downgrades.
+- **Doctor normalizeHookName is platform-correct** - `doctor-governance.mjs` now strips trailing CLI args before basename matching and removes the `.mjs` extension explicitly, so Windows `path.basename(p, ".mjs")` no longer leaks the suffix into the comparison.
+
+### Verification
+
+- Live run: `node scripts/run-meta-theory-governed-execution.mjs --runtime claude_code --emit-conversation-notice "refactor frontend components in src/ui, rebuild backend api routes in src/api, and migrate database schema."` shows `Agent Teams Playbook: status=pass / selected=是 / waves=1` and `Peer Agent Mesh: peers=4 / handoffs=10` with owners that are real runtime agents (`build-error-resolver / ai-engineer-* / api-documenter-* / database-admin-*`).
+- Tests: `node --test tests/meta-theory/*.test.mjs` → 1058 pass / 0 fail; other suites → 638 pass / 0 fail; `npm run meta:doctor:governance` → `All governance doctor checks passed`.
+- Regression coverage: new file `tests/meta-theory/50-parallel-execution-lanes.test.mjs` pins the no-fake-owner and multi-lane contract.
+
 ## [2.8.57] - 2026-06-25
 
 ### Solved Problem

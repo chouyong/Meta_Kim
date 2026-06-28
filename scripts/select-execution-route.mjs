@@ -237,6 +237,10 @@ function compactAgent(entry, source) {
     platformId: entry.platformId ?? null,
     sourceRef: toPosix(sourceRef),
     executionBlock: entry.executionBlock ?? layer === "meta",
+    description: entry.description ?? null,
+    own: entry.own ?? null,
+    boundary: entry.boundary ?? null,
+    trigger: entry.trigger ?? null,
   };
 }
 
@@ -699,12 +703,12 @@ function platformMatchesRuntime(agent) {
 const runtimeScopedProjectExecutionAgents = projectRuntimeAgentCandidates
   .filter((agent) => agent.runtime === runtime || agent.runtime === "shared");
 const runtimeScopedLocalGlobalAgents = localGlobalAgents.filter(platformMatchesRuntime);
-const candidateExistingExecutionOwners = [
+const candidateExecutionAgents = [
   ...runtimeScopedProjectExecutionAgents,
   ...runtimeScopedLocalGlobalAgents,
 ]
-  .filter((agent) => agent.layer !== "meta" && agent.executionBlock !== true)
-  .map((agent) => agent.id);
+  .filter((agent) => agent.layer !== "meta" && agent.executionBlock !== true);
+const candidateExistingExecutionOwners = candidateExecutionAgents.map((agent) => agent.id);
 const ownerDiscoveryPacket = {
   discoveryPrinciple: "canonical_index_first_capability_discovery_owner_last_binding",
   autonomousCapabilityDiscovery,
@@ -858,6 +862,8 @@ function routeForWeapon(weapon) {
   const dep = dependencyIds.length ? candidateDependencies.find((candidate) => dependencyIds.includes(candidate.id)) ?? null : null;
   const runtimeValue = weapon.runtimeSupport?.[runtime] ?? "unknown";
   const osValue = weapon.osSupport?.[osTarget] ?? "unknown";
+  const available = new Set(ownerDiscoveryPacket.candidateExistingExecutionOwners);
+  const executionOwner = weapon.ownerCandidates?.find((owner) => available.has(owner)) ?? null;
   const selectedOwner = weapon.ownerCandidates?.[0] ?? null;
   const existingOwnerMatched = selectedOwner
     ? ownerDiscoveryPacket.candidateExistingExecutionOwners.includes(selectedOwner) ||
@@ -865,6 +871,7 @@ function routeForWeapon(weapon) {
     : false;
   const blockedReasons = [];
   if (!weapon.ownerCandidates?.length) blockedReasons.push("owner missing");
+  if (weapon.ownerCandidates?.length && !executionOwner) blockedReasons.push("owner not in runtime-scoped available set");
   if (!weapon.id) blockedReasons.push("weapon missing");
   if (runtimeValue === "unsupported") blockedReasons.push("runtime unsupported");
   if (osValue === "unsupported") blockedReasons.push("OS unsupported");
@@ -1394,7 +1401,102 @@ function capabilityDiscoveryTaskRequested() {
   return discoveryVerb && discoveryTarget;
 }
 
+// 在 ownerDiscoveryPacket 实际暴露的 agent 池里，按 lane terms 找最匹配的 owner。
+// 匹配字段：id + description + own + boundary + trigger（都来自 canonical frontmatter）。
+// 选出来的 agent.id 必须保证在 candidateExistingExecutionOwners 里（避免 transient hash 假 owner）。
+// 找不到返回 null —— lane 直接不进 workerTaskPacketDrafts，让 route gate 自然降级。
+function findOwnerForLaneTerms(laneTerms) {
+  const tokens = laneTerms
+    .toLowerCase()
+    .split(/[^a-z0-9一-鿿]+/)
+    .filter((t) => t.length >= 2);
+  if (tokens.length === 0) return null;
+  const declared = new Set(ownerDiscoveryPacket.candidateExistingExecutionOwners);
+  const pool = [
+    ...ownerDiscoveryPacket.projectRuntimeAgents,
+    ...ownerDiscoveryPacket.localGlobalAgents,
+  ];
+  let best = null;
+  let bestScore = 0;
+  for (const agent of pool) {
+    if (!declared.has(agent.id)) continue;
+    const corpus = [agent.id, agent.description, agent.own, agent.boundary, agent.trigger]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase();
+    let score = 0;
+    for (const token of tokens) {
+      if (corpus.includes(token)) score += 1;
+    }
+    if (score > bestScore) {
+      bestScore = score;
+      best = agent;
+    }
+  }
+  return bestScore > 0 ? best : null;
+}
+
+function buildParallelExecutionLanes() {
+  // 最大限度放开：>=2 个独立工作单元就拆 lane。
+  // lane terms 来自 taskText 临时提取（路径 + 动名词 + 显式 lane 标记），
+  // 不预设 DOMAIN_KEYWORDS。owner 通过 findOwnerForLaneTerms 在
+  // candidateExecutionAgents 元数据里语义搜索，找不到就别硬塞。
+  const laneSegments = new Map();
+
+  // 1. 路径型 segment：src/ui、src/api、database/migrations —— 每个顶层目录一个 lane
+  for (const match of taskText.matchAll(/(?:^|[\s,;:(])([a-z][\w-]*\/[\w.-]+)/g)) {
+    const path = match[1];
+    const top = path.split("/")[0];
+    if (["the", "and", "for", "with", "under", "into", "from", "in", "on", "to"].includes(top)) continue;
+    const key = `path:${top}`;
+    if (!laneSegments.has(key)) {
+      laneSegments.set(key, { laneHint: top, terms: path.replace(/[\/_.]/g, " ") });
+    }
+  }
+
+  // 2. 显式 lane 标记：lane A / lane B —— laneHint 当 key
+  for (const match of taskText.matchAll(/lane\s+([a-z0-9]+)/gi)) {
+    const label = match[1].toLowerCase();
+    const key = `lane:${label}`;
+    if (!laneSegments.has(key)) {
+      laneSegments.set(key, { laneHint: label, terms: `lane ${label}` });
+    }
+  }
+
+  // 3. 句子分段：逗号/分号/「and」/「与」断句
+  for (const segment of taskText.split(/[,;]|\band\b|与|和|以及/)) {
+    const trimmed = segment.trim();
+    if (trimmed.length < 4) continue;
+    const key = `seg:${trimmed}`;
+    if (!laneSegments.has(key)) {
+      laneSegments.set(key, { laneHint: trimmed.slice(0, 24), terms: trimmed });
+    }
+  }
+
+  if (laneSegments.size < 2) return null;
+
+  const lanes = [];
+  for (const [, segment] of laneSegments) {
+    const owner = findOwnerForLaneTerms(segment.terms);
+    if (!owner) continue;
+    lanes.push({
+      laneId: `exec-${segment.laneHint.replace(/[^a-z0-9一-鿿-]/gi, "-").toLowerCase()}-${lanes.length + 1}`,
+      roleDisplayName: segment.laneHint,
+      ownerAgent: owner.id,
+      purpose: `并行执行 "${segment.terms.trim().slice(0, 60)}"；独立交付，由 ${owner.id} owner 负责`,
+      capabilityProvider: null,
+      decisionImpact: `${owner.id} 是 runtime-scoped 真 owner，匹配到 lane terms：${segment.terms.trim().slice(0, 40)}`,
+      dependsOn: [],
+      parallelGroup: "parallel-execution",
+    });
+  }
+
+  if (lanes.length < 2) return null;
+  return lanes;
+}
+
 function executionCapabilityDiscoveryRoute() {
+  const parallelExecutionLanes = buildParallelExecutionLanes();
   const explicitDiscoveryRoute = capabilityDiscoveryTaskRequested();
   if (taskShape !== "engineering_execution" && !explicitDiscoveryRoute) return null;
   const selectedOwner = selectExecutionOwner();
@@ -1471,6 +1573,7 @@ function executionCapabilityDiscoveryRoute() {
       command: selectedCommand,
       runtimeTool: selectedRuntimeTool,
     },
+    parallelExecutionLanes,
     blockedReasons,
   };
 }
@@ -1665,7 +1768,7 @@ function productBuildOrchestrationRoute() {
     businessFlowLaneId: laneId,
     businessFlowLaneLabel: label,
     roleDisplayName,
-    ownerAgent: selectOwner(ownerPriority) ?? ownerPriority.at(-1) ?? "worker",
+    ownerAgent: selectOwner(ownerPriority) ?? ownerPriority.find((o) => ownerDiscoveryPacket.candidateExistingExecutionOwners.includes(o)) ?? null,
     purpose,
     capabilityNeed,
     includeWhen,
@@ -1856,8 +1959,8 @@ function productBuildOrchestrationRoute() {
   const selectedProviders = Object.fromEntries(laneProviderEntries);
   const firstSelectedSkill = lanesWithBindings.find((item) => item.capabilityProvider)?.capabilityProvider ?? null;
   const missing = lanes
-    .filter((item, index) => !item.ownerAgent || !lanesWithBindings[index]?.capabilityProvider)
-    .map((item) => `${item.laneId}:missing_owner_or_provider`);
+    .filter((item, index) => !lanesWithBindings[index]?.capabilityProvider)
+    .map((item) => `${item.laneId}:missing_provider`);
   const score = missing.length ? 78 : 93;
   return {
     id: `product-build-orchestration:${runtime}:${osTarget}`,
@@ -1923,6 +2026,8 @@ function productBuildOrchestrationRoute() {
         "Evolution writes back only when repeated product-build routing exposes a reusable agent, skill, MCP, command, or hook improvement.",
     },
     blockedReasons: missing,
+    score: missing.length ? 49 : 90,
+    scoreBand: missing.length ? "blocked" : "execute",
   };
 }
 
@@ -2144,10 +2249,10 @@ const output = {
     owner: "meta-conductor",
     route: recommendedRoute.id,
     mergeOwner: "meta-conductor",
-    parallelGroups: recommendedRoute.subjectiveUiCapabilityAmplification?.lanes?.map((lane) => lane.parallelGroup) ?? [],
+    parallelGroups: (recommendedRoute.subjectiveUiCapabilityAmplification?.lanes ?? recommendedRoute.parallelExecutionLanes)?.map((lane) => lane.parallelGroup) ?? [],
   } : null,
-  workerTaskPacketDrafts: recommendedRoute?.subjectiveUiCapabilityAmplification?.lanes
-    ? recommendedRoute.subjectiveUiCapabilityAmplification.lanes.map((lane) => ({
+  workerTaskPacketDrafts: (recommendedRoute?.subjectiveUiCapabilityAmplification?.lanes ?? recommendedRoute?.parallelExecutionLanes)
+    ? (recommendedRoute.subjectiveUiCapabilityAmplification?.lanes ?? recommendedRoute.parallelExecutionLanes).map((lane) => ({
         ownerAgent: lane.ownerAgent,
         roleDisplayName: lane.roleDisplayName,
         roleInstanceId: lane.laneId,

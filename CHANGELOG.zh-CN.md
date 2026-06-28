@@ -6,6 +6,25 @@
 
 更新说明先解释本次解决的用户痛点或风险，再说明为了解决它改了什么、为什么重要。过细的内部任务编号、低价值 backlog id 和实现流水账不放在这里；需要精确证据时，请看 Git 历史、测试、生成报告和 PRD 产物。
 
+## [2.8.58] - 2026-06-28
+
+### 解决的问题
+
+`/meta-theory` 在工程类任务下从来不会真正把 `agent-teams-playbook` 当成 fan-out 适配器选中，所以多 worker 并行模式实际上从未生效。route 分析总是收敛到单 worker 兜底分支，playbook 永远停在 `not_required`。同时，`workerTaskPacketDrafts` 和上层 sourceTasks 也只消费 `subjectiveUiCapabilityAmplification.lanes`，根本没有给工程任务开第二扇门。另外 `meta:doctor:governance` 在 Windows 上对带 `--runtime` 参数的 hook command 会报假阳性 hook mismatch。
+
+### 变更
+
+- **工程任务也能拆多 lane** - `select-execution-route.mjs` 新增 `buildParallelExecutionLanes`，从 task 文本里临时识别路径、显式 lane 标记、句子分段等独立工作单元，≥2 个就拆。worker 产出和 dispatchBoard 现在也认这条 lane 源。
+- **owner 必须来自 runtime-scoped discovery** - 新增 `findOwnerForLaneTerms`，把 lane 描述当查询串，去 `candidateExecutionAgents` 的 `id + description + own + boundary + trigger` 里做关键词匹配；命中才用，不硬编码 `frontend/backend/test/docs`。`compactAgent` 同步补齐 description / own / boundary / trigger 字段，语义匹配才有依据。
+- **找不到真 owner 就跳过 lane** - 找不到就不再兜底写假 owner，直接让这条 lane 不进 workerTaskPacketDrafts，由 route gate 自然降级。
+- **Doctor normalizeHookName 跨平台正确** - `doctor-governance.mjs` 在 basename 匹配前先剥掉 trailing CLI 参数，再显式去 `.mjs` 后缀，避免 Windows `path.basename(p, ".mjs")` 把后缀漏进比对。
+
+### 验证
+
+- 实测：`node scripts/run-meta-theory-governed-execution.mjs --runtime claude_code --emit-conversation-notice "refactor frontend components in src/ui, rebuild backend api routes in src/api, and migrate database schema."`，playbook 从 `not_required` 变 `pass / selected=是 / waves=1`，peer mesh 从 1 变 4 peers / 10 handoffs，owner 都是 runtime 真 agent（如 `build-error-resolver / ai-engineer-* / api-documenter-* / database-admin-*`）。
+- 测试：`node --test tests/meta-theory/*.test.mjs` 1058 pass / 0 fail；其它 suite 638 pass / 0 fail；`npm run meta:doctor:governance` 输出 `All governance doctor checks passed`。
+- 回归保护：新增 `tests/meta-theory/50-parallel-execution-lanes.test.mjs` 守护「无假 owner + 多 lane 触发」契约。
+
 ## [2.8.57] - 2026-06-25
 
 ### 解决的问题
