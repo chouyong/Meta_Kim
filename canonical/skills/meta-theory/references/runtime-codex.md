@@ -119,6 +119,10 @@ Respect user choices (after questioning). Base the analysis on the user's actual
 
 `queryBypass` is not a general substitute for a pre-execution decision. It applies only when there is no execution branch to choose. When branch-changing options exist, use the Codex choice surface even if the evidence gathering itself is read-only.
 
+## Global Hook Package Rule
+
+When `sync-global-meta-theory.mjs --with-global-hooks` writes Codex global hooks, every Meta_Kim command in `~/.codex/hooks.json` must resolve from the global package (`~/.codex/hooks/meta-kim/`) or an explicitly global adapter path. Do not let global hook templates fall back to project-relative `.codex/hooks/...` defaults. If a global hook requires sibling assets, copy them into the same global package, include them in the global hook package fingerprint, and test that the command resolves from a project directory with no `.codex/hooks/` projection.
+
 ## Hook progression
 
 Codex hooks are the last fuse after preflight. Current Codex documentation describes project hooks as trusted lifecycle guardrails loaded from hook/config layers, including managed/plugin/project sources and Windows-specific command variants. Do not treat them as an exhaustive all-tool policy engine.

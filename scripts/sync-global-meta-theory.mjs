@@ -121,6 +121,11 @@ const GLOBAL_HOOK_PACKAGE_FILES_LEGACY = new Set([
   // Files that were shipped historically but are no longer in canonical.
   // Listed here so migration logic can clean them up instead of leaving ghosts.
 ]);
+const MEDUSA_GLOBAL_EXTRA_ASSETS = new Map([
+  ["medusa-findings-surface.mjs", ["shared", "hooks", "medusa-findings-surface.mjs"]],
+  ["medusa-worker.mjs", ["shared", "scripts", "medusa-worker.mjs"]],
+  ["medusa_batch_scan.py", ["shared", "scripts", "medusa_batch_scan.py"]],
+]);
 const RETIRED_HOOK_FILES = ["pre-git-push-confirm.mjs"];
 const legacyHookBackupStamp = new Date()
   .toISOString()
@@ -338,11 +343,29 @@ async function canonicalHookSourcePath(fileName) {
   return null;
 }
 
+function globalHookPackageFileNames() {
+  return [
+    ...new Set([
+      ...GLOBAL_HOOK_PACKAGE_FILES,
+      ...MEDUSA_GLOBAL_EXTRA_ASSETS.keys(),
+    ]),
+  ].sort((left, right) => left.localeCompare(right));
+}
+
+async function globalHookPackageSourcePath(fileName) {
+  const extraSource = MEDUSA_GLOBAL_EXTRA_ASSETS.get(fileName);
+  if (extraSource) {
+    const sourcePath = path.join(canonicalRuntimeAssetsDir, ...extraSource);
+    return (await pathExists(sourcePath)) ? sourcePath : null;
+  }
+  return canonicalHookSourcePath(fileName);
+}
+
 async function fingerprintGlobalHookSources() {
   const hash = createHash("sha256");
   let fileCount = 0;
-  for (const fileName of [...GLOBAL_HOOK_PACKAGE_FILES].sort((left, right) => left.localeCompare(right))) {
-    const filePath = await canonicalHookSourcePath(fileName);
+  for (const fileName of globalHookPackageFileNames()) {
+    const filePath = await globalHookPackageSourcePath(fileName);
     if (!filePath) continue;
     hash.update(fileName);
     hash.update("\n");
@@ -362,7 +385,7 @@ async function fingerprintInstalledGlobalHooks(rootDir) {
   }
   const hash = createHash("sha256");
   let fileCount = 0;
-  for (const fileName of [...GLOBAL_HOOK_PACKAGE_FILES].sort((left, right) => left.localeCompare(right))) {
+  for (const fileName of globalHookPackageFileNames()) {
     const filePath = path.join(rootDir, fileName);
     if (!(await pathExists(filePath))) continue;
     hash.update(fileName);
@@ -580,6 +603,16 @@ function codexGlobalMetaKimHooksDir() {
   return path.join(runtimeHomes.codex.dir, "hooks", "meta-kim");
 }
 
+async function copyMedusaGlobalExtraAssets(dest) {
+  for (const [fileName, sourceParts] of MEDUSA_GLOBAL_EXTRA_ASSETS) {
+    const sourcePath = path.join(canonicalRuntimeAssetsDir, ...sourceParts);
+    if (!(await pathExists(sourcePath))) continue;
+    const targetPath = path.join(dest, fileName);
+    assertHomeBound(targetPath);
+    await fs.copyFile(sourcePath, targetPath);
+  }
+}
+
 async function copyCanonicalHooksToGlobal() {
   const dest = globalMetaKimHooksDir();
   assertHomeBound(dest);
@@ -607,18 +640,7 @@ async function copyCanonicalHooksToGlobal() {
   // worker it spawns lives next to it on disk, and the worker imports the
   // Python helper from its own directory. Mirror them all into the same
   // ~/.claude/hooks/meta-kim/ directory.
-  const medusaSharedAssets = [
-    [["shared", "hooks", "medusa-findings-surface.mjs"], "medusa-findings-surface.mjs"],
-    [["shared", "scripts", "medusa-worker.mjs"], "medusa-worker.mjs"],
-    [["shared", "scripts", "medusa_batch_scan.py"], "medusa_batch_scan.py"],
-  ];
-  for (const [src, name] of medusaSharedAssets) {
-    const sourcePath = path.join(canonicalRuntimeAssetsDir, ...src);
-    if (!(await pathExists(sourcePath))) continue;
-    const targetPath = path.join(dest, name);
-    assertHomeBound(targetPath);
-    await fs.copyFile(sourcePath, targetPath);
-  }
+  await copyMedusaGlobalExtraAssets(dest);
 
   // Cleanup hooks removed from canonical but still present in older installs.
   for (const retired of RETIRED_HOOK_FILES) {
@@ -680,6 +702,7 @@ async function copyCanonicalHooksToCodexGlobal() {
     const destPath = path.join(dest, fileName);
     await fs.copyFile(sourcePath, destPath);
   }
+  await copyMedusaGlobalExtraAssets(dest);
 
   for (const retired of RETIRED_HOOK_FILES) {
     const retiredPath = path.join(dest, retired);
@@ -827,6 +850,8 @@ function buildCodexGlobalHooksTemplate() {
       absHooks,
       "enforce-agent-dispatch.mjs",
     ),
+    medusaEnqueueHookPath: path.join(absHooks, "medusa-postscan-enqueue.mjs"),
+    medusaSurfaceHookPath: path.join(absHooks, "medusa-findings-surface.mjs"),
     hookPromptAdapterPath: codexGlobalHookPromptAdapterPath(),
   });
 }

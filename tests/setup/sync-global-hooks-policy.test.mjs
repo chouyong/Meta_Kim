@@ -36,6 +36,30 @@ async function runScript(args, env) {
   });
 }
 
+function hookCommands(hooks = {}) {
+  const commands = [];
+  for (const blocks of Object.values(hooks ?? {})) {
+    for (const block of blocks ?? []) {
+      for (const hook of block?.hooks ?? []) {
+        if (hook?.command) commands.push(hook.command);
+      }
+    }
+  }
+  return commands;
+}
+
+function nodeScriptPath(command) {
+  const quoted = String(command ?? "").match(/^node\s+"([^"]+)"/u);
+  if (quoted) return quoted[1];
+  const unquoted = String(command ?? "").match(/^node\s+([^\s]+)/u);
+  return unquoted?.[1] ?? null;
+}
+
+function eventArgs(command) {
+  const event = String(command ?? "").match(/--event\s+([A-Za-z0-9-]+)/u);
+  return event ? ["--event", event[1]] : [];
+}
+
 describe("sync-global-meta-theory hook policy", () => {
   test("default global sync/check does not require Claude global hooks", async () => {
     await withTempRuntimeHomes(async ({ env, root }) => {
@@ -297,6 +321,75 @@ describe("sync-global-meta-theory hook policy", () => {
         ),
         "global Codex hooks.json must register prompt-entry project bootstrap hook with package-root evidence",
       );
+    });
+  });
+
+  test("Codex global medusa hooks resolve from the global package without project hooks", async () => {
+    await withTempRuntimeHomes(async ({ env, root }) => {
+      await runScript(["--targets", "codex", "--with-global-hooks"], env);
+
+      const codexHookDir = path.join(root, "codex", "hooks", "meta-kim");
+      for (const fileName of [
+        "medusa-postscan-enqueue.mjs",
+        "medusa-findings-surface.mjs",
+        "medusa-worker.mjs",
+        "medusa_batch_scan.py",
+      ]) {
+        await readFile(path.join(codexHookDir, fileName), "utf8");
+      }
+
+      const hooksJson = JSON.parse(
+        await readFile(path.join(root, "codex", "hooks.json"), "utf8"),
+      );
+      const medusaCommands = hookCommands(hooksJson.hooks).filter((command) =>
+        /medusa-(?:postscan-enqueue|findings-surface)\.mjs/.test(command),
+      );
+      assert.ok(
+        medusaCommands.length >= 4,
+        `expected Codex global medusa commands, got: ${medusaCommands.join(", ")}`,
+      );
+
+      for (const command of medusaCommands) {
+        const scriptPath = nodeScriptPath(command);
+        assert.ok(scriptPath, `expected node script path in command: ${command}`);
+        assert.equal(
+          path.normalize(path.dirname(scriptPath)),
+          path.normalize(codexHookDir),
+          `Codex global medusa command must point at hooks/meta-kim: ${command}`,
+        );
+        assert.doesNotMatch(
+          command.replace(/\\/g, "/"),
+          /(^|\s)\.codex\/hooks\//,
+          `Codex global medusa command must not use a project-relative hook path: ${command}`,
+        );
+      }
+
+      const projectWithoutCodexHooks = path.join(root, "project-without-codex-hooks");
+      await mkdir(projectWithoutCodexHooks, { recursive: true });
+      for (const command of medusaCommands) {
+        const scriptPath = nodeScriptPath(command);
+        const result = spawnSync(
+          process.execPath,
+          [scriptPath, ...eventArgs(command)],
+          {
+            cwd: projectWithoutCodexHooks,
+            env,
+            input: "{}\n",
+            encoding: "utf8",
+            timeout: 5000,
+            windowsHide: true,
+          },
+        );
+        assert.equal(
+          result.status,
+          0,
+          `expected command to resolve without project .codex/hooks: ${command}\n${result.stderr || result.stdout}`,
+        );
+        assert.doesNotMatch(
+          result.stderr,
+          /MODULE_NOT_FOUND|ERR_MODULE_NOT_FOUND|Cannot find module/,
+        );
+      }
     });
   });
 
