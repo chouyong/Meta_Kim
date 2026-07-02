@@ -12,6 +12,16 @@ Known limitation: PreToolUse hooks strip `AskUserQuestion` return data (GitHub i
 
 Trigger proof rule: when `AskUserQuestion` is available and `choiceSurfaceState` is `critical_clarification_allowed` or `execution_confirmation_allowed`, Claude Code must call `AskUserQuestion` or produce a deferred `AskUserQuestion` tool call for the host UI before Execution. A `cardPlanPacket`, CLI report, hook notification, or markdown decision card is not proof that the native question surface appeared. In non-interactive `claude -p` flows, acceptable proof is a deferred `AskUserQuestion` tool call handled by the caller or a non-empty resumed answer. Missing native proof blocks the run.
 
+False native choice claim guard: do not announce "I used AskUserQuestion", "the native question did not return", "the popup failed", or equivalent localized wording unless an `AskUserQuestion` answer, deferred `AskUserQuestion` tool call, or `nativeChoiceSurfaceBlocked` record exists. If the tool is unavailable, say the native question is blocked or pending; do not narrate an empty return that the runtime did not provide.
+
+## Visible Status Boundary
+
+Claude Code `UserPromptSubmit` / HookPrompt context can help Claude decide what to do, but it is not the same thing as telling the user what is happening. `MessageDisplay` can transform assistant text while it streams, but it is display-only: it cannot create a missing stage notice, cannot change what Claude sees, and cannot replace the conversation transcript. For Claude Code, the reliable user-visible status surface is the assistant message itself.
+
+Therefore every governed Claude Code run must render localized assistant-message notices for run start, route selected before Execution, blocker/degraded state when present, and closure. Use `AskUserQuestion` only for branch-changing decisions; do not use it for routine progress.
+
+Claude Code task/todo bookkeeping is not a progress surface. During Critical and pre-evidence Fetch, do not open with `TaskCreate`, `TaskUpdate`, or `TodoWrite`, and do not announce "I will create a task list, then continue Fetch." Continue with a compact assistant-message status plus batch read/search evidence first. Task/todo bookkeeping may be used after Fetch evidence exists when it preserves continuity, but it is not required for governance readiness.
+
 Use `AskUserQuestion` in exactly these cases:
 
 - Critical clarification: only when the missing answer changes deliverable, scope, permission, safety, owner, capability, acceptance, or non-goal, and Fetch cannot safely proceed.
@@ -26,6 +36,8 @@ Subjective quality or non-measurable adjective requests such as "good", "bad", "
 ## Dispatch-Not-Execute In Claude Code
 
 In Claude Code, governed Execution is real only when the main thread invokes actual providers selected during Thinking. The main thread scopes, dispatches, reviews, and synthesizes; it must not directly edit, write, or run implementation commands as the worker for non-trivial executable work.
+
+Claude Code fan-out uses Claude Code's native dispatch capacity, the task DAG, collision boundaries, workspace isolation, permission model, and context budget. Meta_Kim must not impose a fixed maximum number of Claude Code subagents. If the host can safely run more independent Task/Agent lanes, use that host capacity; if the host or task cannot, record the concrete capacity or safety reason.
 
 Before the first mutation, Thinking must produce a dispatch plan that binds each execution lane to:
 
@@ -42,6 +54,8 @@ Execution must then call the selected provider surface:
 - Use prompt/rule providers only when Fetch found them and Thinking bound them to the lane.
 - Use MCP tools only when the MCP inventory proves the tool is available and safe for the lane.
 
+Record selected executable families in `runtimeInvocationPlanPacket`. `hostInvocationRequestPacket` is the Claude Code adapter handoff: for each missing selected family it states the Agent/Task, Skill, slash command, MCP, or runtime-tool action the host must perform and the exact trusted evidence fields to return. The Node runner must not treat the request as proof; only the active Claude Code host or a trusted host adapter can execute the provider surface and then pass `hostInvocationEvidenceTrusted=true` with fresh evidence. `capabilityInvocationTruthPacket.realInvocationCoverage.status` is `pass` only when the selected Claude Code provider surfaces have fresh call evidence, such as Task/Agent invocation output, applied skill evidence, MCP tool result, slash command/script output, or runtime-tool result. `selected_not_invoked` is honest evidence but never a product-experience pass.
+
 For create-agent or iterate-agent routes, execution must separate two artifacts:
 
 - durable project agent: `.claude/agents/<agent>.md` plus matching formal tool projection metadata from `config/sync.json` and `config/runtime-compatibility-catalog.json`
@@ -49,7 +63,16 @@ For create-agent or iterate-agent routes, execution must separate two artifacts:
 
 Do not accept a temporary Agent prompt, runtime thread name, or current work order as the agent definition. Durable agent identity must stay abstract: reusable responsibility class, non-capabilities, abstract loadout slots, inputs, outputs, handoff, memory policy, gap policy, and verification policy.
 
-If no real provider is callable, do not self-execute to "keep moving". Return to Thinking with `capabilityGapPacket`, or enter degraded mode with explicit `degradationReason`, `humanAcceptanceRequired`, and `surfaceState=internal-ready`.
+Durable Claude Code agent completion is a four-step lifecycle, not a file write:
+
+1. Generate a reviewed project-agent definition candidate.
+2. Apply Warden-approved writeback to `.claude/agents/<agent>.md` or the configured projection target.
+3. Reload or restart Claude Code so it discovers the agent definition, then attach `durable_agent` evidence with `evidenceKind=host_discovery_reload`.
+4. Invoke that durable agent through Claude Code Agent/Task and attach `durable_agent` evidence with `evidenceKind=durable_agent_live_invocation`.
+
+Until steps 3 and 4 are attached, `durableAgentLifecyclePacket.status` remains partial even if the file exists.
+
+If no real provider is callable, do not self-execute to "keep moving". Return to Thinking with `capabilityGapPacket`, or enter degraded mode with explicit `degradationReason`, `humanAcceptanceRequired`, `publicReadinessState=internal-ready`, and runtime `surfaceState=notice` or `silent`.
 
 ## Write-Time Fact Gates
 
@@ -80,6 +103,7 @@ Do not copy the external hook's wording into durable Meta_Kim instructions. Keep
 - For agent creation/iteration, produce a durable project-agent candidate with formal tool projection targets from the sync manifest and compatibility catalog; use subagents only as factory or review workers.
 - Record unavailable providers as evidence, not as permission to fake delegation.
 - Cite `workerTaskPackets[].taskPacketId` in every Agent dispatch prompt.
+- Read the current content of every target file in the same execution turn before using Edit, MultiEdit, Write, or any command that rewrites it.
 - Build `fileChangeFactCard` before file mutation, and use it to answer write-time fact gates before retrying the same operation.
 - Block with `nativeChoiceSurfaceBlocked` when `AskUserQuestion` is unavailable, returns empty, or cannot be deferred to the host UI.
 
@@ -101,7 +125,7 @@ Do not copy the external hook's wording into durable Meta_Kim instructions. Keep
 ## Pass criteria
 
 - Every dispatched provider returned a result matching its declared output schema.
-- Every mutated file has a recorded target, consumer, overlap decision, and data-shape note where applicable.
+- Every mutated file was read before rewrite and has a recorded target, consumer, overlap decision, and data-shape note where applicable.
 - `AskUserQuestion` returned a non-empty answer, or non-interactive mode produced a deferred `AskUserQuestion` tool call that the host UI handles before resume.
 - `workerResultPackets[].schemaValidationAttempts[].passed === true` for each lane.
 - The main thread did not directly edit, write, or run implementation commands.
@@ -109,6 +133,7 @@ Do not copy the external hook's wording into durable Meta_Kim instructions. Keep
 ## Fail criteria
 
 - Main thread directly executed implementation work without dispatching a provider.
+- File mutation attempted through Edit, MultiEdit, Write, or rewrite commands before reading the target file in the same execution turn.
 - File mutation started without `fileChangeFactCard` when the change was non-trivial, new-file, data-file, runtime-facing, or hook-gated.
 - `AskUserQuestion` returned empty and the run did not block with `nativeChoiceSurfaceBlocked`.
 - `workerTaskPackets` missing `taskPacketId` or `roleInstanceId`.

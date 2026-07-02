@@ -98,7 +98,7 @@ Before running the full review framework, Prism must name the `coreProblem` in o
 9. **IF** Codex or Claude Code records `conversation_fallback`, chat-card acceptance, markdown-card acceptance, or artifact-only acceptance as the completion evidence for a required branch-changing choice → FAIL primary-runtime downgrade
 10. **IF** `contentEvidencePacket` lacks `researchCapabilityDiscovery` with actual runtime/tool inventory sources, retrieval capability proof, selected research path, gap handling, and Conductor validation when research is required → FAIL evidence sufficiency
 11. **IF** `researchCapabilityDiscovery` uses host-form-factor guesses such as `platformSurface`, treats a static capability index as proof of current tool availability, or claims external research while the selected path is `blocked`, `unknown`, or unverified → FAIL platform honesty
-12. **IF** `contentEvidencePacket` lacks deep research plan, source coverage, key-source deep-read evidence, source-quality ladder, claim attribution, original-synthesis boundary, cross-checks, contradiction handling, assumption ledger, or decision impact mapping when research is required → FAIL evidence sufficiency
+12. **IF** `contentEvidencePacket` lacks deep research plan, key information targets, source coverage, key-source deep-read evidence, source-quality ladder, claim attribution, original-synthesis boundary, cross-checks, contradiction handling, assumption ledger, iteration log, stop condition, decision update rule, claim evidence cards, counterevidence / falsification status, or decision impact mapping when research is required → FAIL evidence sufficiency
 13. **IF** options lack evidence references, meaningful trade-offs, or the required what-changes/problem/result/advantages/disadvantages dimensions → FAIL option quality
 14. **IF** worker work orders lack core problem, non-goals, acceptance criteria, evidence refs, selected expert lens, capability/tool requirements, handoff contract, or verification checks → FAIL Thinking readiness
 15. **IF** dependency failure is handled by `use_fallback`, a guessed artifact, or a generic owner instead of `block`, `wait`, or `return_to_stage` → FAIL dependency policy
@@ -328,7 +328,7 @@ Prism: Collect Evidence -> AI-Slop Scan -> Assertion Evaluation -> Claims Verifi
 | Verification Gate | `meta-warden` + `meta-prism` | Provides: `fixEvidence` + `closeFindings` for each required revision | Reviews closure packet, makes final gate decision |
 | Synthesis Gate | `meta-warden` | — | Owner; Prism does not participate in synthesis gate |
 
-**Escalation Rule**: If `criteriaState` drifts (review standards become too loose or too strict), Prism escalates to Warden for standards recalibration via the `surfaceState: debug-surface` mechanism.
+**Escalation Rule**: If `criteriaState` drifts (review standards become too loose or too strict), Prism escalates to Warden for standards recalibration via the `publicReadinessState: debug-surface` mechanism.
 
 ## Core Analysis Interfaces (Conceptual Layer)
 

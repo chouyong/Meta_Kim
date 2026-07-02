@@ -4,6 +4,11 @@ npm-debug.log*
 pnpm-lock.yaml
 package-lock.json
 
+# ========== Secrets (never commit; preventive — project has no .env yet) ==========
+.env
+.env.*
+!.env.example
+
 # ========== Local-only Claude skills (not synced via sync:runtimes; optional personal overlay) ==========
 canonical/skills/commit-review/
 
@@ -54,6 +59,7 @@ docs/v*-rfc-*.md
 # ========== Test run output (generated; keep tests/*.test.mjs & fixtures tracked) ==========
 tests/output/
 tests/.cache/
+tests/CC-e2e/
 
 # ========== Planning & Progress (local scratch) ==========
 task_plan.md
@@ -62,6 +68,7 @@ findings.md
 
 # ========== Backup / Temporary ==========
 .backup/
+tmp/
 
 # ========== Terminal / Shell Cache Files ==========
 *.omp.cache

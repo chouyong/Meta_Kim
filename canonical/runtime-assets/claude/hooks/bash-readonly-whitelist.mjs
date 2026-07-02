@@ -150,6 +150,29 @@ const COMMAND_ALLOWLIST = [
   ["ps"],
   ["top"],
   ["tasklist"],
+
+  // PowerShell inspection and formatting pipeline commands
+  ["get-childitem"],
+  ["gci"],
+  ["get-content"],
+  ["gc"],
+  ["select-string"],
+  ["sls"],
+  ["get-item"],
+  ["gi"],
+  ["test-path"],
+  ["resolve-path"],
+  ["get-command"],
+  ["get-process"],
+  ["select-object"],
+  ["where-object"],
+  ["sort-object"],
+  ["measure-object"],
+  ["format-list"],
+  ["format-table"],
+  ["convertfrom-json"],
+  ["convertto-json"],
+  ["join-path"],
 ];
 
 /**
@@ -223,6 +246,13 @@ const DANGEROUS_PATTERNS = [
   "rm ",
   "rmdir",
   "del ",
+  "remove-item",
+  "set-content",
+  "add-content",
+  "out-file",
+  "new-item",
+  "move-item",
+  "copy-item",
   "mv ",
   "cp ",
   "touch ",
@@ -405,6 +435,51 @@ function matchesAllowlist(tokens) {
   return null;
 }
 
+function stripOuterQuotes(value) {
+  const trimmed = String(value || "").trim();
+  if (trimmed.length >= 2) {
+    const first = trimmed[0];
+    const last = trimmed[trimmed.length - 1];
+    if ((first === '"' && last === '"') || (first === "'" && last === "'")) {
+      return trimmed.slice(1, -1);
+    }
+  }
+  return trimmed;
+}
+
+function extractNodeEvalScript(segment) {
+  const residual = stripEnvPrefix(String(segment || "").trim()).join(" ");
+  const match = /^(?:node|node\.exe)\s+(?:-e|--eval)\s+([\s\S]+)$/i.exec(residual);
+  return match ? stripOuterQuotes(match[1]) : null;
+}
+
+function isReadOnlyNodeEval(segment) {
+  const script = extractNodeEvalScript(segment);
+  if (!script) return false;
+
+  const lowered = script.toLowerCase();
+  const hasReadSignal =
+    /(?:readfilesync|existssync|readdirsync|statsync|lstatsync|json\.parse|console\.(?:log|error|warn)|process\.stdout\.write)/i.test(
+      script,
+    );
+  if (!hasReadSignal) return false;
+
+  const dangerous =
+    /\b(?:writefilesync|appendfilesync|createwritestream|rmsync|unlinksync|mkdirsync|rmdirsync|renamesync|copyfilesync|cpsync|truncate|chmodsync|chownsync|utimesync)\s*\(/i.test(
+      script,
+    ) ||
+    /\b(?:spawn|spawnsync|exec|execsync|execfile|execfilesync|fork)\s*\(/i.test(
+      script,
+    ) ||
+    /\b(?:fetch|request)\s*\(/i.test(script) ||
+    /\b(?:http|https|net|dgram|tls|child_process)\b/i.test(script) ||
+    /\bprocess\.env\s*[.=]/i.test(script) ||
+    /\b(?:eval|function)\s*\(/i.test(script) ||
+    lowered.includes("import(");
+
+  return !dangerous;
+}
+
 function violatesBlacklist(segment) {
   const lowered = ` ${segment.toLowerCase()} `;
   for (const pat of DANGEROUS_PATTERNS) {
@@ -430,6 +505,14 @@ function violatesBlacklist(segment) {
 function classifySegment(segment) {
   const trimmed = (segment || "").trim();
   if (!trimmed) return { readOnly: true, reason: "empty segment", match: null };
+
+  if (isReadOnlyNodeEval(trimmed)) {
+    return {
+      readOnly: true,
+      reason: "matches allowlist: node eval read-only inspection",
+      match: "node -e read-only",
+    };
+  }
 
   const blacklisted = violatesBlacklist(trimmed);
   if (blacklisted) {
@@ -493,5 +576,7 @@ export const __internals = {
   stripEnvPrefix,
   inspectRedirections,
   isWritableTargetSafe,
+  extractNodeEvalScript,
+  isReadOnlyNodeEval,
   classifySegment,
 };

@@ -1058,20 +1058,97 @@ function validateContentEvidencePacket(contract, artifact) {
     "contentEvidencePacket.capabilityGap must be a string or object.",
   );
   ensureObject(packet.deepResearchPlan, "contentEvidencePacket.deepResearchPlan");
-  for (const field of [
+  const researchGate = policy.deepResearchPlanQualityGate ?? {};
+  const stringArrayPlanFields = [
+    "decisionUse",
     "questions",
     "sourceCategoriesPlanned",
+    "deepReadTargets",
+    "sourceQualityLadder",
+    "claimAttributionRules",
+    "crossCheckStrategy",
+    "originalSynthesisRules",
     "decisionImpactCriteria",
-  ]) {
-    ensureStringArray(
-      packet.deepResearchPlan[field],
-      `contentEvidencePacket.deepResearchPlan.${field}`,
-    );
+    "keyInformationTargets",
+    "iterationPlan",
+    "stopCondition",
+    "decisionUpdateRule",
+  ];
+  for (const field of researchGate.requiredPlanFields ?? stringArrayPlanFields) {
+    const context = `contentEvidencePacket.deepResearchPlan.${field}`;
+    if (stringArrayPlanFields.includes(field)) {
+      ensureStringArray(packet.deepResearchPlan[field], context);
+      ensure(
+        packet.deepResearchPlan[field].length >= 1,
+        `${context} must explain what evidence would change the decision.`,
+      );
+    } else {
+      ensure(
+        packet.deepResearchPlan[field] && typeof packet.deepResearchPlan[field] === "object",
+        `${context} must be present for decision-grade research.`,
+      );
+    }
+  }
+  const decisionFrame = packet.deepResearchPlan.decisionQualityFrame;
+  ensureObject(decisionFrame, "contentEvidencePacket.deepResearchPlan.decisionQualityFrame");
+  for (const field of researchGate.decisionQualityFrameRequiredFields ?? []) {
     ensure(
-      packet.deepResearchPlan[field].length >= 1,
-      `contentEvidencePacket.deepResearchPlan.${field} must explain what evidence would change the decision.`,
+      typeof decisionFrame[field] === "string" ||
+        (Array.isArray(decisionFrame[field]) && decisionFrame[field].length >= 1),
+      `contentEvidencePacket.deepResearchPlan.decisionQualityFrame.${field} must be non-empty.`,
     );
   }
+  const minimumTest = packet.deepResearchPlan.minimumDecisionTest;
+  ensureObject(minimumTest, "contentEvidencePacket.deepResearchPlan.minimumDecisionTest");
+  for (const field of researchGate.minimumDecisionTestRequiredFields ?? []) {
+    ensureString(
+      minimumTest[field],
+      `contentEvidencePacket.deepResearchPlan.minimumDecisionTest.${field}`,
+    );
+  }
+  const hypothesisPolicy = researchGate.competingHypothesesPolicy ?? {};
+  ensureArray(
+    packet.deepResearchPlan.competingHypotheses,
+    "contentEvidencePacket.deepResearchPlan.competingHypotheses",
+  );
+  ensure(
+    packet.deepResearchPlan.competingHypotheses.length >=
+      (hypothesisPolicy.minimumHypotheses ?? 2),
+    "contentEvidencePacket.deepResearchPlan.competingHypotheses must compare at least two plausible routes or explanations.",
+  );
+  for (const [index, hypothesis] of packet.deepResearchPlan.competingHypotheses.entries()) {
+    const context = `contentEvidencePacket.deepResearchPlan.competingHypotheses[${index}]`;
+    ensureObject(hypothesis, context);
+    ensureFields(
+      hypothesis,
+      hypothesisPolicy.requiredFields ?? [
+        "hypothesis",
+        "wouldExpect",
+        "disconfirmingEvidence",
+        "currentStatus",
+        "decisionImpact",
+      ],
+      context,
+    );
+    for (const field of ["hypothesis", "wouldExpect", "disconfirmingEvidence", "currentStatus", "decisionImpact"]) {
+      ensureString(hypothesis[field], `${context}.${field}`);
+    }
+  }
+  const confidencePolicy = packet.deepResearchPlan.evidenceConfidencePolicy;
+  ensureObject(confidencePolicy, "contentEvidencePacket.deepResearchPlan.evidenceConfidencePolicy");
+  ensureStringArray(
+    confidencePolicy.sourceStates,
+    "contentEvidencePacket.deepResearchPlan.evidenceConfidencePolicy.sourceStates",
+  );
+  ensureStringArray(
+    confidencePolicy.downgradeReasons,
+    "contentEvidencePacket.deepResearchPlan.evidenceConfidencePolicy.downgradeReasons",
+  );
+  ensureObject(packet.deepResearchPlan.decisionReadinessGate, "contentEvidencePacket.deepResearchPlan.decisionReadinessGate");
+  ensureStringArray(
+    packet.deepResearchPlan.decisionReadinessGate.requiredSignals,
+    "contentEvidencePacket.deepResearchPlan.decisionReadinessGate.requiredSignals",
+  );
   for (const field of [
     "localSourcesRead",
     "contentFindings",
@@ -1080,6 +1157,8 @@ function validateContentEvidencePacket(contract, artifact) {
     "crossReferenceMatrix",
     "assumptionLedger",
     "decisionImpactMap",
+    "iterationLog",
+    "claimEvidenceCards",
   ]) {
     ensureArray(packet[field], `contentEvidencePacket.${field}`);
     ensure(
@@ -1132,6 +1211,99 @@ function validateContentEvidencePacket(contract, artifact) {
       item.stageAffected,
       allowedImpactStages,
       `contentEvidencePacket.decisionImpactMap[${index}].stageAffected`,
+    );
+  }
+  const iterationPolicy = policy.iterationLogQualityGate ?? {};
+  ensure(
+    packet.iterationLog.length >= (iterationPolicy.minimumIterationLogEntries ?? 1),
+    "contentEvidencePacket.iterationLog must record at least one retrieval or reasoning iteration.",
+  );
+  for (const [index, item] of packet.iterationLog.entries()) {
+    const context = `contentEvidencePacket.iterationLog[${index}]`;
+    ensureObject(item, context);
+    ensureFields(
+      item,
+      iterationPolicy.requiredFields ?? [
+        "iteration",
+        "trigger",
+        "queryOrAction",
+        "observation",
+        "gapClosed",
+        "nextStepDecision",
+        "stopCheck",
+      ],
+      context,
+    );
+    ensure(
+      Number.isInteger(item.iteration) && item.iteration >= 1,
+      `${context}.iteration must be a positive integer.`,
+    );
+    for (const field of ["trigger", "queryOrAction", "observation", "nextStepDecision", "stopCheck"]) {
+      ensureString(item[field], `${context}.${field}`);
+    }
+    ensure(
+      typeof item.gapClosed === "boolean" || typeof item.gapClosed === "string",
+      `${context}.gapClosed must state whether the information gap was closed.`,
+    );
+    ensure(
+      !/none|n\/a|no impact|unchanged/i.test(item.nextStepDecision),
+      `${context}.nextStepDecision must explain whether to continue, stop, or update the route.`,
+    );
+  }
+  const claimCardPolicy = policy.claimEvidenceCardQualityGate ?? {};
+  ensure(
+    packet.claimEvidenceCards.length >= (claimCardPolicy.minimumClaimEvidenceCards ?? 1),
+    "contentEvidencePacket.claimEvidenceCards must include at least one claim evidence card.",
+  );
+  for (const [index, item] of packet.claimEvidenceCards.entries()) {
+    const context = `contentEvidencePacket.claimEvidenceCards[${index}]`;
+    ensureObject(item, context);
+    ensureFields(
+      item,
+      claimCardPolicy.requiredFields ?? [
+        "claim",
+        "sourceRefs",
+        "evidenceAnchor",
+        "confidence",
+        "counterevidence",
+        "decisionImpact",
+        "falsificationStatus",
+      ],
+      context,
+    );
+    for (const field of ["claim", "evidenceAnchor", "decisionImpact"]) {
+      ensureString(item[field], `${context}.${field}`);
+    }
+    validateEvidenceRefArray(artifact, item.sourceRefs, `${context}.sourceRefs`);
+    if (Array.isArray(item.counterevidence)) {
+      ensure(
+        item.counterevidence.length >= 1,
+        `${context}.counterevidence must record what was checked or why none was found.`,
+      );
+      for (const [counterIndex, counter] of item.counterevidence.entries()) {
+        ensureString(counter, `${context}.counterevidence[${counterIndex}]`);
+      }
+    } else {
+      ensureString(item.counterevidence, `${context}.counterevidence`);
+    }
+    ensureEnum(
+      item.confidence,
+      claimCardPolicy.confidenceEnum ?? ["low", "moderate", "high"],
+      `${context}.confidence`,
+    );
+    ensureEnum(
+      item.falsificationStatus,
+      claimCardPolicy.falsificationStatusEnum ?? [
+        "tested_survived",
+        "tested_refuted",
+        "unverified",
+        "blocked",
+      ],
+      `${context}.falsificationStatus`,
+    );
+    ensure(
+      !/none|n\/a|no impact|unchanged/i.test(item.decisionImpact),
+      `${context}.decisionImpact must state what the card changes for the decision.`,
     );
   }
   ensureArray(packet.contradictionLog, "contentEvidencePacket.contradictionLog");
@@ -2616,7 +2788,9 @@ function validateCardPlan(contract, artifact) {
     contract.protocols.cardPlanPacket.requiredFields,
     "cardPlanPacket",
   );
-  ensureArray(cardPlan.cards, "cardPlanPacket.cards");
+  ensureArray(cardPlan.cardEvents, "cardPlanPacket.cardEvents");
+  ensureArray(cardPlan.cardTypeCatalog, "cardPlanPacket.cardTypeCatalog");
+  ensureArray(cardPlan.cardTypeDecisions, "cardPlanPacket.cardTypeDecisions");
   ensureArray(cardPlan.deliveryShells, "cardPlanPacket.deliveryShells");
   ensureArray(cardPlan.controlDecisions, "cardPlanPacket.controlDecisions");
 
@@ -2633,12 +2807,64 @@ function validateCardPlan(contract, artifact) {
   const silencePolicy = contract.runDiscipline.silencePolicy;
   const controlPolicy = contract.runDiscipline.controlIntervention;
 
+  const cardEventIds = new Set();
+  for (const [index, event] of cardPlan.cardEvents.entries()) {
+    ensureFields(
+      event,
+      [
+        "eventId",
+        "eventIndex",
+        "cardKey",
+        "cardType",
+        "cardIntent",
+        "cardDecision",
+        "cardAudience",
+        "cardTiming",
+        "deliveryShellId",
+        "eventReason",
+        "repeatOrdinal",
+      ],
+      `cardPlanPacket.cardEvents[${index}]`,
+    );
+    ensure(!cardEventIds.has(event.eventId), `Duplicate card eventId: ${event.eventId}`);
+    cardEventIds.add(event.eventId);
+    ensure(
+      Number.isInteger(event.eventIndex) && event.eventIndex >= 1,
+      `card event ${event.eventId} eventIndex must be a positive integer.`,
+    );
+    ensure(
+      Number.isInteger(event.repeatOrdinal) && event.repeatOrdinal >= 1,
+      `card event ${event.eventId} repeatOrdinal must be a positive integer.`,
+    );
+    ensureEnum(event.cardType, cardPolicy.cardTypeEnum, `card event ${event.eventId} cardType`);
+    ensureEnum(
+      event.cardIntent,
+      cardPolicy.cardIntentEnum,
+      `card event ${event.eventId} cardIntent`,
+    );
+    ensureEnum(
+      event.cardDecision,
+      cardPolicy.cardDecisionEnum,
+      `card event ${event.eventId} cardDecision`,
+    );
+    ensureEnum(
+      event.cardAudience,
+      cardPolicy.cardAudienceEnum,
+      `card event ${event.eventId} cardAudience`,
+    );
+    ensureEnum(
+      event.cardTiming,
+      cardPolicy.cardTimingEnum,
+      `card event ${event.eventId} cardTiming`,
+    );
+  }
+
   const cardIds = new Set();
-  for (const [index, card] of cardPlan.cards.entries()) {
+  for (const [index, card] of cardPlan.cardTypeDecisions.entries()) {
     ensureFields(
       card,
       contract.protocols.cardDecision.requiredFields,
-      `cardPlanPacket.cards[${index}]`,
+      `cardPlanPacket.cardTypeDecisions[${index}]`,
     );
     ensure(!cardIds.has(card.cardId), `Duplicate cardId: ${card.cardId}`);
     cardIds.add(card.cardId);
@@ -2735,10 +2961,16 @@ function validateCardPlan(contract, artifact) {
     shellIds.has(cardPlan.defaultShellId),
     `cardPlanPacket.defaultShellId ${cardPlan.defaultShellId} must reference an existing delivery shell.`,
   );
-  for (const card of cardPlan.cards) {
+  for (const card of cardPlan.cardTypeDecisions) {
     ensure(
       shellIds.has(card.deliveryShellId),
       `card ${card.cardId} references missing deliveryShellId ${card.deliveryShellId}.`,
+    );
+  }
+  for (const event of cardPlan.cardEvents) {
+    ensure(
+      shellIds.has(event.deliveryShellId),
+      `card event ${event.eventId} references missing deliveryShellId ${event.deliveryShellId}.`,
     );
   }
 
@@ -3809,6 +4041,174 @@ function validateSummaryAndEvolution(contract, artifact) {
   );
 }
 
+function nestedPacket(artifact, packetName) {
+  return artifact.coreLoop?.[packetName] ?? artifact[packetName] ?? null;
+}
+
+function publicReadySignals(artifact) {
+  return [
+    ["runHeader.publicReady", artifact.runHeader?.publicReady],
+    ["summaryPacket.publicReady", artifact.summaryPacket?.publicReady],
+    ["publicReadyDecision.publicReady", artifact.publicReadyDecision?.publicReady],
+    [
+      "coreLoop.publicReadyDecision.publicReady",
+      artifact.coreLoop?.publicReadyDecision?.publicReady,
+    ],
+  ].filter(([, value]) => typeof value === "boolean");
+}
+
+function publicReadyClaims(artifact) {
+  return publicReadySignals(artifact).filter(([, value]) => value === true);
+}
+
+function canonicalJson(value) {
+  return JSON.stringify(value);
+}
+
+function validateNestedPacketConsistency(artifact, packetName) {
+  const topLevel = artifact[packetName];
+  const coreLoop = artifact.coreLoop?.[packetName];
+  if (topLevel === undefined || coreLoop === undefined) return;
+  ensure(
+    canonicalJson(topLevel) === canonicalJson(coreLoop),
+    `${packetName} must match coreLoop.${packetName}; top-level packets cannot mask stale or failing coreLoop truth.`,
+  );
+}
+
+function validateCoreLoopPublicReadyConsistency(artifact) {
+  for (const packetName of [
+    "runtimeInvocationPlanPacket",
+    "hostInvocationRequestPacket",
+    "capabilityInvocationTruthPacket",
+    "productExperiencePacket",
+    "publicReadyDecision",
+  ]) {
+    validateNestedPacketConsistency(artifact, packetName);
+  }
+
+  const claims = publicReadyClaims(artifact);
+  if (claims.length === 0) return;
+
+  const readinessSignals = publicReadySignals(artifact);
+  const falseSignals = readinessSignals.filter(([, value]) => value === false);
+  ensure(
+    falseSignals.length === 0,
+    `${claims.map(([name]) => name).join(", ")} cannot coexist with false public-ready signals: ${falseSignals
+      .map(([name]) => name)
+      .join(", ")}.`,
+  );
+
+  const runtimeInvocationPlanPacket = nestedPacket(
+    artifact,
+    "runtimeInvocationPlanPacket",
+  );
+  const hostInvocationRequestPacket = nestedPacket(
+    artifact,
+    "hostInvocationRequestPacket",
+  );
+  const capabilityInvocationTruthPacket = nestedPacket(
+    artifact,
+    "capabilityInvocationTruthPacket",
+  );
+  const productExperiencePacket = nestedPacket(
+    artifact,
+    "productExperiencePacket",
+  );
+  const claimNames = claims.map(([name]) => name).join(", ");
+
+  ensure(
+    runtimeInvocationPlanPacket?.status === "pass",
+    `${claimNames} requires runtimeInvocationPlanPacket.status=pass.`,
+  );
+  ensure(
+    hostInvocationRequestPacket?.status === "pass",
+    `${claimNames} requires hostInvocationRequestPacket.status=pass.`,
+  );
+  ensure(
+    capabilityInvocationTruthPacket?.realInvocationCoverage?.status === "pass",
+    `${claimNames} requires capabilityInvocationTruthPacket.realInvocationCoverage.status=pass.`,
+  );
+  ensure(
+    productExperiencePacket?.status === "product_experience_pass",
+    `${claimNames} requires productExperiencePacket.status=product_experience_pass.`,
+  );
+
+  const realCoverage = capabilityInvocationTruthPacket.realInvocationCoverage;
+  const requiredFamilies = Array.isArray(realCoverage.requiredFamilies)
+    ? realCoverage.requiredFamilies
+    : [];
+  const hostEvidenceCount = Number(realCoverage.hostEvidenceCount ?? 0);
+  ensure(
+    requiredFamilies.length === 0 || hostEvidenceCount > 0,
+    `${claimNames} requires capabilityInvocationTruthPacket.realInvocationCoverage.hostEvidenceCount > 0 for selected executable families.`,
+  );
+
+  const invocationEvidence = Array.isArray(runtimeInvocationPlanPacket.evidence)
+    ? runtimeInvocationPlanPacket.evidence
+    : [];
+  ensure(
+    requiredFamilies.length === 0 || invocationEvidence.length > 0,
+    `${claimNames} requires runtimeInvocationPlanPacket.evidence for selected executable families.`,
+  );
+  for (const family of requiredFamilies) {
+    ensure(
+      invocationEvidence.some(
+        (item) =>
+          item?.family === family &&
+          item.passEligible === true &&
+          (typeof item.evidenceRef === "string"
+            ? item.evidenceRef.trim().length > 0
+            : Boolean(item.evidenceRef)),
+      ),
+      `${claimNames} requires trusted invocation evidence for selected executable family ${family}.`,
+    );
+  }
+
+  const blockingRows = (capabilityInvocationTruthPacket.rows ?? []).filter(
+    (row) =>
+      row?.selectedCount > 0 &&
+      ["selected_not_invoked", "unavailable", "blocked"].includes(row.state),
+  );
+  ensure(
+    blockingRows.length === 0,
+    `${claimNames} cannot coexist with selected executable capability states: ${blockingRows
+      .map((row) => `${row.family}:${row.state}`)
+      .join(", ")}.`,
+  );
+
+  for (const row of capabilityInvocationTruthPacket.rows ?? []) {
+    if (
+      row?.selectedCount > 0 &&
+      ["invoked", "applied"].includes(row.state)
+    ) {
+      ensure(
+        Array.isArray(row.invocationEvidenceRefs) &&
+          row.invocationEvidenceRefs.length > 0,
+        `${claimNames} requires invocationEvidenceRefs for selected executable capability ${row.family}.`,
+      );
+    }
+  }
+
+  ensure(
+    (hostInvocationRequestPacket.pendingFamilies ?? []).length === 0,
+    `${claimNames} requires hostInvocationRequestPacket.pendingFamilies to be empty.`,
+  );
+  ensure(
+    (hostInvocationRequestPacket.requests ?? []).every(
+      (request) => request.status === "satisfied" && request.passEligible === true,
+    ),
+    `${claimNames} requires every hostInvocationRequestPacket request to be satisfied and passEligible.`,
+  );
+
+  if (artifact.publicReadyDecision && artifact.coreLoop?.publicReadyDecision) {
+    ensure(
+      artifact.publicReadyDecision.publicReady ===
+        artifact.coreLoop.publicReadyDecision.publicReady,
+      "publicReadyDecision.publicReady must match coreLoop.publicReadyDecision.publicReady.",
+    );
+  }
+}
+
 function validateCompactionPacket(contract, artifact) {
   const packet = artifact.compactionPacket;
   if (!packet) {
@@ -3824,6 +4224,22 @@ function validateCompactionPacket(contract, artifact) {
   ensureString(packet.runRef, "compactionPacket.runRef");
   ensureString(packet.profile, "compactionPacket.profile");
   ensureString(packet.profileKey, "compactionPacket.profileKey");
+  ensure(
+    packet.authority === contract.protocols.compactionPacket.authorityPolicy.defaultAuthority,
+    "compactionPacket.authority must be local_continuity_only.",
+  );
+  ensureEnum(
+    packet.sourceAuthority,
+    contract.protocols.compactionPacket.authorityPolicy.allowedSourceAuthority,
+    "compactionPacket.sourceAuthority",
+  );
+  ensure(
+    packet.sourceAuthorityDetail &&
+      typeof packet.sourceAuthorityDetail === "object" &&
+      packet.sourceAuthorityDetail.publicReadyClaimAllowed ===
+        contract.protocols.compactionPacket.authorityPolicy.publicReadyClaimAllowed,
+    "compactionPacket.sourceAuthorityDetail must record publicReadyClaimAllowed=false.",
+  );
   ensureStringArray(packet.openFindings, "compactionPacket.openFindings");
   ensureStringArray(
     packet.pendingRevisions,
@@ -3960,6 +4376,7 @@ export function validateArtifact(contract, artifact) {
   validateWorkerPackets(contract, artifact);
   validateFindingChain(contract, artifact);
   validateSummaryAndEvolution(contract, artifact);
+  validateCoreLoopPublicReadyConsistency(artifact);
   validateCompactionPacket(contract, artifact);
   validateHardPublicReadyTodoGate(contract, artifact);
   validateHardCommentReviewGate(contract, artifact);

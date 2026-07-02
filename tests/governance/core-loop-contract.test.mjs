@@ -1,7 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
 
 const CORE_LOOP = JSON.parse(readFileSync("config/contracts/core-loop-contract.json", "utf8"));
 
@@ -126,6 +128,8 @@ test("capability discovery is multi-type and verification is a fuse", () => {
 });
 
 test("governed execution emits a coreLoop artifact summary", () => {
+  const tempDir = mkdtempSync(path.join(os.tmpdir(), "meta-kim-core-loop-contract-"));
+  const runId = "core-loop-contract-test";
   const result = spawnSync(
     process.execPath,
     [
@@ -133,15 +137,21 @@ test("governed execution emits a coreLoop artifact summary", () => {
       "--task",
       "需要一个稳定的脚本整理 release summary JSON，不需要新长期 agent。",
       "--run-id",
-      "core-loop-contract-test",
+      runId,
+      "--state-dir",
+      tempDir,
+      "--db",
+      path.join(tempDir, "runs.sqlite"),
     ],
     { encoding: "utf8", timeout: 120_000 },
   );
   assert.equal(result.status, 0, result.stderr || result.stdout);
+  const summary = JSON.parse(result.stdout);
+  assert.equal(summary.status, "partial");
+  assert.equal(summary.runId, runId);
 
-  const artifact = JSON.parse(
-    readFileSync(".meta-kim/state/default/governed-executions/core-loop-contract-test.json", "utf8"),
-  );
+  const artifact = JSON.parse(readFileSync(path.join(tempDir, `${runId}.json`), "utf8"));
+  assert.equal(artifact.runId, runId);
   assert.equal(artifact.coreLoop.contractRef, "config/contracts/core-loop-contract.json");
   assert.deepEqual(artifact.coreLoop.spine, EXPECTED_STAGES);
   for (const packetName of [
@@ -161,6 +171,7 @@ test("governed execution emits a coreLoop artifact summary", () => {
     "dynamicWorkflowRuntimePacket",
     "peerAgentMeshPacket",
     "agentTeamsPlaybookPacket",
+    "runtimeInvocationPlanPacket",
     "visibleMetaTheorySurfacePacket",
     "userPerceptionPacket",
     "productExperiencePacket",
@@ -270,7 +281,7 @@ test("governed execution emits a coreLoop artifact summary", () => {
     assert.equal(artifact.coreLoop.agentTeamsPlaybookPacket.selected, false);
   }
   assert.ok(artifact.coreLoop.peerAgentMeshPacket.peers.length > 0);
-  assert.equal(artifact.coreLoop.capabilityInvocationTruthPacket.status, "pass");
+  assert.ok(["pass", "partial"].includes(artifact.coreLoop.capabilityInvocationTruthPacket.status));
   const invocationByFamily = new Map(
     artifact.coreLoop.capabilityInvocationTruthPacket.rows.map((row) => [row.family, row]),
   );
@@ -302,6 +313,15 @@ test("governed execution emits a coreLoop artifact summary", () => {
     artifact.coreLoop.capabilityInvocationTruthPacket.callableInvocationCoverage.status,
     "not_run",
   );
+  if (artifact.coreLoop.capabilityInvocationTruthPacket.status === "partial") {
+    assert.equal(
+      artifact.coreLoop.capabilityInvocationTruthPacket.realInvocationCoverage.status,
+      "partial",
+    );
+    assert.ok(
+      artifact.coreLoop.capabilityInvocationTruthPacket.realInvocationCoverage.missingFamilies.length > 0,
+    );
+  }
   assert.equal(
     artifact.coreLoop.capabilityInvocationTruthPacket.truthAssertions.noLiveSubagentOverclaim,
     true,
@@ -320,7 +340,10 @@ test("governed execution emits a coreLoop artifact summary", () => {
   );
   assert.ok(["pass", "partial"].includes(artifact.coreLoop.visibleMetaTheorySurfacePacket.status));
   assert.equal(artifact.coreLoop.visibleMetaTheorySurfacePacket.capabilityInventory.notSkillOnly, true);
-  assert.equal(artifact.coreLoop.visibleMetaTheorySurfacePacket.capabilityInvocationTruth.status, "pass");
+  assert.equal(
+    artifact.coreLoop.visibleMetaTheorySurfacePacket.capabilityInvocationTruth.status,
+    artifact.coreLoop.capabilityInvocationTruthPacket.status,
+  );
   assert.equal(
     artifact.coreLoop.visibleMetaTheorySurfacePacket.dynamicWorkflow.status,
     artifact.coreLoop.dynamicWorkflowRuntimePacket.status,
@@ -340,8 +363,9 @@ test("governed execution emits a coreLoop artifact summary", () => {
   assert.equal(artifact.coreLoop.productExperiencePacket.noOverclaimGate.status, "pass");
   assert.equal(
     artifact.coreLoop.productExperiencePacket.nativeChoiceSurfaceGate.liveRuntimeBoundary.status,
-    "not_claimed_by_structural_runner",
+    "needs-host-invocation",
   );
+  assert.equal(artifact.coreLoop.productExperiencePacket.nativeChoiceSurfaceGate.status, "partial");
   assert.equal(
     artifact.coreLoop.productExperiencePacket.repeatFailureDesignGate.actionOnSecondOccurrence,
     "bottom_design_failure_return_to_critical_fetch_thinking",
@@ -379,9 +403,12 @@ test("governed execution emits a coreLoop artifact summary", () => {
   assert.ok(artifact.coreLoop.scarPacket.preventionRule);
   assert.equal(artifact.coreLoop.publicReadyDecision.publicReady, false);
   assert.ok(artifact.coreLoop.publicReadyDecision.blockedBy.length > 0);
+  rmSync(tempDir, { recursive: true, force: true });
 });
 
 test("host-visible subagents are observed, not relabeled as runner invocations", () => {
+  const tempDir = mkdtempSync(path.join(os.tmpdir(), "meta-kim-host-visible-"));
+  const runId = "core-loop-host-visible-subagent-test";
   const result = spawnSync(
     process.execPath,
     [
@@ -389,20 +416,22 @@ test("host-visible subagents are observed, not relabeled as runner invocations",
       "--task",
       "需要一次能产生多 worker 的 meta-theory governed run。",
       "--run-id",
-      "core-loop-host-visible-subagent-test",
+      runId,
+      "--state-dir",
+      tempDir,
+      "--db",
+      path.join(tempDir, "runs.sqlite"),
       "--host-visible-subagents",
       "Galileo,Codebase Analysis",
     ],
     { encoding: "utf8", timeout: 120_000 },
   );
   assert.equal(result.status, 0, result.stderr || result.stdout);
+  const summary = JSON.parse(result.stdout);
+  assert.equal(summary.status, "partial");
+  assert.equal(summary.runId, runId);
 
-  const artifact = JSON.parse(
-    readFileSync(
-      ".meta-kim/state/default/governed-executions/core-loop-host-visible-subagent-test.json",
-      "utf8",
-    ),
-  );
+  const artifact = JSON.parse(readFileSync(path.join(tempDir, `${runId}.json`), "utf8"));
   const invocationByFamily = new Map(
     artifact.coreLoop.capabilityInvocationTruthPacket.rows.map((row) => [row.family, row]),
   );
@@ -413,6 +442,7 @@ test("host-visible subagents are observed, not relabeled as runner invocations",
     artifact.coreLoop.capabilityInvocationTruthPacket.truthAssertions.noHostUiSubagentOverclaim,
     true,
   );
+  rmSync(tempDir, { recursive: true, force: true });
 });
 
 test("core-loop contract declares three product goals plus support gates", () => {
@@ -439,8 +469,11 @@ test("core-loop contract declares three product goals plus support gates", () =>
     "dynamicWorkflowRuntimePacket",
     "peerAgentMeshPacket",
     "agentTeamsPlaybookPacket",
+    "runtimeInvocationPlanPacket",
+    "hostInvocationRequestPacket",
     "capabilityInvocationProbePacket",
     "capabilityInvocationTruthPacket",
+    "durableAgentLifecyclePacket",
     "visibleMetaTheorySurfacePacket",
     "userPerceptionPacket",
     "productExperiencePacket",
@@ -485,6 +518,8 @@ test("core-loop contract declares three product goals plus support gates", () =>
 });
 
 test("project-understanding governed run records deep Fetch source classes", () => {
+  const tempDir = mkdtempSync(path.join(os.tmpdir(), "meta-kim-project-understanding-"));
+  const runId = "core-loop-project-understanding-fetch-test";
   const result = spawnSync(
     process.execPath,
     [
@@ -492,18 +527,20 @@ test("project-understanding governed run records deep Fetch source classes", () 
       "--task",
       "这个项目如果商业化应该怎么发展？",
       "--run-id",
-      "core-loop-project-understanding-fetch-test",
+      runId,
+      "--state-dir",
+      tempDir,
+      "--db",
+      path.join(tempDir, "runs.sqlite"),
     ],
     { encoding: "utf8", timeout: 120_000 },
   );
   assert.equal(result.status, 0, result.stderr || result.stdout);
+  const summary = JSON.parse(result.stdout);
+  assert.equal(summary.status, "partial");
+  assert.equal(summary.runId, runId);
 
-  const artifact = JSON.parse(
-    readFileSync(
-      ".meta-kim/state/default/governed-executions/core-loop-project-understanding-fetch-test.json",
-      "utf8",
-    ),
-  );
+  const artifact = JSON.parse(readFileSync(path.join(tempDir, `${runId}.json`), "utf8"));
   const sourceTypes = new Set(
     artifact.coreLoop.fetchPacket.evidence.map((source) => source.sourceType),
   );
@@ -533,6 +570,58 @@ test("project-understanding governed run records deep Fetch source classes", () 
     ),
     true,
   );
+  rmSync(tempDir, { recursive: true, force: true });
+});
+
+test("default governed run is route-driven instead of old capability-gap orchestration", () => {
+  const tempDir = mkdtempSync(path.join(os.tmpdir(), "meta-kim-route-driven-"));
+  const runId = "route-driven-subjective-ui";
+  const result = spawnSync(
+    process.execPath,
+    [
+      "scripts/run-meta-theory-governed-execution.mjs",
+      "--task",
+      "这个页面不好看，帮我弄高级一点",
+      "--run-id",
+      runId,
+      "--state-dir",
+      tempDir,
+      "--db",
+      path.join(tempDir, "runs.sqlite"),
+    ],
+    { encoding: "utf8", timeout: 120_000 },
+  );
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+
+  const artifact = JSON.parse(readFileSync(path.join(tempDir, `${runId}.json`), "utf8"));
+  const report = artifact.sourceArtifacts.orchestrationReport;
+  assert.equal(
+    report.selectedExecutionRoute.recommendedRoute.id,
+    "subjective-ui-design-orchestration:codex:windows",
+  );
+  assert.equal(report.decisionCounts.oldDefaultPath, 0);
+  assert.equal(artifact.workerTaskPackets.length, 6);
+  assert.ok(
+    artifact.workerTaskPackets.every(
+      (packet) => packet.packetKind === "run_scoped_task_not_agent_definition",
+    ),
+    "worker task cards must be marked as run tasks, not durable agent settings",
+  );
+  for (const packet of artifact.workerTaskPackets) {
+    assert.ok(Array.isArray(packet.skillLoadout), `${packet.roleInstanceId} missing skillLoadout`);
+    assert.ok(Array.isArray(packet.mcpLoadout), `${packet.roleInstanceId} missing mcpLoadout`);
+    assert.ok(Array.isArray(packet.toolLoadout), `${packet.roleInstanceId} missing toolLoadout`);
+    assert.ok(Array.isArray(packet.commandLoadout), `${packet.roleInstanceId} missing commandLoadout`);
+  }
+  assert.equal(
+    artifact.workerTaskPackets.some(
+      (packet) =>
+        packet.roleInstanceId === "read-before-edit-implementation" &&
+        packet.readBeforeEditRequired === true,
+    ),
+    true,
+  );
+  rmSync(tempDir, { recursive: true, force: true });
 });
 
 test("core-loop release strict fixture validates with workflow run validator", () => {

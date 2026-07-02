@@ -9,16 +9,17 @@
  *   node setup.mjs --check      # Environment check only
  *   node setup.mjs --silent     # Non-interactive (CI / scripts)
  *   node setup.mjs --skills a,b # Limit global skill repos (non-interactive / CI)
+ *   node setup.mjs --with-global-hooks
+ *                                # Opt in to global hook wiring for selected runtimes
  *   node setup.mjs --project-dir <dir> [--project-dir <dir>]
  *                                # Also export project-level runtime files to one or more projects
  *   node setup.mjs --all-projects # Reuse saved project directories for export/update
  *   node setup.mjs --project-bootstrap --project-dir <dir> [--dry-run|--apply] [--json]
  *                                # Global-first first-trigger project bootstrap
  *
- * Optional prompts (off by default — install uses scope "both" and skips proxy UI):
- *   --prompt-install-scope      # Ask repo vs home vs both
+ * Optional prompts (off by default — install uses global scope and skips proxy UI):
  *   --prompt-proxy              # Ask Windows system proxy for git (META_KIM_GIT_PROXY)
- *   META_KIM_PROMPT_INSTALL_SCOPE=1 / META_KIM_PROMPT_PROXY=1
+ *   META_KIM_PROMPT_PROXY=1
  */
 
 import { execSync, spawnSync, spawn } from "node:child_process";
@@ -50,7 +51,6 @@ import {
 import { resolveManifestSkillSubdir } from "./scripts/install-platform-config.mjs";
 import { buildNodeScriptSpawn } from "./scripts/node-spawn-config.mjs";
 import {
-  CLAUDE_HOOK_FILES,
   CODEX_BUSINESS_ROLE_AGENT_IDS,
   CODEX_RUNTIME_ADAPTER_AGENT_IDS,
   META_AGENTS,
@@ -64,6 +64,7 @@ import {
 import {
   buildCodexHooksJson,
   buildCursorHooksJson,
+  stripProjectMetaKimHooksFromHookConfig,
 } from "./scripts/runtime-hook-mapping.mjs";
 import {
   loadLocalOverrides,
@@ -88,6 +89,8 @@ const args = process.argv.slice(2);
 const updateMode = args.includes("--update") || args.includes("-u");
 const checkOnly = args.includes("--check");
 const projectBootstrapMode = args.includes("--project-bootstrap");
+const projectCleanupMode =
+  args.includes("--cleanup-projects") || args.includes("--project-cleanup");
 const projectBootstrapDryRun = args.includes("--dry-run");
 const projectBootstrapApply = args.includes("--apply");
 const jsonOutputMode = args.includes("--json");
@@ -95,6 +98,20 @@ const silentMode = args.includes("--silent") || !process.stdout.isTTY;
 const useSavedProjectDirsMode =
   args.includes("--all-projects") || args.includes("--update-projects");
 const saveProjectDirsMode = args.includes("--save-project-dirs");
+// Global hook projection policy:
+//   - Fresh install (`npx meta-kim`, `node setup.mjs` without --update):
+//     install global hooks by default so first-time users get the full
+//     governance surface (enforce-agent-dispatch, stop-completion-guard,
+//     fan-out gate, etc.) without needing to know an opt-in flag.
+//   - Update (`--update` / `-u`): keep opt-in to avoid silently
+//     overwriting a user-local hook that was hand-edited between releases.
+//   - Explicit overrides win: `--with-global-hooks` (force on, including
+//     during update) or `--without-global-hooks` (force off, including
+//     during install).
+const setupWithGlobalHooks =
+  args.includes("--with-global-hooks") ||
+  process.env.META_KIM_WITH_GLOBAL_HOOKS === "1" ||
+  (!args.includes("--without-global-hooks") && !updateMode);
 
 function writeUtf8BomFileSync(path, content) {
   writeFileSync(
@@ -106,10 +123,7 @@ function writeUtf8BomFileSync(path, content) {
   );
 }
 
-/** Interactive extras (default off): full install uses scope "both" and skips proxy prompts. */
-const promptInstallScope =
-  args.includes("--prompt-install-scope") ||
-  process.env.META_KIM_PROMPT_INSTALL_SCOPE === "1";
+/** Interactive extras (default off): proxy prompts stay opt-in; install scope is always shown in TTY. */
 const promptProxy =
   args.includes("--prompt-proxy") || process.env.META_KIM_PROMPT_PROXY === "1";
 
@@ -265,2182 +279,10 @@ const LANGUAGES = [
   { code: "ko-KR", label: "한국어" },
 ];
 
-const I18N = {
-  en: {
-    modeCheck: "check only",
-    modeUpdate: "update",
-    modeSilent: "silent",
-    modeInteractive: "interactive",
-    /** Shared gate before menu / CLI modes — headings below are titles only, no "step 1/N" */
-    preflightHeading: "Environment check",
-    nodeOld: (v) => `Node.js v${v} too old, need >=${MIN_NODE_VERSION}`,
-    nodeOk: (v) => `Node.js v${v}`,
-    npmNotFound: "npm not found",
-    gitNotFound: "git not found — skills install requires git",
-    proxyInfo: (p) => `Proxy: ${p}`,
-    pkgFound: "package.json found",
-    pkgNotFound: "package.json not found — run from Meta_Kim root",
-    envFailed: "Environment check failed. Fix the issues above.",
-    envOk: "Environment OK!",
-    stepRuntime: "AI coding tool detection",
-    claudeDetected: (v) => `Claude Code ${v}`,
-    claudeNotDetected: "Claude Code CLI not detected",
-    codexDetected: (v) => `Codex ${v}`,
-    codexNotDetected: "Codex CLI not detected (optional)",
-    openclawDetected: (v) => `OpenClaw ${v}`,
-    openclawNotDetected: "OpenClaw CLI not detected (optional)",
-    cursorDetected: (v) => `Cursor ${v}`,
-    cursorNotDetected: "Cursor CLI not detected (optional)",
-    noRuntime: "No AI coding tool detected.",
-    noRuntimeHint1:
-      "Meta_Kim works with Claude Code, Codex, OpenClaw, or Cursor.",
-    noRuntimeHint2: "Install at least one: {claudeCodeDocs}",
-    continueAnyway: "Continue setup anyway?",
-    setupCancelled: "Setup cancelled. Install an AI coding tool and re-run.",
-    stepConfig: "Project configuration",
-    mcpExists: ".mcp.json already configured",
-    mcpCreated: ".mcp.json created — MCP service registered",
-    settingsExists: ".claude/settings.json already configured",
-    askCreateSettings: "Create .claude/settings.json with hooks?",
-    settingsCreated:
-      ".claude/settings.json created — hooks + permissions registered",
-    settingsSkipped: ".claude/settings.json skipped by user",
-    settingsSkippedNoClaude:
-      ".claude/settings.json skipped (Claude Code not detected)",
-    stepSkills: "Install skills",
-    shipsSkills: (n) => `Meta_Kim ships ${n} skills:`,
-    runningNpm: "Running npm install ...",
-    npmDone: "npm dependencies installed",
-    npmFailed: `
-✗ npm install failed
-
-Possible causes:
-1. Network error → Check your internet connection and proxy settings
-2. Node version mismatch → Ensure Node ${MIN_NODE_VERSION}+ is installed
-3. Permission issue → Run: npm install --no-optional
-
-→ Fix: Run the command manually to see full output: npm install
-`,
-    nodeModulesExist: "node_modules exists (use --update to reinstall)",
-    skillUpdated: (n) => `${n} — updated`,
-    skillInstalled: (n) => `${n} — installed`,
-    skillExists: (n) => `${n} — already installed`,
-    skillSubdirInstalled: (n, s) => `${n} — installed (subdir: ${s})`,
-    skillFailed: (n, r) => `
-✗ Skill installation failed: ${n}
-
-Possible causes:
-1. Network timeout → Run: npm run meta:sync
-2. Permission denied → Run with sudo/administrator
-3. Repo not found → Check the skill repository URL
-
-${r ? `Raw error: ${r}` : ""}
-`,
-    skillUpdateFailed: (n) =>
-      `${n} — update skipped (non-fast-forward; keeping existing)`,
-    skillSubdirNotFound: (n) => `${n} — subdir not found`,
-    skillsReady: (ok, total, fail) =>
-      `${ok}/${total} skills ready${fail > 0 ? `, ${fail} failed` : ""}`,
-    stepValidate: "Validate project",
-    agentPrompts: (n) => `${n} meta-agent prompts`,
-    validationPassed: "Project validation passed",
-    validationWarnings: "Validation has warnings (non-blocking)",
-    setupComplete: "Setup complete!",
-    whatMetaDoes: "What Meta_Kim does:",
-    whatMetaDoesDesc1: "Gives your AI coding agent a team of specialists:",
-    whatMetaDoesDesc2: "one reviews code, one handles security, one manages",
-    whatMetaDoesDesc3: "memory — all coordinated automatically.",
-    howToUse: "How to use:",
-    step1Open: "Open Claude Code in this directory:",
-    step2Try: "Try a meta-theory command:",
-    step3Or: "Or just ask Claude to do something complex:",
-    step3Hint: "(Meta_Kim will auto-coordinate the specialists)",
-    codexNote: "Codex prompts are synced to .codex/",
-    openclawNote: "OpenClaw workspace is synced to openclaw/",
-    cursorNote: "Cursor agents are synced to .cursor/",
-    noRuntimeGetStarted:
-      "No AI coding tool detected. Install Claude Code to get started:",
-    usefulCommands: "Useful commands:",
-    cmdUpdate: "Update all skills",
-    cmdCheck: "Check environment",
-    cmdDoctor: "Diagnose Meta_Kim health",
-    cmdVerify: "Full verification",
-    cmdDiscover: "Scan global capabilities (agents/skills)",
-    // Post-install notes
-    postInstallNotesHeading: "Post-install notes:",
-    postInstallNotesIntro:
-      "After installation, here is what is available and how each layer activates:",
-    postInstallNotesPlatformSync: "Platform capability sync:",
-    platformClauleCode: "Claude Code",
-    platformClauleCodeCap: "agents + skills + hooks",
-    platformCodex: "Codex",
-    platformCodexCap: "agents + skills",
-    platformOpenClaw: "OpenClaw",
-    platformOpenClawCap: "workspace + skills",
-    platformCursor: "Cursor",
-    platformCursorCap: "agents + skills",
-    postInstallNotesLayerActivation: "Three-layer memory activation:",
-    layer1Label: "Layer 1 (Memory)",
-    layer1Note: "automatic — built into Claude Code",
-    layer2Label: "Layer 2 (Graphify)",
-    layer2Note: "automatic after graphify install (pip install graphifyy)",
-    layer3Label: "Layer 3 (SQL / MCP Memory Service)",
-    layer3Note:
-      "requires server startup: memory server --http (then http://localhost:8000)",
-    installLocationsHeading: "Installation locations:",
-    installLocationsProject: "Project-level (this directory)",
-    installLocationsGlobal: "Global-level (shared across projects)",
-    installLocationsManifest: "Install manifest (for safe rollback)",
-    usefulCommandsHeading: "Next useful commands:",
-    cmdWhereStatus: "view all artifact locations",
-    cmdWhereStatusDiff: "diff against previous install",
-    cmdWhereUninstall: "safe uninstall",
-    postInstallNotesReminder: "Reminder:",
-    postInstallNotesReminderText:
-      "Run node setup.mjs --check to verify your installation at any time.",
-    setupError: "Setup error:",
-    setupInterrupted:
-      "Interrupted (Ctrl+C) — setup did not finish. Run node setup.mjs again when ready.",
-    selectLang: "Select language / 选择语言 / 言語を選択 / 언어 선택",
-    choose: (n) => `Choose (1-${n})`,
-    /** Shown under @inquirer select (replaces default English key hints). */
-    inquirerSingleHotkeys: "↑↓ navigate · ⏎ confirm",
-    /** Shown under @inquirer checkbox — space / a / i match default shortcuts. */
-    inquirerMultiHotkeys:
-      "↑↓ move · space toggle · ⏎ confirm · a all · i invert",
-    globalInstallPrompt:
-      "Meta_Kim skills install to ~/.claude/skills/ (global). Install globally?",
-    globalDirReady: (p) => `Global skills dir ready: ${p}`,
-    globalDirCreated: (p) => `Created global skills dir: ${p}`,
-    globalDirCreateFailed: (e) => `Failed to create global skills dir: ${e}`,
-    globalDirTitle: "Global Skills Directory",
-    globalDirPrompt: `Meta_Kim skills will be installed to ~/.claude/skills/
-• Global install — Shared across all projects
-• Skip — For this project only
-• Re-run setup.mjs anytime to install`,
-    globalSkipped: "Global install skipped — using project-local only",
-    // Install scope selection
-    installScopeHeading: "Installation Scope",
-    installScopePrompt: "This repo only, home skills only, or both?",
-    installScopeProject: "This clone — .claude / .codex / openclaw / .cursor",
-    installScopeGlobal:
-      "Home — skills per selected tool (~/.*/skills), not Claude-only",
-    installScopeBoth: "Both (recommended) — repo, then home",
-    installScopeProjectLabel: "This repo only",
-    installScopeGlobalLabel: "Home skills only",
-    installScopeBothLabel: "Both (recommended)",
-    installScopeProjectDesc:
-      "Update tool configs in this repo only; skips home-directory skills.",
-    installScopeProjectDescDetail: `Creates project-level features:
-• graphify-out/ — Knowledge graph (reduces hallucination, speeds queries)
-• .meta-kim/state/ — Runtime cache & session recovery
-• .claude/.codex/.cursor/ — Tool-specific agents & hooks`,
-    installScopeGlobalDesc:
-      "Install skills + meta-theory for tools you pick next; does not update this repo.",
-    installScopeGlobalDescDetail: `Creates global-level features:
-• ~/.claude/skills/ — Skills shared across ALL projects
-• ~/%tool%/skills/ — Tool-specific skills (Claude, Codex, Cursor, etc.)
-• Existing projects can use Meta_Kim without setup`,
-    installScopeBothDesc: "Repo step, then home step.",
-    installScopeBothDescDetail: `Complete installation:
-• First: project-level agents, hooks, and tool configs
-• Then: global skills shared across all projects
-• New & existing projects both benefit`,
-    // Directory structure explanation
-    directoryExplanationHeading: "Directory Structure",
-    directoryExplanationIntro: "Meta_Kim creates two levels of directories:",
-    directoryExplanationProject: "Project-level (in this repo):",
-    directoryExplanationProjectDetail: `• graphify-out/ — Knowledge graph built from your code
-  Reduces AI hallucination by grounding queries in actual codebase structure
-
-• .meta-kim/state/ — Runtime cache and session recovery
-  Stores run history, compacts sessions, enables cross-session recovery
-
-• .claude/.codex/.cursor/ — Tool-specific agents and hooks
-  Project-local configuration for each AI coding tool`,
-    directoryExplanationGlobal: "Global-level (in home directory):",
-    directoryExplanationGlobalDetail: `• ~/.claude/skills/ — Skills shared across ALL projects
-  Install once, use everywhere. Existing projects gain Meta_Kim capabilities.
-
-• ~/%tool%/skills/ — Tool-specific skills
-  Claude: ~/.claude/skills/
-  Codex: ~/.codex/skills/
-  Cursor: ~/.cursor/skills/
-  OpenClaw: ~/.openclaw/skills/`,
-    directoryExplanationExisting: "For existing projects:",
-    depCheckHeading: "Dependency Check",
-    depOk: (n) => `${n} — OK`,
-    depMissing: (n) => `${n} — MISSING`,
-    depNoFiles: (n) => `${n} — directory exists but no .md files`,
-    selectRuntimeTargets: "Which AI coding tools do you use on this machine?",
-    selectSkillDependencies:
-      "Which third-party skill repositories should be installed globally?",
-    inputTargetsHint: (d) =>
-      `Enter numbers, comma for multiple; Enter to use default ${d}`,
-    inputSkillIdsHint: (d) =>
-      `Enter numbers, comma for multiple; Enter to use default ${d}`,
-    warnUnknownSkillId: (id) => `Unknown skill id (ignored): ${id}`,
-    depSummaryAll: "All 9 dependencies verified",
-    depSummarySome: (ok, total) =>
-      `Only ${ok}/${total} dependencies verified — re-run with --update`,
-    syncHeading: "Cross-Runtime Sync Check",
-    syncClaudeAgents: (n) => `Claude Code agents: ${n}/${META_AGENTS.length} .md files`,
-    syncClaudeSkills: "Claude Code skills/meta-theory/SKILL.md",
-    syncClaudeHooks: (n) => `Claude Code hooks: ${n} scripts`,
-    syncClaudeSettings: "Claude Code .claude/settings.json",
-    syncClaudeMcp: "Claude Code .mcp.json",
-    syncCodexAgents: (n, total = META_AGENTS.length) =>
-      `Codex agents: ${n}/${total} .toml files`,
-    syncCodexSkills: "Codex .agents/skills/meta-theory/SKILL.md",
-    syncOpenclawWorkspaces: (n) =>
-      `OpenClaw workspaces: ${n}/${META_AGENTS.length} agents — each folder has the 9 required .md files (BOOT, SOUL, …)`,
-    syncOpenclawSkill: "OpenClaw shared meta-theory",
-    syncSharedSkills: "Shared skills/meta-theory/SKILL.md",
-    syncCursorAgents: (n) => `Cursor agents: ${n}/${META_AGENTS.length} .md files`,
-    syncCursorSkills: "Cursor skills/meta-theory/SKILL.md",
-    syncCursorMcp: "Cursor .cursor/mcp.json",
-    mcpRuntimeProjectOnly: (p) =>
-      `${p} contains meta-kim-runtime, but its script path is not usable here. This MCP is only for the Meta_Kim source repo; remove the meta-kim-runtime block in copied projects. Agents still load from .claude/.codex/.cursor/openclaw files.`,
-    syncOk: "All sync targets verified",
-    syncMissing: (p) => `Missing: ${p}`,
-    syncPartial: (label, got, need) => `${label}: got ${got}, need ${need}`,
-    stepPythonTools: "Optional Python Tools",
-    pythonNotFound: "Python 3.10+ not found — skipping graphify",
-    pythonHint:
-      "Install Python 3.10+ and run: pip install graphifyy && python -m graphify claude install",
-    pythonNotFoundOfferInstall:
-      "Python 3.10+ not found. Do you want to auto-download and install it?",
-    pythonInstalling: "Downloading and installing Python 3.10+...",
-    pythonInstallSuccess: "Python 3.10+ installed successfully",
-    pythonInstallFailed: (err) =>
-      `Python installation failed: ${err} — you can install manually at https://www.python.org/downloads/`,
-    pythonInstallNotSupported: (platform) =>
-      `Auto-install not supported on ${platform}. Please install Python 3.10+ manually from https://www.python.org/downloads/`,
-    pythonInstallWinget: "Installing Python via winget...",
-    pythonInstallWingetHint:
-      "winget is downloading and installing Python — this may take a few minutes, please wait...",
-    pythonInstallScoop: "Installing Python via scoop...",
-    graphifyCheck: (v) => `graphify ${v}`,
-    graphifyInstalling: "Installing graphify (code knowledge graph)...",
-    graphifyInstalled: "graphify installed and Claude skill registered",
-    graphifyUpgrading: "Upgrading graphify to latest version...",
-    graphifyUpgraded: (v) => `graphify upgraded to ${v}`,
-    graphifyUpgradeFailed: `graphify upgrade failed (non-blocking)`,
-    graphifyInstallFailed: `
-✗ graphify installation failed (non-blocking)
-
-Possible causes:
-1. Python not found → Ensure Python 3.10+ is installed and in PATH
-2. pip error → Run: pip install graphifyy manually to see details
-3. Network error → Check your internet/proxy connection
-
-→ Fix: Run: pip install graphifyy && python -m graphify claude install
-`,
-    graphifyAlreadyInstalled: (v) => `graphify ${v} — already installed`,
-    graphifySkillRegistering: (p) => `Registering graphify ${p} skill...`,
-    graphifySkillRegistered: (p) => `graphify ${p} skill registered`,
-    graphifySkillFailed: (p) =>
-      `graphify ${p} skill registration failed (non-blocking)`,
-    graphifySkillSkippedGuideExists: (p) =>
-      `graphify ${p} install skipped (guide already has Graphify section)`,
-    graphifyCodeGraphGenerated: "graphify code graph generated",
-    graphifyCodeGraphGenerationFailed:
-      "graphify code graph generation failed (non-blocking)",
-    networkxCheck: (v) => `networkx ${v}`,
-    networkxUpgrading:
-      "Upgrading networkx to >=3.4 for graphify compatibility...",
-    networkxUpgraded: (v) => `networkx upgraded to ${v}`,
-    networkxUpgradeFailed:
-      "networkx upgrade failed (graphify may not generate graphs correctly)",
-    networkxAlreadyOk: (v) => `networkx ${v} — compatible`,
-    graphifyHookInstalling:
-      "Installing git hooks for auto graph rebuild on commit/checkout...",
-    graphifyHookInstalled:
-      "graphify git hooks installed (auto-rebuild on commit/checkout)",
-    graphifyHookFailed: "graphify git hook installation failed (non-blocking)",
-    stepMcpMemory: "MCP Memory Service (Layer 3)",
-    mcpMemoryInstalling: "Installing MCP Memory Service (Layer 3)...",
-    mcpMemoryInstalled: "MCP Memory Service installed",
-    mcpMemoryInstallFailed:
-      "MCP Memory Service installation failed (non-blocking)",
-    mcpMemoryAlreadyInstalled: (v) =>
-      `MCP Memory Service ${v} — already installed`,
-    mcpMemoryStopping: "Stopping running MCP Memory Service before upgrade...",
-    mcpMemoryStopped: "MCP Memory Service stopped",
-    mcpMemoryUpgrading: "Upgrading MCP Memory Service to latest version...",
-    mcpMemoryUpgraded: (v) => `MCP Memory Service upgraded to ${v}`,
-    mcpMemoryUpgradeFailed: "MCP Memory Service upgrade failed (non-blocking)",
-    mcpMemoryServerRegistered: "MCP Memory Service registered in .mcp.json",
-    mcpMemoryServerExists: ".mcp.json already has MCP Memory Service",
-    askMcpMemoryInstall:
-      "Install MCP Memory Service (Layer 3)? Provides vector-level session memory with sqlite-vec.",
-    mcpMemorySkipped: "MCP Memory Service skipped",
-    mcpMemoryServerStartHint:
-      "MCP Memory Service installed — HTTP service starts with: MCP_ALLOW_ANONYMOUS_ACCESS=true memory server --http",
-    mcpMemoryHookInstalling:
-      "Installing MCP Memory hooks for Claude Code, Codex, Cursor, and OpenClaw...",
-    mcpMemoryHookInstalled: "MCP Memory runtime hooks installed",
-    mcpMemoryHookWarnings:
-      "Hook installation reported warnings (non-blocking) — underlying stderr shown below:",
-    mcpMemoryAutoStarting: "Starting MCP Memory Service (HTTP, background)...",
-    mcpMemoryAutoStarted: "MCP Memory Service running at http://localhost:8000",
-    mcpMemoryAutoStartUnverified:
-      "MCP Memory Service process is running; continuing",
-    mcpMemoryAutoStartFailed: "Auto-start failed — start manually:",
-    mcpMemoryAutoStartManual:
-      "  MCP_ALLOW_ANONYMOUS_ACCESS=true memory server --http",
-    mcpMemoryAutoStartBoot: "Boot auto-start configured",
-    mcpMemoryAutoStartFailureTitle: "Meta_Kim MCP Memory Service",
-    mcpMemoryAutoStartFailureMessage:
-      "Meta_Kim MCP Memory Service failed to start or did not become healthy at http://127.0.0.1:8000. Cross-session memory may be unavailable. Please start it manually: MCP_ALLOW_ANONYMOUS_ACCESS=true memory server --http",
-    updateHeading: "Update Mode",
-    updateNpm: "Reinstalling npm dependencies...",
-    updateSkills: "Updating all skills...",
-    updateSyncProjectFiles:
-      "Syncing tool configs in this repo from canonical/...",
-    updateSyncDone: "Sync complete",
-    updateSyncProjectSkipped: "Project sync skipped (global update mode)",
-    updateSyncSkip: "Sync skipped or failed",
-    updateReGlobal: "Re-select global skills directory?",
-    askReselectRuntimes: "Re-select AI coding tools for this machine?",
-    askPythonToolsUpdate: "Install Python graphify (code knowledge graph)?",
-    pythonToolsSkipped: "Python tools skipped",
-    askGlobalSkillsUpdate: "Update global skills? (optional)",
-    updateSkillsDone: "Global skills updated",
-    globalSkillsSkipped: "Global skills skipped",
-    askMetaTheoryUpdate: "Sync meta-theory to global directory? (optional)",
-    updateMetaTheoryDone: "meta-theory synced to global",
-    metaTheorySkipped: "meta-theory sync skipped",
-    updateComplete: "Update complete!",
-    // Installation overview strings
-    installOverviewTitle: "Meta_Kim Installation Overview",
-    installOverviewWill: "This process will:",
-    installOverviewSyncConfig:
-      "Sync configurations to project directory (canonical → .claude/.codex/openclaw/.cursor/)",
-    installOverviewInstallSkills:
-      "Install selected global skill repositories (~/.claude/skills/)",
-    installOverviewSyncMeta: "Sync meta-theory to global directory",
-    installOverviewOptionalPython: "Install Python graphify tool",
-    installOverviewTargets: "Target tools:",
-    installOverviewSkillList: "Skill repositories:",
-    installOverviewNoSkills: "(none selected)",
-    installOverviewScope: "Installation scope:",
-    installOverviewEstimated: "Estimated time:",
-    installOverviewTime: "2-5 minutes (depends on network speed)",
-    // Progress step strings
-    progressPrepareDir: "Prepare global skills directory",
-    progressNpmInstall: "Install npm dependencies",
-    progressSyncConfig: "Sync tool configurations",
-    progressCleanupLegacy: "Clean up legacy skill files",
-    progressInstallSkills: "Install global skills (may take several minutes)",
-    progressSyncMeta: "Sync meta-theory",
-    progressValidate: "Validate installation",
-    // Confirm strings
-    confirmStartInstall: "Start installation?",
-    footprintTitle: "Installation footprint (from previous run)",
-    footprintFirstInstall:
-      "First install on this machine — no previous footprint recorded.",
-    footprintRefreshNote: "Running install will refresh these entries.",
-    footprintScopeGlobal: "Global",
-    footprintScopeProject: "Project",
-    footprintEntries: "entries",
-    footprintCategoryLabels: {
-      A: "Global runtime skills",
-      B: "Global runtime hooks",
-      C: "Global settings.json merges",
-      D: "Project runtime skills",
-      E: "Project runtime hooks",
-      F: "Project runtime agents",
-      G: "Project settings + MCP config",
-      H: "Project local state (.meta-kim/)",
-      I: "Shared dependencies (pip / git hooks)",
-    },
-    installCancelled: "Installation cancelled",
-    installComplete: "Installation complete!",
-    // Warning messages
-    warnConfigSyncFailed: `
-⚠ Config sync failed, continuing...
-
-Possible causes:
-1. File locked → Close IDE/Explorer on the target directory
-2. Permission denied → Run as administrator
-3. Git conflict → Resolve conflicts in canonical/ and retry
-
-→ Fix: Run: node scripts/sync-runtimes.mjs --scope both
-`,
-    warnSkillsInstallFailed: `
-⚠ Global skills install failed
-
-Possible causes:
-1. Directory locked (EBUSY) → Close Explorer/IDE, wait for antivirus, then retry
-2. Network error → Check proxy settings with: node setup.mjs --prompt-proxy
-3. Repo not found → Verify the skill repository URL is correct
-
-→ Fix: Run: node setup.mjs --update
-→ Hint: If EBUSY, close programs holding the skills folder, then manually delete any *.staged-* temp dirs.
-`,
-    warnMetaTheorySyncFailed: `
-⚠ meta-theory sync failed
-
-Possible causes:
-1. Directory locked → Close programs holding ~/.claude/skills/
-2. Permission denied → Check write permissions on global skills dir
-3. Network error → Verify proxy settings
-
-→ Fix: Run: node scripts/sync-global-meta-theory.mjs --targets claude
-`,
-    warnSkillsUpdateFailed: `
-⚠ Global skills update failed
-
-Possible causes:
-1. Directory locked (EBUSY) → Close Explorer/IDE, wait for antivirus, then retry
-2. Git fetch failed → Check network/proxy connection
-3. Conflicts → Review staged files and resolve manually
-
-→ Hint: If EBUSY, close programs holding the skills folder, then manually delete any *.staged-* temp dirs.
-→ Fix: Run: node setup.mjs --update
-`,
-    warnSkillsUpdateFailedHint:
-      "If the log shows EBUSY or 'resource busy', close Explorer/IDE on the skills folder, wait for antivirus/indexing to finish, then retry. You can delete leftover *.staged-* dirs manually once nothing holds the path.",
-    warnMetaTheoryUpdateFailed: `
-⚠ meta-theory sync failed
-
-Possible causes:
-1. Directory locked → Close programs holding ~/.claude/skills/
-2. Permission denied → Check write permissions on global skills dir
-3. Network error → Verify proxy settings
-
-→ Fix: Run: node scripts/sync-global-meta-theory.mjs --targets claude
-`,
-    warnManifestLoadFail: (msg) => `Failed to load skills manifest: ${msg}`,
-    labelOptional: "(optional)",
-    selectedScope: (name) => `Selected: ${name}`,
-    npmVerOk: (v) => `npm v${v}`,
-    activeRuntimesSavedCli: (list) =>
-      `Target tools saved from --targets: ${list}`,
-    savedActiveTargets: (list) => `Saved target tools: ${list}`,
-    okRepoSynced: "Repo projections synced from canonical/",
-    failRepoSync:
-      "Repo projection sync failed — some in-repo configs may be stale",
-    pipErrorDetail: (err) => `  pip error: ${err}`,
-    modeInfoLine: (mode, plat, ver) => `Mode: ${mode} | ${plat} | Node ${ver}`,
-    stepLabel: (n, label) => `Step ${n}: ${label}`,
-    // Proxy
-    proxyHeading: "Network / Proxy",
-    proxyDetectedPrompt: (port, url) =>
-      `Detected proxy port ${port} (${url}). Use it?`,
-    proxySkip: "No proxy — using direct connection",
-    proxySkipDeclined: "Proxy declined — using direct connection",
-    proxySaved: (url) => `Proxy saved: ${url}`,
-    stepLabel: (n, label) => `Step ${n}: ${label}`,
-    progressInstallPython: "Install Python graphify tool",
-    progressInstallMcpMemory: "Install MCP Memory Service (Layer 3)",
-    checkTargets: (active, supported) =>
-      `activeTargets=${active} supportedTargets=${supported}`,
-    localStateHeader: "Local state",
-    localStateProfile: (profile, key) => `profile=${profile} key=${key}`,
-    localStateRunIndex: (path) => `run index: ${path}`,
-    localStateCompaction: (path) => `compaction: ${path}`,
-    localStateDispatch:
-      "dispatch envelope: config/contracts/workflow-contract.json -> protocols.dispatchEnvelopePacket",
-    localStateMigration:
-      "migration helper: npm run migrate:meta-kim -- <source-dir> --apply",
-    actionPrompt: "What would you like to do?",
-    actionInstall: "Install — Full first-time setup",
-    actionInstallQuick: "Quick setup — Pick one platform, ready to use",
-    actionUpdate: "Update — Refresh skills & sync tools",
-    actionCheck: "Check — Verify dependencies & sync status",
-    actionExit: "Exit",
-
-    npxQuickHeading: "Quick Setup",
-    npxQuickPlatformPrompt: "Which platform do you use?",
-    npxQuickPlatformClaude: "Claude Code",
-    npxQuickPlatformOpenclaw: "OpenClaw",
-    npxQuickPlatformCodex: "Codex CLI",
-    npxQuickPlatformCursor: "Cursor",
-    npxQuickPlatformAll: "All platforms",
-    npxQuickDirPrompt: "Where should I prepare the project directory?",
-    npxQuickDirDefault: "~/Desktop/Meta_Kim",
-    npxQuickCreating: "Preparing project directory:",
-    npxQuickCopyFiles: "Copying project-level runtime files",
-    npxQuickDirExists: "Directory already exists; files inside will be updated",
-    npxQuickDone: "Project-level files ready!",
-    npxQuickPostCopyScript: (f) =>
-      `After copying these files into a project, run: node ${f}`,
-    npxQuickOpenIn: "Open your platform in this directory:",
-    npxQuickAskDeploy:
-      "Export project-level runtime files to another directory? You can copy that directory into existing projects.",
-    npxQuickDeployYes: "Select directory",
-    npxQuickDeployNo: "Skip",
-    projectDeployDirPrompt: "Project directories:",
-    projectDeployAsk: "Project directory updates",
-    projectDeployProtectionNote:
-      "Existing local settings and MCP/hook configs are preserved and merged; only selected directories are touched.",
-    projectDeployInteractiveHint:
-      "Set up a saved project list once, then update every saved project together on future runs.",
-    projectDeployPathEntryHint:
-      "Enter all project roots in one line, separated by semicolons or commas. Example: D:/Project/a; D:/Project/b",
-    projectDeploySavedPathHint: (path) =>
-      `Saved in ${path}; next time choose the saved-directory option or run with --all-projects.`,
-    projectDeployCliSaveHint:
-      "Add --save-project-dirs to remember these CLI targets, then use --all-projects next time.",
-    projectDeploySavedListHeading: (n) => `Saved project directories (${n}):`,
-    projectDeployParsedTargets: (n) =>
-      `Read ${n} project director${n === 1 ? "y" : "ies"}:`,
-    projectDeployNoDirsEntered: "No project directories entered; skipping project export.",
-    projectDeployConfirmSaveAndUpdate: (n) =>
-      `Save and update ${n} project director${n === 1 ? "y" : "ies"}?`,
-    projectDeployConfirmUpdateOnce: (n) =>
-      `Update ${n} project director${n === 1 ? "y" : "ies"} for this run?`,
-    projectDeployUseSaved: (n) => `Update all saved project directories (${n})`,
-    projectDeploySelectOnce: "Update a one-time project directory list",
-    projectDeploySelectAndRemember:
-      "Add or change saved project directories, then update them",
-    projectDeployCliTargets: (n) =>
-      `Using ${n} project directory target(s) from CLI`,
-    projectDeploySavedTargets: (n) =>
-      `Saved ${n} project directory target(s) for future updates`,
-    projectDeployNoSaved:
-      "No saved project directories found; skipping project export.",
-    projectDeployBatchHeading: (n) =>
-      `Updating project-level runtime files in ${n} project director${n === 1 ? "y" : "ies"}`,
-    projectDeploySummary: "Project directory update summary",
-    projectDeployStatusOk: "updated",
-    projectDeployStatusFailed: "failed",
-    projectDeployFailed: (dir, msg) => `Failed to update ${dir}: ${msg}`,
-    projectDeployMoreTargets: (n) =>
-      `Also updated ${n} more project director${n === 1 ? "y" : "ies"}.`,
-    aboutAuthor: "About the Author",
-    contactWebsite: "Website",
-    contactGithub: "GitHub",
-    contactFeishu: "Feishu Wiki",
-    contactWechat: "WeChat Official Account",
-  },
-  "zh-CN": {
-    modeCheck: "仅检查",
-    modeUpdate: "更新",
-    modeSilent: "静默",
-    modeInteractive: "交互式",
-    preflightHeading: "环境检查",
-    nodeOld: (v) => `Node.js v${v} 版本过低，需要 >=${MIN_NODE_VERSION}`,
-    nodeOk: (v) => `Node.js v${v}`,
-    npmNotFound: "npm 未找到",
-    gitNotFound: "git 未找到 — 安装技能需要 git",
-    proxyInfo: (p) => `代理: ${p}`,
-    pkgFound: "package.json 已找到",
-    pkgNotFound: "package.json 未找到 — 请在 Meta_Kim 根目录运行",
-    envFailed: "环境检查未通过，请先解决上述问题。",
-    envOk: "环境检查通过！",
-    stepRuntime: "检测 AI 编程工具",
-    claudeDetected: (v) => `Claude Code ${v}`,
-    claudeNotDetected: "未检测到 Claude Code CLI",
-    codexDetected: (v) => `Codex ${v}`,
-    codexNotDetected: "未检测到 Codex CLI（可选）",
-    openclawDetected: (v) => `OpenClaw ${v}`,
-    openclawNotDetected: "未检测到 OpenClaw CLI（可选）",
-    cursorDetected: (v) => `Cursor ${v}`,
-    cursorNotDetected: "未检测到 Cursor CLI（可选）",
-    noRuntime: "未检测到 AI 编程工具。",
-    noRuntimeHint1: "Meta_Kim 支持 Claude Code、Codex、OpenClaw 或 Cursor。",
-    noRuntimeHint2: "至少安装一个：{claudeCodeDocs}",
-    continueAnyway: "仍然继续安装？",
-    setupCancelled: "安装已取消。请先安装 AI 编程工具。",
-    stepConfig: "项目配置",
-    mcpExists: ".mcp.json 已配置",
-    mcpCreated: ".mcp.json 已创建 — 已注册 MCP 服务",
-    settingsExists: ".claude/settings.json 已配置",
-    askCreateSettings: "创建 .claude/settings.json（含 hooks 配置）？",
-    settingsCreated: ".claude/settings.json 已创建 — hooks 和权限已注册",
-    settingsSkipped: ".claude/settings.json 已跳过（用户选择）",
-    settingsSkippedNoClaude:
-      ".claude/settings.json 已跳过（未检测到 Claude Code）",
-    stepSkills: "安装技能",
-    shipsSkills: (n) => `Meta_Kim 内置 ${n} 个技能：`,
-    runningNpm: "正在运行 npm install ...",
-    npmDone: "npm 依赖安装完成",
-    npmFailed: `
-✗ npm install 失败
-
-可能原因：
-1. 网络错误 → 检查网络连接和代理设置
-2. Node 版本不兼容 → 确保已安装 Node ${MIN_NODE_VERSION}+
-3. 权限问题 → 运行：npm install --no-optional
-
-修复：手动运行命令查看完整输出：npm install
-`,
-    nodeModulesExist: "node_modules 已存在（使用 --update 重新安装）",
-    skillUpdated: (n) => `${n} — 已更新`,
-    skillInstalled: (n) => `${n} — 已安装`,
-    skillExists: (n) => `${n} — 已安装`,
-    skillSubdirInstalled: (n, s) => `${n} — 已安装 (子目录: ${s})`,
-    skillFailed: (n, r) => `
-✗ 技能安装失败：${n}
-
-可能原因：
-1. 网络超时 → 运行：npm run meta:sync
-2. 权限被拒绝 → 使用 sudo/管理员权限运行
-3. 仓库未找到 → 检查技能仓库 URL
-
-${r ? `原始错误：${r}` : ""}
-`,
-    skillUpdateFailed: (n) =>
-      `${n} — 更新跳过（非 fast-forward，保留现有版本）`,
-    skillSubdirNotFound: (n) => `${n} — 子目录未找到`,
-    skillsReady: (ok, total, fail) =>
-      `${ok}/${total} 个技能就绪${fail > 0 ? `，${fail} 个失败` : ""}`,
-    stepValidate: "项目验证",
-    agentPrompts: (n) => `${n} 个 meta-agent 提示词`,
-    validationPassed: "项目验证通过",
-    validationWarnings: "验证有警告（不影响使用）",
-    setupComplete: "安装完成！",
-    whatMetaDoes: "Meta_Kim 是什么：",
-    whatMetaDoesDesc1: "给你的 AI 编程助手配上一支专家团队：",
-    whatMetaDoesDesc2: "有人负责代码审查，有人负责安全，有人负责记忆——",
-    whatMetaDoesDesc3: "全部自动协调，无需手动管理。",
-    howToUse: "如何使用：",
-    step1Open: "在此目录打开 Claude Code：",
-    step2Try: "试试 meta-theory 命令：",
-    step3Or: "或直接让 Claude 做复杂任务：",
-    step3Hint: "（Meta_Kim 会自动协调各专家）",
-    codexNote: "Codex 提示词同步到 .codex/",
-    openclawNote: "OpenClaw 工作区同步到 openclaw/",
-    cursorNote: "Cursor 智能体同步到 .cursor/",
-    noRuntimeGetStarted: "未检测到 AI 编程工具。安装 Claude Code 开始使用：",
-    usefulCommands: "常用命令：",
-    cmdUpdate: "更新所有技能",
-    cmdCheck: "检查环境",
-    cmdDoctor: "诊断 Meta_Kim 健康状态",
-    cmdVerify: "完整验证",
-    cmdDiscover: "扫描全局能力（agents/skills）",
-    // 安装后注意事项
-    postInstallNotesHeading: "安装后注意事项：",
-    postInstallNotesIntro: "安装完成后，各层能力的使用方式如下：",
-    postInstallNotesPlatformSync: "各平台能力同步情况：",
-    platformClauleCode: "Claude Code",
-    platformClauleCodeCap: "agents + skills + hooks",
-    platformCodex: "Codex",
-    platformCodexCap: "agents + skills",
-    platformOpenClaw: "OpenClaw",
-    platformOpenClawCap: "workspace + skills",
-    platformCursor: "Cursor",
-    platformCursorCap: "agents + skills",
-    postInstallNotesLayerActivation: "三层记忆激活方式：",
-    layer1Label: "第一层（Memory）",
-    layer1Note: "自动激活——内置于 Claude Code",
-    layer2Label: "第二层（Graphify）",
-    layer2Note: "安装 graphifyy 后自动激活（pip install graphifyy）",
-    layer3Label: "第三层（SQL / MCP Memory Service）",
-    layer3Note:
-      "需手动启动服务器：memory server --http（然后访问 http://localhost:8000）",
-    installLocationsHeading: "安装位置：",
-    installLocationsProject: "项目级（当前目录）",
-    installLocationsGlobal: "全局级（跨项目共享）",
-    installLocationsManifest: "安装清单（可安全卸载）",
-    usefulCommandsHeading: "常用后续命令：",
-    cmdWhereStatus: "查看所有产物位置",
-    cmdWhereStatusDiff: "对比上次安装",
-    cmdWhereUninstall: "安全卸载",
-    postInstallNotesReminder: "提醒：",
-    postInstallNotesReminderText:
-      "随时可运行 node setup.mjs --check 验证安装状态。",
-    setupError: "安装出错：",
-    setupInterrupted:
-      "已中断（Ctrl+C），安装未完成。需要时请重新运行：node setup.mjs",
-    selectLang: "Select language / 选择语言 / 言語を選択 / 언어 선택",
-    choose: (n) => `选择 (1-${n})`,
-    inquirerSingleHotkeys: "↑↓ 移动选项 · ⏎ 确认",
-    inquirerMultiHotkeys: "↑↓ 移动 · 空格 勾选/取消 · ⏎ 确认 · a 全选 · i 反选",
-    globalInstallPrompt:
-      "Meta_Kim 技能安装到 ~/.claude/skills/（全局）。是否全局安装？",
-    globalDirReady: (p) => `全局技能目录就绪：${p}`,
-    globalDirCreated: (p) => `已创建全局技能目录：${p}`,
-    globalDirCreateFailed: (e) => `创建全局技能目录失败：${e}`,
-    globalDirTitle: "全局技能目录",
-    globalDirPrompt: `Meta_Kim 技能将安装到 ~/.claude/skills/
-• 全局安装 — 所有项目共享
-• 跳过 — 仅在当前项目使用
-• 随时可重新运行 setup.mjs 安装`,
-    globalSkipped: "全局安装已跳过 — 将仅在当前项目使用",
-    // 安装范围选择
-    installScopeHeading: "安装范围",
-    installScopePrompt: "本仓库、用户目录技能、还是两者都要？",
-    installScopeProject: "仅本仓库 — .claude / .codex / openclaw / .cursor",
-    installScopeGlobal:
-      "仅用户目录 — 所选工具各自的 ~/.*/skills（非仅 Claude）",
-    installScopeBoth: "两者（推荐）— 先本仓库，再用户目录",
-    installScopeProjectLabel: "仅本仓库",
-    installScopeGlobalLabel: "仅用户目录",
-    installScopeBothLabel: "两者（推荐）",
-    installScopeProjectDesc: "只更新本仓库内各工具配置；不改用户目录 skills。",
-    installScopeProjectDescDetail: `创建项目级功能：
-• graphify-out/ — 知识图谱（减少幻觉，加速查询）
-• .meta-kim/state/ — 运行缓存与会话恢复
-• .claude/.codex/.cursor/ — 各工具专用智能体与钩子`,
-    installScopeGlobalDesc:
-      "按下一步所选工具写入各 skills + 全局 meta-theory；不改本仓库。",
-    installScopeGlobalDescDetail: `创建全局级功能：
-• ~/.claude/skills/ — 所有项目共享的技能
-• ~/%tool%/skills/ — 各工具专用技能（Claude、Codex、Cursor 等）
-• 现有项目无需安装即可使用 Meta_Kim`,
-    installScopeBothDesc: "先本仓库，后用户目录。",
-    installScopeBothDescDetail: `完整安装：
-• 第一步：项目级智能体、钩子、工具配置
-• 第二步：跨项目共享的全局技能
-• 新项目与现有项目皆受益`,
-    // 目录结构说明
-    directoryExplanationHeading: "目录结构",
-    directoryExplanationIntro: "Meta_Kim 创建两级目录：",
-    directoryExplanationProject: "项目级（本仓库内）：",
-    directoryExplanationProjectDetail: `• graphify-out/ — 从代码构建的知识图谱
-  通过实际代码结构 grounding 查询，减少 AI 幻觉
-
-• .meta-kim/state/ — 运行缓存与会话恢复
-  存储运行历史、压缩会话、支持跨会话恢复
-
-• .claude/.codex/.cursor/ — 各工具专用智能体与钩子
-  每个 AI 编程工具的项目本地配置`,
-    directoryExplanationGlobal: "全局级（用户目录内）：",
-    directoryExplanationGlobalDetail: `• ~/.claude/skills/ — 所有项目共享的技能
-  一次安装，处处可用。现有项目立即获得 Meta_Kim 能力。
-
-• ~/%tool%/skills/ — 各工具专用技能
-  Claude: ~/.claude/skills/
-  Codex: ~/.codex/skills/
-  Cursor: ~/.cursor/skills/
-  OpenClaw: ~/.openclaw/skills/`,
-    directoryExplanationExisting: "现有项目使用方式：",
-    depCheckHeading: "依赖检查",
-    depOk: (n) => `${n} — 正常`,
-    depMissing: (n) => `${n} — 缺失`,
-    depNoFiles: (n) => `${n} — 目录存在但无 .md 文件`,
-    selectRuntimeTargets: "这台电脑上用哪些 AI 编程工具？",
-    selectSkillDependencies: "要安装哪些第三方技能仓库到全局 ~/.*/skills/？",
-    inputTargetsHint: (d) => `输入编号，逗号多选；回车使用默认 ${d}`,
-    inputSkillIdsHint: (d) => `输入编号，逗号多选；回车使用默认 ${d}`,
-    warnUnknownSkillId: (id) => `未知的技能 id（已忽略）：${id}`,
-    depSummaryAll: "全部 9 个依赖验证通过",
-    depSummarySome: (ok, total) =>
-      `仅 ${ok}/${total} 个依赖验证通过 — 请使用 --update 重新安装`,
-    syncHeading: "同步状态检查",
-    syncClaudeAgents: (n) => `Claude Code 智能体: ${n}/${META_AGENTS.length} .md 文件`,
-    syncClaudeSkills: "Claude Code 技能/meta-theory/SKILL.md",
-    syncClaudeHooks: (n) => `Claude Code 钩子: ${n} 个脚本`,
-    syncClaudeSettings: "Claude Code .claude/settings.json",
-    syncClaudeMcp: "Claude Code .mcp.json",
-    syncCodexAgents: (n, total = META_AGENTS.length) =>
-      `Codex 智能体: ${n}/${total} .toml 文件`,
-    syncCodexSkills: "Codex .agents/skills/meta-theory/SKILL.md",
-    syncOpenclawWorkspaces: (n) =>
-      `OpenClaw 工作区：${n}/${META_AGENTS.length} 个智能体，各目录 9 个必备 Markdown 已齐（含 BOOT、SOUL 等；不含子文件夹里的额外文件）`,
-    syncOpenclawSkill: "OpenClaw 共享 meta-theory",
-    syncSharedSkills: "共享技能/meta-theory/SKILL.md",
-    syncCursorAgents: (n) => `Cursor 智能体: ${n}/${META_AGENTS.length} .md 文件`,
-    syncCursorSkills: "Cursor 技能/meta-theory/SKILL.md",
-    syncCursorMcp: "Cursor .cursor/mcp.json",
-    mcpRuntimeProjectOnly: (p) =>
-      `${p} 包含 meta-kim-runtime，但这里的脚本路径不可用。这个 MCP 只给 Meta_Kim 源仓库使用；复制到普通项目时请删除 meta-kim-runtime 这一块。Agent 仍会从 .claude/.codex/.cursor/openclaw 文件加载。`,
-    syncOk: "所有同步目标验证通过",
-    syncMissing: (p) => `缺失：${p}`,
-    syncPartial: (label, got, need) => `${label}：实际 ${got}，需要 ${need}`,
-    stepPythonTools: "可选 Python 工具",
-    pythonNotFound: "未检测到 Python 3.10+ — 跳过 graphify",
-    pythonHint:
-      "安装 Python 3.10+ 后运行：pip install graphifyy && python -m graphify claude install",
-    pythonNotFoundOfferInstall: "未检测到 Python 3.10+，是否要自动下载安装？",
-    pythonInstalling: "正在下载安装 Python 3.10+...",
-    pythonInstallSuccess: "Python 3.10+ 安装成功",
-    pythonInstallFailed: (err) =>
-      `Python 安装失败：${err} — 可手动从 https://www.python.org/downloads/ 下载安装`,
-    pythonInstallNotSupported: (platform) =>
-      `${platform} 平台暂不支持自动安装，请从 https://www.python.org/downloads/ 手动下载 Python 3.10+`,
-    pythonInstallWinget: "正在通过 winget 安装 Python...",
-    pythonInstallWingetHint:
-      "winget 正在下载安装 Python — 可能需要几分钟，请耐心等待...",
-    pythonInstallScoop: "正在通过 scoop 安装 Python...",
-    graphifyCheck: (v) => `graphify ${v}`,
-    graphifyInstalling: "正在安装 graphify（代码知识图谱）...",
-    graphifyInstalled: "graphify 已安装，Claude 技能已注册",
-    graphifyUpgrading: "正在升级 graphify 至最新版本...",
-    graphifyUpgraded: (v) => `graphify 已升级至 ${v}`,
-    graphifyUpgradeFailed: `graphify 升级失败（不影响其他功能）`,
-    graphifyInstallFailed: `
-✗ graphify 安装失败（不影响其他功能）
-
-可能原因：
-1. Python 未找到 → 确保 Python 3.10+ 已安装并在 PATH 中
-2. pip 错误 → 运行：pip install graphifyy 查看详细错误
-3. 网络错误 → 检查网络/代理连接
-
-修复：pip install graphifyy && python -m graphify claude install
-`,
-    graphifyAlreadyInstalled: (v) => `graphify ${v} — 已安装`,
-    graphifySkillRegistering: (p) => `正在注册 graphify ${p} 技能...`,
-    graphifySkillRegistered: (p) => `graphify ${p} 技能已注册`,
-    graphifySkillFailed: (p) => `graphify ${p} 技能注册失败（不影响其他功能）`,
-    graphifySkillSkippedGuideExists: (p) =>
-      `跳过 graphify ${p} install（指南中已有 Graphify 章节）`,
-    graphifyCodeGraphGenerated: "graphify 代码图谱已生成",
-    graphifyCodeGraphGenerationFailed:
-      "graphify 代码图谱生成失败（不影响其他功能）",
-    networkxCheck: (v) => `networkx ${v}`,
-    networkxUpgrading: "正在升级 networkx 至 >=3.4 以兼容 graphify...",
-    networkxUpgraded: (v) => `networkx 已升级至 ${v}`,
-    networkxUpgradeFailed: "networkx 升级失败（graphify 可能无法正确生成图谱）",
-    networkxAlreadyOk: (v) => `networkx ${v} — 版本兼容`,
-    graphifyHookInstalling:
-      "正在安装 git hook（commit/checkout 时自动重建图谱）...",
-    graphifyHookInstalled:
-      "graphify git hook 已安装（commit/checkout 时自动重建图谱）",
-    graphifyHookFailed: "graphify git hook 安装失败（不影响其他功能）",
-    stepMcpMemory: "MCP Memory Service（第三层）",
-    mcpMemoryInstalling: "正在安装 MCP Memory Service（第三层）...",
-    mcpMemoryInstalled: "MCP Memory Service 已安装",
-    mcpMemoryInstallFailed: "MCP Memory Service 安装失败（不影响其他功能）",
-    mcpMemoryAlreadyInstalled: (v) => `MCP Memory Service ${v} — 已安装`,
-    mcpMemoryStopping: "升级前正在停止 MCP Memory Service...",
-    mcpMemoryStopped: "MCP Memory Service 已停止",
-    mcpMemoryUpgrading: "正在升级 MCP Memory Service 至最新版本...",
-    mcpMemoryUpgraded: (v) => `MCP Memory Service 已升级至 ${v}`,
-    mcpMemoryUpgradeFailed: "MCP Memory Service 升级失败（不影响其他功能）",
-    mcpMemoryServerRegistered: "MCP Memory Service 已注册到 .mcp.json",
-    mcpMemoryServerExists: ".mcp.json 已包含 MCP Memory Service",
-    askMcpMemoryInstall:
-      "安装 MCP Memory Service（第三层）？提供向量级会话记忆（sqlite-vec）",
-    mcpMemorySkipped: "MCP Memory Service 已跳过",
-    mcpMemoryServerStartHint:
-      "MCP Memory Service 已安装——HTTP 服务启动方式：MCP_ALLOW_ANONYMOUS_ACCESS=true memory server --http",
-    mcpMemoryHookInstalling:
-      "正在安装 Claude Code、Codex、Cursor、OpenClaw 的 MCP Memory 钩子...",
-    mcpMemoryHookInstalled: "MCP Memory 运行时钩子已安装",
-    mcpMemoryHookWarnings:
-      "钩子安装产生警告（不影响后续流程）——以下是子进程 stderr 原文：",
-    mcpMemoryAutoStarting: "正在启动 MCP Memory Service（HTTP 后台模式）...",
-    mcpMemoryAutoStarted: "MCP Memory Service 已运行于 http://localhost:8000",
-    mcpMemoryAutoStartUnverified:
-      "MCP Memory Service 进程正在运行，继续安装",
-    mcpMemoryAutoStartFailed: "自动启动失败——请手动启动：",
-    mcpMemoryAutoStartManual:
-      "  MCP_ALLOW_ANONYMOUS_ACCESS=true memory server --http",
-    mcpMemoryAutoStartBoot: "已配置开机自启",
-    mcpMemoryAutoStartFailureTitle: "Meta_Kim MCP Memory Service",
-    mcpMemoryAutoStartFailureMessage:
-      "Meta_Kim MCP Memory Service 启动失败，或未在 http://127.0.0.1:8000 变为 healthy。跨会话记忆可能不可用。请手动启动：MCP_ALLOW_ANONYMOUS_ACCESS=true memory server --http",
-    updateHeading: "更新模式",
-    updateNpm: "正在重新安装 npm 依赖...",
-    updateSkills: "正在更新所有技能...",
-    updateSyncProjectFiles: "正在从 canonical/ 同步本仓库内的工具配置...",
-    updateSyncDone: "同步完成",
-    updateSyncProjectSkipped: "跳过项目同步（全局更新模式）",
-    updateSyncSkip: "未同步或同步失败",
-    updateReGlobal: "是否重新选择全局技能目录？",
-    askReselectRuntimes: "重新选择这台电脑的 AI 编程工具？",
-    askPythonToolsUpdate: "安装 Python graphify（代码知识图谱）？",
-    pythonToolsSkipped: "Python 工具已跳过",
-    askGlobalSkillsUpdate: "更新全局技能？（可选）",
-    updateSkillsDone: "全局技能已更新",
-    globalSkillsSkipped: "全局技能已跳过",
-    askMetaTheoryUpdate: "同步 meta-theory 到全局目录？（可选）",
-    updateMetaTheoryDone: "meta-theory 已同步到全局",
-    metaTheorySkipped: "meta-theory 同步已跳过",
-    updateComplete: "更新完成！",
-    // 安装概览字符串
-    installOverviewTitle: "Meta_Kim 安装概览",
-    installOverviewWill: "此过程将：",
-    installOverviewSyncConfig:
-      "同步配置文件 (canonical → .claude/.codex/openclaw/.cursor/)",
-    installOverviewInstallSkills: "安装所选全局技能仓库（~/.claude/skills/）",
-    installOverviewSyncMeta: "同步 meta-theory 到全局目录",
-    installOverviewOptionalPython: "可选：安装 Python graphify 工具",
-    installOverviewTargets: "目标工具：",
-    installOverviewSkillList: "技能仓库：",
-    installOverviewNoSkills: "（未选择）",
-    installOverviewScope: "安装范围：",
-    installOverviewEstimated: "预计用时：",
-    installOverviewTime: "2-5 分钟（取决于网络速度）",
-    // 进度步骤字符串
-    progressPrepareDir: "准备全局技能目录",
-    progressNpmInstall: "安装 npm 依赖",
-    progressSyncConfig: "同步配置文件",
-    progressCleanupLegacy: "清理旧版技能文件",
-    progressInstallSkills: "安装全局技能（可能需要几分钟）",
-    progressSyncMeta: "同步 meta-theory",
-    progressValidate: "验证安装",
-    // 确认字符串
-    confirmStartInstall: "开始安装？",
-    footprintTitle: "安装足迹（上次安装记录）",
-    footprintFirstInstall: "首次安装 — 无历史足迹可显示。",
-    footprintRefreshNote: "本次安装将刷新上述条目。",
-    footprintScopeGlobal: "全局",
-    footprintScopeProject: "项目",
-    footprintEntries: "条",
-    footprintCategoryLabels: {
-      A: "全局运行时技能",
-      B: "全局运行时钩子",
-      C: "全局 settings.json 合并",
-      D: "项目运行时技能",
-      E: "项目运行时钩子",
-      F: "项目运行时智能体",
-      G: "项目 settings + MCP 配置",
-      H: "项目本地状态 (.meta-kim/)",
-      I: "共享依赖 (pip / git 钩子)",
-    },
-    installCancelled: "安装已取消",
-    installComplete: "安装完成！",
-    // Warning messages
-    warnConfigSyncFailed: `
-⚠ 配置同步失败，继续安装...
-
-可能原因：
-1. 文件被锁定 → 关闭目标目录的 IDE/资源管理器窗口
-2. 权限被拒绝 → 以管理员身份运行
-3. Git 冲突 → 解决 canonical/ 中的冲突后重试
-
-修复：node scripts/sync-runtimes.mjs --scope both
-`,
-    warnSkillsInstallFailed: `
-⚠ 全局技能安装失败
-
-可能原因：
-1. 目录被锁定（EBUSY）→ 关闭资源管理器/IDE，等待杀毒/索引完成后重试
-2. 网络错误 → 使用 node setup.mjs --prompt-proxy 检查代理设置
-3. 仓库未找到 → 验证技能仓库 URL 是否正确
-
-修复：node setup.mjs --update
-提示：如遇 EBUSY，先关闭占用 skills 目录的程序，然后手动删除残留的 *.staged-* 临时目录。
-`,
-    warnMetaTheorySyncFailed: `
-⚠ meta-theory 同步失败
-
-可能原因：
-1. 目录被锁定 → 关闭占用 ~/.claude/skills/ 的程序
-2. 权限被拒绝 → 检查全局技能目录的写入权限
-3. 网络错误 → 验证代理设置
-
-修复：node scripts/sync-global-meta-theory.mjs --targets claude
-`,
-    warnSkillsUpdateFailed: `
-⚠ 全局技能更新失败
-
-可能原因：
-1. 目录被锁定（EBUSY）→ 关闭资源管理器/IDE，等待杀毒/索引完成后重试
-2. Git fetch 失败 → 检查网络/代理连接
-3. 冲突 → 查看 staged 文件并手动解决
-
-提示：如遇 EBUSY，先关闭占用 skills 目录的程序，然后手动删除残留的 *.staged-* 临时目录。
-修复：node setup.mjs --update
-`,
-    warnSkillsUpdateFailedHint:
-      "若日志含 EBUSY/目录被占用：请先关闭对该目录的资源管理器窗口与 IDE 监视、等待杀毒/索引结束后再重试；解锁后可手动删除残留的 *.staged-* 临时目录。",
-    warnMetaTheoryUpdateFailed: `
-⚠ meta-theory 同步失败
-
-可能原因：
-1. 目录被锁定 → 关闭占用 ~/.claude/skills/ 的程序
-2. 权限被拒绝 → 检查全局技能目录的写入权限
-3. 网络错误 → 验证代理设置
-
-修复：node scripts/sync-global-meta-theory.mjs --targets claude
-`,
-    warnManifestLoadFail: (msg) => `加载技能清单失败：${msg}`,
-    labelOptional: "（可选）",
-    selectedScope: (name) => `已选择：${name}`,
-    npmVerOk: (v) => `npm v${v}`,
-    activeRuntimesSavedCli: (list) => `已从 --targets 保存目标工具：${list}`,
-    savedActiveTargets: (list) => `已保存目标工具：${list}`,
-    okRepoSynced: "仓库投影已从 canonical/ 同步",
-    failRepoSync: "仓库投影同步失败 — 本仓库内部分配置可能已过期",
-    pipErrorDetail: (err) => `  pip 错误：${err}`,
-    modeInfoLine: (mode, plat, ver) => `模式：${mode} | ${plat} | Node ${ver}`,
-    stepLabel: (n, label) => `步骤 ${n}：${label}`,
-    // Proxy
-    proxyHeading: "网络 / 代理",
-    proxyDetectedPrompt: (port, url) =>
-      `检测到代理端口 ${port}（${url}），是否使用？`,
-    proxySkip: "未检测到代理 — 直连",
-    proxySkipDeclined: "已拒绝代理 — 直连",
-    proxySaved: (url) => `已保存代理：${url}`,
-    stepLabel: (n, label) => `步骤 ${n}：${label}`,
-    progressInstallPython: "安装 Python graphify 工具",
-    progressInstallMcpMemory: "安装 MCP Memory Service（第三层）",
-    checkTargets: (active, supported) =>
-      `activeTargets=${active} supportedTargets=${supported}`,
-    localStateHeader: "本地状态",
-    localStateProfile: (profile, key) => `profile=${profile} key=${key}`,
-    localStateRunIndex: (path) => `运行索引：${path}`,
-    localStateCompaction: (path) => `压缩目录：${path}`,
-    localStateDispatch:
-      "调度信封：config/contracts/workflow-contract.json -> protocols.dispatchEnvelopePacket",
-    localStateMigration:
-      "迁移助手：npm run migrate:meta-kim -- <source-dir> --apply",
-    actionPrompt: "你想做什么？",
-    actionInstall: "安装 — 首次完整安装",
-    actionInstallQuick: "快速配置 — 选一个平台，开箱即用",
-    actionUpdate: "更新 — 刷新技能并同步配置",
-    actionCheck: "检查 — 验证依赖和同步状态",
-    actionExit: "退出",
-
-    npxQuickHeading: "快速配置",
-    npxQuickPlatformPrompt: "你用哪个平台？",
-    npxQuickPlatformClaude: "Claude Code",
-    npxQuickPlatformOpenclaw: "OpenClaw",
-    npxQuickPlatformCodex: "Codex CLI",
-    npxQuickPlatformCursor: "Cursor",
-    npxQuickPlatformAll: "全部平台",
-    npxQuickDirPrompt: "项目级目录放在哪里？",
-    npxQuickDirDefault: "~/Desktop/Meta_Kim",
-    npxQuickCreating: "正在准备项目级目录：",
-    npxQuickCopyFiles: "正在复制项目级运行时文件",
-    npxQuickDirExists: "目录已存在，将更新其中的文件",
-    npxQuickDone: "项目级文件已就绪！",
-    npxQuickPostCopyScript: (f) =>
-      `复制这些文件到项目根目录后运行：node ${f}`,
-    npxQuickOpenIn: "在该目录打开你的平台：",
-    npxQuickAskDeploy: "是否将项目级运行时文件导出到另一个目录？可把该目录复制到现有项目中。",
-    npxQuickDeployYes: "选择目录",
-    npxQuickDeployNo: "跳过",
-    projectDeployDirPrompt: "项目目录：",
-    projectDeployAsk: "项目目录更新",
-    projectDeployProtectionNote:
-      "已有本地 settings、MCP 和 hook 配置会保留并合并；只会更新你选择的目录。",
-    projectDeployInteractiveHint:
-      "先配置一次常用项目目录，后续更新时可一次更新所有已保存项目。",
-    projectDeployPathEntryHint:
-      "请在一行里输入所有项目根目录，多个目录用分号或逗号隔开。示例：D:/Project/a; D:/Project/b",
-    projectDeploySavedPathHint: (path) =>
-      `已保存到 ${path}；下次可选择已保存目录，或用 --all-projects 一次更新。`,
-    projectDeployCliSaveHint:
-      "加上 --save-project-dirs 可记住这些命令行目录，下次用 --all-projects 复用。",
-    projectDeploySavedListHeading: (n) => `已保存的项目目录（${n} 个）：`,
-    projectDeployParsedTargets: (n) => `已读取 ${n} 个项目目录：`,
-    projectDeployNoDirsEntered: "没有输入项目目录，跳过项目级导出。",
-    projectDeployConfirmSaveAndUpdate: (n) => `保存并立即更新这 ${n} 个项目目录？`,
-    projectDeployConfirmUpdateOnce: (n) => `仅本次更新这 ${n} 个项目目录？`,
-    projectDeployUseSaved: (n) => `更新全部已保存项目目录（${n} 个）`,
-    projectDeploySelectOnce: "仅本次更新指定项目目录",
-    projectDeploySelectAndRemember: "添加或修改已保存项目目录，并立即更新",
-    projectDeployCliTargets: (n) => `使用命令行传入的 ${n} 个项目目录`,
-    projectDeploySavedTargets: (n) => `已保存 ${n} 个项目目录，后续更新可复用`,
-    projectDeployNoSaved: "没有已保存的项目目录，跳过项目级导出。",
-    projectDeployBatchHeading: (n) => `正在更新 ${n} 个项目目录的项目级运行时文件`,
-    projectDeploySummary: "项目目录更新结果",
-    projectDeployStatusOk: "已更新",
-    projectDeployStatusFailed: "失败",
-    projectDeployFailed: (dir, msg) => `更新 ${dir} 失败：${msg}`,
-    projectDeployMoreTargets: (n) => `另外 ${n} 个项目目录也已更新。`,
-    aboutAuthor: "关于作者",
-    contactWebsite: "个人主页",
-    contactGithub: "GitHub",
-    contactFeishu: "飞书开源知识库",
-    contactWechat: "微信公众号",
-  },
-  "ja-JP": {
-    modeCheck: "チェックのみ",
-    modeUpdate: "更新",
-    modeSilent: "サイレント",
-    modeInteractive: "インタラクティブ",
-    preflightHeading: "環境チェック",
-    nodeOld: (v) =>
-      `Node.js v${v} は古すぎます。>=${MIN_NODE_VERSION} が必要です`,
-    nodeOk: (v) => `Node.js v${v}`,
-    npmNotFound: "npm が見つかりません",
-    gitNotFound: "git が見つかりません — スキルのインストールに必要です",
-    proxyInfo: (p) => `プロキシ: ${p}`,
-    pkgFound: "package.json が見つかりました",
-    pkgNotFound:
-      "package.json が見つかりません — Meta_Kim ルートで実行してください",
-    envFailed: "環境チェックに失敗しました。上記の問題を解決してください。",
-    envOk: "環境チェックOK！",
-    stepRuntime: "AIコーディングツール検出",
-    claudeDetected: (v) => `Claude Code ${v}`,
-    claudeNotDetected: "Claude Code CLI が検出されませんでした",
-    codexDetected: (v) => `Codex ${v}`,
-    codexNotDetected: "Codex CLI が検出されませんでした（オプション）",
-    openclawDetected: (v) => `OpenClaw ${v}`,
-    openclawNotDetected: "OpenClaw CLI が検出されませんでした（オプション）",
-    cursorDetected: (v) => `Cursor ${v}`,
-    cursorNotDetected: "Cursor CLI が検出されませんでした（オプション）",
-    noRuntime: "AIコーディングツールが検出されませんでした。",
-    noRuntimeHint1:
-      "Meta_Kim は Claude Code、Codex、OpenClaw、または Cursor で動作します。",
-    noRuntimeHint2: "少なくとも1つインストールしてください：{claudeCodeDocs}",
-    continueAnyway: "セットアップを続行しますか？",
-    setupCancelled:
-      "セットアップがキャンセルされました。AIコーディングツールをインストールして再実行してください。",
-    stepConfig: "プロジェクト設定",
-    mcpExists: ".mcp.json は既に設定されています",
-    mcpCreated: ".mcp.json 作成済み — MCP サービスを登録",
-    settingsExists: ".claude/settings.json は既に設定されています",
-    askCreateSettings: ".claude/settings.json（hooks付き）を作成しますか？",
-    settingsCreated:
-      ".claude/settings.json 作成済み — hooks + パーミッション登録完了",
-    settingsSkipped: ".claude/settings.json スキップ（ユーザー選択）",
-    settingsSkippedNoClaude:
-      ".claude/settings.json スキップ（Claude Code 未検出）",
-    stepSkills: "スキルインストール",
-    shipsSkills: (n) => `Meta_Kim には ${n} 個のスキルが含まれています：`,
-    runningNpm: "npm install を実行中...",
-    npmDone: "npm 依存関係のインストール完了",
-    npmFailed: `
-✗ npm install に失敗しました
-
-考えられる原因：
-1. ネットワークエラー → インターネット接続とプロキシ設定を確認
-2. Node バージョンが不一致 → Node ${MIN_NODE_VERSION}+ がインストールされていることを確認
-3. 権限の問題 → 実行：npm install --no-optional
-
-修正：手動で実行して詳細を確認：npm install
-`,
-    nodeModulesExist: "node_modules が存在します（--update で再インストール）",
-    skillUpdated: (n) => `${n} — 更新済み`,
-    skillInstalled: (n) => `${n} — インストール済み`,
-    skillExists: (n) => `${n} — インストール済み`,
-    skillSubdirInstalled: (n, s) =>
-      `${n} — インストール済み (サブディレクトリ: ${s})`,
-    skillFailed: (n, r) => `
-✗ スキルインストール失敗：${n}
-
-考えられる原因：
-1. ネットワークタイムアウト → 実行：npm run meta:sync
-2. 権限が拒否されました → sudo/管理者権限で実行
-3. リポジトリが見つかりません → スキルリポジトリの URL を確認
-
-${r ? `生エラー：${r}` : ""}
-`,
-    skillUpdateFailed: (n) =>
-      `${n} — 更新スキップ（非 fast-forward、既存版を維持）`,
-    skillSubdirNotFound: (n) => `${n} — サブディレクトリが見つかりません`,
-    skillsReady: (ok, total, fail) =>
-      `${ok}/${total} スキル準備完了${fail > 0 ? `、${fail} 失敗` : ""}`,
-    stepValidate: "プロジェクト検証",
-    agentPrompts: (n) => `${n} 個のメタエージェントプロンプト`,
-    validationPassed: "プロジェクト検証に合格しました",
-    validationWarnings: "検証に警告があります（機能に影響なし）",
-    setupComplete: "セットアップ完了！",
-    whatMetaDoes: "Meta_Kim とは：",
-    whatMetaDoesDesc1: "AIコーディングエージェントに専門家チームを提供します：",
-    whatMetaDoesDesc2: "コードレビュー、セキュリティ、メモリ管理などを",
-    whatMetaDoesDesc3: "自動的に調整します。",
-    howToUse: "使い方：",
-    step1Open: "このディレクトリで Claude Code を開く：",
-    step2Try: "meta-theory コマンドを試す：",
-    step3Or: "または Claude に複雑なタスクを依頼する：",
-    step3Hint: "（Meta_Kim が自動的に専門家を調整します）",
-    codexNote: "Codex プロンプトは .codex/ に同期されます",
-    openclawNote: "OpenClaw ワークスペースは openclaw/ に同期されます",
-    cursorNote: "Cursor エージェントは .cursor/ に同期されます",
-    noRuntimeGetStarted:
-      "AIコーディングツールが検出されませんでした。Claude Code をインストールしてください：",
-    usefulCommands: "便利なコマンド：",
-    cmdUpdate: "すべてのスキルを更新",
-    cmdCheck: "環境をチェック",
-    cmdDoctor: "Meta_Kim の健全性を診断",
-    cmdVerify: "フル検証",
-    cmdDiscover: "グローバル機能をスキャン（agents/skills）",
-    // インストール後の注意事項
-    postInstallNotesHeading: "インストール後の注意事項：",
-    postInstallNotesIntro: "インストール完了後、各層の使い方は以下の通りです：",
-    postInstallNotesPlatformSync: "各プラットフォームの同期状況：",
-    platformClauleCode: "Claude Code",
-    platformClauleCodeCap: "agents + skills + hooks",
-    platformCodex: "Codex",
-    platformCodexCap: "agents + skills",
-    platformOpenClaw: "OpenClaw",
-    platformOpenClawCap: "workspace + skills",
-    platformCursor: "Cursor",
-    platformCursorCap: "agents + skills",
-    postInstallNotesLayerActivation: "3層メモリの有効化方法：",
-    layer1Label: "第1層（Memory）",
-    layer1Note: "自動有効 — Claude Code に組み込み済み",
-    layer2Label: "第2層（Graphify）",
-    layer2Note: "graphifyy インストール後は自動有効（pip install graphifyy）",
-    layer3Label: "第3層（SQL / MCP Memory Service）",
-    layer3Note:
-      "サーバー手動起動が必要：memory server --http（次に http://localhost:8000 にアクセス）",
-    installLocationsHeading: "インストール先：",
-    installLocationsProject: "プロジェクトレベル（このディレクトリ）",
-    installLocationsGlobal: "グローバルレベル（プロジェクト間で共有）",
-    installLocationsManifest:
-      "インストールマニフェスト（安全にアンインストール可能）",
-    usefulCommandsHeading: "次によく使うコマンド：",
-    cmdWhereStatus: "すべての成果物の場所を表示",
-    cmdWhereStatusDiff: "前回のインストールとの差分",
-    cmdWhereUninstall: "安全にアンインストール",
-    postInstallNotesReminder: "補足：",
-    postInstallNotesReminderText:
-      "node setup.mjs --check でいつでも導入状態を確認できます。",
-    setupError: "セットアップエラー：",
-    setupInterrupted:
-      "中断しました（Ctrl+C）。未完了です。再開するときは node setup.mjs を実行してください。",
-    selectLang: "Select language / 选择语言 / 言語を選択 / 언어 선택",
-    choose: (n) => `選択 (1-${n})`,
-    inquirerSingleHotkeys: "↑↓ 移動 · ⏎ 確定",
-    inquirerMultiHotkeys: "↑↓ 移動 · Space 切替 · ⏎ 確定 · a 全選択 · i 反転",
-    globalInstallPrompt:
-      "Meta_Kim スキルは ~/.claude/skills/（グローバル）にインストールされます。グローバルインストールしますか？",
-    globalDirReady: (p) => `グローバルスキルディレクトリ準備完了：${p}`,
-    globalDirCreated: (p) => `グローバルスキルディレクトリ作成：${p}`,
-    globalDirCreateFailed: (e) =>
-      `グローバルスキルディレクトリの作成に失敗：${e}`,
-    globalDirTitle: "グローバルスキルディレクトリ",
-    globalDirPrompt: `Meta_Kim スキルは ~/.claude/skills/ にインストールされます
-• グローバルインストール — すべてのプロジェクトで共有
-• スキップ — このプロジェクトのみ
-• いつでも setup.mjs を再実行してインストール`,
-    globalSkipped:
-      "グローバルインストールスキップ — プロジェクトローカルのみ使用",
-    // インストール範囲選択
-    installScopeHeading: "インストール範囲",
-    installScopePrompt: "リポのみ／ホームの skills のみ／両方？",
-    installScopeProject: "リポのみ — .claude / .codex / openclaw / .cursor",
-    installScopeGlobal:
-      "ホームのみ — 選択ツール別 ~/.*/skills（Claude 専用ではない）",
-    installScopeBoth: "両方（推奨）— リポ→ホーム",
-    installScopeProjectLabel: "リポのみ",
-    installScopeGlobalLabel: "ホームのみ",
-    installScopeBothLabel: "両方（推奨）",
-    installScopeProjectDesc:
-      "このリポのツール設定のみ同期。ホーム skills は触らない。",
-    installScopeProjectDescDetail: `プロジェクトレベル機能を作成：
-• graphify-out/ — 知識グラフ（幻覚低減、クエリ高速化）
-• .meta-kim/state/ — 実行キャッシュとセッション回復
-• .claude/.codex/.cursor/ — 各ツール専用エージェントとフック`,
-    installScopeGlobalDesc:
-      "次に選ぶツール向けに skills + meta-theory。リポは更新しない。",
-    installScopeGlobalDescDetail: `グローバルレベル機能を作成：
-• ~/.claude/skills/ — 全プロジェクト共有スキル
-• ~/%tool%/skills/ — 各ツール専用スキル（Claude、Codex、Cursor 等）
-• 既存プロジェクトもセットアップ不要で利用可能`,
-    installScopeBothDesc: "リポのあとホーム。",
-    installScopeBothDescDetail: `完全インストール：
-• 最初：プロジェクトレベルエージェント、フック、ツール設定
-• 次：全プロジェクト共有のグローバルスキル
-• 新規・既存プロジェクト両方に恩恵`,
-    // ディレクトリ構造説明
-    directoryExplanationHeading: "ディレクトリ構造",
-    directoryExplanationIntro: "Meta_Kim は 2 つのレベルのディレクトリを作成：",
-    directoryExplanationProject: "プロジェクトレベル（このリポ内）：",
-    directoryExplanationProjectDetail: `• graphify-out/ — コードから構築された知識グラフ
-  実際のコードベース構造に基づいたクエリで AI 幻覚を低減
-
-• .meta-kim/state/ — 実行キャッシュとセッション回復
-  実行履歴、セッション圧縮、クロスセッション回復を保存
-
-• .claude/.codex/.cursor/ — 各ツール専用エージェントとフック
-  各 AI コーディングツールのプロジェクトローカル設定`,
-    directoryExplanationGlobal: "グローバルレベル（ホームディレクトリ内）：",
-    directoryExplanationGlobalDetail: `• ~/.claude/skills/ — 全プロジェクト共有スキル
-  一度のインストールでどこでも使用。既存プロジェクトも Meta_Kim 機能を獲得。
-
-• ~/%tool%/skills/ — 各ツール専用スキル
-  Claude: ~/.claude/skills/
-  Codex: ~/.codex/skills/
-  Cursor: ~/.cursor/skills/
-  OpenClaw: ~/.openclaw/skills/`,
-    directoryExplanationExisting: "既存プロジェクトの場合：",
-    depCheckHeading: "依存関係チェック",
-    depOk: (n) => `${n} — OK`,
-    depMissing: (n) => `${n} — 見つかりません`,
-    depNoFiles: (n) => `${n} — ディレクトリはありますが.mdファイルがありません`,
-    selectRuntimeTargets: "このパソコンで使うAIコーディングツールを選択",
-    selectSkillDependencies:
-      "グローバル ~/.*/skills/ に入れるサードパーティスキルリポジトリを選んでください",
-    inputTargetsHint: (d) =>
-      `番号を入力、カンマで複数選択；Enterでデフォルト ${d}`,
-    inputSkillIdsHint: (d) =>
-      `番号を入力、カンマで複数選択；Enterでデフォルト ${d}`,
-    warnUnknownSkillId: (id) => `不明なスキル ID（無視）: ${id}`,
-    depSummaryAll: "9つの依存関係すべて検証済み",
-    depSummarySome: (ok, total) =>
-      `${ok}/${total} の依存関係のみ検証 — --update で再インストールしてください`,
-    syncHeading: "同期状態チェック",
-    syncClaudeAgents: (n) => `Claude Code エージェント: ${n}/${META_AGENTS.length} .md ファイル`,
-    syncClaudeSkills: "Claude Code スキル/meta-theory/SKILL.md",
-    syncClaudeHooks: (n) => `Claude Code フック: ${n} スクリプト`,
-    syncClaudeSettings: "Claude Code .claude/settings.json",
-    syncClaudeMcp: "Claude Code .mcp.json",
-    syncCodexAgents: (n, total = META_AGENTS.length) =>
-      `Codex エージェント: ${n}/${total} .toml ファイル`,
-    syncCodexSkills: "Codex .agents/skills/meta-theory/SKILL.md",
-    syncOpenclawWorkspaces: (n) =>
-      `OpenClaw ワークスペース: ${n}/${META_AGENTS.length} エージェント — 各フォルダに必須の .md 9 件（BOOT、SOUL など）`,
-    syncOpenclawSkill: "OpenClaw 共有 meta-theory",
-    syncSharedSkills: "共有スキル/meta-theory/SKILL.md",
-    syncCursorAgents: (n) => `Cursor エージェント: ${n}/${META_AGENTS.length} .md ファイル`,
-    syncCursorSkills: "Cursor スキル/meta-theory/SKILL.md",
-    syncCursorMcp: "Cursor .cursor/mcp.json",
-    mcpRuntimeProjectOnly: (p) =>
-      `${p} に meta-kim-runtime がありますが、この場所ではスクリプトパスを使用できません。この MCP は Meta_Kim ソースリポジトリ専用です。コピー先プロジェクトでは meta-kim-runtime ブロックを削除してください。Agents は .claude/.codex/.cursor/openclaw ファイルから引き続き読み込まれます。`,
-    syncOk: "すべての同期ターゲット検証済み",
-    syncMissing: (p) => `不足：${p}`,
-    syncPartial: (label, got, need) => `${label}：実際 ${got}、必要 ${need}`,
-    stepPythonTools: "オプション Python ツール",
-    pythonNotFound: "Python 3.10+ が見つかりません — graphify をスキップ",
-    pythonHint:
-      "Python 3.10+ をインストール後：pip install graphifyy && python -m graphify claude install",
-    pythonNotFoundOfferInstall:
-      "Python 3.10+ が見つかりません。自動ダウンロード・インストールしますか？",
-    pythonInstalling: "Python 3.10+ をダウンロード・インストール中...",
-    pythonInstallSuccess: "Python 3.10+ のインストールに成功しました",
-    pythonInstallFailed: (err) =>
-      `Python のインストールに失敗しました：${err} — https://www.python.org/downloads/ から手動でインストールしてください`,
-    pythonInstallNotSupported: (platform) =>
-      `${platform} では自動インストールがサポートされていません。https://www.python.org/downloads/ から手動でインストールしてください`,
-    pythonInstallWinget: "winget で Python をインストール中...",
-    pythonInstallWingetHint:
-      "winget で Python をダウンロード・インストール中 — 数分かかる場合があります、お待ちください...",
-    pythonInstallScoop: "scoop で Python をインストール中...",
-    graphifyCheck: (v) => `graphify ${v}`,
-    graphifyInstalling: "graphify をインストール中（コードナレッジグラフ）...",
-    graphifyInstalled: "graphify インストール完了、Claude スキル登録済み",
-    graphifyUpgrading: "graphify を最新バージョンにアップグレード中...",
-    graphifyUpgraded: (v) => `graphify を ${v} にアップグレードしました`,
-    graphifyUpgradeFailed: `graphify アップグレード失敗（非ブロッキング）`,
-    graphifyInstallFailed: `
-✗ graphify インストール失敗（非ブロッキング）
-
-考えられる原因：
-1. Python が見つかりません → Python 3.10+ がインストールされ PATH に含まれていることを確認
-2. pip エラー → 実行：pip install graphifyy で詳細を確認
-3. ネットワークエラー → ネットワーク/プロキシ接続を確認
-
-修正：pip install graphifyy && python -m graphify claude install
-`,
-    graphifyAlreadyInstalled: (v) => `graphify ${v} — インストール済み`,
-    graphifySkillRegistering: (p) => `graphify ${p} スキルを登録中...`,
-    graphifySkillRegistered: (p) => `graphify ${p} スキル登録済み`,
-    graphifySkillFailed: (p) =>
-      `graphify ${p} スキル登録失敗（非ブロッキング）`,
-    graphifySkillSkippedGuideExists: (p) =>
-      `graphify ${p} install をスキップ（ガイドに Graphify セクションが既にあります）`,
-    graphifyCodeGraphGenerated: "graphify コードグラフ生成済み",
-    graphifyCodeGraphGenerationFailed:
-      "graphify コードグラフ生成失敗（非ブロッキング）",
-    networkxCheck: (v) => `networkx ${v}`,
-    networkxUpgrading: "graphify互換のためnetworkxを>=3.4にアップグレード中...",
-    networkxUpgraded: (v) => `networkxを${v}にアップグレードしました`,
-    networkxUpgradeFailed:
-      "networkxのアップグレードに失敗（グラフ生成が正しく動作しない可能性）",
-    networkxAlreadyOk: (v) => `networkx ${v} — 互換性あり`,
-    graphifyHookInstalling:
-      "git hookをインストール中（commit/checkout時にグラフ自動再構築）...",
-    graphifyHookInstalled:
-      "graphify git hookインストール完了（commit/checkout時に自動再構築）",
-    graphifyHookFailed: "graphify git hookインストール失敗（非ブロッキング）",
-    stepMcpMemory: "MCP Memory Service（第三層）",
-    mcpMemoryInstalling: "MCP Memory Service（第三層）をインストール中...",
-    mcpMemoryInstalled: "MCP Memory Service がインストールされました",
-    mcpMemoryInstallFailed:
-      "MCP Memory Service インストール失敗（非ブロッキング）",
-    mcpMemoryAlreadyInstalled: (v) =>
-      `MCP Memory Service ${v} — すでにインストール済み`,
-    mcpMemoryStopping: "アップグレード前に MCP Memory Service を停止中...",
-    mcpMemoryStopped: "MCP Memory Service を停止しました",
-    mcpMemoryUpgrading:
-      "MCP Memory Service を最新バージョンにアップグレード中...",
-    mcpMemoryUpgraded: (v) =>
-      `MCP Memory Service を ${v} にアップグレードしました`,
-    mcpMemoryUpgradeFailed:
-      "MCP Memory Service アップグレード失敗（非ブロッキング）",
-    mcpMemoryServerRegistered:
-      "MCP Memory Service が .mcp.json に登録されました",
-    mcpMemoryServerExists:
-      ".mcp.json にはすでに MCP Memory Service がありません",
-    askMcpMemoryInstall:
-      "MCP Memory Service（第三層）をインストールしますか？sqlite-vec によるベクトル級セッション記憶を提供します。",
-    mcpMemorySkipped: "MCP Memory Service をスキップしました",
-    mcpMemoryServerStartHint:
-      "MCP Memory Service がインストールされました——HTTP サービスの起動方法：MCP_ALLOW_ANONYMOUS_ACCESS=true memory server --http",
-    mcpMemoryHookInstalling:
-      "Claude Code、Codex、Cursor、OpenClaw の MCP Memory フックをインストール中...",
-    mcpMemoryHookInstalled: "MCP Memory ランタイムフックをインストールしました",
-    mcpMemoryHookWarnings:
-      "フックのインストール中に警告が発生しました（非ブロッキング）——子プロセスの stderr を以下に表示します:",
-    mcpMemoryAutoStarting:
-      "MCP Memory Service（HTTP バックグラウンド）を起動中...",
-    mcpMemoryAutoStarted:
-      "MCP Memory Service が http://localhost:8000 で実行中",
-    mcpMemoryAutoStartUnverified:
-      "MCP Memory Service プロセスは実行中です。インストールを続行します",
-    mcpMemoryAutoStartFailed: "自動起動に失敗——手動で起動してください：",
-    mcpMemoryAutoStartManual:
-      "  MCP_ALLOW_ANONYMOUS_ACCESS=true memory server --http",
-    mcpMemoryAutoStartBoot: "起動時自動開始を設定しました",
-    mcpMemoryAutoStartFailureTitle: "Meta_Kim MCP Memory Service",
-    mcpMemoryAutoStartFailureMessage:
-      "Meta_Kim MCP Memory Service の起動に失敗したか、http://127.0.0.1:8000 が healthy になりませんでした。クロスセッションメモリが利用できない可能性があります。手動で起動してください: MCP_ALLOW_ANONYMOUS_ACCESS=true memory server --http",
-    updateHeading: "アップデートモード",
-    updateNpm: "npm依存関係を再インストール中...",
-    updateSkills: "すべてのスキルを更新中...",
-    updateSyncProjectFiles: "canonical/ からリポ内のツール設定を同期中...",
-    updateSyncDone: "同期が完了しました",
-    updateSyncProjectSkipped:
-      "プロジェクト同期をスキップ（グローバル更新モード）",
-    updateSyncSkip: "同期をスキップしたか失敗しました",
-    updateReGlobal: "グローバルスキルディレクトリを再選択しますか？",
-    askReselectRuntimes:
-      "このパソコンで使うAIコーディングツールを再選択しますか？",
-    askPythonToolsUpdate:
-      "Python graphify（コードナレッジグラフ）をインストールしますか？",
-    pythonToolsSkipped: "Python ツールをスキップしました",
-    askGlobalSkillsUpdate: "グローバルスキルを更新しますか？（オプション）",
-    updateSkillsDone: "グローバルスキルが更新されました",
-    globalSkillsSkipped: "グローバルスキルをスキップしました",
-    askMetaTheoryUpdate:
-      "meta-theory をグローバルディレクトリに同期しますか？（オプション）",
-    updateMetaTheoryDone: "meta-theory がグローバルに同期されました",
-    metaTheorySkipped: "meta-theory 同期をスキップしました",
-    updateComplete: "アップデート完了！",
-    // インストール概要文字列
-    installOverviewTitle: "Meta_Kim インストール概要",
-    installOverviewWill: "このプロセスでは：",
-    installOverviewSyncConfig:
-      "プロジェクトディレクトリに設定を同期 (canonical → .claude/.codex/openclaw/.cursor/)",
-    installOverviewInstallSkills:
-      "選択したグローバルスキルリポジトリをインストール (~/.claude/skills/)",
-    installOverviewSyncMeta: "meta-theory をグローバルディレクトリに同期",
-    installOverviewOptionalPython: "Python graphify ツールをインストール",
-    installOverviewTargets: "対象ツール：",
-    installOverviewSkillList: "スキルリポジトリ：",
-    installOverviewNoSkills: "（未選択）",
-    installOverviewScope: "インストール範囲：",
-    installOverviewEstimated: "予想時間：",
-    installOverviewTime: "2-5分（ネットワーク速度によります）",
-    // 進捗ステップ文字列
-    progressPrepareDir: "グローバルスキルディレクトリを準備",
-    progressNpmInstall: "npm依存関係をインストール",
-    progressSyncConfig: "設定を同期",
-    progressCleanupLegacy: "レガシースキルファイルをクリーンアップ",
-    progressInstallSkills:
-      "グローバルスキルをインストール（数分かかる場合があります）",
-    progressSyncMeta: "meta-theory を同期",
-    progressValidate: "インストールを検証",
-    // 確認文字列
-    confirmStartInstall: "インストールを開始しますか？",
-    footprintTitle: "インストール足跡（前回の記録）",
-    footprintFirstInstall:
-      "このマシンでの初回インストール — 前回の足跡はありません。",
-    footprintRefreshNote: "インストール実行時に上記エントリは更新されます。",
-    footprintScopeGlobal: "グローバル",
-    footprintScopeProject: "プロジェクト",
-    footprintEntries: "件",
-    footprintCategoryLabels: {
-      A: "グローバルランタイムスキル",
-      B: "グローバルランタイムフック",
-      C: "グローバル settings.json マージ",
-      D: "プロジェクトランタイムスキル",
-      E: "プロジェクトランタイムフック",
-      F: "プロジェクトランタイムエージェント",
-      G: "プロジェクト settings + MCP 設定",
-      H: "プロジェクトローカル状態 (.meta-kim/)",
-      I: "共有依存関係 (pip / git フック)",
-    },
-    installCancelled: "インストールがキャンセルされました",
-    installComplete: "インストール完了！",
-    // 警告メッセージ
-    warnConfigSyncFailed: `
-⚠ 設定同期失敗、続行します...
-
-考えられる原因：
-1. ファイルがロックされています → ターゲットディレクトリで IDE/エクスプローラーを閉じる
-2. 権限が拒否されました → 管理者として実行
-3. Git 競合 → canonical/ の競合を解決してから再試行
-
-修正：node scripts/sync-runtimes.mjs --scope both
-`,
-    warnSkillsInstallFailed: `
-⚠ グローバルスキルインストール失敗
-
-考えられる原因：
-1. ディレクトリがロックされています（EBUSY）→ エクスプローラー/IDE を閉じ、ウイルス対策/インデックス完了を待ってから再試行
-2. ネットワークエラー → node setup.mjs --prompt-proxy でプロキシ設定を確認
-3. リポジトリが見つかりません → スキルリポジトリの URL が正しいか確認
-
-修正：node setup.mjs --update
-ヒント：EBUSY の場合、スキルフォルダを使用しているプログラムを閉じてから、*.staged-* の一時ディレクトリを手動で削除してください。
-`,
-    warnMetaTheorySyncFailed: `
-⚠ meta-theory 同期失敗
-
-考えられる原因：
-1. ディレクトリがロックされています → ~/.claude/skills/ を使用しているプログラムを閉じる
-2. 権限が拒否されました → グローバルスキルディレクトリの書き込み権限を確認
-3. ネットワークエラー → プロキシ設定を確認
-
-修正：node scripts/sync-global-meta-theory.mjs --targets claude
-`,
-    warnSkillsUpdateFailed: `
-⚠ グローバルスキル更新失敗
-
-考えられる原因：
-1. ディレクトリがロックされています（EBUSY）→ エクスプローラー/IDE を閉じ、ウイルス対策/インデックス完了を待ってから再試行
-2. Git fetch に失敗しました → ネットワーク/プロキシ接続を確認
-3. 競合 → ステージされたファイルを確認し、手動で解決
-
-ヒント：EBUSY の場合、スキルフォルダを使用しているプログラムを閉じてから、*.staged-* の一時ディレクトリを手動で削除してください。
-修正：node setup.mjs --update
-`,
-    warnSkillsUpdateFailedHint:
-      "ログに EBUSY 等がある場合: スキルフォルダを開いているエクスプローラー/IDE を閉じ、ウイルス対策/インデックス完了を待って再実行。*.staged-* は解放後に手動削除可。",
-    warnMetaTheoryUpdateFailed: `
-⚠ meta-theory 同期失敗
-
-考えられる原因：
-1. ディレクトリがロックされています → ~/.claude/skills/ を使用しているプログラムを閉じる
-2. 権限が拒否されました → グローバルスキルディレクトリの書き込み権限を確認
-3. ネットワークエラー → プロキシ設定を確認
-
-修正：node scripts/sync-global-meta-theory.mjs --targets claude
-`,
-    warnManifestLoadFail: (msg) => `スキルマニフェストの読み込みに失敗：${msg}`,
-    labelOptional: "（オプション）",
-    selectedScope: (name) => `選択済み：${name}`,
-    npmVerOk: (v) => `npm v${v}`,
-    activeRuntimesSavedCli: (list) => `--targets から対象ツールを保存：${list}`,
-    savedActiveTargets: (list) => `対象ツールを保存：${list}`,
-    okRepoSynced: "canonical/ からリポジトリプロジェクションを同期",
-    failRepoSync:
-      "リポジトリプロジェクション同期失敗 — リポ内の一部設定が古い可能性",
-    pipErrorDetail: (err) => `  pip エラー：${err}`,
-    modeInfoLine: (mode, plat, ver) =>
-      `モード：${mode} | ${plat} | Node ${ver}`,
-    stepLabel: (n, label) => `ステップ ${n}：${label}`,
-    // Proxy
-    proxyHeading: "ネットワーク / プロキシ",
-    proxyDetectedPrompt: (port, url) =>
-      `プロキシポート ${port}（${url}）を検出。使用しますか？`,
-    proxySkip: "プロキシ未検出 — 直接接続",
-    proxySkipDeclined: "プロキシ辞退 — 直接接続",
-    proxySaved: (url) => `プロキシを保存：${url}`,
-    stepLabel: (n, label) => `ステップ ${n}：${label}`,
-    progressInstallPython: "Python graphify ツールをインストール",
-    progressInstallMcpMemory: "MCP Memory Service（第三層）をインストール",
-    checkTargets: (active, supported) =>
-      `activeTargets=${active} supportedTargets=${supported}`,
-    localStateHeader: "ローカル状態",
-    localStateProfile: (profile, key) => `profile=${profile} key=${key}`,
-    localStateRunIndex: (path) => `ランインデックス：${path}`,
-    localStateCompaction: (path) => `コンパクション：${path}`,
-    localStateDispatch:
-      "ディスパッチエンベロープ：config/contracts/workflow-contract.json -> protocols.dispatchEnvelopePacket",
-    localStateMigration:
-      "マイグレーションヘルパー：npm run migrate:meta-kim -- <source-dir> --apply",
-    actionPrompt: "何をしますか？",
-    actionInstall: "インストール — 初回セットアップ",
-    actionInstallQuick:
-      "クイックセットアップ — プラットフォームを選んですぐ使う",
-    actionUpdate: "アップデート — スキル更新＆設定同期",
-    actionCheck: "チェック — 依存関係と同期状態を確認",
-    actionExit: "終了",
-
-    npxQuickHeading: "クイックセットアップ",
-    npxQuickPlatformPrompt: "どのプラットフォームを使いますか？",
-    npxQuickPlatformClaude: "Claude Code",
-    npxQuickPlatformOpenclaw: "OpenClaw",
-    npxQuickPlatformCodex: "Codex CLI",
-    npxQuickPlatformCursor: "Cursor",
-    npxQuickPlatformAll: "すべてのプラットフォーム",
-    npxQuickDirPrompt: "プロジェクト用ディレクトリをどこに準備しますか？",
-    npxQuickDirDefault: "~/Desktop/Meta_Kim",
-    npxQuickCreating: "プロジェクト用ディレクトリを準備中：",
-    npxQuickCopyFiles: "プロジェクト用ランタイムファイルをコピー中",
-    npxQuickDirExists: "ディレクトリは既に存在します。中のファイルを更新します",
-    npxQuickDone: "プロジェクト用ファイルの準備完了！",
-    npxQuickPostCopyScript: (f) =>
-      `これらのファイルをプロジェクトにコピーした後に実行：node ${f}`,
-    npxQuickOpenIn: "このディレクトリでプラットフォームを開く：",
-    npxQuickAskDeploy:
-      "プロジェクト用ランタイムファイルを別ディレクトリに書き出しますか？そのディレクトリを既存プロジェクトへコピーできます。",
-    npxQuickDeployYes: "ディレクトリを選択",
-    npxQuickDeployNo: "スキップ",
-    projectDeployDirPrompt: "プロジェクトディレクトリ：",
-    projectDeployAsk: "プロジェクトディレクトリ更新",
-    projectDeployProtectionNote:
-      "既存のローカル settings、MCP、hook 設定は保持してマージします。選択したディレクトリだけを更新します。",
-    projectDeployInteractiveHint:
-      "プロジェクトリストを一度保存すると、以後の更新で保存済みプロジェクトをまとめて更新できます。",
-    projectDeployPathEntryHint:
-      "すべてのプロジェクトルートを 1 行で入力してください。複数のディレクトリはセミコロンまたはカンマで区切ります。例: D:/Project/a; D:/Project/b",
-    projectDeploySavedPathHint: (path) =>
-      `${path} に保存しました。次回は保存済みディレクトリを選ぶか --all-projects で更新できます。`,
-    projectDeployCliSaveHint:
-      "--save-project-dirs を付けると CLI で渡した対象を保存できます。次回は --all-projects を使えます。",
-    projectDeploySavedListHeading: (n) => `保存済みプロジェクトディレクトリ（${n} 件）：`,
-    projectDeployParsedTargets: (n) =>
-      `${n} 件のプロジェクトディレクトリを読み取りました：`,
-    projectDeployNoDirsEntered:
-      "プロジェクトディレクトリが入力されていないため、プロジェクトエクスポートをスキップします。",
-    projectDeployConfirmSaveAndUpdate: (n) =>
-      `${n} 件のプロジェクトディレクトリを保存して今すぐ更新しますか？`,
-    projectDeployConfirmUpdateOnce: (n) =>
-      `今回だけ ${n} 件のプロジェクトディレクトリを更新しますか？`,
-    projectDeployUseSaved: (n) => `保存済みプロジェクトディレクトリをすべて更新（${n} 件）`,
-    projectDeploySelectOnce: "今回だけ指定したプロジェクトディレクトリを更新",
-    projectDeploySelectAndRemember:
-      "保存済みプロジェクトディレクトリを追加・変更し、今すぐ更新",
-    projectDeployCliTargets: (n) =>
-      `CLI から渡された ${n} 件のプロジェクトディレクトリを使用`,
-    projectDeploySavedTargets: (n) =>
-      `${n} 件のプロジェクトディレクトリを保存しました。今後の更新で再利用できます`,
-    projectDeployNoSaved:
-      "保存済みプロジェクトディレクトリがないため、プロジェクトエクスポートをスキップします。",
-    projectDeployBatchHeading: (n) =>
-      `${n} 件のプロジェクトディレクトリでプロジェクト用ランタイムファイルを更新中`,
-    projectDeploySummary: "プロジェクトディレクトリ更新結果",
-    projectDeployStatusOk: "更新済み",
-    projectDeployStatusFailed: "失敗",
-    projectDeployFailed: (dir, msg) => `${dir} の更新に失敗しました：${msg}`,
-    projectDeployMoreTargets: (n) =>
-      `他 ${n} 件のプロジェクトディレクトリも更新しました。`,
-    aboutAuthor: "作者について",
-    contactWebsite: "ウェブサイト",
-    contactGithub: "GitHub",
-    contactFeishu: "Feishu Wiki",
-    contactWechat: "WeChat公式アカウント",
-  },
-  "ko-KR": {
-    modeCheck: "확인만",
-    modeUpdate: "업데이트",
-    modeSilent: "자동",
-    modeInteractive: "대화형",
-    preflightHeading: "환경 확인",
-    nodeOld: (v) =>
-      `Node.js v${v} 버전이 너무 낮습니다. >=${MIN_NODE_VERSION} 필요`,
-    nodeOk: (v) => `Node.js v${v}`,
-    npmNotFound: "npm을 찾을 수 없습니다",
-    gitNotFound: "git을 찾을 수 없습니다 — 스킬 설치에 필요합니다",
-    proxyInfo: (p) => `프록시: ${p}`,
-    pkgFound: "package.json 찾음",
-    pkgNotFound:
-      "package.json을 찾을 수 없습니다 — Meta_Kim 루트에서 실행하세요",
-    envFailed: "환경 확인 실패. 위 문제를 먼저 해결하세요.",
-    envOk: "환경 확인 통과!",
-    stepRuntime: "AI 코딩 도구 감지",
-    claudeDetected: (v) => `Claude Code ${v}`,
-    claudeNotDetected: "Claude Code CLI 감지되지 않음",
-    codexDetected: (v) => `Codex ${v}`,
-    codexNotDetected: "Codex CLI 감지되지 않음 (선택)",
-    openclawDetected: (v) => `OpenClaw ${v}`,
-    openclawNotDetected: "OpenClaw CLI 감지되지 않음 (선택)",
-    cursorDetected: (v) => `Cursor ${v}`,
-    cursorNotDetected: "Cursor CLI 감지되지 않음 (선택)",
-    noRuntime: "AI 코딩 도구가 감지되지 않았습니다.",
-    noRuntimeHint1:
-      "Meta_Kim은 Claude Code, Codex, OpenClaw 또는 Cursor에서 작동합니다.",
-    noRuntimeHint2: "최소 하나를 설치하세요: {claudeCodeDocs}",
-    continueAnyway: "설정을 계속 진행할까요?",
-    setupCancelled:
-      "설정이 취소되었습니다. AI 코딩 도구를 설치하고 다시 실행하세요.",
-    stepConfig: "프로젝트 설정",
-    mcpExists: ".mcp.json이 이미 구성되어 있습니다",
-    mcpCreated: ".mcp.json 생성됨 — MCP 서비스 등록됨",
-    settingsExists: ".claude/settings.json이 이미 구성되어 있습니다",
-    askCreateSettings: "hooks가 포함된 .claude/settings.json을 생성할까요?",
-    settingsCreated: ".claude/settings.json 생성됨 — hooks + 권한 등록 완료",
-    settingsSkipped: ".claude/settings.json 건너뜀 (사용자 선택)",
-    settingsSkippedNoClaude:
-      ".claude/settings.json 건너뜀 (Claude Code 미감지)",
-    stepSkills: "스킬 설치",
-    shipsSkills: (n) => `Meta_Kim에는 ${n}개의 스킬이 포함되어 있습니다:`,
-    runningNpm: "npm install 실행 중...",
-    npmDone: "npm 의존성 설치 완료",
-    npmFailed: `
-✗ npm install 실패
-
-가능한 원인：
-1. 네트워크 오류 → 인터넷 연결 및 프록시 설정 확인
-2. Node 버전 불일치 → Node ${MIN_NODE_VERSION}+ 가 설치되어 있는지 확인
-3. 권한 문제 → 실행：npm install --no-optional
-
-수정：수동으로 실행하여 세부 정보 확인：npm install
-`,
-    nodeModulesExist: "node_modules가 존재합니다 (--update로 재설치)",
-    skillUpdated: (n) => `${n} — 업데이트됨`,
-    skillInstalled: (n) => `${n} — 설치됨`,
-    skillExists: (n) => `${n} — 이미 설치됨`,
-    skillSubdirInstalled: (n, s) => `${n} — 설치됨 (하위디렉토리: ${s})`,
-    skillFailed: (n, r) => `
-✗ 스킬 설치 실패：${n}
-
-가능한 원인：
-1. 네트워크 타임아웃 → 실행：npm run meta:sync
-2. 권한 거부 → sudo/관리자 권한으로 실행
-3. 리포지토리를 찾을 수 없음 → 스킬 리포지토리 URL 확인
-
-${r ? `원본 오류：${r}` : ""}
-`,
-    skillUpdateFailed: (n) =>
-      `${n} — 업데이트 건너뜀（非 fast-forward, 기존 버전 유지）`,
-    skillSubdirNotFound: (n) => `${n} — 하위디렉토리를 찾을 수 없음`,
-    skillsReady: (ok, total, fail) =>
-      `${ok}/${total} 스킬 준비 완료${fail > 0 ? `, ${fail} 실패` : ""}`,
-    stepValidate: "프로젝트 검증",
-    agentPrompts: (n) => `${n}개의 메타 에이전트 프롬프트`,
-    validationPassed: "프로젝트 검증 통과",
-    validationWarnings: "검증에 경고가 있습니다 (기능에 영향 없음)",
-    setupComplete: "설정 완료!",
-    whatMetaDoes: "Meta_Kim이란:",
-    whatMetaDoesDesc1: "AI 코딩 에이전트에 전문가 팀을 제공합니다:",
-    whatMetaDoesDesc2: "코드 리뷰, 보안, 메모리 관리 등을",
-    whatMetaDoesDesc3: "자동으로 조정합니다.",
-    howToUse: "사용 방법:",
-    step1Open: "이 디렉토리에서 Claude Code 열기:",
-    step2Try: "meta-theory 명령 시도:",
-    step3Or: "또는 Claude에게 복잡한 작업 요청:",
-    step3Hint: "(Meta_Kim이 자동으로 전문가를 조정합니다)",
-    codexNote: "Codex 프롬프트는 .codex/에 동기화됩니다",
-    openclawNote: "OpenClaw 워크스페이스는 openclaw/에 동기화됩니다",
-    cursorNote: "Cursor 에이전트는 .cursor/에 동기화됩니다",
-    noRuntimeGetStarted:
-      "AI 코딩 도구가 감지되지 않았습니다. Claude Code를 설치하세요:",
-    usefulCommands: "유용한 명령:",
-    cmdUpdate: "모든 스킬 업데이트",
-    cmdCheck: "환경 확인",
-    cmdDoctor: "Meta_Kim 상태 진단",
-    cmdVerify: "전체 검증",
-    cmdDiscover: "전역 기능 스캔（agents/skills）",
-    // 설치 후 주의사항
-    postInstallNotesHeading: "설치 후 주의사항:",
-    postInstallNotesIntro: "설치 완료 후 각 층의 사용 방식은 다음과 같습니다:",
-    postInstallNotesPlatformSync: "각 플랫폼 동기화 현황:",
-    platformClauleCode: "Claude Code",
-    platformClauleCodeCap: "agents + skills + hooks",
-    platformCodex: "Codex",
-    platformCodexCap: "agents + skills",
-    platformOpenClaw: "OpenClaw",
-    platformOpenClawCap: "workspace + skills",
-    platformCursor: "Cursor",
-    platformCursorCap: "agents + skills",
-    postInstallNotesLayerActivation: "3층 메모리 활성화 방식:",
-    layer1Label: "제1층 (Memory)",
-    layer1Note: "자동 활성화 — Claude Code에 내장됨",
-    layer2Label: "제2층 (Graphify)",
-    layer2Note: "graphifyy 설치 후 자동 활성화 (pip install graphifyy)",
-    layer3Label: "제3층 (SQL / MCP Memory Service)",
-    layer3Note:
-      "서버 수동 시작 필요: memory server --http (그러면 http://localhost:8000 에 접속)",
-    installLocationsHeading: "설치 위치:",
-    installLocationsProject: "프로젝트 레벨 (현재 디렉터리)",
-    installLocationsGlobal: "전역 레벨 (프로젝트 간 공유)",
-    installLocationsManifest: "설치 매니페스트 (안전하게 제거 가능)",
-    usefulCommandsHeading: "다음에 자주 사용하는 명령:",
-    cmdWhereStatus: "모든 산출물 위치 확인",
-    cmdWhereStatusDiff: "이전 설치와 비교",
-    cmdWhereUninstall: "안전하게 제거",
-    postInstallNotesReminder: "참고:",
-    postInstallNotesReminderText:
-      "node setup.mjs --check로 언제든지 설치 상태를 확인할 수 있습니다.",
-    setupError: "설정 오류:",
-    setupInterrupted:
-      "중단됨(Ctrl+C). 설치가 끝나지 않았습니다. 다시 실행: node setup.mjs",
-    selectLang: "Select language / 选择语言 / 言語を選択 / 언어 선택",
-    choose: (n) => `선택 (1-${n})`,
-    inquirerSingleHotkeys: "↑↓ 이동 · ⏎ 확인",
-    inquirerMultiHotkeys:
-      "↑↓ 이동 · Space 선택 토글 · ⏎ 확인 · a 전체 · i 반전",
-    globalInstallPrompt:
-      "Meta_Kim 스킬을 ~/.claude/skills/ (전역)에 설치합니다. 전역 설치할까요?",
-    globalDirReady: (p) => `전역 스킬 디렉토리 준비됨: ${p}`,
-    globalDirCreated: (p) => `전역 스킬 디렉토리 생성됨: ${p}`,
-    globalDirCreateFailed: (e) => `전역 스킬 디렉토리 생성 실패：${e}`,
-    globalDirTitle: "전역 스킬 디렉토리",
-    globalDirPrompt: `Meta_Kim 스킬은 ~/.claude/skills/ 에 설치됩니다
-• 전역 설치 — 모든 프로젝트에서 공유
-• 건너뛰기 — 이 프로젝트에서만 사용
-• 언제든 setup.mjs 를 다시 실행하여 설치`,
-    globalSkipped: "전역 설치 건너뜀 — 프로젝트 로컬만 사용",
-    // 설치 범위 선택
-    installScopeHeading: "설치 범위",
-    installScopePrompt: "리포만 / 홈 skills만 / 둘 다?",
-    installScopeProject: "리포만 — .claude / .codex / openclaw / .cursor",
-    installScopeGlobal: "홈만 — 선택 도구별 ~/.*/skills (Claude 전용 아님)",
-    installScopeBoth: "둘 다 (권장) — 리포→홈",
-    installScopeProjectLabel: "리포만",
-    installScopeGlobalLabel: "홈만",
-    installScopeBothLabel: "둘 다 (권장)",
-    installScopeProjectDesc: "이 리포 도구 설정만. 홈 skills는 안 함.",
-    installScopeProjectDescDetail: `프로젝트 레벨 기능 생성：
-• graphify-out/ — 지식 그래프（환각 감소，쿼리 속도 향상）
-• .meta-kim/state/ — 런타임 캐시 및 세션 복구
-• .claude/.codex/.cursor/ — 각 도구 전용 에이전트 및 훅`,
-    installScopeGlobalDesc:
-      "다음에 고른 도구용 skills + meta-theory. 리포는 안 건드림.",
-    installScopeGlobalDescDetail: `글로벌 레벨 기능 생성：
-• ~/.claude/skills/ — 모든 프로젝트 공유 스킬
-• ~/%tool%/skills/ — 각 도구 전용 스킬（Claude，Codex，Cursor 등）
-• 기존 프로젝트도 설치 없이 Meta_Kim 사용 가능`,
-    installScopeBothDesc: "리포 후 홈 순서.",
-    installScopeBothDescDetail: `완전 설치：
-• 첫째：프로젝트 레벨 에이전트，훅，도구 설정
-• 둘째：모든 프로젝트 공유 글로벌 스킬
-• 신규 및 기존 프로젝트 모두 혜택`,
-    // 디렉토리 구조 설명
-    directoryExplanationHeading: "디렉토리 구조",
-    directoryExplanationIntro: "Meta_Kim 은 두 레벨의 디렉토리 생성：",
-    directoryExplanationProject: "프로젝트 레벨（이 리포 내）：",
-    directoryExplanationProjectDetail: `• graphify-out/ — 코드에서 구축된 지식 그래프
-  실제 코드베이스 구조에 기반한 쿼리로 AI 환각 감소
-
-• .meta-kim/state/ — 런타임 캐시 및 세션 복구
-  실행 기록，세션 압축，크로스 세션 복구 저장
-
-• .claude/.codex/.cursor/ — 각 도구 전용 에이전트 및 훅
-  각 AI 코딩 도구의 프로젝트 로컬 설정`,
-    directoryExplanationGlobal: "글로벌 레벨（홈 디렉토리 내）：",
-    directoryExplanationGlobalDetail: `• ~/.claude/skills/ — 모든 프로젝트 공유 스킬
-  한 번 설치로 어디서든 사용. 기존 프로젝트도 Meta_Kim 기능 획득.
-
-• ~/%tool%/skills/ — 각 도구 전용 스킬
-  Claude: ~/.claude/skills/
-  Codex: ~/.codex/skills/
-  Cursor: ~/.cursor/skills/
-  OpenClaw: ~/.openclaw/skills/`,
-    directoryExplanationExisting: "기존 프로젝트 사용 방법：",
-    depCheckHeading: "의존성 확인",
-    depOk: (n) => `${n} — 정상`,
-    depMissing: (n) => `${n} — 누락`,
-    depNoFiles: (n) => `${n} — 디렉토리는 있으나 .md 파일 없음`,
-    selectRuntimeTargets: "이 컴퓨터에서 사용할 AI 코딩 도구 선택",
-    selectSkillDependencies:
-      "전역 ~/.*/skills/에 설치할 서드파티 스킬 저장소를 선택하세요",
-    inputTargetsHint: (d) => `번호 입력, 쉼표로 다중 선택；Enter로 기본값 ${d}`,
-    inputSkillIdsHint: (d) =>
-      `번호 입력, 쉼표로 다중 선택；Enter로 기본값 ${d}`,
-    warnUnknownSkillId: (id) => `알 수 없는 스킬 id(무시): ${id}`,
-    depSummaryAll: "9개 의존성 모두 확인 완료",
-    depSummarySome: (ok, total) =>
-      `${ok}/${total}개 의존성만 확인 — --update로 재설치하세요`,
-    syncHeading: "동기화 상태 확인",
-    syncClaudeAgents: (n) => `Claude Code 에이전트: ${n}/${META_AGENTS.length} .md 파일`,
-    syncClaudeSkills: "Claude Code 스킬/meta-theory/SKILL.md",
-    syncClaudeHooks: (n) => `Claude Code 훅: ${n} 스크립트`,
-    syncClaudeSettings: "Claude Code .claude/settings.json",
-    syncClaudeMcp: "Claude Code .mcp.json",
-    syncCodexAgents: (n, total = META_AGENTS.length) =>
-      `Codex 에이전트: ${n}/${total} .toml 파일`,
-    syncCodexSkills: "Codex .agents/skills/meta-theory/SKILL.md",
-    syncOpenclawWorkspaces: (n) =>
-      `OpenClaw 워크스페이스: ${n}/${META_AGENTS.length} 에이전트 — 각 폴더에 필수 .md 9개(BOOT, SOUL 등)`,
-    syncOpenclawSkill: "OpenClaw 공유 meta-theory",
-    syncSharedSkills: "공유 스킬/meta-theory/SKILL.md",
-    syncCursorAgents: (n) => `Cursor 에이전트: ${n}/${META_AGENTS.length} .md 파일`,
-    syncCursorSkills: "Cursor 스킬/meta-theory/SKILL.md",
-    syncCursorMcp: "Cursor .cursor/mcp.json",
-    mcpRuntimeProjectOnly: (p) =>
-      `${p}에 meta-kim-runtime이 있지만 이 위치에서는 스크립트 경로를 사용할 수 없습니다. 이 MCP는 Meta_Kim 소스 저장소 전용입니다. 복사한 일반 프로젝트에서는 meta-kim-runtime 블록을 삭제하세요. Agents는 계속 .claude/.codex/.cursor/openclaw 파일에서 로드됩니다.`,
-    syncOk: "모든 동기화 대상 확인 완료",
-    syncMissing: (p) => `누락: ${p}`,
-    syncPartial: (label, got, need) => `${label}: 실제 ${got}, 필요 ${need}`,
-    stepPythonTools: "선택적 Python 도구",
-    pythonNotFound: "Python 3.10+ 없음 — graphify 건너뜀",
-    pythonHint:
-      "Python 3.10+ 설치 후: pip install graphifyy && python -m graphify claude install",
-    pythonNotFoundOfferInstall:
-      "Python 3.10+ 없음. 자동 다운로드 및 설치할까요?",
-    pythonInstalling: "Python 3.10+ 다운로드 및 설치 중...",
-    pythonInstallSuccess: "Python 3.10+ 설치 성공",
-    pythonInstallFailed: (err) =>
-      `Python 설치 실패: ${err} — https://www.python.org/downloads/ 에서 수동 설치 가능`,
-    pythonInstallNotSupported: (platform) =>
-      `${platform}은(는) 자동 설치를 지원하지 않습니다. https://www.python.org/downloads/ 에서 수동 설치하세요`,
-    pythonInstallWinget: "winget으로 Python 설치 중...",
-    pythonInstallWingetHint:
-      "winget이 Python을 다운로드 및 설치 중입니다 — 몇 분 정도 걸릴 수 있습니다, 잠시만 기다려 주세요...",
-    pythonInstallScoop: "scoop으로 Python 설치 중...",
-    graphifyCheck: (v) => `graphify ${v}`,
-    graphifyInstalling: "graphify 설치 중 (코드 지식 그래프)...",
-    graphifyInstalled: "graphify 설치 완료, Claude 스킬 등록됨",
-    graphifyUpgrading: "graphify을(를) 최신 버전으로 업그레이드 중...",
-    graphifyUpgraded: (v) => `graphify이(가) ${v}(으)로 업그레이드되었습니다`,
-    graphifyUpgradeFailed: `graphify 업그레이드 실패 (비차단)`,
-    graphifyInstallFailed: `
-✗ graphify 설치 실패 (비차단)
-
-가능한 원인：
-1. Python을 찾을 수 없음 → Python 3.10+ 가 설치되어 있고 PATH에 있는지 확인
-2. pip 오류 → 실행：pip install graphifyy 로 세부 정보 확인
-3. 네트워크 오류 → 네트워크/프록시 연결 확인
-
-수정：pip install graphifyy && python -m graphify claude install
-`,
-    graphifyAlreadyInstalled: (v) => `graphify ${v} — 이미 설치됨`,
-    graphifySkillRegistering: (p) => `graphify ${p} 스킬 등록 중...`,
-    graphifySkillRegistered: (p) => `graphify ${p} 스킬 등록됨`,
-    graphifySkillFailed: (p) => `graphify ${p} 스킬 등록 실패 (비차단)`,
-    graphifySkillSkippedGuideExists: (p) =>
-      `graphify ${p} install 건너뜀(가이드에 Graphify 섹션이 이미 있음)`,
-    graphifyCodeGraphGenerated: "graphify 코드 그래프 생성됨",
-    graphifyCodeGraphGenerationFailed:
-      "graphify 코드 그래프 생성 실패 (비차단)",
-    networkxCheck: (v) => `networkx ${v}`,
-    networkxUpgrading:
-      "graphify 호환성을 위해 networkx를 >=3.4로 업그레이드 중...",
-    networkxUpgraded: (v) => `networkx ${v}(으)로 업그레이드 완료`,
-    networkxUpgradeFailed:
-      "networkx 업그레이드 실패 (그래프 생성이 올바르지 않을 수 있음)",
-    networkxAlreadyOk: (v) => `networkx ${v} — 호환 가능`,
-    graphifyHookInstalling:
-      "git hook 설치 중 (commit/checkout 시 그래프 자동 재구축)...",
-    graphifyHookInstalled:
-      "graphify git hook 설치 완료 (commit/checkout 시 자동 재구축)",
-    graphifyHookFailed: "graphify git hook 설치 실패 (비차단)",
-    stepMcpMemory: "MCP Memory Service（3층）",
-    mcpMemoryInstalling: "MCP Memory Service（3층） 설치 중...",
-    mcpMemoryInstalled: "MCP Memory Service 설치 완료",
-    mcpMemoryInstallFailed: "MCP Memory Service 설치 실패 (비차단)",
-    mcpMemoryAlreadyInstalled: (v) => `MCP Memory Service ${v} — 이미 설치됨`,
-    mcpMemoryStopping: "업그레이드 전 MCP Memory Service 중지 중...",
-    mcpMemoryStopped: "MCP Memory Service 중지됨",
-    mcpMemoryUpgrading:
-      "MCP Memory Service을(를) 최신 버전으로 업그레이드 중...",
-    mcpMemoryUpgraded: (v) =>
-      `MCP Memory Service이(가) ${v}(으)로 업그레이드되었습니다`,
-    mcpMemoryUpgradeFailed: "MCP Memory Service 업그레이드 실패 (비차단)",
-    mcpMemoryServerRegistered: "MCP Memory Service 가 .mcp.json 에 등록됨",
-    mcpMemoryServerExists: ".mcp.json 에 이미 MCP Memory Service 있음",
-    askMcpMemoryInstall:
-      "MCP Memory Service（3층）를 설치하시겠습니까? sqlite-vec 로 벡터 수준 세션 기억을 제공합니다.",
-    mcpMemorySkipped: "MCP Memory Service 건너뜀",
-    mcpMemoryServerStartHint:
-      "MCP Memory Service 설치 완료——HTTP 서비스 시작 방법: MCP_ALLOW_ANONYMOUS_ACCESS=true memory server --http",
-    mcpMemoryHookInstalling:
-      "Claude Code, Codex, Cursor, OpenClaw용 MCP Memory 훅 설치 중...",
-    mcpMemoryHookInstalled: "MCP Memory 런타임 훅 설치 완료",
-    mcpMemoryHookWarnings:
-      "훅 설치에서 경고가 발생했습니다 (비차단) — 하위 프로세스의 stderr 원문은 아래와 같습니다:",
-    mcpMemoryAutoStarting: "MCP Memory Service (HTTP 백그라운드) 시작 중...",
-    mcpMemoryAutoStarted:
-      "MCP Memory Service가 http://localhost:8000에서 실행 중",
-    mcpMemoryAutoStartUnverified:
-      "MCP Memory Service 프로세스가 실행 중이므로 설치를 계속합니다",
-    mcpMemoryAutoStartFailed: "자동 시작 실패 — 수동으로 시작하세요:",
-    mcpMemoryAutoStartManual:
-      "  MCP_ALLOW_ANONYMOUS_ACCESS=true memory server --http",
-    mcpMemoryAutoStartBoot: "부팅 시 자동 시작 구성 완료",
-    mcpMemoryAutoStartFailureTitle: "Meta_Kim MCP Memory Service",
-    mcpMemoryAutoStartFailureMessage:
-      "Meta_Kim MCP Memory Service를 시작하지 못했거나 http://127.0.0.1:8000 이 healthy 상태가 되지 않았습니다. 세션 간 메모리를 사용할 수 없을 수 있습니다. 수동으로 시작하세요: MCP_ALLOW_ANONYMOUS_ACCESS=true memory server --http",
-    updateHeading: "업데이트 모드",
-    updateNpm: "npm 의존성 재설치 중...",
-    updateSkills: "모든 스킬 업데이트 중...",
-    updateSyncProjectFiles: "canonical/에서 리포 내 도구 설정 동기화 중...",
-    updateSyncDone: "동기화 완료",
-    updateSyncProjectSkipped: "프로젝트 동기화 건너뜀 (전역 업데이트 모드)",
-    updateSyncSkip: "동기화를 건너뛰었거나 실패했습니다",
-    updateReGlobal: "전역 스킬 디렉토리를 다시 선택할까요?",
-    askReselectRuntimes: "이 컴퓨터에서 사용할 AI 코딩 도구를 다시 선택할까요?",
-    askPythonToolsUpdate: "Python graphify (코드 지식 그래프)를 설치할까요?",
-    pythonToolsSkipped: "Python 도구 건너뜀",
-    askGlobalSkillsUpdate: "전역 스킬을 업데이트할까요? (선택)",
-    updateSkillsDone: "전역 스킬 업데이트 완료",
-    globalSkillsSkipped: "전역 스킬 건너뜀",
-    askMetaTheoryUpdate: "meta-theory를 전역 디렉토리에 동기화할까요? (선택)",
-    updateMetaTheoryDone: "meta-theory가 전역에 동기화됨",
-    metaTheorySkipped: "meta-theory 동기화 건너뜀",
-    updateComplete: "업데이트 완료!",
-    // 설치 개요 문자열
-    installOverviewTitle: "Meta_Kim 설치 개요",
-    installOverviewWill: "이 과정에서:",
-    installOverviewSyncConfig:
-      "프로젝트 디렉토리에 설정 동기화 (canonical → .claude/.codex/openclaw/.cursor/)",
-    installOverviewInstallSkills:
-      "선택한 전역 스킬 리포지토리 설치 (~/.claude/skills/)",
-    installOverviewSyncMeta: "meta-theory를 전역 디렉토리에 동기화",
-    installOverviewOptionalPython: "Python graphify 도구 설치",
-    installOverviewTargets: "대상 도구:",
-    installOverviewSkillList: "스킬 저장소:",
-    installOverviewNoSkills: "(선택 없음)",
-    installOverviewScope: "설치 범위:",
-    installOverviewEstimated: "예상 시간:",
-    installOverviewTime: "2-5분(네트워크 속도에 따라 다름)",
-    // 진행 단계 문자열
-    progressPrepareDir: "전역 스킬 디렉토리 준비",
-    progressNpmInstall: "npm 의존성 설치",
-    progressSyncConfig: "설정 동기화",
-    progressCleanupLegacy: "레거시 스킬 파일 정리",
-    progressInstallSkills: "전역 스킬 설치(몇 분 소요될 수 있음)",
-    progressSyncMeta: "meta-theory 동기화",
-    progressValidate: "설치 검증",
-    // 확인 문자열
-    confirmStartInstall: "설치를 시작할까요?",
-    footprintTitle: "설치 발자국 (이전 설치 기록)",
-    footprintFirstInstall: "이 머신에서 첫 설치 — 이전 발자국이 없습니다.",
-    footprintRefreshNote: "설치 실행 시 위 항목들이 갱신됩니다.",
-    footprintScopeGlobal: "전역",
-    footprintScopeProject: "프로젝트",
-    footprintEntries: "항목",
-    footprintCategoryLabels: {
-      A: "전역 런타임 스킬",
-      B: "전역 런타임 훅",
-      C: "전역 settings.json 병합",
-      D: "프로젝트 런타임 스킬",
-      E: "프로젝트 런타임 훅",
-      F: "프로젝트 런타임 에이전트",
-      G: "프로젝트 settings + MCP 설정",
-      H: "프로젝트 로컬 상태 (.meta-kim/)",
-      I: "공유 의존성 (pip / git 훅)",
-    },
-    installCancelled: "설치가 취소되었습니다",
-    installComplete: "설치 완료!",
-    // 경고 메시지
-    warnConfigSyncFailed: `
-⚠ 구성 동기화 실패, 계속 진행...
-
-가능한 원인：
-1. 파일이 잠겨 있습니다 → 대상 디렉토리의 IDE/탐색기를 닫으세요
-2. 권한 거부 → 관리자로 실행
-3. Git 충돌 → canonical/ 의 충돌을 해결한 후 재시도
-
-수정：node scripts/sync-runtimes.mjs --scope both
-`,
-    warnSkillsInstallFailed: `
-⚠ 전역 스킬 설치 실패
-
-가능한 원인：
-1. 디렉토리가 잠겨 있습니다（EBUSY）→ 탐색기/IDE를 닫고, 백신/인덱싱이 끝난 뒤 재시도
-2. 네트워크 오류 → node setup.mjs --prompt-proxy 로 프록시 설정 확인
-3. 리포지토리를 찾을 수 없음 → 스킬 리포지토리 URL이 올바른지 확인
-
-수정：node setup.mjs --update
-힌트：EBUSY인 경우 skills 폴더를 사용하는 프로그램을 닫은 후 *.staged-* 임시 폴더를 수동으로 삭제하세요.
-`,
-    warnMetaTheorySyncFailed: `
-⚠ meta-theory 동기화 실패
-
-가능한 원인：
-1. 디렉토리가 잠겨 있습니다 → ~/.claude/skills/ 를 사용하는 프로그램 닫기
-2. 권한 거부 → 전역 스킬 디렉토리의 쓰기 권한 확인
-3. 네트워크 오류 → 프록시 설정 확인
-
-수정：node scripts/sync-global-meta-theory.mjs --targets claude
-`,
-    warnSkillsUpdateFailed: `
-⚠ 전역 스킬 업데이트 실패
-
-가능한 원인：
-1. 디렉토리가 잠겨 있습니다（EBUSY）→ 탐색기/IDE를 닫고, 백신/인덱싱이 끝난 뒤 재시도
-2. Git fetch 실패 → 네트워크/프록시 연결 확인
-3. 충돌 → 스테이지된 파일을 확인하고 수동으로 해결
-
-힌트：EBUSY인 경우 skills 폴더를 사용하는 프로그램을 닫은 후 *.staged-* 임시 폴더를 수동으로 삭제하세요.
-수정：node setup.mjs --update
-`,
-    warnSkillsUpdateFailedHint:
-      "로그에 EBUSY 등이 있으면: 탐색기/IDE로 skills 폴더를 닫고, 후원/인덱싱이 끝난 뒤 재시도. 잠금 해제 후 *.staged-* 폴더는 수동 삭제 가능.",
-    warnMetaTheoryUpdateFailed: `
-⚠ meta-theory 동기화 실패
-
-가능한 원인：
-1. 디렉토리가 잠겨 있습니다 → ~/.claude/skills/ 를 사용하는 프로그램 닫기
-2. 권한 거부 → 전역 스킬 디렉토리의 쓰기 권한 확인
-3. 네트워크 오류 → 프록시 설정 확인
-
-수정：node scripts/sync-global-meta-theory.mjs --targets claude
-`,
-    warnManifestLoadFail: (msg) => `스킬 매니페스트 로드 실패：${msg}`,
-    labelOptional: "(선택)",
-    selectedScope: (name) => `선택됨：${name}`,
-    npmVerOk: (v) => `npm v${v}`,
-    activeRuntimesSavedCli: (list) => `--targets에서 대상 도구 저장：${list}`,
-    savedActiveTargets: (list) => `대상 도구 저장：${list}`,
-    okRepoSynced: "canonical/에서 리포지토리 프로젝션 동기화됨",
-    failRepoSync:
-      "리포지토리 프로젝션 동기화 실패 — 리포 내 일부 설정이 오래되었을 수 있음",
-    pipErrorDetail: (err) => `  pip 오류：${err}`,
-    modeInfoLine: (mode, plat, ver) => `모드：${mode} | ${plat} | Node ${ver}`,
-    stepLabel: (n, label) => `단계 ${n}：${label}`,
-    // Proxy
-    proxyHeading: "네트워크 / 프록시",
-    proxyDetectedPrompt: (port, url) =>
-      `프록시 포트 ${port}（${url}）감지됨. 사용하시겠습니까?`,
-    proxySkip: "프록시 미감지 — 직접 연결",
-    proxySkipDeclined: "프록시 거절됨 — 직접 연결",
-    proxySaved: (url) => `프록시 저장됨: ${url}`,
-    stepLabel: (n, label) => `단계 ${n}：${label}`,
-    progressInstallPython: "Python graphify 도구 설치",
-    progressInstallMcpMemory: "MCP Memory Service（3층） 설치",
-    checkTargets: (active, supported) =>
-      `activeTargets=${active} supportedTargets=${supported}`,
-    localStateHeader: "로컬 상태",
-    localStateProfile: (profile, key) => `profile=${profile} key=${key}`,
-    localStateRunIndex: (path) => `런 인덱스：${path}`,
-    localStateCompaction: (path) => `컴팩션：${path}`,
-    localStateDispatch:
-      "디스패치 엔벨로프：config/contracts/workflow-contract.json -> protocols.dispatchEnvelopePacket",
-    localStateMigration:
-      "마이그레이션 도우미：npm run migrate:meta-kim -- <source-dir> --apply",
-    actionPrompt: "무엇을 하시겠습니까?",
-    actionInstall: "설치 — 최초 전체 설정",
-    actionInstallQuick: "빠른 설정 — 플랫폼 하나 선택, 바로 사용",
-    actionUpdate: "업데이트 — 스킬 갱신 및 설정 동기화",
-    actionCheck: "확인 — 의존성 및 동기화 상태 검증",
-    actionExit: "종료",
-
-    npxQuickHeading: "빠른 설정",
-    npxQuickPlatformPrompt: "어떤 플랫폼을 사용하시나요?",
-    npxQuickPlatformClaude: "Claude Code",
-    npxQuickPlatformOpenclaw: "OpenClaw",
-    npxQuickPlatformCodex: "Codex CLI",
-    npxQuickPlatformCursor: "Cursor",
-    npxQuickPlatformAll: "모든 플랫폼",
-    npxQuickDirPrompt: "프로젝트용 디렉터리를 어디에 준비할까요?",
-    npxQuickDirDefault: "~/Desktop/Meta_Kim",
-    npxQuickCreating: "프로젝트용 디렉터리 준비 중:",
-    npxQuickCopyFiles: "프로젝트용 런타임 파일 복사 중",
-    npxQuickDirExists: "디렉터리가 이미 존재합니다. 내부 파일을 업데이트합니다",
-    npxQuickDone: "프로젝트용 파일 준비 완료!",
-    npxQuickPostCopyScript: (f) =>
-      `이 파일들을 프로젝트에 복사한 뒤 실행: node ${f}`,
-    npxQuickOpenIn: "이 디렉터리에서 플랫폼 열기:",
-    npxQuickAskDeploy:
-      "프로젝트용 런타임 파일을 다른 디렉터리로 내보낼까요? 해당 디렉터리를 기존 프로젝트에 복사할 수 있습니다.",
-    npxQuickDeployYes: "디렉터리 선택",
-    npxQuickDeployNo: "건너뛰기",
-    projectDeployDirPrompt: "프로젝트 디렉터리:",
-    projectDeployAsk: "프로젝트 디렉터리 업데이트",
-    projectDeployProtectionNote:
-      "기존 로컬 settings, MCP, hook 구성은 보존하고 병합합니다. 선택한 디렉터리만 업데이트합니다.",
-    projectDeployInteractiveHint:
-      "프로젝트 목록을 한 번 저장하면 이후 업데이트에서 저장된 모든 프로젝트를 함께 업데이트할 수 있습니다.",
-    projectDeployPathEntryHint:
-      "모든 프로젝트 루트를 한 줄에 입력하세요. 여러 디렉터리는 세미콜론이나 쉼표로 구분합니다. 예: D:/Project/a; D:/Project/b",
-    projectDeploySavedPathHint: (path) =>
-      `${path}에 저장했습니다. 다음에는 저장된 디렉터리 옵션을 선택하거나 --all-projects로 업데이트할 수 있습니다.`,
-    projectDeployCliSaveHint:
-      "--save-project-dirs를 추가하면 CLI 대상이 저장되며 다음에는 --all-projects를 사용할 수 있습니다.",
-    projectDeploySavedListHeading: (n) => `저장된 프로젝트 디렉터리 (${n}개):`,
-    projectDeployParsedTargets: (n) =>
-      `프로젝트 디렉터리 ${n}개를 읽었습니다:`,
-    projectDeployNoDirsEntered:
-      "프로젝트 디렉터리가 입력되지 않아 프로젝트 내보내기를 건너뜁니다.",
-    projectDeployConfirmSaveAndUpdate: (n) =>
-      `프로젝트 디렉터리 ${n}개를 저장하고 지금 업데이트할까요?`,
-    projectDeployConfirmUpdateOnce: (n) =>
-      `이번 실행에서만 프로젝트 디렉터리 ${n}개를 업데이트할까요?`,
-    projectDeployUseSaved: (n) => `저장된 모든 프로젝트 디렉터리 업데이트 (${n}개)`,
-    projectDeploySelectOnce: "이번에만 지정한 프로젝트 디렉터리 업데이트",
-    projectDeploySelectAndRemember:
-      "저장된 프로젝트 디렉터리를 추가/변경하고 지금 업데이트",
-    projectDeployCliTargets: (n) =>
-      `CLI에서 전달된 프로젝트 디렉터리 ${n}개 사용`,
-    projectDeploySavedTargets: (n) =>
-      `프로젝트 디렉터리 ${n}개를 저장했습니다. 향후 업데이트에서 재사용할 수 있습니다`,
-    projectDeployNoSaved:
-      "저장된 프로젝트 디렉터리가 없어 프로젝트 내보내기를 건너뜁니다.",
-    projectDeployBatchHeading: (n) =>
-      `프로젝트 디렉터리 ${n}개의 프로젝트용 런타임 파일 업데이트 중`,
-    projectDeploySummary: "프로젝트 디렉터리 업데이트 결과",
-    projectDeployStatusOk: "업데이트됨",
-    projectDeployStatusFailed: "실패",
-    projectDeployFailed: (dir, msg) => `${dir} 업데이트 실패: ${msg}`,
-    projectDeployMoreTargets: (n) =>
-      `다른 프로젝트 디렉터리 ${n}개도 업데이트했습니다.`,
-    aboutAuthor: "작성자 소개",
-    contactWebsite: "웹사이트",
-    contactGithub: "GitHub",
-    contactFeishu: "Feishu 위키",
-    contactWechat: "WeChat 공식 계정",
-  },
-};
+// i18n strings live in config/i18n/setup-strings.mjs to keep setup.mjs small.
+// buildI18N is a closure so the (v) => ... functions can reference MIN_NODE_VERSION.
+import { buildI18N } from "./config/i18n/setup-strings.mjs";
+const I18N = buildI18N({ MIN_NODE_VERSION });
 
 let t = I18N.en; // default, overwritten by selectLanguage()
 let quickDeployDir = null; // first deploy target shown in legacy next-step text
@@ -2603,6 +445,34 @@ function inquirerThemeMulti() {
   };
 }
 
+let warnedInquirerFallback = false;
+
+function isMissingInquirerPromptsError(error) {
+  const message = String(error?.message || "");
+  return (
+    (error?.code === "ERR_MODULE_NOT_FOUND" &&
+      message.includes("@inquirer/prompts")) ||
+    message.includes("Cannot find package '@inquirer/prompts'")
+  );
+}
+
+function warnInquirerFallbackOnce() {
+  if (warnedInquirerFallback) return;
+  warnedInquirerFallback = true;
+  warn(t.inquirerUnavailableFallback);
+}
+
+async function importInquirerPrompt(name) {
+  try {
+    const mod = await import("@inquirer/prompts");
+    return mod[name] ?? null;
+  } catch (error) {
+    if (!isMissingInquirerPromptsError(error)) throw error;
+    warnInquirerFallbackOnce();
+    return null;
+  }
+}
+
 function formatSelectChoiceLabel(option) {
   const text =
     typeof option === "string" ? option : option.label || option.toString();
@@ -2637,17 +507,44 @@ function printMultiMenu(question, choices, focused, selected) {
   }
 }
 
+async function numberedSelectFallback(question, options) {
+  printSelectMenu(question, options, 0);
+  const answer = await ask(t.choose(options.length));
+  const idx = parseInt(answer, 10) - 1;
+  return idx >= 0 && idx < options.length ? idx : 0;
+}
+
+function parseMultiSelectAnswer(answer, choices, defaultIds) {
+  if (!answer) return defaultIds;
+  const parts = answer
+    .split(",")
+    .map((p) => p.trim())
+    .filter(Boolean);
+  if (!parts.length) return defaultIds;
+  return parts.map((part) => {
+    if (/^\d+$/.test(part)) {
+      const index = parseInt(part, 10) - 1;
+      return choices[index]?.id ?? part;
+    }
+    return part.toLowerCase();
+  });
+}
+
+async function numberedMultiSelectFallback(question, choices, defaultIds, hintText) {
+  printMultiMenu(question, choices, 0, new Set(defaultIds));
+  const answer = await ask(`${hintText(`${C.dim}${defaultIds.join(", ")}${C.reset}`)}`);
+  return parseMultiSelectAnswer(answer, choices, defaultIds);
+}
+
 async function keyboardSelect(question, options) {
   if (silentMode) return 0;
 
   if (!process.stdin.isTTY) {
-    printSelectMenu(question, options, 0);
-    const answer = await ask(t.choose(options.length));
-    const idx = parseInt(answer, 10) - 1;
-    return idx >= 0 && idx < options.length ? idx : 0;
+    return numberedSelectFallback(question, options);
   }
 
-  const { select } = await import("@inquirer/prompts");
+  const select = await importInquirerPrompt("select");
+  if (!select) return numberedSelectFallback(question, options);
 
   const choices = options.map((o, i) => ({
     name: formatSelectChoiceLabel(o),
@@ -2672,26 +569,11 @@ async function keyboardMultiSelect(question, choices, defaultIds, hintText) {
   if (silentMode) return defaultIds;
 
   if (!process.stdin.isTTY) {
-    printMultiMenu(question, choices, 0, new Set(defaultIds));
-    const answer = await ask(
-      `${hintText(`${C.dim}${defaultIds.join(", ")}${C.reset}`)}`,
-    );
-    if (!answer) return defaultIds;
-    const parts = answer
-      .split(",")
-      .map((p) => p.trim())
-      .filter(Boolean);
-    if (!parts.length) return defaultIds;
-    return parts.map((part) => {
-      if (/^\d+$/.test(part)) {
-        const index = parseInt(part, 10) - 1;
-        return choices[index]?.id ?? part;
-      }
-      return part.toLowerCase();
-    });
+    return numberedMultiSelectFallback(question, choices, defaultIds, hintText);
   }
 
-  const { checkbox } = await import("@inquirer/prompts");
+  const checkbox = await importInquirerPrompt("checkbox");
+  if (!checkbox) return numberedMultiSelectFallback(question, choices, defaultIds, hintText);
 
   const cbChoices = choices.map((c) => ({
     name: stripAnsi(`${c.label || ""} (${c.id || ""})`),
@@ -2747,16 +629,16 @@ async function resolveSelectedSkillDependencyIds() {
   if (silentMode) {
     return getDefaultSkillIds();
   }
-  const defaultIds = getDefaultSkillIds();
-  const choices = SKILLS.map((s) => ({
-    id: s.name,
-    label: s.repo,
+  const skillChoices = SKILLS.map((skill) => ({
+    id: skill.name,
+    label: skill.label || skill.name,
   }));
-  return askMultiSelectSkillRepos(
-    t.selectSkillDependencies,
-    choices,
-    defaultIds,
+  const pickedSkills = await askMultiSelectSkillRepos(
+    t.askSkillReposChoice ?? "Choose third-party skill repos to install",
+    skillChoices,
+    getDefaultSkillIds(),
   );
+  return normalizeSkillIds(pickedSkills);
 }
 
 // ── Proxy configuration ────────────────────────────────
@@ -2885,25 +767,23 @@ function isFirstRun() {
 }
 
 /** Show installation overview before starting (scope-aware bullets) */
-function showInstallOverview(activeTargets, installScope, skillIds = []) {
+function showInstallOverview(
+  activeTargets,
+  installScope,
+  skillIds = [],
+) {
   const bullets = [];
   if (installScope === "project") {
     bullets.push(t.installOverviewSyncConfig);
-  } else if (installScope === "global") {
-    bullets.push(t.installOverviewInstallSkills);
-    bullets.push(t.installOverviewSyncMeta);
   } else {
-    bullets.push(t.installOverviewSyncConfig);
     bullets.push(t.installOverviewInstallSkills);
     bullets.push(t.installOverviewSyncMeta);
   }
-
   // graphify is always optional — show as optional hint, not a bullet
   const scopeLabel =
     {
       project: t.installScopeProjectLabel,
       global: t.installScopeGlobalLabel,
-      both: t.installScopeBothLabel,
     }[installScope] || installScope;
 
   const skillLine =
@@ -2936,7 +816,7 @@ async function showExistingFootprint(installScope) {
     await import("./scripts/install-manifest.mjs");
 
   const sources = [];
-  if (installScope === "global" || installScope === "both") {
+  if (installScope === "global") {
     try {
       const m = readManifest(manifestPathFor("global"));
       if (m && m.entries?.length > 0)
@@ -2945,7 +825,7 @@ async function showExistingFootprint(installScope) {
       /* manifest read is best-effort */
     }
   }
-  if (installScope === "project" || installScope === "both") {
+  if (installScope === "project") {
     try {
       const m = readManifest(manifestPathFor("project", PROJECT_DIR));
       if (m && m.entries?.length > 0)
@@ -3006,8 +886,6 @@ const QUICK_PLATFORMS = [
   { id: "all", labelKey: "npxQuickPlatformAll" },
 ];
 
-const POST_COPY_BOOTSTRAP_FILENAME = "meta-kim-post-copy.mjs";
-
 async function askQuickPlatform() {
   const labels = QUICK_PLATFORMS.map((p) => t[p.labelKey]);
   const idx = await askSelect(t.npxQuickPlatformPrompt, labels);
@@ -3052,12 +930,568 @@ const DEPLOY_SKIP_CONFIG_PATHS = new Set([
   ".codex/config.toml",
 ]);
 
+const PROJECT_BOOTSTRAP_MERGED_CONFIG_PATHS = new Set([
+  ...DEPLOY_PROTECTED_JSON_PATHS,
+  ...DEPLOY_PROTECTED_TEXT_PATHS,
+  ...DEPLOY_SKIP_CONFIG_PATHS,
+]);
+
+const GLOBAL_HOOK_PACKAGE_FILES_LIST = [
+  "activate-meta-theory-spine.mjs",
+  "bash-readonly-whitelist.mjs",
+  "block-dangerous-bash.mjs",
+  "ecc-permission-cache-wrapper.mjs",
+  "enforce-agent-dispatch.mjs",
+  "graphify-context.mjs",
+  "meta-kim-memory-save.mjs",
+  "post-console-log-warn.mjs",
+  "post-format.mjs",
+  "post-typecheck.mjs",
+  "skip-reminder.mjs",
+  "stop-compaction.mjs",
+  "stop-completion-guard.mjs",
+  "stop-console-log-audit.mjs",
+  "stop-memory-save.mjs",
+  "stop-save-progress.mjs",
+  "stop-spine-cleanup.mjs",
+  "subagent-context.mjs",
+  "utils.mjs",
+];
+
+const PROJECT_LOCAL_CAPABILITY_PREFIXES = [
+  ".claude/agents/",
+  ".claude/skills/",
+  ".claude/commands/",
+  ".claude/hooks/",
+  ".claude/capability-index/",
+  ".codex/agents/",
+  ".codex/skills/",
+  ".codex/commands/",
+  ".codex/hooks/",
+  ".codex/capability-index/",
+  ".agents/skills/",
+  ".cursor/agents/",
+  ".cursor/skills/",
+  ".cursor/hooks/",
+  ".cursor/rules/",
+  ".cursor/capability-index/",
+  "openclaw/workspaces/",
+  "openclaw/skills/",
+  "openclaw/capability-index/",
+  "openclaw/hooks/",
+];
+
+const PROJECT_SKILL_ROOTS_BY_PLATFORM = {
+  claude: [".claude/skills"],
+  codex: [".agents/skills"],
+  cursor: [".cursor/skills"],
+  openclaw: ["openclaw/skills"],
+};
+
+const PROJECT_META_KIM_CONFIG_RELS_BY_PLATFORM = {
+  claude: [".claude/settings.json", ".mcp.json"],
+  codex: [".codex/hooks.json", ".mcp.json"],
+  cursor: [".cursor/hooks.json", ".cursor/mcp.json"],
+  openclaw: ["openclaw/openclaw.template.json"],
+};
+
+const PROJECT_META_KIM_LOCAL_STATE_RELS = [
+  ".claude/project-task-state.json",
+  ".meta-kim/meta-kim-post-copy.mjs",
+  ".meta-kim/state/default/project-bootstrap.json",
+];
+
+const PROJECT_HOOK_REL_DIRS_BY_PLATFORM = {
+  claude: ".claude/hooks",
+  codex: ".codex/hooks",
+  cursor: ".cursor/hooks",
+  openclaw: "openclaw/hooks",
+};
+
+const PROJECT_HOOK_SOURCE_CANDIDATES = {
+  claude: [
+    ...GLOBAL_HOOK_PACKAGE_FILES_LIST,
+    "spine-state.mjs",
+  ],
+  codex: [
+    "activate-meta-theory-spine.mjs",
+    "bash-readonly-whitelist.mjs",
+    "enforce-agent-dispatch.mjs",
+    "graphify-context.mjs",
+    "post-console-log-warn.mjs",
+    "post-format.mjs",
+    "post-typecheck.mjs",
+    "skip-reminder.mjs",
+    "spine-state.mjs",
+    "stop-compaction.mjs",
+    "stop-completion-guard.mjs",
+    "stop-console-log-audit.mjs",
+    "stop-spine-cleanup.mjs",
+    "subagent-context.mjs",
+    "utils.mjs",
+  ],
+  cursor: [
+    "activate-meta-theory-spine.mjs",
+    "bash-readonly-whitelist.mjs",
+    "enforce-agent-dispatch.mjs",
+    "graphify-context.mjs",
+    "post-console-log-warn.mjs",
+    "post-format.mjs",
+    "post-typecheck.mjs",
+    "skip-reminder.mjs",
+    "spine-state.mjs",
+    "stop-compaction.mjs",
+    "stop-completion-guard.mjs",
+    "stop-console-log-audit.mjs",
+    "stop-spine-cleanup.mjs",
+    "subagent-context.mjs",
+    "utils.mjs",
+  ],
+  openclaw: [
+    "stop-save-progress.mjs",
+  ],
+};
+
+function readProjectHookSource(platformId, hookName) {
+  if (
+    (platformId === "codex" || platformId === "cursor") &&
+    hookName === "graphify-context.mjs"
+  ) {
+    return buildCodexGraphifyContextHookSource();
+  }
+  const candidates = [];
+  if (platformId === "claude") {
+    candidates.push(
+      join(PROJECT_DIR, "canonical", "runtime-assets", "claude", "hooks", hookName),
+    );
+  }
+  candidates.push(
+    join(PROJECT_DIR, "canonical", "runtime-assets", "shared", "hooks", hookName),
+  );
+  candidates.push(
+    join(PROJECT_DIR, "canonical", "runtime-assets", "claude", "hooks", hookName),
+  );
+  for (const candidate of candidates) {
+    if (!existsSync(candidate)) continue;
+    return readFileSync(candidate, "utf8");
+  }
+  return null;
+}
+
+function buildCodexGraphifyContextHookSource() {
+  return [
+    'import { existsSync, readFileSync } from "node:fs";',
+    'import path from "node:path";',
+    'import process from "node:process";',
+    "",
+    "function readPayload() {",
+    "  try {",
+    '    const raw = readFileSync(0, "utf8");',
+    '    return raw.trim() ? JSON.parse(raw) : {};',
+    "  } catch {",
+    "    return {};",
+    "  }",
+    "}",
+    "",
+    "const payload = readPayload();",
+    'const cwd = typeof payload.cwd === "string" && payload.cwd ? payload.cwd : process.cwd();',
+    'const graphPath = path.join(cwd, "graphify-out", "graph.json");',
+    "",
+    "if (existsSync(graphPath)) {",
+    "  console.log(",
+    "    JSON.stringify({",
+    '      systemMessage: "graphify: Knowledge graph exists. For focused questions, run `graphify query \\"<question>\\" --budget 1000` first; use `graphify path`/`graphify explain` for relationships or concepts. Treat graph results as candidate file anchors and verify route-changing claims against source files; fall back to targeted `rg` when results are generic or stale. Read GRAPH_REPORT.md only for broad architecture context; never inject full graph.json or full GRAPH_REPORT.md.",',
+    "    }),",
+    "  );",
+    "}",
+    "",
+  ].join("\n");
+}
+
+const OPENCLAW_AGENT_ORDER = [
+  "meta-warden",
+  "meta-genesis",
+  "meta-artisan",
+  "meta-sentinel",
+  "meta-librarian",
+  "meta-conductor",
+  "meta-prism",
+  "meta-scout",
+];
+
+function parseSetupAgentFrontmatter(raw, filePath) {
+  const match = raw.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/);
+  if (!match) {
+    throw new Error(`${filePath} is missing YAML frontmatter.`);
+  }
+
+  const data = {};
+  for (const line of match[1].split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+    const separator = trimmed.indexOf(":");
+    if (separator === -1) {
+      throw new Error(`${filePath} has an invalid frontmatter line: ${line}`);
+    }
+    const key = trimmed.slice(0, separator).trim();
+    let value = trimmed.slice(separator + 1).trim();
+    if (
+      (value.startsWith('"') && value.endsWith('"')) ||
+      (value.startsWith("'") && value.endsWith("'"))
+    ) {
+      value = value.slice(1, -1);
+    }
+    data[key] = value;
+  }
+
+  return { data, body: match[2].trimStart() };
+}
+
+function extractSetupAgentTitle(body, fallback) {
+  const match = body.match(/^#\s+(.+)$/m);
+  return match ? match[1].trim() : fallback;
+}
+
+function roleFromSetupAgentTitle(title, fallback) {
+  const parts = title.split(":");
+  return parts.length > 1 ? parts.slice(1).join(":").trim() : fallback;
+}
+
+function sortSetupAgents(agents) {
+  return [...agents].sort((left, right) => {
+    const leftIndex = OPENCLAW_AGENT_ORDER.indexOf(left.id);
+    const rightIndex = OPENCLAW_AGENT_ORDER.indexOf(right.id);
+    if (leftIndex === -1 && rightIndex === -1) return left.id.localeCompare(right.id);
+    if (leftIndex === -1) return 1;
+    if (rightIndex === -1) return -1;
+    return leftIndex - rightIndex;
+  });
+}
+
+function loadSetupAgents() {
+  const canonicalAgentsDir = join(PROJECT_DIR, "canonical", "agents");
+  const files = readdirSync(canonicalAgentsDir)
+    .filter((file) => file.endsWith(".md"))
+    .sort();
+
+  const agents = [];
+  for (const file of files) {
+    const filePath = join(canonicalAgentsDir, file);
+    const raw = readFileSync(filePath, "utf8");
+    const { data, body } = parseSetupAgentFrontmatter(raw, filePath);
+    if (!data.name || !data.description) {
+      throw new Error(`${filePath} must define frontmatter name and description.`);
+    }
+    const title = extractSetupAgentTitle(body, data.name);
+    agents.push({
+      id: data.name,
+      description: data.description,
+      sourceFile: relative(PROJECT_DIR, filePath).replace(/\\/g, "/"),
+      title,
+      role: roleFromSetupAgentTitle(title, data.description),
+      body: body.trim(),
+    });
+  }
+
+  return sortSetupAgents(agents);
+}
+
+function parseSetupAgentPresentation(agent) {
+  const titleMatch = agent.title.match(
+    /^(.*?)(?::\s*(.*?))?(?:\s+([^\s]+))?$/u,
+  );
+  return {
+    displayName: titleMatch?.[1]?.trim() || agent.id,
+    localizedRole: titleMatch?.[2]?.trim() || agent.description,
+    emoji: titleMatch?.[3]?.trim() || "🤖",
+  };
+}
+
+function buildSetupOpenClawBootstrap(agent) {
+  const { displayName, localizedRole } = parseSetupAgentPresentation(agent);
+
+  return `# BOOTSTRAP.md - ${agent.id}
+
+This workspace already ships Meta_Kim meta-architecture assets; do not invent a persona from scratch.
+
+## Cold-start order
+
+1. Read \`IDENTITY.md\` — confirm you are \`${displayName}\` and your role is ${localizedRole}.
+2. Read \`SOUL.md\` — boundaries and quality bar.
+3. Read \`TOOLS.md\` and \`AGENTS.md\` — decide what to delegate.
+4. Update \`USER.md\` only when the user explicitly asks for long-lived context.
+
+## First reply
+
+- One sentence: what you own (and only that).
+- Do not absorb other meta agents' responsibilities.
+- Escalate cross-boundary conflicts to \`meta-warden\`.
+`;
+}
+
+function buildSetupOpenClawIdentity(agent) {
+  const { displayName, localizedRole, emoji } = parseSetupAgentPresentation(agent);
+
+  return `# IDENTITY.md - ${agent.id}
+
+- **Name:** ${displayName}
+- **Creature:** Meta_Kim meta agent
+- **Vibe:** Focused, minimal, clear boundaries; primary job: ${localizedRole}
+- **Emoji:** ${emoji}
+- **Avatar:**
+
+## Identity Notes
+
+- Agent ID: \`${agent.id}\`
+- Core role: ${agent.description}
+- Canonical source: \`${agent.sourceFile}\`
+`;
+}
+
+function buildSetupOpenClawUser() {
+  return `# USER.md - About Your Human
+
+- **Name:**
+- **What to call them:**
+- **Pronouns:** _(optional)_
+- **Timezone:**
+- **Notes:**
+
+## Context
+
+Record this user's long-term preferences for Meta_Kim work; do not store unrelated private data.
+`;
+}
+
+function buildSetupOpenClawBoot(agent) {
+  const { displayName } = parseSetupAgentPresentation(agent);
+
+  return `# BOOT.md - ${agent.id}
+
+After the OpenClaw gateway starts, run one-time boot checks in this order when needed.
+
+1. Confirm the workspace path and that \`IDENTITY.md\`, \`SOUL.md\`, \`TOOLS.md\`, and \`AGENTS.md\` are readable.
+2. Do not message the user proactively; act only when the boot task explicitly requires it.
+3. If you see role-boundary conflicts, record them in \`MEMORY.md\` under open questions — do not rewrite persona on your own.
+4. If you are \`${displayName}\`, keep boot checks inside your own boundary only.
+`;
+}
+
+function buildSetupOpenClawMemory(agent) {
+  return `# MEMORY.md - ${agent.id}
+
+Store information that stays true across sessions.
+
+## Do record
+
+- Stable user preferences
+- Recurring architecture decisions
+- Confirmed boundary interpretations
+- Risk constraints that keep applying
+
+## Do not record
+
+- One-off task state
+- Ephemeral command output
+- Unconfirmed guesses
+- Personal data unrelated to Meta_Kim
+`;
+}
+
+function buildSetupOpenClawTeamDirectory(agents) {
+  const rows = agents
+    .map((agent) => `| \`${agent.id}\` | ${agent.title} | ${agent.description} |`)
+    .join("\n");
+
+  return `# AGENTS.md - Meta_Kim Team Directory
+
+This file is generated from \`canonical/agents/*.md\` by Meta_Kim runtime sync/bootstrap.
+
+Use the smallest agent whose boundary matches the task. Escalate to \`meta-warden\` when the task spans multiple agent boundaries.
+
+Important: this file lists only the Meta_Kim team. It is not the full OpenClaw registry. If the user asks how many agents exist, which agents are currently registered, or who can collaborate right now, query the live runtime registry first instead of answering from this file alone.
+
+| Agent ID | Name | Responsibility |
+| --- | --- | --- |
+${rows}
+`;
+}
+
+function buildSetupOpenClawSoul(agent) {
+  return `# SOUL.md - ${agent.id}
+
+Generated from \`${agent.sourceFile}\`. Edit the canonical source first, then run Meta_Kim runtime sync/bootstrap.
+
+## Runtime Notes
+
+- You are running inside OpenClaw.
+- Read the local \`AGENTS.md\` before delegating with \`sessions_send\`.
+- \`AGENTS.md\` only lists the Meta_Kim team, not the full OpenClaw registry.
+- When the user asks which agents exist, how many agents exist, or who can collaborate right now, query the live runtime registry first through \`agents_list\`. If that tool is unavailable, fall back to an explicit runtime command and state the result source.
+- Stay inside your own responsibility boundary unless the user explicitly asks you to coordinate broader work.
+- The theory source is \`canonical/skills/meta-theory/references/meta-theory.md\`; public runtime behavior must not depend on local narrative notes.
+- For \`meta-theory\`, \`/meta-theory\`, project understanding, architecture, runtime routing, hook/MCP/tool routing, commercialization, market, competitor, pricing, growth, strategy, or roadmap tasks, run or faithfully follow \`npm run meta:theory:run:notice -- "<user request>"\` before Thinking and relay the compact notice/report path. If command execution or retrieval capability is unavailable, return \`blocked_to_fetch\` with the exact missing capability instead of giving a shallow summary.
+- Project-understanding Fetch must account for README, AGENTS, package scripts, canonical agents/skills/runtime assets, contracts, capability index, runtime projections, MCP configs, hooks, dependency registry, and Graphify when present.
+
+${agent.body}
+`;
+}
+
+function buildSetupOpenClawHeartbeat(agent) {
+  const templatePath = join(
+    PROJECT_DIR,
+    "canonical",
+    "runtime-assets",
+    "openclaw",
+    "HEARTBEAT.template.md",
+  );
+  const raw = readFileSync(templatePath, "utf8");
+  return raw.replace(/^<!--[\s\S]*?-->\r?\n/, "").replaceAll("{{AGENT_ID}}", agent.id);
+}
+
+function buildSetupOpenClawTools(agent, agents) {
+  const teammates = agents
+    .filter((item) => item.id !== agent.id)
+    .map((item) => `- \`${item.id}\`: ${item.description}`)
+    .join("\n");
+
+  return `# TOOLS.md - ${agent.id}
+
+Auto-generated by Meta_Kim runtime sync/bootstrap. Edit canonical sources first, then re-sync.
+
+## OpenClaw runtime conventions
+
+- Read \`SOUL.md\` and \`AGENTS.md\` in this directory first.
+- For collaboration, prefer OpenClaw native agent-to-agent routing.
+- \`AGENTS.md\` lists the Meta_Kim team only — it is not the full OpenClaw registry.
+- When the user asks for agent counts, names, or who can collaborate, call \`agents_list\` first; if unavailable, use an explicit command and state the source.
+- Shared skill: \`../../skills/meta-theory/SKILL.md\` (directory under \`openclaw/skills/\`, not duplicated per workspace).
+- Do not absorb other agents' duties; delegate or escalate to \`meta-warden\` when out of scope.
+
+## Teammates
+
+${teammates || "- None"}
+`;
+}
+
+function buildOpenClawWorkspacePlans(targetDir) {
+  const agents = loadSetupAgents();
+  const teamDirectory = buildSetupOpenClawTeamDirectory(agents);
+  const builders = {
+    "BOOT.md": (agent) => buildSetupOpenClawBoot(agent),
+    "BOOTSTRAP.md": (agent) => buildSetupOpenClawBootstrap(agent),
+    "IDENTITY.md": (agent) => buildSetupOpenClawIdentity(agent),
+    "MEMORY.md": (agent) => buildSetupOpenClawMemory(agent),
+    "USER.md": () => buildSetupOpenClawUser(),
+    "SOUL.md": (agent) => buildSetupOpenClawSoul(agent),
+    "AGENTS.md": () => teamDirectory,
+    "HEARTBEAT.md": (agent) => buildSetupOpenClawHeartbeat(agent),
+    "TOOLS.md": (agent) => buildSetupOpenClawTools(agent, agents),
+  };
+
+  return agents.flatMap((agent) =>
+    OPENCLAW_WORKSPACE_MD.map((fileName) =>
+      projectGeneratedFilePlan(
+        `openclaw/workspaces/${agent.id}/${fileName}`,
+        builders[fileName](agent),
+        targetDir,
+        `generated:openclaw-workspace:${agent.id}:${fileName}`,
+      ),
+    ),
+  );
+}
+
+function projectHookGeneratedPlans(platformId, targetDir) {
+  const plans = [];
+  const relDir = PROJECT_HOOK_REL_DIRS_BY_PLATFORM[platformId];
+  const hookNames = PROJECT_HOOK_SOURCE_CANDIDATES[platformId] ?? [];
+  if (relDir && hookNames.length > 0) {
+    for (const hookName of hookNames) {
+      const content = readProjectHookSource(platformId, hookName);
+      if (!content) continue;
+      plans.push(projectGeneratedFilePlan(
+        `${relDir}/${hookName}`,
+        content,
+        targetDir,
+        `generated:project-hook:${platformId}:${hookName}`,
+      ));
+    }
+  }
+  if (platformId === "openclaw") {
+    plans.push(...buildOpenClawWorkspacePlans(targetDir));
+  }
+  return plans;
+}
+
+function writeProjectGeneratedHooks(platformId, targetDir) {
+  let count = 0;
+  for (const plan of projectHookGeneratedPlans(platformId, targetDir)) {
+    const content = plan.content;
+    if (!content) continue;
+    const destPath = join(targetDir, plan.relPath);
+    mkdirSync(dirname(destPath), { recursive: true });
+    writeFileSync(destPath, content, "utf8");
+    count += 1;
+  }
+  return count;
+}
+
 function shouldSkipProjectDeployPath(relPath) {
   const rel = normalizeDeployRelPath(relPath);
   return (
     DEPLOY_LOCAL_STATE_PATHS.has(rel) ||
     DEPLOY_SKIP_CONFIG_PATHS.has(rel) ||
     rel.endsWith("/.openclaw/workspace-state.json")
+  );
+}
+
+function isMetaKimNamespacedProjectPath(relPath) {
+  const rel = normalizeDeployRelPath(relPath);
+  return (
+    rel === ".meta-kim/meta-kim-post-copy.mjs" ||
+    rel.startsWith(".claude/agents/meta-") ||
+    rel.startsWith(".codex/agents/meta-") ||
+    rel.startsWith(".cursor/agents/meta-") ||
+    rel.startsWith("openclaw/workspaces/meta-") ||
+    rel.startsWith(".claude/skills/meta-theory/") ||
+    rel.startsWith(".agents/skills/meta-theory/") ||
+    rel.startsWith(".cursor/skills/meta-theory/") ||
+    rel.startsWith("openclaw/skills/meta-theory/") ||
+    rel.startsWith(".claude/capability-index/meta-kim-") ||
+    rel.startsWith(".codex/capability-index/meta-kim-") ||
+    rel.startsWith(".cursor/capability-index/meta-kim-") ||
+    rel.startsWith("openclaw/capability-index/meta-kim-") ||
+    // Hook scripts under each platform's hooks dir are Meta_Kim-managed when
+    // their basename is on the canonical hook-file whitelist. Without this,
+    // bootstrap misclassifies them as user files and aborts with
+    // "user-owned file conflict" on every update.
+    isMetaKimManagedHookRelPath(rel) ||
+    rel === ".codex/commands/meta-theory.md"
+  );
+}
+
+// Recognizes hook files shipped by Meta_Kim into a user's project hooks dir.
+// Mirrors the GLOBAL_HOOK_PACKAGE_FILES whitelist so bootstrap correctly
+// classifies them as owned by Meta_Kim (not as user-authored files).
+function isMetaKimManagedHookRelPath(rel) {
+  if (typeof rel !== "string") return false;
+  const normalized = rel.replace(/\\/g, "/");
+  let basename = null;
+  if (normalized.startsWith(".claude/hooks/")) {
+    basename = normalized.slice(".claude/hooks/".length);
+  } else if (normalized.startsWith(".codex/hooks/")) {
+    basename = normalized.slice(".codex/hooks/".length);
+  } else if (normalized.startsWith(".cursor/hooks/")) {
+    basename = normalized.slice(".cursor/hooks/".length);
+  } else if (normalized.startsWith("openclaw/hooks/")) {
+    basename = normalized.slice("openclaw/hooks/".length);
+  }
+  if (!basename) return false;
+  const fileName = basename.split("/").pop();
+  if (!fileName || !fileName.endsWith(".mjs")) return false;
+  return (
+    GLOBAL_HOOK_PACKAGE_FILES_LIST.includes(fileName) ||
+    fileName === "spine-state.mjs" // legacy ghost file from older Meta_Kim installs
   );
 }
 
@@ -3087,6 +1521,24 @@ function writeJsonObject(filePath, value) {
   writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`, "utf8");
 }
 
+function canonicalJson(value) {
+  if (Array.isArray(value)) {
+    return value.map(canonicalJson);
+  }
+  if (isPlainObject(value)) {
+    return Object.fromEntries(
+      Object.keys(value)
+        .sort()
+        .map((key) => [key, canonicalJson(value[key])]),
+    );
+  }
+  return value;
+}
+
+function jsonEquivalent(left, right) {
+  return JSON.stringify(canonicalJson(left)) === JSON.stringify(canonicalJson(right));
+}
+
 function managedTextBlockMarkers(relPath) {
   const id = `META_KIM MANAGED BLOCK: ${normalizeDeployRelPath(relPath)}`;
   return {
@@ -3098,11 +1550,10 @@ function managedTextBlockMarkers(relPath) {
 function mergeManagedTextBlockPreserveBase(base, generated, relPath) {
   const existing = String(base ?? "");
   const nextBlock = String(generated ?? "").trimEnd();
-  if (!existing.trim()) return `${nextBlock}\n`;
-  if (existing.trimEnd() === nextBlock) return `${nextBlock}\n`;
-
   const { begin, end } = managedTextBlockMarkers(relPath);
   const block = `${begin}\n${nextBlock}\n${end}`;
+  if (!existing.trim()) return `${block}\n`;
+  if (existing.trimEnd() === block) return `${block}\n`;
   const escapedBegin = begin.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const escapedEnd = end.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const blockRe = new RegExp(`${escapedBegin}[\\s\\S]*?${escapedEnd}`);
@@ -3110,13 +1561,28 @@ function mergeManagedTextBlockPreserveBase(base, generated, relPath) {
   if (blockRe.test(existing)) {
     return `${existing.replace(blockRe, block).trimEnd()}\n`;
   }
+  if (existing.trimEnd() === nextBlock) return `${block}\n`;
   return `${existing.trimEnd()}\n\n${block}\n`;
+}
+
+function stripManagedTextBlock(raw, relPath) {
+  const { begin, end } = managedTextBlockMarkers(relPath);
+  const escapedBegin = begin.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const escapedEnd = end.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const blockRe = new RegExp(`${escapedBegin}[\\s\\S]*?${escapedEnd}`, "g");
+  return String(raw ?? "").replace(blockRe, "").trim();
+}
+
+function equivalentText(left, right) {
+  return String(left ?? "").replace(/\r\n/g, "\n").trimEnd() ===
+    String(right ?? "").replace(/\r\n/g, "\n").trimEnd();
 }
 
 function rewriteProjectDirRefs(raw, targetDir) {
   const sourceForward = PROJECT_DIR.replace(/\\/g, "/");
   const targetForward = targetDir.replace(/\\/g, "/");
   return String(raw)
+    .replaceAll("__REPO_ROOT__", targetForward)
     .replaceAll(sourceForward, targetForward)
     .replaceAll(PROJECT_DIR, targetDir);
 }
@@ -3271,16 +1737,6 @@ function prepareProjectDeployJson(relPath, srcPath, targetDir) {
   if (rel === ".mcp.json" || rel === ".cursor/mcp.json") {
     return { mcpServers: {} };
   }
-  if (rel === ".codex/hooks.json") {
-    return buildCodexHooksJson({
-      memoryHookPath: null,
-    });
-  }
-  if (rel === ".cursor/hooks.json") {
-    return buildCursorHooksJson({
-      memoryHookPath: null,
-    });
-  }
 
   const raw = readFileSync(srcPath, "utf8");
   const parsed = parseJsonText(rewriteProjectDirRefs(raw, targetDir), srcPath);
@@ -3290,36 +1746,69 @@ function prepareProjectDeployJson(relPath, srcPath, targetDir) {
   return parsed;
 }
 
-function mergeProtectedProjectDeployFile(srcPath, destPath, relPath, targetDir) {
-  const rel = normalizeDeployRelPath(relPath);
-  const base = readJsonObjectIfExists(destPath);
-  const generated = prepareProjectDeployJson(rel, srcPath, targetDir);
-  let merged;
-
-  if (rel === ".claude/settings.json") {
-    merged = mergeRepoClaudeSettings(base, generated, targetDir);
-  } else if (rel === ".mcp.json" || rel === ".cursor/mcp.json") {
-    merged = mergeMcpConfigPreserveBase(base, generated);
-  } else if (rel === ".codex/hooks.json" || rel === ".cursor/hooks.json") {
-    merged = mergeHookConfigPreserveBase(base, generated);
-  } else {
-    merged = mergeDeepPreserveBase(generated, base);
+function backupBeforeMerge(destPath, label = "pre-merge") {
+  if (!destPath) return null;
+  if (!existsSync(destPath)) return null;
+  try {
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+    const backupRoot = join(
+      PROJECT_DIR,
+      ".meta-kim",
+      "backups",
+      `${label}-${stamp}`,
+    );
+    const safeBase = String(destPath).replace(/[\\/]+/g, "__");
+    const backupPath = join(backupRoot, safeBase);
+    mkdirSync(dirname(backupPath), { recursive: true });
+    cpSync(destPath, backupPath);
+    return backupPath;
+  } catch (err) {
+    warn(t?.warnBackupFailed?.(destPath, err.message) || `Backup failed for ${destPath}: ${err.message}`);
+    return null;
   }
+}
 
-  writeJsonObject(destPath, merged);
+function mergeProtectedProjectDeployFile(srcPath, destPath, relPath, targetDir) {
+  backupBeforeMerge(destPath, "pre-merge");
+  writeJsonObject(
+    destPath,
+    plannedProtectedProjectDeployJson(srcPath, destPath, relPath, targetDir),
+  );
   return 1;
 }
 
 function mergeProtectedProjectDeployTextFile(srcPath, destPath, relPath, targetDir) {
+  backupBeforeMerge(destPath, "pre-merge");
+  writeFileSync(
+    destPath,
+    plannedProtectedProjectDeployText(srcPath, destPath, relPath, targetDir),
+    "utf8",
+  );
+  return 1;
+}
+
+function plannedProtectedProjectDeployJson(srcPath, destPath, relPath, targetDir) {
+  const rel = normalizeDeployRelPath(relPath);
+  const base = readJsonObjectIfExists(destPath);
+  const generated = prepareProjectDeployJson(rel, srcPath, targetDir);
+
+  if (rel === ".claude/settings.json") {
+    return mergeRepoClaudeSettings(base, generated, targetDir);
+  }
+  if (rel === ".mcp.json" || rel === ".cursor/mcp.json") {
+    return mergeMcpConfigPreserveBase(base, generated);
+  }
+  if (rel === ".codex/hooks.json" || rel === ".cursor/hooks.json") {
+    return mergeHookConfigPreserveBase(base, generated);
+  }
+  return mergeDeepPreserveBase(generated, base);
+}
+
+function plannedProtectedProjectDeployText(srcPath, destPath, relPath, targetDir) {
   const rel = normalizeDeployRelPath(relPath);
   const generated = rewriteProjectDirRefs(readFileSync(srcPath, "utf8"), targetDir);
-  if (!existsSync(destPath)) {
-    writeFileSync(destPath, generated.endsWith("\n") ? generated : `${generated}\n`, "utf8");
-    return 1;
-  }
-  const base = readFileSync(destPath, "utf8");
-  writeFileSync(destPath, mergeManagedTextBlockPreserveBase(base, generated, rel), "utf8");
-  return 1;
+  const base = existsSync(destPath) ? readFileSync(destPath, "utf8") : "";
+  return mergeManagedTextBlockPreserveBase(base, generated, rel);
 }
 
 function copyProjectDeployFile(srcPath, destPath, relPath, targetDir) {
@@ -3373,19 +1862,39 @@ function projectDeployRootsForPlatform(platformId) {
     add("AGENTS.md");
   }
 
+  // Replace whole-directory roots (.claude/.codex/.cursor/openclaw) with
+  // explicit subpath roots so deploy only touches known runtime projection
+  // surfaces and never recurses through unrelated local state.
   if (platformId === "claude" || platformId === "all") {
-    add(".claude");
-    if (existsSync(join(PROJECT_DIR, ".mcp.json"))) add(".mcp.json");
+    add("canonical/agents", ".claude/agents");
+    add("canonical/skills/meta-theory", ".claude/skills/meta-theory");
+    add("config/capability-index", ".claude/capability-index");
+    add("canonical/runtime-assets/claude/commands", ".claude/commands");
+    add("canonical/runtime-assets/claude/settings.json", ".claude/settings.json");
+    add("canonical/runtime-assets/claude/mcp.json", ".mcp.json");
   }
   if (platformId === "openclaw" || platformId === "all") {
-    add("openclaw");
+    add("canonical/skills/meta-theory", "openclaw/skills/meta-theory");
+    add("config/capability-index", "openclaw/capability-index");
+    add(
+      "canonical/runtime-assets/openclaw/openclaw.template.json",
+      "openclaw/openclaw.template.json",
+    );
   }
   if (platformId === "codex" || platformId === "all") {
-    add(".codex");
-    add(".agents");
+    add("canonical/skills/meta-theory", ".agents/skills/meta-theory");
+    add("config/capability-index", ".codex/capability-index");
+    add("canonical/runtime-assets/codex/commands", ".codex/commands");
+    add("canonical/runtime-assets/codex/hooks.json", ".codex/hooks.json");
+    add(".codex/config.toml");
   }
   if (platformId === "cursor" || platformId === "all") {
-    add(".cursor");
+    add("canonical/agents", ".cursor/agents");
+    add("canonical/skills/meta-theory", ".cursor/skills/meta-theory");
+    add("config/capability-index", ".cursor/capability-index");
+    add("canonical/runtime-assets/cursor/rules", ".cursor/rules");
+    add("canonical/runtime-assets/cursor/hooks.json", ".cursor/hooks.json");
+    add("canonical/runtime-assets/claude/mcp.json", ".cursor/mcp.json");
   }
   return roots;
 }
@@ -3396,74 +1905,183 @@ function collectDeployFilePlansFromRoot(srcRoot, destRoot, context = {}) {
   const targetDir = context.targetDir || destRoot;
   const plans = [];
   if (!statSync(srcRoot).isDirectory()) {
-    const relPath = normalizeDeployRelPath(relative(sourceRoot, srcRoot));
+    const relPath = normalizeDeployRelPath(
+      context.destRelBase || relative(sourceRoot, srcRoot),
+    );
     const destPath = join(targetDir, relPath);
-    plans.push(projectDeployFilePlan(srcRoot, destPath, relPath));
+    plans.push(projectDeployFilePlan(srcRoot, destPath, relPath, targetDir, context));
     return plans;
   }
   for (const entry of readdirSync(srcRoot, { withFileTypes: true })) {
     const srcPath = join(srcRoot, entry.name);
-    const relPath = normalizeDeployRelPath(relative(sourceRoot, srcPath));
+    const sourceRel = normalizeDeployRelPath(relative(sourceRoot, srcPath));
+    const relPath = normalizeDeployRelPath(
+      context.destRelBase ? join(context.destRelBase, sourceRel) : sourceRel,
+    );
     const destPath = join(targetDir, relPath);
     if (entry.isDirectory()) {
       plans.push(
         ...collectDeployFilePlansFromRoot(srcPath, destPath, {
           sourceRoot,
           targetDir,
+          managedRelPaths: context.managedRelPaths,
+          destRelBase: context.destRelBase,
         }),
       );
     } else {
-      plans.push(projectDeployFilePlan(srcPath, destPath, relPath));
+      plans.push(projectDeployFilePlan(srcPath, destPath, relPath, targetDir, context));
     }
   }
   return plans;
 }
 
-function projectDeployFilePlan(srcPath, destPath, relPath) {
+function projectDeployFilePlan(srcPath, destPath, relPath, targetDir, context = {}) {
   const rel = normalizeDeployRelPath(relPath);
   const skipped = shouldSkipProjectDeployPath(rel);
   const protectedJson = DEPLOY_PROTECTED_JSON_PATHS.has(rel);
   const protectedText = DEPLOY_PROTECTED_TEXT_PATHS.has(rel);
   const exists = existsSync(destPath);
+  const contentStatus = projectDeployFileContentStatus(srcPath, destPath, rel, {
+    skipped,
+    protectedJson,
+    protectedText,
+    targetDir,
+  });
+  const managedByManifest = context.managedRelPaths?.has(rel) === true;
+  const metaKimOwnedPath = isMetaKimNamespacedProjectPath(rel);
+  const unknownExistingConflict =
+    exists &&
+    contentStatus !== "same" &&
+    !skipped &&
+    !protectedJson &&
+    !protectedText &&
+    !managedByManifest &&
+    !metaKimOwnedPath;
   const mergePolicy = skipped
     ? "never_touch"
     : protectedJson
       ? "additive_preserve_user_state_json"
-      : protectedText && exists
+      : protectedText
         ? "managed_block_preserve_user_text"
+        : unknownExistingConflict
+          ? "user_owned_existing_file_conflict"
         : exists
-          ? "generated_projection_replace"
+          ? managedByManifest
+            ? "manifest_managed_projection_replace"
+            : "meta_kim_namespaced_projection_replace"
           : "generated_projection_create";
   return {
     relPath: rel,
     source: normalizeDeployRelPath(relative(PROJECT_DIR, srcPath)),
     exists,
+    contentStatus,
+    ownership: skipped
+      ? "local_state"
+      : protectedJson || protectedText
+        ? "shared_config_merge"
+        : managedByManifest
+          ? "manifest_managed"
+          : metaKimOwnedPath
+            ? "meta_kim_owned"
+            : exists
+              ? "unknown_existing"
+              : "new_file",
     action: skipped
       ? "skip"
-      : exists && (protectedJson || protectedText)
+      : protectedText
         ? "merge"
+        : exists && protectedJson
+        ? "merge"
+        : unknownExistingConflict
+          ? "conflict"
         : exists
           ? "replace"
           : "create",
+    effectiveAction:
+      skipped || contentStatus === "same"
+        ? "unchanged"
+        : protectedText
+          ? "merge"
+          : exists && protectedJson
+          ? "merge"
+          : unknownExistingConflict
+            ? "conflict"
+          : exists
+            ? "replace"
+            : "create",
     mergePolicy,
   };
+}
+
+function projectGeneratedFilePlan(relPath, content, targetDir, source) {
+  const rel = normalizeDeployRelPath(relPath);
+  const destPath = join(targetDir, rel);
+  const exists = existsSync(destPath);
+  const current = exists ? readFileSync(destPath, "utf8") : null;
+  const contentStatus = !exists ? "missing" : current === content ? "same" : "different";
+  return {
+    relPath: rel,
+    source,
+    content,
+    exists,
+    contentStatus,
+    ownership: isMetaKimNamespacedProjectPath(rel)
+      ? "meta_kim_owned"
+      : exists
+        ? "unknown_existing"
+        : "new_file",
+    action: exists ? "replace" : "create",
+    effectiveAction: contentStatus === "same" ? "unchanged" : exists ? "replace" : "create",
+    mergePolicy: exists
+      ? "meta_kim_namespaced_projection_replace"
+      : "generated_projection_create",
+  };
+}
+
+function projectDeployFileContentStatus(
+  srcPath,
+  destPath,
+  relPath,
+  { skipped, protectedJson, protectedText, targetDir },
+) {
+  if (skipped) return "skip";
+  if (!existsSync(destPath)) return "missing";
+  if (protectedJson) {
+    const current = readJsonObjectIfExists(destPath);
+    const planned = plannedProtectedProjectDeployJson(srcPath, destPath, relPath, targetDir);
+    return jsonEquivalent(current, planned) ? "same" : "different";
+  }
+  if (protectedText) {
+    const current = readFileSync(destPath, "utf8");
+    const planned = plannedProtectedProjectDeployText(srcPath, destPath, relPath, targetDir);
+    return current === planned ? "same" : "different";
+  }
+  return readFileSync(srcPath).equals(readFileSync(destPath)) ? "same" : "different";
 }
 
 function collectProjectDeployPlan(activeTargets, targetDir) {
   const plans = [];
   const seen = new Set();
+  const managedRelPaths = previousProjectManagedRelPaths(targetDir);
   for (const platformId of activeTargets) {
     for (const root of projectDeployRootsForPlatform(platformId)) {
       const src = join(PROJECT_DIR, root.srcRel);
       const dest = join(targetDir, root.destRel);
       for (const plan of collectDeployFilePlansFromRoot(src, dest, {
-        sourceRoot: PROJECT_DIR,
+        sourceRoot: root.destRel !== root.srcRel ? src : PROJECT_DIR,
         targetDir,
+        managedRelPaths,
+        destRelBase: root.destRel !== root.srcRel ? root.destRel : null,
       })) {
         if (seen.has(plan.relPath)) continue;
         seen.add(plan.relPath);
         plans.push(plan);
       }
+    }
+    for (const plan of projectHookGeneratedPlans(platformId, targetDir)) {
+      if (seen.has(plan.relPath)) continue;
+      seen.add(plan.relPath);
+      plans.push(plan);
     }
   }
   return plans.sort((left, right) => left.relPath.localeCompare(right.relPath));
@@ -3511,56 +2129,949 @@ function readProjectBootstrapManifest(targetDir) {
   }
 }
 
+function previousProjectManagedRelPaths(targetDir) {
+  const manifest = readProjectBootstrapManifest(targetDir);
+  const managedFiles = Array.isArray(manifest?.managedFiles) ? manifest.managedFiles : [];
+  return new Set(
+    managedFiles
+      .map((file) => normalizeDeployRelPath(file?.relPath ?? ""))
+      .filter(Boolean),
+  );
+}
+
+function previousProjectManagedFileMap(targetDir) {
+  const manifest = readProjectBootstrapManifest(targetDir);
+  const managedFiles = Array.isArray(manifest?.managedFiles) ? manifest.managedFiles : [];
+  const result = new Map();
+  for (const file of managedFiles) {
+    const relPath = normalizeDeployRelPath(file?.relPath ?? "");
+    if (!relPath) continue;
+    result.set(relPath, file);
+  }
+  return result;
+}
+
+function isProjectLocalCapabilityAsset(relPath) {
+  const rel = normalizeDeployRelPath(relPath);
+  if (!rel || PROJECT_BOOTSTRAP_MERGED_CONFIG_PATHS.has(rel)) return false;
+  return PROJECT_LOCAL_CAPABILITY_PREFIXES.some((prefix) => rel.startsWith(prefix));
+}
+
+function projectInstructionRelPathsForTargets(activeTargets) {
+  const targets = activeTargets.includes("all")
+    ? ["claude", "codex", "cursor", "openclaw"]
+    : activeTargets;
+  const rels = new Set();
+  if (targets.includes("claude")) rels.add("CLAUDE.md");
+  if (
+    targets.includes("codex") ||
+    targets.includes("cursor") ||
+    targets.includes("openclaw")
+  ) {
+    rels.add("AGENTS.md");
+  }
+  return [...rels];
+}
+
+function isRedundantProjectInstructionFile(targetDir, relPath) {
+  const rel = normalizeDeployRelPath(relPath);
+  const targetPath = join(targetDir, rel);
+  const sourcePath = join(PROJECT_DIR, rel);
+  if (!existsSync(targetPath) || !existsSync(sourcePath)) return false;
+  const stats = statSync(targetPath);
+  if (!stats.isFile()) return false;
+  const current = readFileSync(targetPath, "utf8");
+  const generated = rewriteProjectDirRefs(readFileSync(sourcePath, "utf8"), targetDir);
+  const userText = stripManagedTextBlock(current, rel);
+  const metaKimProjectionSignature =
+    (rel === "AGENTS.md" && userText.trimStart().startsWith("# Meta_Kim for Codex")) ||
+    (rel === "CLAUDE.md" &&
+      userText.trimStart().startsWith("# Meta_Kim for Claude Code"));
+  return (
+    equivalentText(current, generated) ||
+    equivalentText(userText, "") ||
+    equivalentText(userText, generated) ||
+    metaKimProjectionSignature
+  );
+}
+
+function removeRedundantProjectInstructionFiles(targetDir, activeTargets) {
+  const removed = [];
+  const skipped = [];
+  const root = resolve(targetDir);
+  for (const relPath of projectInstructionRelPathsForTargets(activeTargets)) {
+    const rel = normalizeDeployRelPath(relPath);
+    const absPath = resolve(targetDir, rel);
+    if (!isPathInsideDir(absPath, root)) {
+      skipped.push({ relPath: rel, reason: "outside_target_dir" });
+      continue;
+    }
+    if (!isRedundantProjectInstructionFile(targetDir, rel)) continue;
+    if (!removeUntrackedProjectPath(targetDir, rel, skipped, { recursive: false })) {
+      continue;
+    }
+    removed.push(rel);
+    pruneEmptyProjectDirs(targetDir, rel);
+  }
+  return { removed, skipped };
+}
+
+function projectAssetCleanupBucket(relPath) {
+  const rel = normalizeDeployRelPath(relPath);
+  const runtime = rel.startsWith(".claude/")
+    ? "Claude Code"
+    : rel.startsWith(".codex/") || rel.startsWith(".agents/")
+      ? "Codex"
+      : rel.startsWith(".cursor/")
+        ? "Cursor"
+        : rel.startsWith("openclaw/")
+          ? "OpenClaw"
+          : "Other";
+  const type = rel.includes("/agents/") || rel.startsWith("openclaw/workspaces/")
+    ? "agents"
+    : rel.includes("/skills/")
+      ? "skills"
+      : rel.includes("/commands/")
+        ? "Commands"
+        : rel.includes("/hooks/")
+          ? "hooks"
+          : rel.includes("/rules/")
+            ? "rules"
+            : rel.includes("/capability-index/")
+              ? "capability-index"
+              : "assets";
+  return `${runtime} ${type}`;
+}
+
+function summarizeProjectAssetCleanup(removed) {
+  const counts = new Map();
+  for (const relPath of removed) {
+    const bucket = projectAssetCleanupBucket(relPath);
+    counts.set(bucket, (counts.get(bucket) ?? 0) + 1);
+  }
+  return [...counts.entries()]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([bucket, count]) => `${bucket}: ${count}`);
+}
+
+function isPathInsideDir(absPath, absDir) {
+  const rel = relative(absDir, absPath);
+  return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
+}
+
+function isGitTrackedProjectPath(targetDir, relPath) {
+  if (!existsSync(join(targetDir, ".git"))) return false;
+  const rel = normalizeDeployRelPath(relPath);
+  const probe = spawnSync("git", ["-C", targetDir, "ls-files", "--", rel], {
+    encoding: "utf8",
+    windowsHide: true,
+  });
+  if (probe.status !== 0) return false;
+  return probe.stdout.trim().length > 0;
+}
+
+function removeUntrackedProjectPath(targetDir, relPath, skipped, options = {}) {
+  const rel = normalizeDeployRelPath(relPath);
+  const root = resolve(targetDir);
+  const absPath = resolve(targetDir, rel);
+  if (!isPathInsideDir(absPath, root)) {
+    skipped.push({ relPath: rel, reason: "outside_target_dir" });
+    return false;
+  }
+  if (!existsSync(absPath)) return false;
+  if (isGitTrackedProjectPath(targetDir, rel)) {
+    skipped.push({ relPath: rel, reason: "git_tracked_preserved" });
+    return false;
+  }
+  rmSync(absPath, { recursive: options.recursive !== false, force: true });
+  return true;
+}
+
+function pruneEmptyProjectDirs(targetDir, relPath, removedDirs = null) {
+  let currentDir = dirname(join(targetDir, normalizeDeployRelPath(relPath)));
+  const root = resolve(targetDir);
+  while (currentDir !== root && isPathInsideDir(currentDir, root)) {
+    let entries = [];
+    try {
+      entries = readdirSync(currentDir);
+    } catch (error) {
+      if (error.code === "ENOENT") return;
+      throw error;
+    }
+    if (entries.length > 0) return;
+    const removedRel = normalizeDeployRelPath(relative(targetDir, currentDir));
+    rmSync(currentDir, { recursive: true, force: true });
+    if (Array.isArray(removedDirs) && removedRel) {
+      removedDirs.push(removedRel);
+    }
+    currentDir = dirname(currentDir);
+  }
+}
+
+function removeStaleManagedProjectAssets(
+  targetDir,
+  currentFilePlans,
+  options = {},
+) {
+  const removeCurrentManaged = options.removeCurrentManaged === true;
+  const currentRelPaths = new Set(
+    currentFilePlans.map((file) => normalizeDeployRelPath(file.relPath)).filter(Boolean),
+  );
+  const previousRelPaths = previousProjectManagedRelPaths(targetDir);
+  const removed = [];
+  const skipped = [];
+  const root = resolve(targetDir);
+
+  // cleanupProjectRedundancyDirs (removeCurrentManaged) must delete every
+  // capability asset the current plan would install — including cursor/openclaw
+  // roots that are absent from the historical manifest (which only recorded the
+  // bootstrap-time activeTargets, e.g. [claude,codex]). Without unioning
+  // currentRelPaths, those runtimes' project-level agents/skills/workspaces are
+  // never cleaned and the global-single-source intent silently leaks.
+  const cleanupSources = removeCurrentManaged
+    ? Array.from(new Set([...previousRelPaths, ...currentRelPaths]))
+    : Array.from(previousRelPaths);
+  for (const relPath of cleanupSources) {
+    if (!removeCurrentManaged && currentRelPaths.has(relPath)) continue;
+    if (!isProjectLocalCapabilityAsset(relPath)) continue;
+    const absPath = resolve(targetDir, relPath);
+    if (!isPathInsideDir(absPath, root)) {
+      skipped.push({ relPath, reason: "outside_target_dir" });
+      continue;
+    }
+    if (!existsSync(absPath)) continue;
+    const stats = statSync(absPath);
+    if (!stats.isFile()) {
+      skipped.push({ relPath, reason: "not_a_file" });
+      continue;
+    }
+    if (!removeUntrackedProjectPath(targetDir, relPath, skipped, { recursive: false })) {
+      continue;
+    }
+    removed.push(relPath);
+    pruneEmptyProjectDirs(targetDir, relPath);
+  }
+
+  return { removed, skipped };
+}
+
+const LEGACY_PROJECT_CAPABILITY_RELS_BY_PLATFORM = {
+  claude: [
+    ".claude/skills/meta-theory.md",
+    ".claude/skills/references",
+  ],
+  codex: [
+    ".codex/skills/meta-theory.md",
+    ".codex/skills/references",
+    ".codex/skills/meta-theory",
+  ],
+  cursor: [
+    ".cursor/skills/meta-theory.md",
+    ".cursor/skills/references",
+  ],
+  openclaw: [
+    "openclaw/skills/meta-theory.md",
+    "openclaw/skills/references",
+  ],
+};
+
+function mergeProjectCleanupResults(...cleanups) {
+  return {
+    removed: cleanups.flatMap((cleanup) => cleanup?.removed ?? []),
+    skipped: cleanups.flatMap((cleanup) => cleanup?.skipped ?? []),
+  };
+}
+
+function legacyProjectCapabilityRelPaths(activeTargets) {
+  const targets = activeTargets.includes("all")
+    ? Object.keys(LEGACY_PROJECT_CAPABILITY_RELS_BY_PLATFORM)
+    : activeTargets;
+  return [
+    ...new Set(
+      targets.flatMap(
+        (target) => LEGACY_PROJECT_CAPABILITY_RELS_BY_PLATFORM[target] ?? [],
+      ),
+    ),
+  ];
+}
+
+function removeLegacyProjectCapabilityEntrypoints(targetDir, activeTargets) {
+  const removed = [];
+  const skipped = [];
+  const root = resolve(targetDir);
+
+  for (const relPath of legacyProjectCapabilityRelPaths(activeTargets)) {
+    const rel = normalizeDeployRelPath(relPath);
+    const absPath = resolve(targetDir, rel);
+    if (!isPathInsideDir(absPath, root)) {
+      skipped.push({ relPath: rel, reason: "outside_target_dir" });
+      continue;
+    }
+    if (!existsSync(absPath)) continue;
+    if (!removeUntrackedProjectPath(targetDir, rel, skipped)) continue;
+    removed.push(rel);
+    pruneEmptyProjectDirs(targetDir, rel);
+  }
+
+  return { removed, skipped };
+}
+
+const GLOBAL_CLEANUP_PROJECT_CAPABILITY_ROOTS_BY_PLATFORM = {
+  claude: [
+    ".claude/skills/meta-theory",
+  ],
+  codex: [
+    ".agents/skills/meta-theory",
+  ],
+  cursor: [
+    ".cursor/skills/meta-theory",
+  ],
+  openclaw: [
+    "openclaw/skills/meta-theory",
+  ],
+};
+
+function globalCleanupProjectCapabilityRoots(activeTargets) {
+  const targets = activeTargets.includes("all")
+    ? Object.keys(GLOBAL_CLEANUP_PROJECT_CAPABILITY_ROOTS_BY_PLATFORM)
+    : activeTargets;
+  return [
+    ...new Set(
+      targets.flatMap(
+        (target) => GLOBAL_CLEANUP_PROJECT_CAPABILITY_ROOTS_BY_PLATFORM[target] ?? [],
+      ),
+    ),
+  ];
+}
+
+function removeGlobalProjectCapabilityRoots(targetDir, activeTargets) {
+  const removed = [];
+  const skipped = [];
+  const root = resolve(targetDir);
+
+  for (const relPath of globalCleanupProjectCapabilityRoots(activeTargets)) {
+    const rel = normalizeDeployRelPath(relPath);
+    const absPath = resolve(targetDir, rel);
+    if (!isPathInsideDir(absPath, root)) {
+      skipped.push({ relPath: rel, reason: "outside_target_dir" });
+      continue;
+    }
+    if (!existsSync(absPath)) continue;
+    if (!removeUntrackedProjectPath(targetDir, rel, skipped)) continue;
+    removed.push(rel);
+    pruneEmptyProjectDirs(targetDir, rel);
+  }
+
+  return { removed, skipped };
+}
+
+function expandedCleanupTargets(activeTargets) {
+  return activeTargets.includes("all")
+    ? ["claude", "codex", "cursor", "openclaw"]
+    : activeTargets;
+}
+
+function targetValuesForPlatforms(map, activeTargets) {
+  return [
+    ...new Set(
+      expandedCleanupTargets(activeTargets).flatMap((target) => map[target] ?? []),
+    ),
+  ];
+}
+
+function readTextIfFile(filePath) {
+  if (!existsSync(filePath)) return "";
+  const stats = statSync(filePath);
+  if (!stats.isFile()) return "";
+  return readFileSync(filePath, "utf8");
+}
+
+function isMetaKimGeneratedSkillDirectory(dirPath) {
+  const skillPath = join(dirPath, "SKILL.md");
+  const raw = readTextIfFile(skillPath);
+  if (!raw.trim()) return false;
+  const markerRe =
+    /\b(author:\s*Meta_Kim|sourceGapId:\s*gap-|approvalEvidence:\s*warden-approved|Reusable Meta_Kim|Meta_Kim executable governance dispatcher)\b/u;
+  return markerRe.test(raw);
+}
+
+function removeMetaKimGeneratedProjectSkillResidue(targetDir, activeTargets) {
+  const removed = [];
+  const skipped = [];
+  const root = resolve(targetDir);
+  for (const relRoot of targetValuesForPlatforms(PROJECT_SKILL_ROOTS_BY_PLATFORM, activeTargets)) {
+    const absRoot = resolve(targetDir, relRoot);
+    if (!isPathInsideDir(absRoot, root)) {
+      skipped.push({ relPath: normalizeDeployRelPath(relRoot), reason: "outside_target_dir" });
+      continue;
+    }
+    if (!existsSync(absRoot)) continue;
+    for (const entry of readdirSync(absRoot, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue;
+      const absPath = join(absRoot, entry.name);
+      const relPath = normalizeDeployRelPath(relative(targetDir, absPath));
+      if (!isMetaKimGeneratedSkillDirectory(absPath)) continue;
+      if (!removeUntrackedProjectPath(targetDir, relPath, skipped)) continue;
+      removed.push(relPath);
+      pruneEmptyProjectDirs(targetDir, relPath);
+    }
+  }
+  return { removed, skipped };
+}
+
+function directoryContainsFiles(dirPath) {
+  if (!existsSync(dirPath)) return false;
+  for (const entry of readdirSync(dirPath, { withFileTypes: true })) {
+    const entryPath = join(dirPath, entry.name);
+    if (entry.isFile()) return true;
+    if (entry.isDirectory() && directoryContainsFiles(entryPath)) return true;
+  }
+  return false;
+}
+
+function isMetaKimOpenClawHookDirectory(dirPath) {
+  const hookDoc = readTextIfFile(join(dirPath, "HOOK.md"));
+  return hookDoc.includes("Meta_Kim") || hookDoc.includes("mcp-memory-service");
+}
+
+function removeMetaKimOpenClawDirectoryResidue(targetDir, activeTargets) {
+  const removed = [];
+  const skipped = [];
+  if (!expandedCleanupTargets(activeTargets).includes("openclaw")) {
+    return { removed, skipped };
+  }
+  const root = resolve(targetDir);
+  const hookRoot = resolve(targetDir, "openclaw/hooks");
+  if (isPathInsideDir(hookRoot, root) && existsSync(hookRoot)) {
+    for (const entry of readdirSync(hookRoot, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue;
+      const absPath = join(hookRoot, entry.name);
+      const relPath = normalizeDeployRelPath(relative(targetDir, absPath));
+      if (!isMetaKimOpenClawHookDirectory(absPath)) continue;
+      if (!removeUntrackedProjectPath(targetDir, relPath, skipped)) continue;
+      removed.push(relPath);
+      pruneEmptyProjectDirs(targetDir, relPath);
+    }
+  } else if (!isPathInsideDir(hookRoot, root)) {
+    skipped.push({ relPath: "openclaw/hooks", reason: "outside_target_dir" });
+  }
+
+  const workspaceRoot = resolve(targetDir, "openclaw/workspaces");
+  if (isPathInsideDir(workspaceRoot, root) && existsSync(workspaceRoot)) {
+    for (const entry of readdirSync(workspaceRoot, { withFileTypes: true })) {
+      if (!entry.isDirectory() || !entry.name.startsWith("meta-")) continue;
+      const absPath = join(workspaceRoot, entry.name);
+      const relPath = normalizeDeployRelPath(relative(targetDir, absPath));
+      if (directoryContainsFiles(absPath)) continue;
+      if (!removeUntrackedProjectPath(targetDir, relPath, skipped)) continue;
+      removed.push(relPath);
+      pruneEmptyProjectDirs(targetDir, relPath);
+    }
+  } else if (!isPathInsideDir(workspaceRoot, root)) {
+    skipped.push({ relPath: "openclaw/workspaces", reason: "outside_target_dir" });
+  }
+
+  return { removed, skipped };
+}
+
+function stripMetaKimMcpServersFromConfig(config = {}) {
+  const next = cloneJson(config && typeof config === "object" ? config : {});
+  if (isPlainObject(next.mcpServers)) {
+    for (const key of ["meta-kim-runtime", "mcp-memory-service"]) {
+      delete next.mcpServers[key];
+    }
+  }
+  if (isPlainObject(next.mcp?.servers)) {
+    for (const key of ["meta-kim-runtime", "mcp-memory-service"]) {
+      delete next.mcp.servers[key];
+    }
+  }
+  return next;
+}
+
+function stripMetaKimOpenClawTemplate(config = {}) {
+  const next = stripMetaKimMcpServersFromConfig(config);
+  if (Array.isArray(next.agents?.list)) {
+    next.agents.list = next.agents.list.filter(
+      (agent) => !String(agent?.id ?? "").startsWith("meta-"),
+    );
+  }
+  if (Array.isArray(next.tools?.agentToAgent?.allow)) {
+    next.tools.agentToAgent.allow = next.tools.agentToAgent.allow.filter(
+      (id) => !String(id ?? "").startsWith("meta-"),
+    );
+  }
+  if (Array.isArray(next.skills?.load?.extraDirs)) {
+    next.skills.load.extraDirs = next.skills.load.extraDirs.filter(
+      (dir) => !String(dir ?? "").replace(/\\/g, "/").includes("/openclaw/skills"),
+    );
+  }
+  return next;
+}
+
+function stripMetaKimProjectConfig(relPath, config = {}) {
+  const rel = normalizeDeployRelPath(relPath);
+  let next = cloneJson(config && typeof config === "object" ? config : {});
+  if (rel.endsWith("hooks.json") || rel === ".claude/settings.json") {
+    next = stripProjectMetaKimHooksFromHookConfig(next);
+  }
+  if (rel.endsWith("mcp.json") || rel === ".mcp.json") {
+    next = stripMetaKimMcpServersFromConfig(next);
+  }
+  if (rel === "openclaw/openclaw.template.json") {
+    next = stripMetaKimOpenClawTemplate(next);
+  }
+  return next;
+}
+
+function generatedProjectConfigVariantsForRel(targetDir, relPath, currentFilePlans = []) {
+  const rel = normalizeDeployRelPath(relPath);
+  const plan = currentFilePlans.find(
+    (file) => normalizeDeployRelPath(file.relPath) === rel,
+  );
+  const sourcePath = join(PROJECT_DIR, plan?.source ?? rel);
+  if (!existsSync(sourcePath)) return null;
+  const raw = readFileSync(sourcePath, "utf8");
+  const candidates = [raw, rewriteProjectDirRefs(raw, targetDir)];
+  const variants = [];
+  const seen = new Set();
+  for (const candidate of candidates) {
+    if (seen.has(candidate)) continue;
+    seen.add(candidate);
+    variants.push(parseJsonText(candidate, sourcePath));
+  }
+  return variants;
+}
+
+function isEmptyProjectConfigShell(config = {}) {
+  if (!isPlainObject(config)) return false;
+  return Object.entries(config).every(([key, value]) => {
+    if (key === "version") return true;
+    if (Array.isArray(value)) return value.length === 0;
+    if (isPlainObject(value)) return Object.keys(value).length === 0;
+    return value === null || value === "" || value === false;
+  });
+}
+
+function isGeneratedOnlyProjectConfig(targetDir, relPath, config, currentFilePlans = []) {
+  const rel = normalizeDeployRelPath(relPath);
+  const previousFiles = previousProjectManagedFileMap(targetDir);
+  const plan = currentFilePlans.find((file) => normalizeDeployRelPath(file.relPath) === rel);
+  const hasMetaKimManagementEvidence =
+    previousFiles.has(rel) ||
+    plan?.ownership === "shared_config_merge" ||
+    plan?.mergePolicy === "additive_preserve_user_state_json";
+  if (!hasMetaKimManagementEvidence) return false;
+  const generatedVariants = generatedProjectConfigVariantsForRel(
+    targetDir,
+    rel,
+    currentFilePlans,
+  );
+  if (!generatedVariants) return false;
+  return generatedVariants.some((generated) => {
+    const strippedGenerated = stripMetaKimProjectConfig(rel, generated);
+    return jsonEquivalent(config, generated) || jsonEquivalent(config, strippedGenerated);
+  });
+}
+
+function cleanupRedundantProjectConfigs(targetDir, activeTargets, currentFilePlans = []) {
+  const removed = [];
+  const skipped = [];
+  const root = resolve(targetDir);
+  const relPaths = targetValuesForPlatforms(
+    PROJECT_META_KIM_CONFIG_RELS_BY_PLATFORM,
+    activeTargets,
+  );
+  for (const relPath of relPaths) {
+    const rel = normalizeDeployRelPath(relPath);
+    const absPath = resolve(targetDir, rel);
+    if (!isPathInsideDir(absPath, root)) {
+      skipped.push({ relPath: rel, reason: "outside_target_dir" });
+      continue;
+    }
+    if (!existsSync(absPath)) continue;
+    const current = readJsonObjectIfExists(absPath);
+    if (!current) continue;
+    const stripped = stripMetaKimProjectConfig(rel, current);
+    const shouldDelete =
+      isEmptyProjectConfigShell(stripped) ||
+      isGeneratedOnlyProjectConfig(targetDir, rel, stripped, currentFilePlans);
+    if (shouldDelete) {
+      if (!removeUntrackedProjectPath(targetDir, rel, skipped, { recursive: false })) {
+        continue;
+      }
+      removed.push(rel);
+      pruneEmptyProjectDirs(targetDir, rel);
+      continue;
+    }
+    if (!jsonEquivalent(current, stripped)) {
+      if (isGitTrackedProjectPath(targetDir, rel)) {
+        skipped.push({ relPath: rel, reason: "git_tracked_preserved" });
+        continue;
+      }
+      backupBeforeMerge(absPath, "pre-strip");
+      writeJsonObject(absPath, stripped);
+    }
+  }
+  return { removed, skipped };
+}
+
+function isMetaKimProjectTaskState(filePath) {
+  const raw = readTextIfFile(filePath);
+  return raw.includes("auto-save from Stop hook") && raw.includes("meta_kim");
+}
+
+function removeMetaKimProjectLocalState(targetDir) {
+  const removed = [];
+  const skipped = [];
+  const root = resolve(targetDir);
+  for (const relPath of PROJECT_META_KIM_LOCAL_STATE_RELS) {
+    const rel = normalizeDeployRelPath(relPath);
+    const absPath = resolve(targetDir, rel);
+    if (!isPathInsideDir(absPath, root)) {
+      skipped.push({ relPath: rel, reason: "outside_target_dir" });
+      continue;
+    }
+    if (!existsSync(absPath)) continue;
+    if (rel === ".claude/project-task-state.json" && !isMetaKimProjectTaskState(absPath)) {
+      skipped.push({ relPath: rel, reason: "local_state_not_meta_kim_signed" });
+      continue;
+    }
+    if (!removeUntrackedProjectPath(targetDir, rel, skipped)) continue;
+    removed.push(rel);
+    pruneEmptyProjectDirs(targetDir, rel, removed);
+  }
+  return { removed, skipped };
+}
+
+function pruneEmptyDirsPostOrder(absDir, targetRoot, removed, targetDir) {
+  if (!existsSync(absDir) || !isPathInsideDir(absDir, targetRoot)) return;
+  for (const entry of readdirSync(absDir, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue;
+    pruneEmptyDirsPostOrder(join(absDir, entry.name), targetRoot, removed, targetDir);
+  }
+  if (absDir === targetRoot) return;
+  const entries = readdirSync(absDir);
+  if (entries.length > 0) return;
+  rmSync(absDir, { recursive: true, force: true });
+  removed.push(normalizeDeployRelPath(relative(targetDir, absDir)));
+}
+
+function pruneEmptyProjectRuntimeDirs(targetDir, activeTargets) {
+  const removed = [];
+  const skipped = [];
+  const root = resolve(targetDir);
+  const roots = [
+    ...targetValuesForPlatforms(PROJECT_SKILL_ROOTS_BY_PLATFORM, activeTargets),
+    ".agents",
+    ".claude",
+    ".codex",
+    "openclaw",
+    ".cursor",
+  ];
+  for (const relRoot of [...new Set(roots)]) {
+    const absRoot = resolve(targetDir, relRoot);
+    if (!isPathInsideDir(absRoot, root)) {
+      skipped.push({ relPath: normalizeDeployRelPath(relRoot), reason: "outside_target_dir" });
+      continue;
+    }
+    if (!existsSync(absRoot)) continue;
+    pruneEmptyDirsPostOrder(absRoot, root, removed, targetDir);
+  }
+  return { removed, skipped };
+}
+
+function stripStaleProjectHookConfigs(targetDir, currentFilePlans) {
+  const currentRelPaths = new Set(
+    currentFilePlans.map((file) => normalizeDeployRelPath(file.relPath)).filter(Boolean),
+  );
+  const previousFiles = previousProjectManagedFileMap(targetDir);
+  const hookConfigPaths = new Set([
+    ".claude/settings.json",
+    ".codex/hooks.json",
+    ".cursor/hooks.json",
+  ]);
+  const changed = [];
+
+  for (const relPath of previousFiles.keys()) {
+    if (currentRelPaths.has(relPath)) continue;
+    if (!hookConfigPaths.has(relPath)) continue;
+    const configPath = join(targetDir, relPath);
+    if (!existsSync(configPath)) continue;
+    const current = readJsonObjectIfExists(configPath);
+    if (!current) continue;
+    const stripped = stripProjectMetaKimHooksFromHookConfig(current);
+    if (jsonEquivalent(current, stripped)) continue;
+    if (isGitTrackedProjectPath(targetDir, relPath)) continue;
+    backupBeforeMerge(configPath, "pre-strip-hooks");
+    writeJsonObject(configPath, stripped);
+    changed.push(relPath);
+  }
+
+  return changed;
+}
+
+function reportProjectAssetCleanup(cleanup, options = {}) {
+  if (jsonOutputMode || !cleanup) return;
+  if (cleanup.removed.length > 0) {
+    const isRetarget = options.reason === "project_retarget";
+    const isGlobalRedundancy = options.reason === "global_redundancy";
+    // Batch cleanup prints intro/scope once at the heading; per-project only
+    // report what was removed to avoid N× repeated boilerplate across dirs.
+    if (!isGlobalRedundancy) {
+      info(
+        isRetarget
+          ? t.projectAssetsRetargetCleanupIntro
+          : t.projectAssetsCleanupIntro,
+      );
+      info(
+        isRetarget
+          ? t.projectAssetsRetargetCleanupScope
+          : t.projectAssetsCleanupScope,
+      );
+    }
+    info(
+      t.projectAssetsCleanupRemoved(
+        cleanup.removed.length,
+        summarizeProjectAssetCleanup(cleanup.removed),
+      ),
+    );
+  } else if (options.reason === "global_redundancy") {
+    info(t.projectAssetsCleanupAllClean ?? t.projectAssetsCleanupRemoved(0, []));
+  }
+  if (cleanup.skipped.length > 0) {
+    info(t.projectAssetsCleanupSkipped(cleanup.skipped.length));
+  }
+}
+
 function projectBootstrapStatus(targetDir, activeTargets, filePlans) {
   const existingManifest = readProjectBootstrapManifest(targetDir);
   const version = readPackageVersion();
   const actionable = filePlans.filter((plan) => plan.action !== "skip");
-  const missingCount = actionable.filter((plan) => !plan.exists).length;
-  const mergeCount = actionable.filter((plan) => plan.action === "merge").length;
-  const replaceCount = actionable.filter((plan) => plan.action === "replace").length;
-  const stale =
+  const pending = actionable.filter((plan) => plan.effectiveAction !== "unchanged");
+  const missingCount = pending.filter((plan) => !plan.exists).length;
+  const createCount = pending.filter((plan) => plan.effectiveAction === "create").length;
+  const mergeCount = pending.filter((plan) => plan.effectiveAction === "merge").length;
+  const replaceCount = pending.filter((plan) => plan.effectiveAction === "replace").length;
+  const conflictCount = pending.filter((plan) => plan.effectiveAction === "conflict").length;
+  const targetChanged =
     Boolean(existingManifest) &&
-    existingManifest.metaKimVersion &&
+    JSON.stringify(existingManifest.activeTargets ?? []) !== JSON.stringify(activeTargets);
+  const versionChanged =
+    Boolean(existingManifest) &&
+    Boolean(existingManifest.metaKimVersion) &&
     existingManifest.metaKimVersion !== version;
-  return {
-    status: stale
-      ? "stale"
-      : missingCount > 0
-        ? "missing"
-        : replaceCount > 0 || mergeCount > 0
+  const status = conflictCount > 0
+    ? "conflict"
+    : versionChanged
+    ? "stale"
+    : targetChanged
+      ? "target_scope_changed"
+    : !existingManifest && missingCount > 0
+      ? "missing"
+      : existingManifest && (replaceCount > 0 || mergeCount > 0 || createCount > 0 || missingCount > 0)
+        ? "repair_required"
+        : replaceCount > 0 || mergeCount > 0 || createCount > 0
           ? "ready_with_existing_config"
-          : "ready",
+        : existingManifest
+          ? "ready"
+          : "ready_with_existing_config";
+  return {
+    status,
+    requiresConfirmation: status !== "ready",
+    confirmationReason:
+      status === "ready"
+        ? "Project bootstrap manifest and project-specific files are current; no project write is needed."
+        : status === "conflict"
+          ? "Existing project files overlap Meta_Kim generated paths but are not known to be Meta_Kim-owned; resolve conflicts before apply."
+          : status === "stale"
+          ? "Existing project bootstrap manifest uses a different Meta_Kim version."
+          : status === "target_scope_changed"
+            ? "Selected runtime targets differ from the previous project bootstrap manifest."
+          : status === "missing"
+            ? "Project context/config/state or confirmed overrides are missing one or more required files."
+            : status === "repair_required"
+              ? "Project bootstrap version is current, but managed files need repair, merge, or recreation."
+              : "Project has existing or equivalent config but still needs a confirmed bootstrap to record state or apply pending changes.",
     metaKimVersion: version,
     targetDir,
     activeTargets,
     counts: {
       total: filePlans.length,
-      create: actionable.filter((plan) => plan.action === "create").length,
+      create: createCount,
       merge: mergeCount,
       replace: replaceCount,
+      conflict: conflictCount,
       skip: filePlans.filter((plan) => plan.action === "skip").length,
       missing: missingCount,
+      unchanged: actionable.length - pending.length,
+      pending: pending.length,
     },
     previousManifest: existingManifest
       ? {
           metaKimVersion: existingManifest.metaKimVersion ?? null,
           appliedAt: existingManifest.appliedAt ?? null,
           activeTargets: existingManifest.activeTargets ?? [],
+          targetChanged,
         }
       : null,
   };
 }
 
+function projectBootstrapWritePreview(targetDir, filePlans, state) {
+  const pending = filePlans.filter(
+    (plan) => plan.action !== "skip" && plan.effectiveAction !== "unchanged",
+  );
+  const conflicts = pending.filter((plan) => plan.effectiveAction === "conflict");
+  const writablePending = pending.filter((plan) => plan.effectiveAction !== "conflict");
+  const existing = writablePending.filter((plan) => existsSync(join(targetDir, plan.relPath)));
+  const projectWrites = filePlans
+    .filter(
+      (plan) =>
+        plan.action !== "skip" &&
+        plan.effectiveAction !== "unchanged" &&
+        plan.effectiveAction !== "conflict",
+    )
+    .map((plan) => ({
+      relPath: plan.relPath,
+      action: plan.effectiveAction,
+      plannedAction: plan.action,
+      mergePolicy: plan.mergePolicy,
+      ownership: plan.ownership,
+      backupBeforeApply: plan.exists,
+    }));
+  return {
+    globalWrites: [],
+    projectWrites,
+    projectConflicts: conflicts.map((plan) => ({
+      relPath: plan.relPath,
+      action: plan.effectiveAction,
+      plannedAction: plan.action,
+      mergePolicy: plan.mergePolicy,
+      ownership: plan.ownership,
+      safeNextAction:
+        "Inspect the existing file, rename it, remove it, or mark it as managed only after user confirmation.",
+    })),
+    manifestWrite: {
+      requiredBeforeReady: state.status !== "ready",
+      reason: state.confirmationReason,
+      stateManifest: ".meta-kim/state/default/project-bootstrap.json",
+    },
+    confirmation: {
+      required: state.requiresConfirmation,
+      reason: state.confirmationReason,
+    },
+    backup: {
+      requiredBeforeApply: state.status !== "ready" && existing.length > 0,
+      backupRootPattern: ".meta-kim/backups/project-bootstrap/<timestamp>",
+      fileCount: existing.length,
+      entries: existing.map((plan) => ({
+        relPath: plan.relPath,
+        mergePolicy: plan.mergePolicy,
+      })),
+    },
+    rollbackPlan: {
+      availableAfterApply: true,
+      restoreFrom: ".meta-kim/backups/project-bootstrap/<timestamp>/backup-manifest.json",
+      stateManifest: ".meta-kim/state/default/project-bootstrap.json",
+      policy:
+        "Restore backed-up files from backup-manifest.json; created-only generated files can be removed from managedFiles in the project bootstrap manifest.",
+    },
+  };
+}
+
+function buildProjectBootstrapChoiceSurface(state, writePreview) {
+  if (!state.requiresConfirmation) {
+    return {
+      required: false,
+      trigger: "no_choice_needed_current",
+      header: "Project ready",
+      question:
+        "Meta_Kim project bootstrap is already current for the selected targets. No project-specific files need to be written, and no confirmation popup should be shown.",
+      recommendedOptionId: "continue",
+      options: [
+        {
+          id: "continue",
+          label: "Continue",
+          expectedResult: "Proceed with the governed run without project-specific bootstrap writes.",
+          advantage: "Avoids repeated prompts and leaves the project untouched.",
+          risk: "None for the current selected targets.",
+          verificationImpact: "Dry-run shows status=ready, requiresConfirmation=false, and zero project writes.",
+        },
+      ],
+    };
+  }
+
+  const pendingCount = writePreview.projectWrites.length;
+  const conflictCount = writePreview.projectConflicts?.length ?? 0;
+  const targetText = state.activeTargets.join(", ");
+  const reason = state.confirmationReason;
+  const hasConflicts = state.status === "conflict";
+  return {
+    required: true,
+    trigger: "runtime_native_choice_required_before_apply",
+    runtimeRequirement:
+      "Claude Code must use AskUserQuestion and Codex must use request_user_input before --apply. Compatibility runtimes may show a labeled chat decision card.",
+    header: "Project bootstrap",
+    question: [
+      `AI understanding: this directory needs Meta_Kim project-specific context/config/state or confirmed overrides for ${targetText}.`,
+      `AI additions: dry-run found ${state.status}; ${reason}`,
+      "Capability route: reuse global runtime capabilities first, then apply only project-specific context/config/state or confirmed overrides.",
+      `Candidate paths: ${
+        hasConflicts
+          ? "inspect and resolve conflicts, skip this project for now, or apply only after conflicts are resolved"
+          : "apply now, inspect only, or skip this project for now"
+      }. Pending project writes: ${pendingCount}; conflicts: ${conflictCount}; global writes: ${writePreview.globalWrites.length}.`,
+    ].join("\n"),
+    recommendedOptionId: hasConflicts ? "inspect_dry_run_only" : "apply_project_bootstrap",
+    options: [
+      {
+        id: "apply_project_bootstrap",
+        label: hasConflicts ? "Apply after resolving conflicts" : "Apply project bootstrap (Recommended)",
+        expectedResult:
+          "Create or update the selected project-specific context/config/state or confirmed overrides, then write the project bootstrap manifest.",
+        advantage: "The next meta-theory trigger can proceed without asking again when files remain current.",
+        risk: hasConflicts
+          ? "Blocked until writePreview.projectConflicts is empty; Meta_Kim will not overwrite unknown user-owned files."
+          : "Touches project files listed in writePreview.projectWrites after backup/merge policy.",
+        verificationImpact:
+          "After apply, a second dry-run must report status=ready, requiresConfirmation=false, pending=0, and projectWrites=0.",
+      },
+      {
+        id: "inspect_dry_run_only",
+        label: "Inspect only",
+        expectedResult: "Do not write files; keep the dry-run plan for human review.",
+        advantage: "Safest when the project owner wants to inspect generated files first.",
+        risk: "Meta_Kim can still reuse global capabilities, but project-specific context/config/state may remain stale for this directory.",
+        verificationImpact: "No manifest update is written; the next trigger will ask again if state is unchanged.",
+      },
+      {
+        id: "skip_this_project",
+        label: "Skip project-local writes",
+        expectedResult: "Continue without applying Meta_Kim project-specific files.",
+        advantage: "Avoids changing a directory that should rely on global reusable capabilities only.",
+        risk: "Only global reusable capabilities remain available; project-specific overrides/config/state are not enabled.",
+        verificationImpact: "The run must not claim project-governed readiness for this directory.",
+      },
+    ],
+  };
+}
+
 function buildProjectBootstrapPlan(activeTargets, targetDir) {
   const filePlans = collectProjectDeployPlan(activeTargets, targetDir);
+  const state = projectBootstrapStatus(targetDir, activeTargets, filePlans);
+  const writePreview = projectBootstrapWritePreview(targetDir, filePlans, state);
   return {
     schemaVersion: "meta-kim-project-bootstrap-plan-v0.1",
     mode: "dry-run",
     sourceChain: readSyncSourceChain(),
-    state: projectBootstrapStatus(targetDir, activeTargets, filePlans),
+    state,
     files: filePlans,
+    writePreview,
+    choiceSurface: buildProjectBootstrapChoiceSurface(state, writePreview),
     decisions: {
-      defaultTargets: "config/sync.json defaultTargets; current default is Claude Code + Codex unless --targets overrides it.",
+      defaultTargets:
+        "config/sync.json defaultTargets are Claude Code + Codex; effective activeTargets may also come from an explicit --targets value or saved .meta-kim/local.overrides.json activeTargets.",
       protectedMerge: "JSON configs use additive preserve-user-state merge; AGENTS.md/CLAUDE.md use managed text blocks; .codex/config.toml is skipped because Codex native controls belong to global host config.",
       firstTriggerFlow:
         "Global skill runs dry-run first, asks through the runtime native choice surface, then runs --apply only after user confirmation or trusted-auto policy.",
@@ -3568,9 +3079,22 @@ function buildProjectBootstrapPlan(activeTargets, targetDir) {
   };
 }
 
+function assertNoProjectBootstrapConflicts(plan) {
+  const conflicts = plan.writePreview?.projectConflicts ?? [];
+  if (conflicts.length === 0) return;
+  const rels = conflicts.map((entry) => entry.relPath).join(", ");
+  throw new Error(
+    `Project bootstrap blocked by ${conflicts.length} user-owned file conflict(s): ${rels}`,
+  );
+}
+
 function createProjectBootstrapBackup(targetDir, filePlans) {
   const existing = filePlans.filter(
-    (plan) => plan.action !== "skip" && existsSync(join(targetDir, plan.relPath)),
+    (plan) =>
+      plan.action !== "skip" &&
+      plan.effectiveAction !== "unchanged" &&
+      plan.effectiveAction !== "conflict" &&
+      existsSync(join(targetDir, plan.relPath)),
   );
   if (existing.length === 0) {
     return { created: false, fileCount: 0, entries: [] };
@@ -3605,7 +3129,7 @@ function createProjectBootstrapBackup(targetDir, filePlans) {
   };
 }
 
-function writeProjectBootstrapManifest(targetDir, plan, backup) {
+function writeProjectBootstrapManifest(targetDir, plan, backup, cleanup = null) {
   const manifestPath = projectBootstrapManifestPath(targetDir);
   const manifest = {
     schemaVersion: "meta-kim-project-bootstrap-v0.1",
@@ -3616,7 +3140,10 @@ function writeProjectBootstrapManifest(targetDir, plan, backup) {
     stateBeforeApply: plan.state,
     protectedMergeDecisions: plan.decisions,
     backup,
-    managedFiles: plan.files.filter((file) => file.action !== "skip"),
+    cleanup,
+    managedFiles: plan.files.filter(
+      (file) => file.action !== "skip" && file.effectiveAction !== "conflict",
+    ),
     skippedFiles: plan.files.filter((file) => file.action === "skip"),
   };
   mkdirSync(dirname(manifestPath), { recursive: true });
@@ -3624,11 +3151,258 @@ function writeProjectBootstrapManifest(targetDir, plan, backup) {
   return manifestPath;
 }
 
+// Per-platform project-level hook directories. Mirrors RUNTIME_HOOK_CAPABILITIES
+// but kept inline so this function stays self-contained for the bootstrap CLI.
+const PROJECT_HOOK_DIRS_BY_PLATFORM = {
+  claude: ".claude/hooks",
+  codex: ".codex/hooks",
+  cursor: ".cursor/hooks",
+  openclaw: "openclaw/hooks",
+};
+
+// Per-platform whitelist of Meta_Kim-managed hook files. Files NOT on the
+// whitelist (user-authored) are preserved.
+const PROJECT_HOOK_FILE_WHITELIST_BY_PLATFORM = {
+  claude: new Set([
+    "activate-meta-theory-spine.mjs",
+    "bash-readonly-whitelist.mjs",
+    "block-dangerous-bash.mjs",
+    "ecc-permission-cache-wrapper.mjs",
+    "enforce-agent-dispatch.mjs",
+    "graphify-context.mjs",
+    "hook-i18n.mjs",
+    "meta-kim-memory-save.mjs",
+    "post-format.mjs",
+    "post-typecheck.mjs",
+    "post-console-log-warn.mjs",
+    "skip-reminder.mjs",
+    "subagent-context.mjs",
+    "stop-compaction.mjs",
+    "stop-memory-save.mjs",
+    "stop-console-log-audit.mjs",
+    "stop-completion-guard.mjs",
+    "stop-save-progress.mjs",
+    "stop-spine-cleanup.mjs",
+    "utils.mjs",
+    "spine-state.mjs",
+  ]),
+  codex: new Set([
+    "activate-meta-theory-spine.mjs",
+    "bash-readonly-whitelist.mjs",
+    "codex_hook_adapter.py",
+    "codex_hook_runner.mjs",
+    "enforce-agent-dispatch.mjs",
+    "graphify-context.mjs",
+    "hook-i18n.mjs",
+    "hookprompt-adapter.mjs",
+    "meta-kim-memory-save.mjs",
+    "planning-with-files-adapter.mjs",
+    "post_tool_use.py",
+    "post-tool-use.sh",
+    "post-console-log-warn.mjs",
+    "post-format.mjs",
+    "post-typecheck.mjs",
+    "pre_tool_use.py",
+    "pre-tool-use.sh",
+    "pre-compact.sh",
+    "session_start.py",
+    "session-start.sh",
+    "stop.py",
+    "stop.sh",
+    "user_prompt_submit.py",
+    "user-prompt-submit.sh",
+    "permission_request.py",
+    "resolve-plan-dir.sh",
+    "skip-reminder.mjs",
+    "spine-state.mjs",
+    "stop-compaction.mjs",
+    "stop-console-log-audit.mjs",
+    "stop-completion-guard.mjs",
+    "stop-spine-cleanup.mjs",
+    "subagent-context.mjs",
+    "utils.mjs",
+  ]),
+  cursor: new Set([
+    "activate-meta-theory-spine.mjs",
+    "bash-readonly-whitelist.mjs",
+    "enforce-agent-dispatch.mjs",
+    "graphify-context.mjs",
+    "hook-i18n.mjs",
+    "hookprompt-adapter.mjs",
+    "meta-kim-memory-save.mjs",
+    "planning-with-files-adapter.mjs",
+    "post-tool-use.ps1",
+    "post-tool-use.sh",
+    "post-console-log-warn.mjs",
+    "post-format.mjs",
+    "post-typecheck.mjs",
+    "pre-tool-use.ps1",
+    "pre-tool-use.sh",
+    "stop.ps1",
+    "stop.sh",
+    "user-prompt-submit.ps1",
+    "user-prompt-submit.sh",
+    "skip-reminder.mjs",
+    "spine-state.mjs",
+    "stop-compaction.mjs",
+    "stop-console-log-audit.mjs",
+    "stop-completion-guard.mjs",
+    "stop-spine-cleanup.mjs",
+    "subagent-context.mjs",
+    "utils.mjs",
+  ]),
+  openclaw: new Set([
+    "stop-save-progress.mjs",
+  ]),
+};
+
+// Remove Meta_Kim-managed hook files from a target project's hook dirs.
+// Walks every active platform, removes files matching the per-platform
+// whitelist, and emits a 4-locale progress message.
+async function migrateProjectMetaKimHooksForBootstrap(activeTargets, targetDir) {
+  const platforms = Array.isArray(activeTargets) ? activeTargets : [];
+  for (const platform of platforms) {
+    const relDir = PROJECT_HOOK_DIRS_BY_PLATFORM[platform];
+    const whitelist = PROJECT_HOOK_FILE_WHITELIST_BY_PLATFORM[platform];
+    if (!relDir || !whitelist) continue;
+    const hooksDir = join(targetDir, relDir);
+    let entries;
+    try {
+      entries = readdirSync(hooksDir);
+    } catch (error) {
+      if (error.code === "ENOENT") continue;
+      throw error;
+    }
+    const removed = [];
+    const kept = [];
+    for (const name of entries) {
+      if (!whitelist.has(name)) {
+        kept.push(name);
+        continue;
+      }
+      const relPath = normalizeDeployRelPath(join(relDir, name));
+      const skipped = [];
+      if (!removeUntrackedProjectPath(targetDir, relPath, skipped, { recursive: false })) {
+        kept.push(name);
+        continue;
+      }
+      try {
+        removed.push(name);
+      } catch (error) {
+        if (error.code !== "ENOENT") {
+          warn(
+            `[Meta_Kim] Failed to remove ${platform} hook ${name}: ${error.message}`,
+          );
+        }
+      }
+    }
+    if (removed.length > 0) {
+      if (!jsonOutputMode) {
+        info(t.projectHooksMigrationRemoved(platform, removed.length, hooksDir));
+        info(t.projectHooksMigrationKept(platform, kept));
+      }
+      let remaining = [];
+      try {
+        remaining = readdirSync(hooksDir);
+      } catch (error) {
+        if (error.code !== "ENOENT") throw error;
+      }
+      if (remaining.length === 0) {
+        rmSync(hooksDir, { recursive: true, force: true });
+      }
+    } else {
+      if (!jsonOutputMode) {
+        info(t.projectHooksMigrationNoChange(platform, hooksDir));
+      }
+    }
+  }
+}
+
+async function applyProjectBootstrapToDir(activeTargets, targetDir) {
+  const legacyCleanup = removeLegacyProjectCapabilityEntrypoints(targetDir, activeTargets);
+  let plan = buildProjectBootstrapPlan(activeTargets, targetDir);
+  const cleanup = mergeProjectCleanupResults(
+    legacyCleanup,
+    removeStaleManagedProjectAssets(targetDir, plan.files),
+  );
+  const strippedHookConfigs = stripStaleProjectHookConfigs(targetDir, plan.files);
+  cleanup.strippedHookConfigs = strippedHookConfigs;
+  reportProjectAssetCleanup(cleanup, { reason: "project_retarget" });
+  if (cleanup.removed.length > 0 || strippedHookConfigs.length > 0) {
+    plan = buildProjectBootstrapPlan(activeTargets, targetDir);
+  }
+  assertNoProjectBootstrapConflicts(plan);
+  if (plan.state.status === "ready") {
+    return {
+      ...plan,
+      mode: "apply",
+      applied: false,
+      noOp: true,
+      backup: { created: false, fileCount: 0, entries: [] },
+      cleanup,
+      manifestPath: projectBootstrapManifestPath(targetDir),
+    };
+  }
+  const backup = createProjectBootstrapBackup(targetDir, plan.files);
+  if (!existsSync(targetDir)) {
+    mkdirSync(targetDir, { recursive: true });
+  }
+  for (const platformId of activeTargets) {
+    deployPlatformFiles(platformId, targetDir);
+  }
+  const manifestPath = writeProjectBootstrapManifest(targetDir, plan, backup, cleanup);
+  const afterPlan = buildProjectBootstrapPlan(activeTargets, targetDir);
+  return {
+    ...afterPlan,
+    mode: "apply",
+    applied: true,
+    backup,
+    cleanup,
+    manifestPath,
+  };
+}
+
+function classifyProjectBootstrapError(error) {
+  const msg = error?.message || String(error);
+  return /EACCES|EPERM|permission|read-only|readonly|access denied/i.test(msg)
+    ? "blocked"
+    : "failed";
+}
+
+function projectBootstrapFailureResult(targetDir, activeTargets, error) {
+  const message = error?.message || String(error);
+  return {
+    schemaVersion: "meta-kim-project-bootstrap-plan-v0.1",
+    mode: "apply",
+    applied: false,
+    state: {
+      status: classifyProjectBootstrapError(error),
+      targetDir,
+      activeTargets,
+    },
+    error: {
+      status: classifyProjectBootstrapError(error),
+      message,
+      returnToStage: "Fetch",
+      repairAction:
+        "Fix target permissions or resolve the conflicting project file, then rerun project bootstrap dry-run before apply.",
+    },
+  };
+}
+
 function deployPlatformFiles(platformId, targetDir) {
   let fileCount = 0;
+  const targetIsRepo = resolve(targetDir) === resolve(PROJECT_DIR);
   const copyIfExists = (srcRel, destRel) => {
     const src = join(PROJECT_DIR, srcRel);
     const dest = join(targetDir, destRel);
+    if (
+      targetIsRepo &&
+      existsSync(src) &&
+      resolve(src) === resolve(dest)
+    ) {
+      return;
+    }
     if (!existsSync(src)) return;
     mkdirSync(dirname(dest), { recursive: true });
     const relPath = normalizeDeployRelPath(destRel);
@@ -3645,332 +3419,12 @@ function deployPlatformFiles(platformId, targetDir) {
   for (const root of projectDeployRootsForPlatform(platformId)) {
     copyIfExists(root.srcRel, root.destRel);
   }
+  fileCount += writeProjectGeneratedHooks(platformId, targetDir);
   return fileCount;
 }
 
-function buildPostCopyBootstrapScript(activeTargets) {
-  const graphifyPlatforms = [
-    ...new Set(
-      expandGraphifyTargets(activeTargets)
-        .map((target) => GRAPHIFY_PLATFORM_MAP[target])
-        .filter(Boolean),
-    ),
-  ];
-
-  return `#!/usr/bin/env node
-import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
-import { spawn, spawnSync } from "node:child_process";
-
-const scriptPath = fileURLToPath(import.meta.url);
-const rootDir = dirname(scriptPath);
-const graphifyPlatforms = ${JSON.stringify(graphifyPlatforms, null, 2)};
-const autoMode = process.argv.includes("--auto");
-const autoWorkerMode = process.argv.includes("--auto-worker");
-const stateDir = join(rootDir, ".meta-kim", "state", "default");
-const autoMarkerPath = join(stateDir, "post-copy-init.json");
-const runningTtlMs = 10 * 60 * 1000;
-const failedRetryMs = 60 * 60 * 1000;
-const guideTargets = {
-  claude: "CLAUDE.md",
-  codex: "AGENTS.md",
-  claw: "AGENTS.md",
-  opencode: "AGENTS.md",
-  aider: "AGENTS.md",
-  droid: "AGENTS.md",
-  trae: "AGENTS.md",
-  "trae-cn": "AGENTS.md",
-};
-
-function scriptMtimeMs() {
-  try {
-    return statSync(scriptPath).mtimeMs;
-  } catch {
-    return null;
-  }
-}
-
-function readAutoMarker() {
-  try {
-    return JSON.parse(readFileSync(autoMarkerPath, "utf8"));
-  } catch {
-    return null;
-  }
-}
-
-function writeAutoMarker(status, extra = {}) {
-  try {
-    mkdirSync(stateDir, { recursive: true });
-    writeFileSync(
-      autoMarkerPath,
-      JSON.stringify(
-        {
-          status,
-          updatedAt: new Date().toISOString(),
-          scriptMtimeMs: scriptMtimeMs(),
-          ...extra,
-        },
-        null,
-        2,
-      ) + "\\n",
-      "utf8",
-    );
-  } catch {
-    // Auto-init state is best-effort; never let it block meta-theory startup.
-  }
-}
-
-function markerAgeMs(marker) {
-  const raw = marker?.updatedAt || marker?.startedAt;
-  const time = raw ? Date.parse(raw) : Number.NaN;
-  return Number.isFinite(time) ? Date.now() - time : Number.POSITIVE_INFINITY;
-}
-
-function shouldSkipAutoLaunch() {
-  const marker = readAutoMarker();
-  const currentScriptMtimeMs = scriptMtimeMs();
-  if (
-    marker?.status === "passed" &&
-    marker.scriptMtimeMs === currentScriptMtimeMs
-  ) {
-    return true;
-  }
-  if (marker?.status === "running" && markerAgeMs(marker) < runningTtlMs) {
-    return true;
-  }
-  if (marker?.status === "failed" && markerAgeMs(marker) < failedRetryMs) {
-    return true;
-  }
-  return false;
-}
-
-function launchAutoWorker() {
-  if (process.env.META_KIM_POST_COPY_AUTO === "off") return;
-  if (shouldSkipAutoLaunch()) return;
-
-  const startedAt = new Date().toISOString();
-  writeAutoMarker("running", {
-    mode: "auto",
-    startedAt,
-  });
-
-  try {
-    const child = spawn(process.execPath, [scriptPath, "--auto-worker"], {
-      cwd: rootDir,
-      detached: true,
-      stdio: "ignore",
-      windowsHide: true,
-      env: {
-        ...process.env,
-        META_KIM_POST_COPY_AUTO: "worker",
-      },
-    });
-    child.unref();
-  } catch (error) {
-    writeAutoMarker("failed", {
-      mode: "auto",
-      message: error?.message || String(error),
-    });
-  }
-}
-
-if (autoMode && !autoWorkerMode) {
-  launchAutoWorker();
-  process.exit(0);
-}
-
-function fail(message, code = 1) {
-  if (autoWorkerMode) {
-    writeAutoMarker("failed", {
-      mode: "auto",
-      message,
-    });
-  }
-  console.error(message);
-  process.exit(code);
-}
-
-function pushUniqueCandidate(candidates, seen, command, prefixArgs = []) {
-  const key = command + "\\0" + prefixArgs.join("\\0");
-  if (seen.has(key)) return;
-  seen.add(key);
-  candidates.push({ command, prefixArgs });
-}
-
-function homebrewPythonCandidates() {
-  if (process.platform !== "darwin" && process.platform !== "linux") {
-    return [];
-  }
-
-  const prefixes = [];
-  const addPrefix = (value) => {
-    if (typeof value !== "string") return;
-    const trimmed = value.trim();
-    if (trimmed && !prefixes.includes(trimmed)) {
-      prefixes.push(trimmed);
-    }
-  };
-
-  addPrefix(process.env.HOMEBREW_PREFIX);
-  if (process.platform === "darwin") {
-    addPrefix("/opt/homebrew");
-    addPrefix("/usr/local");
-  } else {
-    addPrefix("/home/linuxbrew/.linuxbrew");
-  }
-
-  const candidates = [];
-  const seen = new Set();
-  const supportedMinors = Array.from({ length: 11 }, (_, index) => 20 - index);
-
-  for (const prefix of prefixes) {
-    pushUniqueCandidate(candidates, seen, join(prefix, "bin", "python3"));
-    pushUniqueCandidate(candidates, seen, join(prefix, "bin", "python"));
-
-    for (const minor of supportedMinors) {
-      const version = "3." + minor;
-      pushUniqueCandidate(
-        candidates,
-        seen,
-        join(prefix, "bin", "python" + version),
-      );
-      pushUniqueCandidate(
-        candidates,
-        seen,
-        join(prefix, "opt", "python@" + version, "bin", "python" + version),
-      );
-      pushUniqueCandidate(
-        candidates,
-        seen,
-        join(prefix, "opt", "python@" + version, "bin", "python3"),
-      );
-      pushUniqueCandidate(
-        candidates,
-        seen,
-        join(prefix, "opt", "python@" + version, "libexec", "bin", "python3"),
-      );
-      pushUniqueCandidate(
-        candidates,
-        seen,
-        join(prefix, "opt", "python@" + version, "libexec", "bin", "python"),
-      );
-    }
-  }
-
-  return candidates;
-}
-
-function pythonCandidates() {
-  if (process.platform === "win32") {
-    return [
-      { command: "py", prefixArgs: ["-3"] },
-      { command: "python", prefixArgs: [] },
-      { command: "python3", prefixArgs: [] },
-    ];
-  }
-  return [
-    { command: "python3", prefixArgs: [] },
-    { command: "python", prefixArgs: [] },
-    ...homebrewPythonCandidates(),
-  ];
-}
-
-function runCandidate(candidate, args, stdio = "inherit") {
-  return spawnSync(candidate.command, [...candidate.prefixArgs, ...args], {
-    cwd: rootDir,
-    encoding: "utf8",
-    stdio,
-  });
-}
-
-function findPython() {
-  for (const candidate of pythonCandidates()) {
-    const result = runCandidate(
-      candidate,
-      [
-        "-c",
-        "import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)",
-      ],
-      "pipe",
-    );
-    if (result.status === 0) return candidate;
-  }
-  return null;
-}
-
-function runPython(python, args, { optional = false, stdio = "inherit" } = {}) {
-  const result = runCandidate(python, args, stdio);
-  if (result.status === 0) return true;
-  if (optional) {
-    console.warn("[Meta_Kim] Optional command failed:", args.join(" "));
-    return false;
-  }
-  fail("[Meta_Kim] Command failed: " + args.join(" "), result.status || 1);
-}
-
-function guideAlreadyHasGraphifySection(platform) {
-  const target = guideTargets[platform];
-  if (!target) return false;
-  const filePath = join(rootDir, target);
-  if (!existsSync(filePath)) return false;
-  return /^##\\s+graphify\\b/im.test(readFileSync(filePath, "utf8"));
-}
-
-const python = findPython();
-if (!python) {
-  fail(
-    "[Meta_Kim] Python 3.10+ with pip is required for graphify. Install Python, then run this script again.",
-  );
-}
-
-const pipShow = runCandidate(python, ["-m", "pip", "show", "graphifyy"], "pipe");
-if (pipShow.status !== 0) {
-  runPython(python, ["-m", "pip", "install", "graphifyy"]);
-}
-runPython(python, ["-m", "pip", "install", "--upgrade", "networkx>=3.4"], {
-  optional: true,
-});
-
-if (existsSync(join(rootDir, ".git"))) {
-  runPython(python, ["-m", "graphify", "hook", "install"]);
-} else {
-  console.log("[Meta_Kim] Skipping graphify git hook; no .git directory found.");
-}
-
-for (const platform of graphifyPlatforms) {
-  if (guideAlreadyHasGraphifySection(platform)) {
-    console.log(\`[Meta_Kim] graphify \${platform} guide section already exists; skipping install.\`);
-    continue;
-  }
-  runPython(python, ["-m", "graphify", platform, "install"], {
-    optional: true,
-  });
-}
-
-runPython(python, ["-m", "graphify", "update", "."]);
-writeAutoMarker("passed", {
-  mode: autoWorkerMode ? "auto" : "manual",
-  graphPath: join(rootDir, "graphify-out", "graph.json"),
-});
-console.log("[Meta_Kim] graphify is initialized for:", rootDir);
-`;
-}
-
-function writePostCopyBootstrap(targetDir, activeTargets) {
-  const bootstrapPath = join(targetDir, POST_COPY_BOOTSTRAP_FILENAME);
-  writeFileSync(
-    bootstrapPath,
-    buildPostCopyBootstrapScript(activeTargets),
-    "utf8",
-  );
-  return bootstrapPath;
-}
-
 function printPostCopyBootstrapHint() {
-  console.log(
-    `${C.dim}  ${t.npxQuickPostCopyScript(POST_COPY_BOOTSTRAP_FILENAME)}${C.reset}`,
-  );
+  console.log(`${C.dim}  ${t.npxQuickPostCopyScript}${C.reset}`);
 }
 
 function savedProjectDeployDirsFrom(overrides) {
@@ -4134,6 +3588,84 @@ async function askDeployDirectory() {
   return [];
 }
 
+async function askProjectCleanupDirectory() {
+  console.log("");
+
+  if (cliProjectDeployDirs.length > 0) {
+    info(t.projectDeployCliTargets(cliProjectDeployDirs.length));
+    if (saveProjectDirsMode) {
+      await saveProjectDeployDirs(cliProjectDeployDirs);
+    } else {
+      console.log(`${C.dim}${t.projectDeployCliSaveHint}${C.reset}`);
+    }
+    return cliProjectDeployDirs;
+  }
+
+  const localOverrides = await loadLocalOverrides();
+  const savedDirs = savedProjectDeployDirsFrom(localOverrides);
+
+  if (useSavedProjectDirsMode) {
+    if (savedDirs.length === 0) {
+      skip(t.projectDeployNoSaved);
+      return [];
+    }
+    info(t.projectCleanupUseSaved(savedDirs.length));
+    return savedDirs;
+  }
+
+  if (silentMode) {
+    return [];
+  }
+
+  if (savedDirs.length > 0) {
+    printProjectDeployDirList(
+      t.projectDeploySavedListHeading(savedDirs.length),
+      savedDirs,
+    );
+  } else {
+    console.log(`${C.dim}${t.projectDeployNoSaved}${C.reset}`);
+  }
+
+  const wantCleanup = await askYesNo(t.askProjectRedundantCleanup, true);
+  if (!wantCleanup) return [];
+
+  console.log(`${C.dim}${t.projectCleanupProtectionNote}${C.reset}`);
+  if (savedDirs.length === 0) {
+    const dirs = await collectProjectDeployDirs(false);
+    console.log("");
+    return dirs;
+  }
+
+  const options = [
+    { id: "saved", label: t.projectCleanupUseSaved(savedDirs.length) },
+    { id: "remember", label: t.projectCleanupSelectAndRemember },
+    { id: "once", label: t.projectCleanupSelectOnce },
+  ];
+  options.push({ id: "skip", label: t.npxQuickDeployNo });
+
+  const choiceIdx = await askSelect(
+    t.projectCleanupAsk,
+    options.map((option) => option.label),
+  );
+  const choice = options[choiceIdx]?.id || "skip";
+  if (choice === "saved") {
+    console.log("");
+    return savedDirs;
+  }
+  if (choice === "once") {
+    const dirs = await collectProjectDeployDirs(false);
+    console.log("");
+    return dirs;
+  }
+  if (choice === "remember") {
+    const dirs = await collectProjectDeployDirs(true);
+    console.log("");
+    return dirs;
+  }
+  console.log("");
+  return [];
+}
+
 function printProjectDeploySummary(results) {
   if (!results.length) return;
   console.log(`${C.bold}${t.projectDeploySummary}${C.reset}`);
@@ -4147,6 +3679,132 @@ function printProjectDeploySummary(results) {
   console.log("");
 }
 
+function printProjectCleanupSummary(results) {
+  if (!results.length) return;
+  console.log(`${C.bold}${t.projectCleanupSummary}${C.reset}`);
+  for (const result of results) {
+    const label =
+      result.status === "ok"
+        ? `${C.green}${t.projectDeployStatusOk}${C.reset}`
+        : `${C.red}${t.projectDeployStatusFailed}${C.reset}`;
+    console.log(`${C.dim}- ${result.dir}:${C.reset} ${label}`);
+  }
+  console.log("");
+}
+
+function cleanupProjectHookConfigs(activeTargets, targetDir) {
+  const platforms = new Set();
+  for (const platform of activeTargets) {
+    if (platform === "all") {
+      platforms.add("claude");
+      platforms.add("codex");
+      platforms.add("cursor");
+      continue;
+    }
+    if (platform === "claude" || platform === "codex" || platform === "cursor") {
+      platforms.add(platform);
+    }
+  }
+
+  const relPaths = [];
+  if (platforms.has("claude")) relPaths.push(".claude/settings.json");
+  if (platforms.has("codex")) relPaths.push(".codex/hooks.json");
+  if (platforms.has("cursor")) relPaths.push(".cursor/hooks.json");
+
+  const changed = [];
+  for (const relPath of relPaths) {
+    const configPath = join(targetDir, relPath);
+    if (!existsSync(configPath)) continue;
+    const current = readJsonObjectIfExists(configPath);
+    if (!current) continue;
+    const stripped = stripProjectMetaKimHooksFromHookConfig(current);
+    if (jsonEquivalent(current, stripped)) continue;
+    if (isGitTrackedProjectPath(targetDir, relPath)) continue;
+    backupBeforeMerge(configPath, "pre-strip-hooks");
+    writeJsonObject(configPath, stripped);
+    changed.push(relPath);
+  }
+
+  if (changed.length > 0 && !jsonOutputMode) {
+    const formatter = t.projectCleanupHookConfigStripped;
+    const message =
+      typeof formatter === "function"
+        ? formatter(changed)
+        : `Removed Meta_Kim project hook references from: ${changed.join(", ")}`;
+    info(message);
+  }
+  return changed;
+}
+
+async function cleanupProjectRedundancyDirs(activeTargets, targetDirs) {
+  const dirs = uniqueProjectDeployDirs(targetDirs);
+  if (dirs.length === 0) return [];
+
+  if (!jsonOutputMode) {
+    heading(t.projectCleanupBatchHeading(dirs.length));
+    console.log(`${C.dim}${t.projectCleanupProtectionNote}${C.reset}`);
+    info(t.projectAssetsCleanupIntro);
+    info(t.projectAssetsCleanupScope);
+  }
+
+  const results = [];
+  for (const targetDir of dirs) {
+    try {
+      await migrateProjectMetaKimHooksForBootstrap(activeTargets, targetDir);
+      const strippedHookConfigs = cleanupProjectHookConfigs(activeTargets, targetDir);
+      const legacyCleanup = removeLegacyProjectCapabilityEntrypoints(targetDir, activeTargets);
+      const plan = buildProjectBootstrapPlan(activeTargets, targetDir);
+      const capabilityRootCleanup = removeGlobalProjectCapabilityRoots(targetDir, activeTargets);
+      const generatedSkillCleanup = removeMetaKimGeneratedProjectSkillResidue(
+        targetDir,
+        activeTargets,
+      );
+      const openClawDirectoryCleanup = removeMetaKimOpenClawDirectoryResidue(
+        targetDir,
+        activeTargets,
+      );
+      const configCleanup = cleanupRedundantProjectConfigs(
+        targetDir,
+        activeTargets,
+        plan.files,
+      );
+      const instructionCleanup = removeRedundantProjectInstructionFiles(
+        targetDir,
+        activeTargets,
+      );
+      const localStateCleanup = removeMetaKimProjectLocalState(targetDir);
+      const emptyDirCleanup = pruneEmptyProjectRuntimeDirs(targetDir, activeTargets);
+      const cleanup = mergeProjectCleanupResults(
+        legacyCleanup,
+        capabilityRootCleanup,
+        generatedSkillCleanup,
+        openClawDirectoryCleanup,
+        configCleanup,
+        instructionCleanup,
+        removeStaleManagedProjectAssets(targetDir, plan.files, {
+          removeCurrentManaged: true,
+        }),
+        localStateCleanup,
+        emptyDirCleanup,
+      );
+      if (!jsonOutputMode) {
+        reportProjectAssetCleanup(cleanup, { reason: "global_redundancy" });
+      }
+      results.push({ dir: targetDir, status: "ok", cleanup, strippedHookConfigs });
+    } catch (error) {
+      const msg = error?.message || String(error);
+      if (!jsonOutputMode) {
+        warn(t.projectDeployFailed(targetDir, msg));
+      }
+      results.push({ dir: targetDir, status: "failed", message: msg });
+    }
+  }
+  if (!jsonOutputMode) {
+    printProjectCleanupSummary(results);
+  }
+  return results;
+}
+
 async function copyToDeployDirs(activeTargets, targetDirs) {
   const dirs = uniqueProjectDeployDirs(targetDirs);
   if (dirs.length === 0) return [];
@@ -4157,8 +3815,8 @@ async function copyToDeployDirs(activeTargets, targetDirs) {
   const results = [];
   for (const targetDir of dirs) {
     try {
-      await copyToDeployDir(activeTargets, targetDir);
-      results.push({ dir: targetDir, status: "ok" });
+      const result = await copyToDeployDir(activeTargets, targetDir);
+      results.push({ dir: targetDir, status: "ok", manifestPath: result.manifestPath });
     } catch (error) {
       const msg = error?.message || String(error);
       warn(t.projectDeployFailed(targetDir, msg));
@@ -4178,20 +3836,15 @@ async function copyToDeployDir(activeTargets, targetDir) {
 
   console.log(`${C.dim}  ${t.npxQuickCreating} ${targetDir}${C.reset}`);
 
-  for (const platformId of activeTargets) {
-    await withProgress(`  ${t.npxQuickCopyFiles} (${platformId})`, async () => {
-      const count = deployPlatformFiles(platformId, targetDir);
-      return count > 0;
-    });
-  }
+  const bootstrapResult = await applyProjectBootstrapToDir(activeTargets, targetDir);
   quickDeployDir = quickDeployDir || targetDir;
   quickDeployDirs = uniqueProjectDeployDirs([...quickDeployDirs, targetDir]);
-  writePostCopyBootstrap(targetDir, activeTargets);
 
   console.log(`${C.green}${C.bold}✓ ${t.npxQuickDone}${C.reset}`);
   console.log(`${C.dim}  ${targetDir}${C.reset}`);
   printPostCopyBootstrapHint();
   console.log("");
+  return bootstrapResult;
 }
 
 async function runQuickDeploy() {
@@ -4229,7 +3882,7 @@ async function runQuickDeploy() {
 
   // Clean up legacy skill files before sync
   await withProgress(t.progressCleanupLegacy, () => {
-    const n = cleanupLegacySkills("both");
+    const n = cleanupLegacySkills("project");
     if (n > 0) ok(`Cleaned ${n} legacy file(s)`);
     return true;
   });
@@ -4242,12 +3895,12 @@ async function runQuickDeploy() {
 
   // Copy platform files to target directory
   await withProgress(t.npxQuickCopyFiles, async () => {
+    assertNoProjectBootstrapConflicts(buildProjectBootstrapPlan([platformId], targetDir));
     const count = deployPlatformFiles(platformId, targetDir);
     quickDeployDir = targetDir;
     quickDeployDirs = uniqueProjectDeployDirs([targetDir]);
     return count > 0;
   });
-  writePostCopyBootstrap(targetDir, [platformId]);
 
   // Install global skills
   await withProgress(t.progressPrepareDir, async () => {
@@ -4291,29 +3944,24 @@ async function runQuickDeploy() {
 // ── Install scope selection ─────────────────────────────
 
 /**
- * Ask user where to install: project-only, global-only, or both
- * Returns: 'project' | 'global' | 'both'
+ * Ask user where to install: global reusable capabilities or project directory updates.
+ * Returns: 'project' | 'global'
  */
 async function askInstallScope() {
-  if (silentMode || !promptInstallScope) return "both";
+  if (silentMode) return "global";
 
   heading(t.installScopeHeading);
 
   const scopes = [
-    {
-      id: "project",
-      label: t.installScopeProjectLabel,
-      desc: t.installScopeProjectDesc,
-    },
     {
       id: "global",
       label: t.installScopeGlobalLabel,
       desc: t.installScopeGlobalDesc,
     },
     {
-      id: "both",
-      label: `${t.installScopeBothLabel}`,
-      desc: t.installScopeBothDesc,
+      id: "project",
+      label: t.installScopeProjectLabel,
+      desc: t.installScopeProjectDesc,
     },
   ];
 
@@ -4325,12 +3973,11 @@ async function askInstallScope() {
     })),
   );
 
-  const selected = scopes[idx]?.id || "both";
+  const selected = scopes[idx]?.id || "global";
   const pickedLabel =
     {
       project: t.installScopeProjectLabel,
       global: t.installScopeGlobalLabel,
-      both: t.installScopeBothLabel,
     }[selected] || selected;
   info(t.selectedScope(pickedLabel));
 
@@ -4339,7 +3986,6 @@ async function askInstallScope() {
     {
       project: "installScopeProjectDescDetail",
       global: "installScopeGlobalDescDetail",
-      both: "installScopeBothDescDetail",
     }[selected];
   if (t[detailKey]) {
     console.log("");
@@ -4535,19 +4181,7 @@ function checkSync(
       allOk = false;
     }
 
-    // Canonical hooks: exact 8 files synced by sync-global-meta-theory.mjs
-    const hooksDir = join(PROJECT_DIR, ".claude", "hooks");
-    const missingHooks = CLAUDE_HOOK_FILES.filter(
-      (h) => !existsSync(join(hooksDir, h)),
-    );
-    if (missingHooks.length === 0) {
-      ok(t.syncClaudeHooks(CLAUDE_HOOK_FILES.length));
-    } else {
-      warn(
-        t.syncMissing(`.claude/hooks/ — missing: ${missingHooks.join(", ")}`),
-      );
-      allOk = false;
-    }
+    ok(t.syncClaudeProjectHooksMigrated);
 
     if (existsSync(join(PROJECT_DIR, ".claude", "settings.json")))
       ok(t.syncClaudeSettings);
@@ -4605,8 +4239,9 @@ function checkSync(
       "meta-theory",
       "SKILL.md",
     );
-    if (existsSync(codexSkillPath)) ok(t.syncCodexSkills);
-    else {
+    if (existsSync(codexSkillPath)) {
+      ok(t.syncCodexSkillsGlobal ?? t.syncCodexSkills);
+    } else {
       fail(t.syncMissing(".agents/skills/meta-theory/SKILL.md"));
       allOk = false;
     }
@@ -4847,6 +4482,14 @@ async function selectActiveTargets(runtimes) {
   return chosenTargets;
 }
 
+async function rememberProjectProjectionMode(mode) {
+  const localOverrides = await loadLocalOverrides();
+  await writeLocalOverrides({
+    ...localOverrides,
+    projectProjectionMode: mode,
+  });
+}
+
 function runNodeScript(scriptRelative, extraArgs = [], envOverrides = {}) {
   // Automatically pass --lang to child scripts
   const langArgs = currentLangCode ? ["--lang", currentLangCode] : [];
@@ -4867,13 +4510,164 @@ function runNodeScript(scriptRelative, extraArgs = [], envOverrides = {}) {
   return spawnSync(spawnConfig.command, spawnConfig.args, mergedOptions);
 }
 
-function metaTheoryGlobalSyncArgs(targets) {
+function refreshGlobalCapabilityInventory(activeTargets = []) {
+  info(t.refreshGlobalCapabilityInventory);
+  const targetArgs =
+    Array.isArray(activeTargets) && activeTargets.length > 0
+      ? ["--runtime-inventory-only", "--targets", activeTargets.join(",")]
+      : ["--runtime-inventory-only"];
+  const result = runNodeScript("scripts/discover-global-capabilities.mjs", targetArgs, {
+    META_KIM_LANG: currentLangCode,
+  });
+  if (result.status === 0) {
+    ok(t.globalCapabilityInventoryRefreshed);
+    return true;
+  }
+  warn(t.globalCapabilityInventoryFailed);
+  return false;
+}
+
+function metaTheoryGlobalSyncArgs(targets, withGlobalHooks = false) {
   const targetList = Array.isArray(targets) ? targets.join(",") : String(targets);
   const syncArgs = ["--targets", targetList];
-  if (targetList.split(",").includes("claude")) {
+  const hookTargets = targetList
+    .split(",")
+    .map((target) => target.trim())
+    .filter(Boolean);
+  if (
+    withGlobalHooks &&
+    hookTargets.some((target) => ["claude", "codex"].includes(target))
+  ) {
     syncArgs.push("--with-global-hooks");
   }
   return syncArgs;
+}
+
+function nonClaudeGlobalRuntimeHookTargets(targets) {
+  const targetList = Array.isArray(targets)
+    ? targets
+    : String(targets || "")
+        .split(",")
+        .filter(Boolean);
+  return targetList.filter((target) =>
+    ["cursor", "openclaw"].includes(target),
+  );
+}
+
+function formatRuntimeTargetLabels(targets) {
+  const labels = new Map(RUNTIME_CHOICES.map((choice) => [choice.id, choice.label]));
+  return targets.map((target) => labels.get(target) || target).join(", ");
+}
+
+function syncNonClaudeGlobalRuntimeHooks(targets, withGlobalHooks = false) {
+  if (!withGlobalHooks) return true;
+  const hookTargets = nonClaudeGlobalRuntimeHookTargets(targets);
+  if (hookTargets.length === 0) return true;
+  const syncResult = runNodeScript("scripts/sync-runtimes.mjs", [
+    "--scope",
+    "global",
+    "--targets",
+    hookTargets.join(","),
+  ]);
+  return syncResult.status === 0;
+}
+
+// Returns { ok: boolean, missing: string[], stale: string[] } for the global
+// Meta_Kim hooks dir. Used by global hook migration and sync checks.
+function checkGlobalHooksCompleteness(hooksDir) {
+  const missing = [];
+  const stale = [];
+  if (!existsSync(hooksDir)) {
+    return { ok: false, missing: GLOBAL_HOOK_PACKAGE_FILES_LIST, stale: [] };
+  }
+  for (const fileName of GLOBAL_HOOK_PACKAGE_FILES_LIST) {
+    if (!existsSync(join(hooksDir, fileName))) {
+      missing.push(fileName);
+    }
+  }
+  let entries = [];
+  try {
+    entries = readdirSync(hooksDir);
+  } catch {
+    return { ok: missing.length === 0, missing, stale };
+  }
+  for (const entry of entries) {
+    if (
+      entry.endsWith(".mjs") &&
+      !GLOBAL_HOOK_PACKAGE_FILES_LIST.includes(entry)
+    ) {
+      stale.push(entry);
+    }
+  }
+  return { ok: missing.length === 0 && stale.length === 0, missing, stale };
+}
+
+// Migrate the global Meta_Kim hooks dir: back up + remove files that no
+// longer match the canonical whitelist (e.g. legacy spine-state.mjs), and
+// user-authored files (anything not on the whitelist) are preserved.
+async function migrateGlobalMetaKimHooksDir(hooksDir) {
+  const result = { removed: [], kept: [], backupDir: null, status: "noop" };
+  if (!existsSync(hooksDir)) return result;
+  let entries = [];
+  try {
+    entries = await fs.readdir(hooksDir);
+  } catch {
+    return result;
+  }
+  const metaKimFiles = entries.filter(
+    (e) =>
+      e.endsWith(".mjs") &&
+      GLOBAL_HOOK_PACKAGE_FILES_LIST.includes(e) === false,
+  );
+  if (metaKimFiles.length === 0) {
+    result.status = "clean";
+    return result;
+  }
+  const ts = new Date().toISOString().replace(/[:.]/g, "-");
+  const backupDir = `${hooksDir}.meta-kim.bak-${ts}`;
+  let confirmed = false;
+  if (silentMode || checkMode) {
+    confirmed = true;
+  } else {
+    info(t.globalHooksMigrationHeading);
+    info(t.globalHooksMigrationFound(metaKimFiles.length));
+    info(t.globalHooksMigrationListed(metaKimFiles));
+    const remaining = entries.filter((e) => !metaKimFiles.includes(e));
+    if (remaining.length > 0) {
+      info(t.globalHooksMigrationKept(remaining));
+    }
+    confirmed = await askYesNo(
+      t.globalHooksMigrationConfirm(metaKimFiles.length),
+      false,
+    );
+  }
+  if (!confirmed) {
+    result.status = "skipped";
+    warn(t.globalHooksMigrationSkipped);
+    return result;
+  }
+  await fs.mkdir(backupDir, { recursive: true });
+  for (const fileName of metaKimFiles) {
+    try {
+      await fs.copyFile(join(hooksDir, fileName), join(backupDir, fileName));
+      await fs.unlink(join(hooksDir, fileName));
+      result.removed.push(fileName);
+    } catch (error) {
+      if (error.code !== "ENOENT") {
+        warn(
+          `[Meta_Kim] Failed to migrate ${fileName}: ${error.message}`,
+        );
+      }
+    }
+  }
+  result.backupDir = backupDir;
+  result.kept = entries.filter((e) => !metaKimFiles.includes(e));
+  result.status = "migrated";
+  if (!silentMode) {
+    info(t.globalHooksMigrationBackedUp(backupDir));
+    info(t.globalHooksMigrationDone(result.removed.length));
+  }
+  return result;
 }
 
 // ── Legacy skill file cleanup ────────────────────────────
@@ -4884,6 +4678,7 @@ const LEGACY_PROJECT_PATHS = [
   join(PROJECT_DIR, ".claude", "skills", "meta-theory.md"),
   join(PROJECT_DIR, ".codex", "skills", "meta-theory.md"),
   join(PROJECT_DIR, ".codex", "skills", "references"),
+  join(PROJECT_DIR, ".codex", "skills", "meta-theory"),
   join(PROJECT_DIR, "openclaw", "skills", "meta-theory.md"),
   join(PROJECT_DIR, "openclaw", "skills", "references"),
   join(PROJECT_DIR, ".cursor", "skills", "meta-theory.md"),
@@ -4913,7 +4708,7 @@ const LEGACY_GLOBAL_PATHS = [
 function cleanupLegacySkills(scope = "project") {
   let cleaned = 0;
 
-  if (scope === "project" || scope === "both") {
+  if (scope === "project") {
     for (const p of LEGACY_PROJECT_PATHS) {
       if (!existsSync(p)) continue;
       try {
@@ -4925,7 +4720,7 @@ function cleanupLegacySkills(scope = "project") {
     }
   }
 
-  if (scope === "global" || scope === "both") {
+  if (scope === "global") {
     for (const { file, dir } of LEGACY_GLOBAL_PATHS) {
       for (const p of [file, dir]) {
         if (!existsSync(p)) continue;
@@ -5202,8 +4997,10 @@ async function installPythonTools(
   activeTargets,
   inUpdateMode = false,
   targetDir = PROJECT_DIR,
+  options = {},
 ) {
   heading(t.stepPythonTools);
+  const projectWiring = options.projectWiring !== false;
   const graphifyDir = resolve(targetDir);
   let python = checkPython310();
   if (!python) {
@@ -5261,6 +5058,11 @@ async function installPythonTools(
 
   // Ensure networkx >= 3.4 for louvain_communities(max_level) compatibility
   ensureNetworkxCompatibility(python);
+
+  if (!projectWiring) {
+    skip(t.graphifyProjectWiringSkipped);
+    return true;
+  }
 
   // Idempotent wiring: register graphify skill for each active target + git hooks once.
   // git hooks are cross-platform (commit/checkout trigger), install once.
@@ -5918,6 +5720,12 @@ function configureBootAutoStart(memoryBin) {
 async function installMcpMemoryServiceStep(inUpdateMode = false, activeTargets = DEFAULT_TARGETS.map((target) => target.id)) {
   heading(t.stepMcpMemory);
 
+  const want = await askYesNo(t.askMcpMemoryInstall, true);
+  if (!want) {
+    skip(`${C.dim}${t.mcpMemorySkipped}${C.reset}`);
+    return;
+  }
+
   // Detect Python — reuse same detection as graphify for consistency
   const detected = checkPython310();
   if (!detected) {
@@ -5966,13 +5774,6 @@ async function installMcpMemoryServiceStep(inUpdateMode = false, activeTargets =
       ok(t.mcpMemoryAlreadyInstalled(existing.version ?? "unknown"));
     }
   } else {
-    // Ask user (unless in silent mode)
-    const want = await askYesNo(t.askMcpMemoryInstall, true);
-    if (!want) {
-      skip(`${C.dim}${t.mcpMemorySkipped}${C.reset}`);
-      return;
-    }
-
     // Install via pip (use resolved Python for cross-platform compatibility)
     info(t.mcpMemoryInstalling);
     const installResult = runPythonModule(python, [
@@ -6200,12 +6001,14 @@ function showNextSteps(runtimes) {
   console.log("");
   console.log(`${C.bold}${t.postInstallNotesHeading}${C.reset}`);
   console.log(`${C.dim}${t.postInstallNotesIntro}${C.reset}`);
+  console.log(`${C.dim}${t.capabilityGateNotice}${C.reset}`);
+  console.log(`${C.dim}${t.globalHooksOptInNotice}${C.reset}`);
   console.log("");
   console.log(
     `${C.bold}${C.cyan}● ${t.postInstallNotesPlatformSync}${C.reset}`,
   );
   const platformRows = [
-    { name: t.platformClauleCode, cap: t.platformClauleCodeCap },
+    { name: t.platformClaudeCode, cap: t.platformClaudeCodeCap },
     { name: t.platformCodex, cap: t.platformCodexCap },
     { name: t.platformOpenClaw, cap: t.platformOpenClawCap },
     { name: t.platformCursor, cap: t.platformCursorCap },
@@ -6215,8 +6018,8 @@ function showNextSteps(runtimes) {
         r.name
           .replace("platform", "")
           .toLowerCase()
-          .replace("claulecode", "claude")
-      ] || r.name === t.platformClauleCode,
+          .replace("claudecode", "claude")
+      ] || r.name === t.platformClaudeCode,
   );
   for (const row of platformRows) {
     console.log(`${C.dim}• ${row.name}: ${row.cap}${C.reset}`);
@@ -6436,6 +6239,12 @@ function showModeInfo() {
   );
 }
 
+function checkProjectRuntimeSync(runtimes, targetContext) {
+  if (targetContext.localOverrides?.projectProjectionMode !== "global_only") {
+    checkSync(runtimes, targetContext.activeTargets);
+  }
+}
+
 async function runProjectBootstrapCli() {
   if (projectBootstrapApply && projectBootstrapDryRun) {
     throw new Error("--project-bootstrap cannot use --apply and --dry-run together");
@@ -6445,45 +6254,38 @@ async function runProjectBootstrapCli() {
   const targetDirs = cliProjectDeployDirs.length > 0 ? cliProjectDeployDirs : [process.cwd()];
   const applyMode = projectBootstrapApply && !projectBootstrapDryRun;
   const results = [];
+  let ok = true;
 
   for (const targetDir of targetDirs) {
-    const plan = buildProjectBootstrapPlan(activeTargets, targetDir);
-    if (!applyMode) {
-      results.push(plan);
-      continue;
-    }
+    try {
+      const plan = buildProjectBootstrapPlan(activeTargets, targetDir);
+      if (!applyMode) {
+        results.push(plan);
+        continue;
+      }
 
-    const backup = createProjectBootstrapBackup(targetDir, plan.files);
-    if (!existsSync(targetDir)) {
-      mkdirSync(targetDir, { recursive: true });
+      results.push(await applyProjectBootstrapToDir(activeTargets, targetDir));
+    } catch (error) {
+      ok = false;
+      if (jsonOutputMode) {
+        results.push(projectBootstrapFailureResult(targetDir, activeTargets, error));
+      } else {
+        throw error;
+      }
     }
-    for (const platformId of activeTargets) {
-      deployPlatformFiles(platformId, targetDir);
-    }
-    const postCopyBootstrap = writePostCopyBootstrap(targetDir, activeTargets);
-    const manifestPath = writeProjectBootstrapManifest(targetDir, plan, backup);
-    const afterPlan = buildProjectBootstrapPlan(activeTargets, targetDir);
-    results.push({
-      ...afterPlan,
-      mode: "apply",
-      applied: true,
-      backup,
-      manifestPath,
-      postCopyBootstrap,
-    });
   }
 
   const summary = {
     schemaVersion: "meta-kim-project-bootstrap-result-v0.1",
     mode: applyMode ? "apply" : "dry-run",
-    ok: true,
+    ok,
     resultCount: results.length,
     results,
   };
 
   if (jsonOutputMode) {
     console.log(JSON.stringify(summary, null, 2));
-    return;
+    return ok;
   }
 
   for (const result of results) {
@@ -6498,12 +6300,48 @@ async function runProjectBootstrapCli() {
       console.log(`  manifest=${result.manifestPath}`);
     }
   }
+  return ok;
+}
+
+async function runProjectCleanupCli() {
+  const targetContext = await resolveTargetContext(args);
+  const activeTargets = targetContext.activeTargets;
+  const localOverrides = await loadLocalOverrides();
+  const savedDirs = savedProjectDeployDirsFrom(localOverrides);
+  const targetDirs =
+    cliProjectDeployDirs.length > 0
+      ? cliProjectDeployDirs
+      : savedDirs;
+
+  const results = await cleanupProjectRedundancyDirs(activeTargets, targetDirs);
+  const failed = results.filter((result) => result.status === "failed");
+  const summary = {
+    schemaVersion: "meta-kim-project-cleanup-result-v0.1",
+    mode: "cleanup",
+    ok: failed.length === 0,
+    resultCount: results.length,
+    results,
+  };
+
+  if (jsonOutputMode) {
+    console.log(JSON.stringify(summary, null, 2));
+    return summary.ok;
+  }
+
+  console.log(`Meta_Kim project cleanup: ${summary.ok ? "ok" : "failed"}`);
+  console.log(`  targets=${activeTargets.join(",")}`);
+  console.log(`  cleanedProjects=${summary.resultCount}`);
+  return summary.ok;
 }
 
 async function main() {
   if (projectBootstrapMode) {
-    await runProjectBootstrapCli();
-    process.exit(0);
+    const ok = await runProjectBootstrapCli();
+    process.exit(ok ? 0 : 1);
+  }
+  if (projectCleanupMode) {
+    const ok = await runProjectCleanupCli();
+    process.exit(ok ? 0 : 1);
   }
 
   // Show logo before language selection
@@ -6523,7 +6361,7 @@ async function main() {
     console.log(`\n${C.green}✓ ${t.envOk}${C.reset}\n`);
     const detectedRuntimes = await detectRuntimes();
     const targetContext = await resolveTargetContext(args);
-    checkSync(detectedRuntimes, targetContext.supportedTargets);
+    checkProjectRuntimeSync(detectedRuntimes, targetContext);
     console.log(
       `${C.dim}${t.checkTargets(targetContext.activeTargets.join(", "), targetContext.supportedTargets.join(", "))}${C.reset}`,
     );
@@ -6582,12 +6420,15 @@ async function runInstall() {
 
   // 询问安装范围
   const installScope = await askInstallScope();
+  const needProject = installScope === "project";
+  const needGlobal = installScope === "global";
+  await rememberProjectProjectionMode(needGlobal ? "global_only" : "project");
 
   // Ask proxy configuration (saves to localOverrides)
   await askProxyConfig();
 
   let selectedSkillIds = [];
-  if (installScope === "global" || installScope === "both") {
+  if (needGlobal) {
     selectedSkillIds = await resolveSelectedSkillDependencyIds();
   }
 
@@ -6595,10 +6436,23 @@ async function runInstall() {
   showDirectoryExplanation();
 
   // Ask project deploy directories BEFORE confirm (so user decides upfront)
-  const deployDirs = await askDeployDirectory();
+  const deployDirs = needProject ? await askDeployDirectory() : [];
+  const cleanupDirs = needGlobal ? await askProjectCleanupDirectory() : [];
+
+  // Early cleanup: run right after directory selection so the user sees the
+  // result immediately. Must not depend on the slower install steps below
+  // (npm install / python / mcp / validate) — those are easy to interrupt,
+  // and losing the cleanup defeats the global-single-source intent.
+  if (cleanupDirs.length > 0) {
+    await cleanupProjectRedundancyDirs(activeTargets, cleanupDirs);
+  }
 
   // Show installation overview
-  showInstallOverview(activeTargets, installScope, selectedSkillIds);
+  showInstallOverview(
+    activeTargets,
+    installScope,
+    selectedSkillIds,
+  );
   await showExistingFootprint(installScope);
 
   const confirm = await askYesNo(t.confirmStartInstall, true);
@@ -6609,13 +6463,10 @@ async function runInstall() {
 
   console.log();
 
-  const needProject = installScope === "project" || installScope === "both";
-  const needGlobal = installScope === "global" || installScope === "both";
-
   // 步骤计数
   let stepNum = 0;
 
-  // 项目本地同步 (project-only 或 both)
+  // 项目目录更新
   if (needProject) {
     stepNum++;
     await withProgress(t.stepLabel(stepNum, t.progressNpmInstall), async () => {
@@ -6656,7 +6507,7 @@ async function runInstall() {
     });
   }
 
-  // 全局安装 (global-only 或 both)
+  // 全局安装
   if (needGlobal) {
     // 准备全局目录
     stepNum++;
@@ -6706,13 +6557,25 @@ async function runInstall() {
     await withProgress(t.stepLabel(stepNum, t.progressSyncMeta), () => {
       const syncResult = runNodeScript(
         "scripts/sync-global-meta-theory.mjs",
-        metaTheoryGlobalSyncArgs(activeTargets),
+        metaTheoryGlobalSyncArgs(activeTargets, setupWithGlobalHooks),
       );
-      if (syncResult.status !== 0) {
+      const runtimeHooksOk = syncNonClaudeGlobalRuntimeHooks(
+        activeTargets,
+        setupWithGlobalHooks,
+      );
+      if (syncResult.status !== 0 || !runtimeHooksOk) {
         warn(t.warnMetaTheorySyncFailed);
       }
-      return syncResult.status === 0;
+      return syncResult.status === 0 && runtimeHooksOk;
     });
+  }
+
+  if (needGlobal) {
+    stepNum++;
+    await withProgress(
+      t.stepLabel(stepNum, t.refreshGlobalCapabilityInventory),
+      async () => refreshGlobalCapabilityInventory(activeTargets),
+    );
   }
 
   // [Optional] Python tools (graphify)
@@ -6722,7 +6585,9 @@ async function runInstall() {
     async () => {
       const wantPython = await askYesNo(t.askPythonToolsUpdate, true);
       if (wantPython) {
-        await installPythonTools(activeTargets);
+        await installPythonTools(activeTargets, false, PROJECT_DIR, {
+          projectWiring: needProject,
+        });
       } else {
         skip(`${C.dim}${t.pythonToolsSkipped}${C.reset}`);
       }
@@ -6738,7 +6603,7 @@ async function runInstall() {
     },
   );
 
-  //验证：project-only 和 both 检查 repo-local；global-only 跳过 repo-local 检查
+  // 验证：项目路径检查 repo-local；全局路径只跑项目完整性校验
   stepNum++;
   await withProgress(t.stepLabel(stepNum, t.progressValidate), async () => {
     if (needProject) {
@@ -6767,12 +6632,24 @@ async function runUpdate() {
 
   // ── 0. Ask for update scope (like install mode) ─────────────────────
   const updateScope = await askInstallScope();
+  const needProject = updateScope === "project";
+  const needGlobal = updateScope === "global";
+  await rememberProjectProjectionMode(needGlobal ? "global_only" : "project");
 
   // Ask proxy configuration (saves to localOverrides)
   await askProxyConfig();
 
   // Ask project deploy directories BEFORE update starts
-  const deployDirs = await askDeployDirectory();
+  const deployDirs = needProject ? await askDeployDirectory() : [];
+  const cleanupDirs = needGlobal ? await askProjectCleanupDirectory() : [];
+
+  // Early cleanup: run right after directory selection so the user sees the
+  // result immediately. Must not depend on the slower install steps below
+  // (npm install / python / mcp / validate) — those are easy to interrupt,
+  // and losing the cleanup defeats the global-single-source intent.
+  if (cleanupDirs.length > 0) {
+    await cleanupProjectRedundancyDirs(activeTargets, cleanupDirs);
+  }
 
   // ── 1. npm install (always — new code may have new deps) ────────────
   info(t.updateNpm);
@@ -6788,7 +6665,9 @@ async function runUpdate() {
   console.log("");
   const wantPython = await askYesNo(t.askPythonToolsUpdate, true);
   if (wantPython) {
-    await installPythonTools(activeTargets, true);
+    await installPythonTools(activeTargets, true, PROJECT_DIR, {
+      projectWiring: needProject,
+    });
   } else {
     skip(`${C.dim}${t.pythonToolsSkipped}${C.reset}`);
   }
@@ -6802,9 +6681,7 @@ async function runUpdate() {
   if (legacyCount > 0) ok(`Cleaned ${legacyCount} legacy file(s)`);
 
   // ── 3. sync-runtimes (scope from user selection) ──────────────────
-  if (updateScope === "global") {
-    skip(`${C.dim}${t.updateSyncProjectSkipped}${C.reset}`);
-  } else {
+  if (needProject) {
     info(t.updateSyncProjectFiles);
     const syncResult = runNodeScript("scripts/sync-runtimes.mjs", [
       "--scope",
@@ -6816,10 +6693,9 @@ async function runUpdate() {
     else warn(t.updateSyncSkip);
   }
 
-  // ── 4. [Optional] Global skills update ─────────────────────────────
+  // ── 4. Global skills update ───────────────────────────────────────
   console.log("");
-  const wantGlobalSkills = await askYesNo(t.askGlobalSkillsUpdate, true);
-  if (wantGlobalSkills) {
+  if (needGlobal) {
     const updateSkillIds = await resolveSelectedSkillDependencyIds();
     const localOverrides = await loadLocalOverrides();
     const proxyEnv = localOverrides.gitProxy
@@ -6846,27 +6722,34 @@ async function runUpdate() {
       warn(t.warnSkillsUpdateFailed);
       warn(`${C.dim}${t.warnSkillsUpdateFailedHint}${C.reset}`);
     }
-  } else {
-    skip(`${C.dim}${t.globalSkillsSkipped}${C.reset}`);
   }
 
-  // ── 5. [Optional] Global meta-theory sync ──────────────────────────
+  // ── 5. Global meta-theory sync ────────────────────────────────────
   console.log("");
-  const wantMetaTheory = await askYesNo(t.askMetaTheoryUpdate, true);
-  if (wantMetaTheory) {
+  if (needGlobal) {
     const updateSyncResult = runNodeScript(
       "scripts/sync-global-meta-theory.mjs",
-      metaTheoryGlobalSyncArgs(activeTargets),
+      metaTheoryGlobalSyncArgs(activeTargets, setupWithGlobalHooks),
     );
-    if (updateSyncResult.status === 0) ok(t.updateMetaTheoryDone);
+    const runtimeHooksOk = syncNonClaudeGlobalRuntimeHooks(
+      activeTargets,
+      setupWithGlobalHooks,
+    );
+    if (updateSyncResult.status === 0 && runtimeHooksOk)
+      ok(t.updateMetaTheoryDone);
     else warn(t.warnMetaTheoryUpdateFailed);
-  } else {
-    skip(`${C.dim}${t.metaTheorySkipped}${C.reset}`);
+  }
+
+  // ── 5.5. Refresh global capability inventory ───────────────────────
+  console.log("");
+  if (needGlobal) {
+    await refreshGlobalCapabilityInventory(activeTargets);
   }
 
   // ── 6. checkSync (repo-local, project scope) ───────────────────────
-  const { supportedTargets } = await resolveTargetContext(args);
-  checkSync(runtimes, supportedTargets);
+  if (needProject) {
+    checkSync(runtimes, activeTargets);
+  }
   console.log(`\n${C.bold}${C.green}✓ ${t.updateComplete}${C.reset}\n`);
 
   // Copy runtime files to user-chosen project directories (if opted in earlier)
@@ -6879,7 +6762,7 @@ async function runCheck() {
   console.log(`\n${C.green}✓ ${t.envOk}${C.reset}\n`);
   const runtimes = await detectRuntimes();
   const targetContext = await resolveTargetContext(args);
-  checkSync(runtimes, targetContext.supportedTargets);
+  checkProjectRuntimeSync(runtimes, targetContext);
   console.log(
     `${C.dim}${t.checkTargets(targetContext.activeTargets.join(", "), targetContext.supportedTargets.join(", "))}${C.reset}`,
   );

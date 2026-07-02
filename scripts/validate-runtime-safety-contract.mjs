@@ -37,6 +37,17 @@ async function readText(relativePath) {
   return fs.readFile(repoPath(relativePath), "utf8");
 }
 
+async function readOptionalText(relativePath) {
+  try {
+    return await readText(relativePath);
+  } catch (error) {
+    if (error.code === "ENOENT") {
+      return null;
+    }
+    throw error;
+  }
+}
+
 async function readJson(relativePath) {
   return JSON.parse(await readText(relativePath));
 }
@@ -77,11 +88,24 @@ function hasAll(haystack, needles, label) {
   }
 }
 
+function sameMembers(left, right) {
+  return (
+    JSON.stringify([...(left ?? [])].sort()) ===
+    JSON.stringify([...(right ?? [])].sort())
+  );
+}
+
+function productIdsByTier(catalog, tier) {
+  return (catalog.products ?? [])
+    .filter((product) => product.tier === tier)
+    .map((product) => product.id);
+}
+
 const contract = await readJson("config/governance/runtime-safety-hardening-contract.json");
 const pkg = await readJson("package.json");
 const catalog = await readJson("config/runtime-compatibility-catalog.json");
 const checklist = await readText("config/contracts/change-readiness-checklist.md");
-const pullRequestTemplate = await readText(".github/pull_request_template.md");
+const pullRequestTemplate = await readOptionalText(".github/pull_request_template.md");
 const verificationEvidence = await readText("canonical/skills/meta-theory/references/verification-evidence.md");
 const evalMetaAgents = await readText("scripts/eval-meta-agents.mjs");
 
@@ -112,12 +136,180 @@ hasAll(
 );
 hasAll(
   contract.hostConfigMerge?.protectedState ?? [],
-  ["userOwnedConfig", "credentials", "customMcpServers", "nativeHostControls", "marketplaceSources"],
+  [
+    "userOwnedConfig",
+    "userOwnedGlobalInstructionFiles",
+    "credentials",
+    "customMcpServers",
+    "nativeHostControls",
+    "marketplaceSources",
+  ],
   "host config protected state",
+);
+hasAll(
+  contract.hostConfigMerge?.codexGlobalInstructionFiles?.protectedFiles ?? [],
+  ["~/.codex/AGENTS.md"],
+  "Codex global instruction protected files",
+);
+hasAll(
+  contract.hostConfigMerge?.codexGlobalInstructionFiles?.policy ?? [],
+  [
+    "snapshot before ECC upstream installer",
+    "restore user-authored global AGENTS.md after upstream installer",
+    "quarantine exact ECC baseline if it appears in global AGENTS.md",
+    "never copy project AGENTS.md into Codex global home",
+  ],
+  "Codex global instruction file policy",
 );
 assert(
   contract.hostConfigMerge?.mergeMode === "additive_preserve_user_state",
   "host config merge mode must preserve user state",
+);
+
+assert(
+  contract.installExperienceModel?.goal ===
+    "clear_global_or_project_install_paths_with_optional_manifest_proven_project_cleanup",
+  "install experience goal must bind clear global/project install paths and optional manifest-proven cleanup",
+);
+hasAll(
+  contract.installExperienceModel?.principles ?? [],
+  [
+    "global common capabilities are reusable across projects and are the default install/update path",
+    "project-level complete projections are preserved when the user explicitly selects project directory updates",
+    "global cleanup is a separate optional step and must not run during project install/update",
+    "governance applies only to explicitly enabled directories",
+    "existing user configuration always wins over generated defaults",
+  ],
+  "install experience principles",
+);
+const projectProjectionLayer =
+  contract.installExperienceModel?.layers?.projectCompleteProjectionLayer ?? {};
+assert(
+  JSON.stringify(projectProjectionLayer.defaultActiveTargets) ===
+    JSON.stringify(["claude", "codex"]),
+  "project projection default active targets must be Claude Code + Codex",
+);
+hasAll(
+  projectProjectionLayer.defaultProjectionSet ?? [],
+  [
+    "CLAUDE.md",
+    "AGENTS.md",
+    ".claude/",
+    ".codex/",
+    ".mcp.json",
+    ".meta-kim/state",
+    ".meta-kim/backups",
+  ],
+  "project default projection layer",
+);
+const conditionalProjectionSets =
+  projectProjectionLayer.targetConditionalProjectionSets ?? {};
+hasAll(
+  conditionalProjectionSets.claude ?? [],
+  ["CLAUDE.md", ".claude/", ".mcp.json", ".meta-kim/state", ".meta-kim/backups"],
+  "Claude Code target projection layer",
+);
+hasAll(
+  conditionalProjectionSets.codex ?? [],
+  ["AGENTS.md", ".codex/", ".meta-kim/state", ".meta-kim/backups"],
+  "Codex target projection layer",
+);
+hasAll(
+  conditionalProjectionSets.cursor ?? [],
+  ["AGENTS.md", ".cursor/", ".meta-kim/state", ".meta-kim/backups"],
+  "Cursor target projection layer",
+);
+hasAll(
+  conditionalProjectionSets.openclaw ?? [],
+  ["AGENTS.md", "openclaw/", ".meta-kim/state", ".meta-kim/backups"],
+  "OpenClaw target projection layer",
+);
+hasAll(
+  projectProjectionLayer.selectionInvariant ?? "",
+  ["activeTargets", "claude,codex", "--targets", ".meta-kim/local.overrides.json", "all four supported targets are formal"],
+  "project projection selection invariant",
+);
+const platformSupportTiers = contract.installExperienceModel?.platformSupportTiers ?? {};
+assert(
+  platformSupportTiers.sourceOfTruth === "config/runtime-compatibility-catalog.json",
+  "platform support tiers must reference the runtime compatibility catalog",
+);
+assert(
+  sameMembers(
+    platformSupportTiers.formalProjectionTargets,
+    productIdsByTier(catalog, "runtime_projection"),
+  ),
+  "formal projection targets must match runtime_projection catalog products",
+);
+assert(
+  sameMembers(platformSupportTiers.defaultSelectedTargets, ["claude", "codex"]),
+  "default selected targets must be Claude Code + Codex",
+);
+assert(
+  sameMembers(platformSupportTiers.nonDefaultFormalProjectionTargets, [
+    "openclaw",
+    "cursor",
+  ]),
+  "non-default formal projection targets must be OpenClaw + Cursor",
+);
+assert(
+  sameMembers(
+    platformSupportTiers.dependencyInstallTargets,
+    productIdsByTier(catalog, "dependency_install_target"),
+  ),
+  "dependency install targets must match dependency_install_target catalog products",
+);
+assert(
+  sameMembers(
+    platformSupportTiers.candidateProbeTargets,
+    productIdsByTier(catalog, "candidate_probe"),
+  ),
+  "candidate probe targets must match candidate_probe catalog products",
+);
+hasAll(
+  platformSupportTiers.boundary ?? "",
+  ["OpenClaw", "Cursor", "formal Meta_Kim projection targets"],
+  "platform support tier boundary",
+);
+hasAll(
+  platformSupportTiers.promotionInvariant ?? "",
+  ["runtime profile", "projection layout", "generated target paths", "sync tests", "install policy"],
+  "platform promotion invariant",
+);
+const installOptions = contract.installExperienceModel?.installOptions ?? [];
+assert(
+  installOptions.find((option) => option.id === "global")?.defaultOnEnter === true,
+  "global reusable capabilities must be the Enter default",
+);
+assert(
+  installOptions.find((option) => option.id === "project")?.defaultOnEnter === false,
+  "project directory updates must default off",
+);
+assert(
+  installOptions.find((option) => option.id === "project_cleanup_after_global")
+    ?.requiresInstallOption === "global",
+  "project cleanup must require global install/update first",
+);
+assert(
+  !installOptions.some((option) => option.id === "both"),
+  "install options must not include a combined both mode",
+);
+assert(
+  !installOptions.some((option) => option.id === "advanced_global_controls"),
+  "install options must not expose advanced global controls as a separate path",
+);
+hasAll(
+  contract.installExperienceModel?.noSkillSemantics?.mustNotSkip ?? [],
+  [
+    "project projection when project scope is selected",
+    "global meta-theory core sync when global scope is selected",
+  ],
+  "no-skill semantics",
+);
+hasAll(
+  contract.installExperienceModel?.dryRunDisclosure?.mustShow ?? [],
+  ["globalWrites", "projectWrites", "mergePolicy", "backupBeforeApply", "rollbackPlan"],
+  "dry-run disclosure",
 );
 hasAll(
   contract.hostConfigMerge?.codexNativeControls?.requiredFeatures ?? [],
@@ -357,6 +549,26 @@ hasAll(
   ],
   "lazy project bootstrap source chain",
 );
+assert(
+  contract.lazyProjectBootstrap?.postCopyInitializerPolicy?.executorLocation ===
+    "installed package root scripts/project-post-copy-init.mjs",
+  "post-copy initializer must be a global package-root executor",
+);
+hasAll(
+  contract.lazyProjectBootstrap?.postCopyInitializerPolicy?.projectOutputs ?? [],
+  [
+    ".meta-kim/state/default/post-copy-init.json",
+    "graphify-out/graph.json",
+    "graphify-out/GRAPH_REPORT.md",
+  ],
+  "post-copy initializer project outputs",
+);
+hasAll(
+  contract.lazyProjectBootstrap?.postCopyInitializerPolicy
+    ?.forbiddenProjectExecutables ?? [],
+  [".meta-kim/meta-kim-post-copy.mjs", "meta-kim-post-copy.mjs"],
+  "post-copy project executable ban",
+);
 hasAll(
   contract.lazyProjectBootstrap?.projectFilePolicies?.merge ?? [],
   [".claude/settings.json", ".codex/hooks.json", ".cursor/hooks.json", ".mcp.json"],
@@ -380,6 +592,7 @@ hasAll(
   contract.lazyProjectBootstrap?.scenarioAcceptance ?? [],
   [
     "empty project dry-run exposes sourceChain and writes nothing",
+    "current project dry-run after apply reports ready, requires no confirmation, and lists no project writes",
     "existing user AGENTS.md or CLAUDE.md keeps user text and adds a managed block",
     ".codex/config.toml remains global-owned and is never copied into project bootstrap",
     "stale project manifest reports stale before update",
@@ -397,7 +610,7 @@ hasAll(
   "lazy project bootstrap forbidden outcomes",
 );
 
-for (const doc of [checklist, pullRequestTemplate]) {
+for (const doc of [checklist, pullRequestTemplate].filter(Boolean)) {
   hasAll(
     doc,
     [
@@ -408,6 +621,13 @@ for (const doc of [checklist, pullRequestTemplate]) {
       "Install / Update Status Semantics",
     ],
     "change readiness documentation",
+  );
+}
+
+if (!pullRequestTemplate) {
+  console.warn(
+    "[Meta_Kim] Optional GitHub pull request template is not present; " +
+      "runtime safety readiness is validated from config/contracts/change-readiness-checklist.md.",
   );
 }
 

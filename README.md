@@ -12,7 +12,8 @@
 </p>
 
 <p>
-  <img alt="Tools" src="https://img.shields.io/badge/tools-Claude%20Code%20%7C%20Codex%20%7C%20OpenClaw%20%7C%20Cursor-111827"/>
+  <img alt="Projection tiers" src="https://img.shields.io/badge/default-Claude%20Code%20%7C%20Codex%20%2B%20compat-OpenClaw%20%7C%20Cursor-111827"/>
+  <img alt="Candidate compatibility probes" src="https://img.shields.io/badge/candidate-Qoder%20%7C%20Trae%20%7C%20Kiro%20%7C%20Cascade%20%7C%20Cline%20%7C%20Roo%20%7C%20Continue-475569"/>
   <img alt="Stars" src="https://img.shields.io/github/stars/KimYx0207/Meta_Kim?style=flat&logo=github"/>
   <img alt="License" src="https://img.shields.io/badge/license-Apache--2.0-green"/>
 </p>
@@ -25,13 +26,13 @@
 
 ## Overview
 
-**Meta_Kim** is not another AI coding tool. It is the governance layer for AI coding work.
+**Meta_Kim** is not another AI coding tool. It is a governance layer for durable AI coding work.
 
 The hard part of AI coding is no longer getting a model to change files. The hard part is deciding what should happen first, which capability should own it, what evidence proves it worked, and how the lesson survives the next run.
 
 Claude Code, Codex, OpenClaw, and Cursor are all hands: they can write code and change files. But who decides which file to change first? Who reviews the result? Who fixes the problems that show up? And how do we make sure the same mistake does not repeat next time?
 
-Meta_Kim is built for that. It is **AI above AI**: a unified governance layer that keeps complex work from turning into a mess.
+Meta_Kim is built for that. It is the governance layer above the coding hands: a runnable set of agents, skills, contracts, hooks, scripts, and evidence gates that keeps complex work from turning into a mess.
 
 ### One-line summary
 
@@ -90,6 +91,22 @@ node setup.mjs
 
 > 💡 **After install**: `setup.mjs` prints where every artifact lives. To revisit that summary anytime (or diff vs. the previous install), run `npm run meta:status` in the directory where you installed.
 
+At a fresh clone, Meta_Kim intentionally separates source files, generated projections, and local state:
+
+| Layer | Examples | When you should see it |
+| --- | --- | --- |
+| GitHub source | `README.md`, `AGENTS.md`, `CLAUDE.md`, `canonical/`, `config/`, `scripts/` | Immediately after `git clone`; also included by the package `files` whitelist when applicable |
+| Generated runtime projections | `.claude/`, `.codex/`, `.agents/`, `.cursor/`, `openclaw/`, `.mcp.json`, `codex/` | Created locally by `node setup.mjs` or `npm run meta:sync`; gitignored and not GitHub source |
+| Local run state and graph output | `.meta-kim/`, `graphify-out/`, `tests/output/`, `task_plan.md`, `findings.md`, `progress.md` | Created only by setup, graphify, tests, or governed runs; local-only and safe to regenerate |
+
+### Install scope
+
+The default Enter path is **global reusable capabilities**. Agents, commands, MCP, and skills are installed into each selected runtime's official global/home locations when that runtime supports them. Global hook wiring is opt-in: pass `--with-global-hooks` when you intentionally want Meta_Kim to update Claude/Codex/Cursor hook settings. Projects reuse global capabilities directly; project-local agents, commands, MCP, hooks, or skills are created only when Fetch/Thinking proves project-specific customization, iteration, or a dedicated override is needed.
+
+If you explicitly choose **Project directory updates**, setup asks which project directories to update and writes the target-selected project runtime projection there, including project hooks/config where that runtime supports them. This path does not install global reusable capabilities and does not run project cleanup.
+
+Project files are still allowed, but they are not the default reusable capability store. Confirmed project bootstrap writes only project context/config/state plus proven project-specific overrides, preserving existing user config through managed blocks, add-only writes, protected JSON merge, backups, and manifests. Every applied project bootstrap records `.meta-kim/` state and backup files.
+
 If you plan to maintain the repository, edit the canonical sources first: `canonical/agents/`, `canonical/skills/meta-theory/`, `config/contracts/`, and `config/capability-index/`. Then run (requires Node.js >= 22.13.0):
 
 ```bash
@@ -106,15 +123,15 @@ Recommended reading order:
 
 ### Usage Paths
 
-After global install (`node setup.mjs` or `npx`), humans should be able to use plain task language. Slash commands remain maintainer shortcuts, not the normal user path.
+After the default install (`node setup.mjs` or `npx`) or a confirmed project bootstrap, humans should be able to use plain task language. Slash commands remain maintainer shortcuts, not the normal user path.
 
 | Where you are | What works automatically | Human entry path |
 |---|---|---|
 | Meta_Kim repo with Claude Code | Full governance via CLAUDE.md (8-stage spine, gates, dispatch rules) | Say the task naturally; durable work is classified into the governed route |
-| Any other project with Claude Code | Hooks (safety, format, memory save) + meta-theory skill | Say the task naturally; explicit `/meta-theory` remains a maintainer shortcut |
-| Codex | AGENTS.md rules + 9 custom agents + meta-theory command | Say the task naturally; Codex classifies durable work, subjective ambiguity, and pure queries differently |
-| OpenClaw | Compatible workspace agents, skills, config, and internal lifecycle hooks | Requires OpenClaw config/auth; contributors must complete strict OpenClaw self-testing and provide evidence; changes can merge only after that evidence passes review |
-| Cursor | Compatible official subagents, `.cursor/rules`, hooks, skills, and MCP mirrors | Contributors must complete strict Cursor self-testing and provide evidence; changes can merge only after that evidence passes review |
+| Any other project with Claude Code | Global skills can be discovered; global hooks require explicit `--with-global-hooks`; project-local files are written only after confirmed customization/bootstrap | Say the task naturally; explicit `/meta-theory` remains a maintainer shortcut |
+| Codex | Global skills plus project `AGENTS.md` context when present; global hooks require explicit `--with-global-hooks`; local `.codex/agents`, `.codex/commands`, or `.agents/skills` are project-specific overrides, not default execution-layer projection | Say the task naturally; Codex classifies durable work, subjective ambiguity, and pure queries differently |
+| OpenClaw | Global/shared skills plus OpenClaw config/auth; project `openclaw/` material is for project-specific workspace/context overrides | Requires OpenClaw config/auth; contributors must complete strict OpenClaw self-testing and provide evidence; changes can merge only after that evidence passes review |
+| Cursor | Global skills plus project rules/context when present; local `.cursor/agents`, `.cursor/rules`, `.cursor/skills`, hooks, and MCP are project-specific overrides | Contributors must complete strict Cursor self-testing and provide evidence; changes can merge only after that evidence passes review |
 
 ### Platform Support Tiers
 
@@ -122,13 +139,13 @@ Meta_Kim now tracks platform support in tiers instead of treating every compatib
 
 | Tier | Products | What it means |
 |---|---|---|
-| Formal tool projections | Claude Code, Codex, OpenClaw, Cursor | Canonical governance is projected into tool-specific files and checked by `npm run meta:sync` / `npm run meta:check`. |
-| Native dependency install targets | opencode, Qwen, Zed, Gemini, CodeBuddy, Antigravity, JoyCode | ECC supports these through its upstream installer, but Meta_Kim does not claim a full runtime projection until profile, layout, sync, and tests exist. |
-| Candidate probes | Qoder CLI, Trae, Kiro, Windsurf / Devin Desktop Cascade, Cline, Roo Code, Continue | Official docs expose compatible primitives such as rules, skills, agents/modes, hooks, MCP, commands, memory, or permission controls. Meta_Kim records them as candidate probes, not formal supported runtimes yet. |
+| Default formal projections | Claude Code, Codex | Canonical governance is projected by default, checked by `npm run meta:sync` / `npm run meta:check`, and used for the primary prompt-first flow. |
+| Non-default compatibility projections | OpenClaw, Cursor | Tool-specific project files are generated only when these targets are selected; runtime changes need maintainer handshake plus tool-side self-test evidence before they are treated as complete. |
+| Candidate compatibility probes | Qoder CLI, Trae, Kiro, Windsurf / Devin Desktop Cascade, Cline, Roo Code, Continue | Official docs expose compatible primitives such as rules, skills, agents/modes, hooks, MCP, commands, memory, or permission controls. Meta_Kim records them as candidate probes, not formal supported runtimes yet. |
 
 Source of truth: `config/runtime-compatibility-catalog.json`.
 
-Surface compatibility is intentionally weaker than runtime support. A tool can share Meta_Kim-compatible primitives and still need adapter design, profile/layout generation, sync tests, and live validation before it becomes a formal projection.
+Surface compatibility is intentionally weaker than runtime support. A tool can share Meta_Kim-compatible primitives and still need adapter design, profile/layout generation, sync tests, and live validation before it becomes a formal projection. Dependency-project install matrices are not repeated here as Meta_Kim support claims.
 
 ---
 
@@ -221,6 +238,8 @@ Search whether existing agents, skills, tools, or MCP integrations already cover
 **Governance Decision Engine**
 
 Meta_Kim is not only the 8-stage spine. It first identifies the governance trigger, checks runtime and OS capability, checks dependency capability, separates owner from weapon, filters by Win/Mac/runtime support, asks the user only for branch-changing choices, executes deterministic parts, verifies whether the user goal actually landed, and writes reusable learning back. Reference-only projects are absorbed into Meta_Kim data, not silently promoted into dependencies; see `config/governance/decision-pattern-catalog.json`.
+
+Automation is assistive, not authoritative. It may gather evidence, draft options, run deterministic checks, surface blockers, and prepare readable status, but branch-changing judgment in Critical, Fetch, Thinking, and Review remains a human decision point. A selected capability, hook match, report, or validator pass must not be relabeled as human acceptance or native runtime evidence.
 
 **Thinking - define boundaries, owners, sequence, deliverables, risks, and stop conditions**
 
@@ -537,41 +556,45 @@ These hooks are not optional polish. They are the execution-layer guardrails of 
 
 ### Cross-platform mapping
 
-**The whole architecture can be mapped onto any project that supports agents and agent-to-agent communication.**
+**A new platform can be evaluated when it exposes Meta_Kim-compatible primitives, but it is not a formal projection until profile, layout, sync, tests, and evidence exist.**
 
-Meta_Kim currently maps to four tool targets:
+Meta_Kim currently owns two default formal projection targets and two non-default compatibility projection targets:
 
 | Platform | Status | Mapping style |
 | --- | --- | --- |
-| **Claude Code** | Fully supported | `.claude/agents/*.md` + `SKILL.md` + hooks + MCP |
-| **Codex** | Fully supported | `.codex/agents/*.toml` + `.agents/skills/` + commands + hooks |
-| **OpenClaw** | Compatible formal projection | `openclaw/` workspaces + skills + internal hooks; stricter tool-denial changes need contributor-owned OpenClaw self-test evidence, and can merge only after that evidence passes review |
-| **Cursor** | Compatible formal projection | `.cursor/agents/*.md` + `.cursor/rules/*.mdc` + skills + hooks + MCP; Cursor changes need contributor-owned Cursor self-test evidence, and can merge only after that evidence passes review |
+| **Claude Code** | Default formal projection | `.claude/agents/*.md` + `SKILL.md` + hooks + MCP; primary prompt-first path verified by sync/check and maintained as a default target |
+| **Codex** | Default formal projection | generated local `.codex/agents/*.toml` for the nine governance agents + `.agents/skills/` + commands + hooks; primary prompt-first path verified by sync/check and maintained as a default target |
+| **OpenClaw** | Non-default compatibility projection; maintainer handshake required | `openclaw/` workspaces + skills + internal hooks; stricter tool-denial changes need contributor-owned OpenClaw self-test evidence, and can merge only after that evidence passes review |
+| **Cursor** | Non-default compatibility projection; maintainer handshake required | `.cursor/agents/*.md` + `.cursor/rules/*.mdc` + skills + hooks + MCP; Cursor changes need contributor-owned Cursor self-test evidence, and can merge only after that evidence passes review |
+
+Meta_Kim also tracks candidate compatibility probes for Qoder CLI, Trae, Kiro, Windsurf / Devin Desktop Cascade, Cline, Roo Code, and Continue. These products expose compatible primitives in their official docs, but setup does not generate project projections for them until a runtime profile, projection layout, generated paths, sync tests, install policy, and live or official probe evidence are added.
 
 The canonical source layer is `canonical/agents/`, `canonical/skills/meta-theory/`, `config/contracts/`, and `config/capability-index/`. The repository mirrors that layer into platform-specific projections through `npm run meta:sync`.
+
+Open-source boundary: Generated runtime projection directories are local outputs, gitignored, and not GitHub source. That includes `.claude/`, `.codex/`, `.agents/`, `.cursor/`, `openclaw/`, `.mcp.json`, and `codex/`. The nine governance agents live in `canonical/agents/`; Meta_Kim sync does not generate execution-layer Codex agents such as `worker`, `explorer`, `frontend`, `backend`, `test`, `review`, `analysis`, `verify`, or `docs`.
 
 ```mermaid
 flowchart TB
     CANONICAL["canonical/ + config/<br/>(single source layer)"]
 
     CANONICAL --> |npm run meta:sync| CLAUDE[".claude/<br/>Claude Code<br/>agents + skills + hooks"]
-    CANONICAL --> |npm run meta:sync| CODEX[".codex/ + .agents/<br/>Codex<br/>agents.toml + skills + hooks"]
+    CANONICAL --> |npm run meta:sync| CODEX[".codex/ + .agents/<br/>Codex<br/>governance agents.toml + skills + hooks"]
     CANONICAL --> |npm run meta:sync| OPENCLAW["openclaw/<br/>OpenClaw<br/>workspaces + skills + internal hooks"]
     CANONICAL --> |npm run meta:sync| CURSOR[".cursor/<br/>Cursor<br/>agents + rules + skills + hooks + MCP"]
 
-    NEW[New platform...] -.-> |config mapping| CANONICAL
+    CANDIDATE["candidate probes<br/>Qoder / Trae / Kiro / Cascade / Cline / Roo / Continue"] -.-> |promotion requires profile + layout + tests + evidence| CANONICAL
 
     style CANONICAL fill:#7c3aed,color:#fff
     style CLAUDE fill:#fbbf24,color:#000
     style CODEX fill:#34d399,color:#000
     style OPENCLAW fill:#60a5fa,color:#000
     style CURSOR fill:#f87171,color:#fff
-    style NEW fill:#555,color:#aaa
+    style CANDIDATE fill:#555,color:#aaa
 ```
 
-You can keep adding platform mappings over time as long as the platform supports agents and agent communication.
+You can keep adding platform mappings over time, but the upgrade path is gated: a candidate becomes a formal projection only after Meta_Kim owns the adapter shape and can verify it.
 
-The four tool targets are first-class Meta_Kim projections, but their native surfaces differ. Claude Code and Codex are both fully supported. OpenClaw and Cursor are compatible formal projections; PRs that improve either target must include strict contributor-owned self-test evidence from that tool, and can merge only after that evidence passes review.
+The four tool targets are first-class Meta_Kim projection families, but their native surfaces and evidence levels differ. Claude Code and Codex are the default selected primary path. OpenClaw and Cursor are available non-default compatibility projections: use them with maintainer handshake, and treat runtime changes as incomplete until strict contributor-owned self-test evidence from that tool passes review. Projection smoke, fixture validation, and generated reports are useful evidence, but they are not the same thing as native-live runtime proof.
 
 | Capability surface | Claude Code | Codex | OpenClaw | Cursor |
 | --- | --- | --- | --- | --- |
@@ -579,9 +602,9 @@ The four tool targets are first-class Meta_Kim projections, but their native sur
 | **Skills / references** | Native skills, references, and a mature global ecosystem | `.agents/skills/` is the project skill root | Workspace skills and installable skills | Project skill/reference mirrors |
 | **Hooks / automation** | Project hooks + settings.json + plugin ecosystem | Trusted `.codex/hooks.json` project/user hooks | Internal lifecycle hooks; typed plugin hooks needed for blocking/canceling policy | `.cursor/hooks.json` lowerCamel lifecycle hooks with `preToolUse` / `failClosed` |
 | **MCP / configuration** | Full native MCP and config surface | Can connect via runtime adapters and MCP | Clear workspace config | Project MCP and configuration mirrors |
-| **Governance loop support** | Fully supported through Claude-native surfaces | Fully supported through Codex-native surfaces | Compatible through OpenClaw-native surfaces; typed plugin tool-denial changes need strict tests | Compatible through Cursor-native surfaces; project decision cards and official hook gates preserve compatibility semantics |
+| **Governance loop support** | Default formal projection through Claude-native surfaces | Default formal projection through Codex-native surfaces | Non-default formal projection through OpenClaw-native surfaces; typed plugin tool-denial changes need strict tests | Non-default formal projection through Cursor-native surfaces; project decision cards and official hook gates preserve native semantics |
 
-The point is compatibility discipline, not a ranking: each formal tool target keeps its own agent, skill, hook, MCP, choice, and config surface instead of pretending one host's format is universal.
+The point is format discipline, not a ranking: each formal tool target keeps its own agent, skill, hook, MCP, choice, and config surface instead of pretending one host's format is universal.
 
 Choice surfaces are tool-specific. Claude Code should use `AskUserQuestion`; Codex should use `request_user_input` when `~/.codex/config.toml` has `[features].default_mode_request_user_input = true`; Cursor uses an `alwaysApply` project rule to trigger a chat decision card plus official `preToolUse` / `failClosed` hooks for tool gating; OpenClaw uses workspace/chat cards unless a typed plugin approval hook is explicitly installed and strictly tested.
 
@@ -641,16 +664,16 @@ When you're halfway through a conversation and your token budget runs out, the c
 
 ### What works globally vs. in-repo only
 
-Meta_Kim's gates and protocols work on three enforcement layers. After global installation (`node setup.mjs`), here is what works in any project versus what requires the Meta_Kim repo:
+Meta_Kim separates reusable global capability from directory-authorized governance. After global installation (`node setup.mjs`), global skills, agents, commands, and MCP entries can be discovered from any project when the runtime supports them. Global hooks require explicit `--with-global-hooks`; project-governed behavior applies only where this directory has confirmed context/config/state or project-specific overrides. This table separates reusable capability from checks that require the Meta_Kim source repo:
 
 | Enforcement layer | Global install | Needs Meta_Kim repo |
 | --- | --- | --- |
-| **Prompt layer** (agents + skills enforce gates/protocols) | Works — installed to `~/.claude/skills/` and `~/.claude/agents/` | — |
-| **Hook layer** (session-end gate checks, memory save to MCP Memory Service, dangerous command blocking) | Works — configured in `.claude/settings.json` | — |
-| **Config layer** (contract definitions are referenced in skill prompts) | Works — AI reads the rules from the installed skill | — |
+| **Prompt layer** (agents + skills enforce gates/protocols) | Reusable entrypoints are global; project-specific behavior requires confirmed local context/config/state or overrides | — |
+| **Hook layer** (session-end gate checks, memory save to MCP Memory Service, dangerous command blocking) | Active only where hooks/settings are explicitly configured; advanced global controls are opt-in | — |
+| **Config layer** (contract definitions are referenced in skill prompts) | AI can read installed rules; project files are written only after bootstrap confirms local context/state or project-specific overrides | — |
 | **Code validation** (`npm run meta:validate:run` hard-checks packet chains) | — | Required — script lives in `scripts/validate-run-artifact.mjs` |
 
-The first three layers are the primary defense and work everywhere. Code validation is a final safety net that requires running from the Meta_Kim repo (or pointing to its scripts).
+The first three layers are the primary defense once a directory is enabled. Code validation is a final safety net that requires running from the Meta_Kim repo (or pointing to its scripts).
 
 ---
 
@@ -661,7 +684,7 @@ Meta_Kim does not use a single memory layer. It uses three, each with a differen
 Each layer has different activation requirements:
 - **Layer 1** is built into Claude Code — requires Claude Code runtime (auto-memory at `~/.claude/projects/*/memory/`)
 - **Layer 2** is installed automatically by `node setup.mjs`
-- **Layer 3** is installed by `node setup.mjs` but requires manual server startup (see Layer 3 activation below)
+- **Layer 3** is installed by `node setup.mjs`; setup attempts a background HTTP start, and manual startup is the fallback when the health endpoint is unavailable (see Layer 3 activation below)
 
 ### Layer 1: Memory (agent upgrade memory)
 
@@ -675,12 +698,12 @@ Each layer has different activation requirements:
 ### Layer 2: Graphify (project-level LLM wiki)
 
 - **Responsibility**: project-level code knowledge graph
-- **Storage**: `graphify-out/graph.json` (NetworkX node-link format); for humans and agents, prefer `graphify-out/GRAPH_REPORT.md` when present
+- **Storage**: `graphify-out/graph.json` (NetworkX node-link format); humans and agents use it through query/path/explain slices, with `graphify-out/GRAPH_REPORT.md` reserved for broad architecture orientation
 - **Mechanism (data)**: `node setup.mjs` (optional Python step) installs graphify and **idempotently** runs `python -m graphify claude install` and `python -m graphify hook install` even if graphify was already installed via pip; git hooks rebuild the graph on commit/checkout in the **current repo**. `npm run meta:graphify:install` does the same (including hooks).
-- **Mechanism (usage)**: synced meta-theory `dev-governance.md` Fetch **Step 0.5** defines how the model should detect and use the graph — not a background service. Claude Code subagents get a **short hint** via `subagent-context.mjs`, not automatic embedding of `graph.json`. Codex / OpenClaw / Cursor share the same reference after `meta:sync` but have no SubagentStart hook; optional `python -m graphify codex install` or `python -m graphify claw install` in a **target repo** patches that repo’s docs per graphify CLI (`python -m graphify --help`).
+- **Mechanism (usage)**: synced meta-theory `dev-governance.md` Fetch **Step 0.5** defines how the model should detect and use the graph — not a background service. Claude Code subagents get a **short hint** via `subagent-context.mjs`, not automatic embedding of `graph.json`. Focused work should call `graphify query`, `graphify path`, or `graphify explain` to get candidate file anchors, then verify route-changing claims against source files. Codex / OpenClaw / Cursor share the same reference after `meta:sync` but have no SubagentStart hook; optional `python -m graphify codex install` or `python -m graphify claw install` in a **target repo** patches that repo’s docs per graphify CLI (`python -m graphify --help`).
 - **Core value**:
   - Make memory increasingly familiar with the project - not by remembering raw code, but by understanding structure and relationships
-  - **Reduce hallucinations** - agents answer from graph facts instead of guessing
+  - **Reduce hallucinations** - agents start from graph-backed file anchors and verify claims against source instead of guessing
   - **Cut token usage** - subgraph extraction replaces raw file reads, with up to 71x compression
 - **Quality threshold**:
   - Fuzzy nodes > 30% -> mark the graph as low quality and fall back to direct file reads
@@ -717,14 +740,16 @@ For multi-platform setups, run `node setup.mjs` — it loops through all selecte
   - For **Codex**: `~/.codex/hooks.json` receives SessionStart, UserPromptSubmit, and Stop bridges to `meta-kim-memory-save.mjs`, so start/prompt/end checkpoints are automatic.
   - For **OpenClaw**: `~/.openclaw/hooks/mcp-memory-service` receives a managed hook for `command:new`, `command:reset`, `session:compact:after`, and `command:stop`.
   - For **Cursor**: `~/.cursor/hooks.json` receives `beforeSubmitPrompt` and `stop` bridges to the shared memory hook.
-- **Start server**: `memory server --http` (with `MCP_ALLOW_ANONYMOUS_ACCESS=true` on macOS/Linux, or `$env:MCP_ALLOW_ANONYMOUS_ACCESS="true"` in Windows PowerShell), then access at `http://localhost:8000`.
-- **Port**: the server and Meta_Kim hooks use `http://localhost:8000`.
+- **Start server**: `memory server --http` (with `MCP_ALLOW_ANONYMOUS_ACCESS=true` on macOS/Linux, or `$env:MCP_ALLOW_ANONYMOUS_ACCESS="true"` in Windows PowerShell), then verify `http://127.0.0.1:8000/api/health`.
+- **Port**: health-check examples use `http://127.0.0.1:8000`; shipped hooks default to `http://localhost:8000` unless `MCP_MEMORY_URL`, `META_KIM_MEMORY_PORT`, or runtime memory config overrides the endpoint. Both loopback hosts are accepted.
 - **Hooks**: auto-registered for Claude Code, Codex, Cursor, and OpenClaw; each runtime uses its native hook format while sharing the same MCP Memory HTTP endpoint.
 - **MCP registration vs writes**: `.mcp.json` registers the MCP Memory server (`memory server`) for client access. Automatic session writes are separate lifecycle hooks: Claude Code uses `stop-memory-save.mjs`, Codex/Cursor use `meta-kim-memory-save.mjs`, and OpenClaw uses its managed `mcp-memory-service` hook.
+- **Evidence boundary**: a configured `.mcp.json`, installed hook, HTTP health response, successful write, successful read, and cross-session recall are different evidence layers. Do not claim cross-session recall from setup or health checks alone.
 - **Query**: `npm run meta:query:runs -- --owner <agent>` — find past runs by agent, or `npm run meta:index:runs -- <artifact>` for manual indexing of validated run artifacts
 - **Troubleshooting**:
   - **Python hook fails on Windows**: If the SessionStart hook fails with exit code 49 or shows no output, the Python command may point to the Windows Store shim. Run `node scripts/install-mcp-memory-hooks.mjs` to auto-detect and fix. The installer now skips WindowsApps shims and prefers explicit Python executables from `LOCALAPPDATA\Programs\Python*`. Use `--force` flag to re-register even if current path appears valid.
   - **Check installation**: Run `node scripts/install-mcp-memory-hooks.mjs --check` to verify hook status and Python path validity.
+  - **Check HTTP health**: Run `curl -fsS --max-time 3 http://127.0.0.1:8000/api/health` after startup. `npm run meta:test:mcp` checks Meta_Kim's runtime MCP server, not this external MCP Memory HTTP service.
   - **Manual verification**: Test your Python command with `python --version` or the detected path with `"C:/Users/YOUR_USER/AppData/Local/Programs/Python/Python311/python.exe" --version`.
 
 ### How the three layers work together
@@ -780,7 +805,7 @@ The three memory layers work together toward two core goals:
 | --- | --- |
 | `node setup.mjs` | Interactive install / update / check wizard |
 | `git pull --ff-only` | For clone installs, pull the latest Meta_Kim source from GitHub |
-| `node setup.mjs --update` | Refresh the current installation projections, skills, and dependencies; it does not pull Meta_Kim source code |
+| `node setup.mjs --update` | Refresh the current installation projections, skills, dependencies, and local global capability inventory; it does not pull Meta_Kim source code |
 | `node setup.mjs --update --project-dir <dir> --project-dir <dir>` | Refresh project-level runtime files in explicit project directories |
 | `node setup.mjs --update --all-projects` | Refresh project-level runtime files in saved project directories |
 | `node setup.mjs --check` | Environment check without writing |
@@ -813,7 +838,8 @@ Interactive update flow:
 | `npm run meta:check:runtimes` | Check whether the four runtimes are in sync |
 | `npm run meta:validate` | Validate repository integrity |
 | `npm run meta:verify:all` | Full validation, including runtime smoke checks |
-| `npm run meta:doctor:governance` | Governance health check |
+
+Additional governance and scope checks (`meta:install-scope:verify`, `meta:project-cache:verify`, `meta:doctor:governance`) are listed in `AGENTS.md`.
 
 ### Where the active rules live
 
@@ -840,8 +866,10 @@ Start with `package.json` scripts. The supported maintenance paths are the `meta
 | `npm run meta:deps:install` | Install the 9 community skills globally for the default Claude Code + Codex path |
 | `npm run meta:deps:install:all-runtimes` | Explicitly install them into Claude Code, Codex, OpenClaw, and Cursor |
 | `npm run meta:deps:install:claude-plugins` | Install Claude Code marketplace plugins only |
-| `npm run discover:global` | Scan global capabilities |
+| `npm run discover:global` | Manually refresh the local global capability inventory; setup/update and dependency install/update run this automatically after global capability changes |
 | `npm run meta:sync:global` | Sync meta-theory to the user-level runtime |
+
+Global dependency install/update commands refresh `.meta-kim/state/{profile}/capability-index/global-capabilities.json` after they modify runtime homes, so newly installed agents, skills, commands, MCP providers, hooks, plugins, and runtime tools are available to capability-first routing without a separate manual scan.
 
 `planning-with-files` is a core external dependency, not a project-local `.agents/skills/` mirror. After dependency install, check runtime home directories such as `~/.codex/skills/planning-with-files/`, `~/.claude/skills/planning-with-files/`, `~/.cursor/skills/planning-with-files/`, or `~/.openclaw/skills/planning-with-files/`. Do not conclude it is missing from the absence of `.agents/skills/planning-with-files/` alone.
 
@@ -849,7 +877,7 @@ Start with `package.json` scripts. The supported maintenance paths are the `meta
 
 Superpowers has native plugin entry points in Claude Code, Codex, and Cursor. Meta_Kim no longer treats the old Codex / Cursor `skills/superpowers` fallback as a correct plugin install; update runs remove the legacy fallback written by older Meta_Kim versions and tell users to use the host-native plugin entry point.
 
-ECC uses the upstream `affaan-m/ECC` package and plugin identity. Claude Code installs through `ecc@ecc`; home-based targets such as Codex, opencode, and Qwen use ECC's own CLI installer with the `core` profile. Project-local ECC targets such as Cursor, Zed, Gemini, CodeBuddy, Antigravity, and JoyCode must be installed from each project root with the upstream ECC command, so Meta_Kim cleans old fallback directories and prints the exact command instead of installing into the wrong global or npm-cache directory.
+ECC uses the upstream `affaan-m/ECC` package and plugin identity. Meta_Kim delegates ECC-specific target support to the upstream ECC installer and keeps only the cleanup/hand-off boundary here, so dependency-owned target lists do not become Meta_Kim platform support claims.
 
 For plugin bundles without a native host plugin entry point, the installer still falls back to a sparse-checkout of the upstream bundle's runtime-specific subtree:
 
@@ -859,9 +887,6 @@ For plugin bundles without a native host plugin entry point, the installer still
 | Codex | Superpowers uses the Codex Plugins pane or `/plugins`; ECC uses `npx --yes --package ecc-universal@latest ecc install --profile core --target codex` and currently installs the `refactor-cleaner` agent, not the `/refactor-clean` slash command because upstream ECC does not expose `commands-core` for Codex; other bundles fall back through `.codex/` → `.codex-plugin/` → `skills/` |
 | Cursor | Superpowers uses `/add-plugin superpowers` or Cursor's plugin marketplace; ECC is project-local: run `npx --yes --package ecc-universal@latest ecc install --profile core --target cursor` from the project root; other bundles fall back through `.cursor/` → `.cursor-plugin/` → `skills/` |
 | OpenClaw | `skills/` |
-| opencode | ECC uses `npx --yes --package ecc-universal@latest ecc install --profile core --target opencode`; other bundles fall back through `.opencode/` -> `skills/` |
-| Qwen | ECC uses `npx --yes --package ecc-universal@latest ecc install --profile core --target qwen` |
-| Zed, Gemini, CodeBuddy, Antigravity, JoyCode | ECC is project-local: run `npx --yes --package ecc-universal@latest ecc install --profile core --target <target>` from each project root |
 | Qoder CLI | Candidate probe only: generic bundle probing can look for `.qoder/` -> `skills/`, but ECC is not run for Qoder because upstream `ecc install --help` does not list `qoder` |
 | Trae, Kiro, Windsurf / Devin Desktop Cascade, Cline, Roo Code, Continue | Candidate probes only: compatible primitives are tracked in `config/runtime-compatibility-catalog.json`, but Meta_Kim does not install or project to them until an adapter, sync path, and validation suite exist |
 
@@ -871,14 +896,10 @@ Sparse-checkout fallback trees land in `~/.<runtime>/skills/<id>/`; native ECC i
 
 | Command | Purpose |
 | --- | --- |
-| `npm run meta:validate:run -- <file.json>` | Validate governed run artifacts |
-| `npm run meta:eval:agents` | Lightweight runtime smoke test |
-| `npm run meta:eval:agents:live` | Live prompt-backed acceptance |
 | `npm run meta:probe:clis` | Probe local CLI tools |
 | `npm run meta:test:mcp` | MCP self-test |
-| `npm run meta:index:runs -- <dir>` | Index validated run artifacts |
-| `npm run meta:query:runs -- --owner <agent>` | Query the run index |
-| `npm run migrate:meta-kim -- <dir> --apply` | Import an older prompt pack |
+
+More advanced commands (`meta:validate:run`, `meta:eval:agents`, `meta:eval:agents:live`, `meta:index:runs`, `meta:query:runs`, `migrate:meta-kim`) are in `AGENTS.md`.
 
 ---
 
@@ -922,7 +943,7 @@ Together, they cost far less than asking AI to reread the entire project from sc
 
 ### Q: Which platforms are supported?
 
-Claude Code, Codex, OpenClaw, and Cursor are formal runtime projections. ECC additionally supports native install targets for opencode, Qwen, Zed, Gemini, CodeBuddy, Antigravity, and JoyCode. Qoder CLI, Trae, Kiro, Windsurf / Devin Desktop Cascade, Cline, Roo Code, and Continue are tracked as candidate probes because their official docs expose compatible primitives, but they are not yet formal Meta_Kim runtime projections. The exact support boundary lives in `config/runtime-compatibility-catalog.json`.
+Claude Code and Codex are default formal runtime projections. OpenClaw and Cursor are non-default formal projections. Qoder CLI, Trae, Kiro, Windsurf / Devin Desktop Cascade, Cline, Roo Code, and Continue are tracked as candidate probes because their official docs expose compatible primitives, but they are not yet formal Meta_Kim runtime projections. Dependency-project install targets are handled by those upstream projects and are not repeated as Meta_Kim support claims. The exact support boundary lives in `config/runtime-compatibility-catalog.json`.
 
 ### Q: Is the installation complicated?
 

@@ -4,11 +4,802 @@
 
 这是 Meta_Kim 面向读者的更新说明。
 
-更新说明只解释“改了什么、为什么重要”。过细的内部任务编号、低价值 backlog id 和实现流水账不放在这里；需要精确证据时，请看 Git 历史、测试、生成报告和 PRD 产物。
+更新说明先解释本次解决的用户痛点或风险，再说明为了解决它改了什么、为什么重要。过细的内部任务编号、低价值 backlog id 和实现流水账不放在这里；需要精确证据时，请看 Git 历史、测试、生成报告和 PRD 产物。
 
-## [Unreleased]
+## [2.8.64] - 2026-07-02
+
+### 解决的问题
+
+有三个相互关联的根因，导致"fan-out 不发生"问题在多次发版里反复出现，即使项目早就在更早的 patch 里发过 fan-out 关卡：(1) `enforce-agent-dispatch.mjs` 在 Execution 阶段检测到主线程零 Agent dispatch 自干，却只 `process.stderr.write` 一行 warn 然后放行——就是这个软约束导致"主线程还是会自干"的现象；(2) `scripts/sync-runtimes.mjs` 在 `local.overrides.json` 是 `projectProjectionMode: "global_only"` 时跳过 canonical hook 投影到 runtime 镜像（因为该模式强制 `selectedTargets = []`，per-runtime `syncClaudeProjection` 根本没被调），canonical hook 改动就这么静默地脱同步，必须手动 `cp` 才能追平；(3) `setup.mjs` 让全局 hook 投影在初次安装时是 opt-in（`--with-global-hooks`），所以 `npx meta-kim` 首次安装的人**根本收不到后续发版里加的治理能力**，除非他们显式重跑 setup。三者都是机制层面的独立缺陷，不是文档问题；只修一个，用户可见的症状会再次复发。
+
+### 改动
+
+- **Execution 阶段 fan-out 关卡现在是真 block，不再是 warn**——`enforce-agent-dispatch.mjs` 把长期 warn-only 的路径换成调用 `spine-state.mjs` 里的新纯函数 `evaluateFanoutGate(state)`，再按 `META_KIM_FANOUT_GATE`（block | warn | progressive | off，默认 progressive + 7 天 grace）决策。当 run 是真 fan-out（≥2 worker packets、0 记录的 Agent dispatch、未显式 `degradedMode: true`）时，关卡 deny 下一次 mutation 并报告 `META_KIM_FANOUT_GATE effective mode`；唯一合法的出口是 dispatch Agent 或写 `degradedMode: true` 到 spine state。单 lane run（`workerTaskPackets.length < 2`）豁免，避免 Codex / Cursor / OpenClaw dispatch 事件覆盖差异误伤合法单 owner run。
+- **`spine-state.mjs` 新增纯函数 `evaluateFanoutGate(state)`**——返回 `{ triggered, dispatched, workerCount, stage, degraded, reason }`。跨 runtime hook 共享，**不 spawn 完整 PreToolUse hook 就能直接单测**。reason 字段是挂给每次 deny / warn 事件的人话说明。
+- **`tests/governance/fanout-completion-gate.test.mjs` 回归覆盖**——6 个 case：triggered（execution + 0 dispatch + ≥2 worker + 未 degraded）、有 Agent dispatch 时不触发、`degradedMode: true` 时不触发、单 lane（<2 worker packets）不触发、非 Execution 阶段不触发、null/缺字段安全（不抛）。
+- **修 `meta:sync` 在 `global_only` 下静默跳过 hook 投影的根因**——`scripts/sync-runtimes.mjs` 在主函数加一段（`scope !== "global"` 守卫），把 canonical `claude/hooks/*`（按 `PROJECT_CLAUDE_HOOK_FILES` + shared 依赖 `activate-meta-theory-spine.mjs` + `skip-reminder.mjs` 过滤）无条件投到 `.claude/hooks/`、`.codex/hooks/`、`.cursor/hooks/` 三个镜像。同一段也跑 `REMOVED_PROJECT_CLAUDE_HOOK_FILES` 清理，避免老 hook 在重命名/删除后回流。
+- **修 `npx meta-kim` 首次安装静默跳过全局 hook 的根因**——`setup.mjs` 重定义 `setupWithGlobalHooks`：初次安装（`npx meta-kim`、`node setup.mjs` 不带 `--update`）默认装全局 hook；`--update` 仍 opt-in（不覆盖用户改过的 hook）。显式 `--with-global-hooks`（强制开，含 update）和 `--without-global-hooks`（强制关，含初次安装）覆盖两个默认。意思是下游用户升到这个版本能自动拿到 fan-out 关卡，不用额外 flag。
+- **`shared/hooks/spine-state.mjs` 也加了同一份 `evaluateFanoutGate`**——test helper `runEnforceHookWithState`（`tests/meta-theory/11-eight-stage-spine.test.mjs`）在临时 cwd 里**先复制** canonical/spine-state.mjs、**再复制** shared/spine-state.mjs 覆盖，hook `import './spine-state.mjs'` 解析到最后写的 shared 版。不在这里加同一函数，test 会在 Execution 阶段第一次 mutation 时 ReferenceError。canonical 和 shared 各保留一份是 test fixture 复制顺序决定的，不删任一份。
+
+### 验证
+
+- `node --test tests/governance/fanout-completion-gate.test.mjs` → 6 pass / 0 fail。
+- `npm run meta:test:governance` → 76 pass / 0 fail（无回归）。
+- `npm run meta:check` → 7/7 过，含 `meta:open-source-boundary:validate`（canonical-only `package.json` `files` 白名单完整，没有 runtime 镜像或 test fixture 漏进发布集）。
+- **`meta:sync` 反向测试**：手动把 `.claude/hooks/enforce-agent-dispatch.mjs` 里的 `evaluateFanoutGate` 块删掉（3 → 2 匹配），跑 `npm run meta:sync`；输出报告"已更新 2 个文件 / 已更新 10 个文件 / 已更新 10 个文件"，镜像恢复到 3 匹配。canonical 没动（diff 干净），`.codex` 和 `.cursor` 镜像也跟着恢复。
+- Windows + Node 22.16.0 实机：`npm run meta:setup:check` 和 `npm run meta:setup:update` 都过。`Skipped global hooks (opt in with --with-global-hooks)` 通知在 `setup.mjs --update` 下仍出现（保留的 opt-in 行为）；新默认在下次 `npx meta-kim` 初次安装时生效。
+- `npm run meta:release:smoke` → 1108 tests / 1103 pass / 0 fail / 5 skipped（v2.8.63 baseline 一致）。
+
+## [2.8.63] - 2026-06-30
+
+### 解决的问题
+
+8 阶段脊柱的关卡存在 stage key 漂移：`enforce-agent-dispatch.mjs` 本地 stage order 用的是 `meta_review`（下划线），而 `spine-state.mjs` 和 canonical 标签用的是 `meta-review`（连字符），导致 `indexOf` 在 Meta-Review 阶段静默失败。Fetch 阶段也缺少与 Critical 对称的业务文件 mutation deny 分支，导致 `npm install` 和业务文件写入在 `fetchRecord` 提交前不被拦截。另外，SubagentStart hook 对所有 spawn 的 agent 触发（`matcher: "*"`）、MCP-memory 安装脚本未经确认就写用户全局 `~/.claude/settings.json`、缺少一条同步全局 hooks 的命令、新增的 `global-owner-discovery.md` reference 缺少 prompt-executability 校验器要求的标准 section 结构——这些让产品体验测试链路报错。
+
+### 改动
+
+- 将 stage key 统一为 `meta-review`，覆盖 `enforce-agent-dispatch.mjs`、`spine-state.mjs`（claude + shared 源）以及全部 runtime 投影（`.claude` / `.codex` / `.cursor` 加全局 `~/.claude/hooks/meta-kim` 和 `~/.codex/hooks/meta-kim`），让 Meta-Review 关卡在每个平台都正确解析。
+- 新增 Fetch 阶段业务 mutation deny 分支，与 Critical 对称：能力发现必须先写 `fetchRecord`，才能进行业务文件写入或包安装。
+- 把 Claude 和 Codex 投影的 SubagentStart hook matcher 从 `*` 收窄为 `meta-*`，让上下文注入只针对 meta 治理 subagent。
+- 给 `install-mcp-memory-hooks.mjs` 加 `META_KIM_CONFIRM_GLOBAL` 确认关卡，用户全局 `~/.claude/settings.json` 不再在无显式 flag 时被改写。
+- 新增 `meta:sync:global:release` npm 脚本（与 `meta:check:global:release` 对称），一条命令同时同步全局 skill + commands + hooks + settings。
+- 新增 `canonical/skills/meta-theory/references/global-owner-discovery.md`（完整 12 section 结构），并在 `SKILL.md` 和 `dev-governance.md` 中链接。
+
+## [2.8.62] - 2026-06-29
+
+### 解决的问题
+
+`scripts/discover-global-capabilities.mjs` 导出的 `OUTPUT_I18N` 只有英文和中文两块翻译，但项目其它地方（如 `setup.mjs` 的 `LANG_ARG_ALIASES`）宣传支持 `en / zh / ja / ko` 4 个语言。传 `--lang ja` 或 `--lang ko` 实际静默 fallback 到英文，Skills 家族统计的截断提示在英文和中文下都有对应文案，日文和韩文完全没有翻译。这是 v2.8.60（截断文案）和 v2.8.61（setup i18n 抽取）都没补完的缺口。
+
+### 变更
+
+- **`OUTPUT_I18N` 现在覆盖全部 4 个语言** - 增补日文（`ja-JP`）和韩文（`ko-KR`）两块，包含和英文中文同样的 16 个 key：title、byPlatform、hooksByCategory、skillsByFamily、detailsHidden、noMatchingCapabilities、noMatchingCapabilityType、warnings、more、none、scanning、scanningPlatform、errors、detailedInventory、governanceRules、canonicalIndexWritten、localInventoryWritten、canonicalIndexMirrored、searchIndexWritten。
+- **`normalizeOutputLang` 把 ja 和 ko 前缀路由到新块** - `ja*` 映射到 `"ja-JP"`，`ko*` 映射到 `"ko-KR"`；之前两者都 fallback 到英文。
+- **截断文案本地化** - 日文 `more` 写 `等、残り {n} 件は篇幅の都合により非表示`；韩文 `more` 写 `등, 나머지 {n}개 항목은 분량상 표시되지 않음`。`{n}` 仍由 `formatCounts` 替换。
+- **回归保护** - `tests/meta-theory/52-discover-i18n-truncate-format.test.mjs` 加 2 个 case 守护 (a) 源码里有全部 4 语言块；(b) `normalizeOutputLang` 有 `ja → "ja-JP"` 和 `ko → "ko-KR"` 分支。
+
+### 验证
+
+- 实测：`node scripts/discover-global-capabilities.mjs --lang ja | head -5` 现在显示 `🔍 グローバル能力をスキャン中...` 和 `  Claude Code をスキャン中...`；`--lang ko` 显示对应韩文扫描标题。
+- `node --test tests/meta-theory/*.test.mjs` → 1071 pass / 0 fail。
+- 其它 suite → 638 pass / 0 fail。
+- `npm run meta:doctor:governance` → `All governance doctor checks passed`。
+
+### 关于上一版的说明
+
+v2.8.60 引入了截断文案，v2.8.61 抽取了 setup i18n 块，但两个版本都没补完 `discover-global-capabilities.mjs` 的 4 语言覆盖。v2.8.62 把这个收尾。**不 amend v2.8.61 release**——v2.8.61 的 GitHub release 保持原样可追溯。
+
+## [2.8.61] - 2026-06-29
+
+### 解决的问题
+
+`setup.mjs` 已经长到 9204 行，里面嵌了 2463 行的 4 语言 I18N 字符串对象（4 语言 × 几百个 key）。同一份翻译数据实际上散在两个地方（`scripts/meta-kim-i18n.mjs` 和 `setup.mjs`），脚本文件大部分体积是翻译表而不是流程逻辑。`LANG_ARG_ALIASES` 自称支持 `en / zh / ja / ko`，但实际字符串只在那 2463 行里活着，没有文件级测试守护单一源契约。
+
+### 变更
+
+- **I18N 字符串抽到 `config/i18n/setup-strings.mjs`** - 2463 行 4 语言块独立成文件。函数以 `export function buildI18N({ MIN_NODE_VERSION })` 暴露，原 `(v) => ... 模板字面量` 还能通过闭包引用 `MIN_NODE_VERSION`。
+- **`setup.mjs` 改为 import** - 2463 行内联对象换成 `import { buildI18N } from "./config/i18n/setup-strings.mjs"; const I18N = buildI18N({ MIN_NODE_VERSION });`。`setup.mjs` 从 9204 → 6741 行。
+- **单一源恢复** - 改翻译现在只需改一个文件。`scripts/meta-kim-i18n.mjs` 继续服务其它脚本；`config/i18n/setup-strings.mjs` 服务 setup.mjs。
+- **回归保护** - 新增 `tests/meta-theory/53-setup-i18n-extracted.test.mjs`，守护单一源契约：strings 文件存在 + export `buildI18N`；setup.mjs import 它 + 不再有内联 `const I18N = {`；4 语言块全在；setup.mjs 行数 < 7500。
+
+### 验证
+
+- `node setup.mjs --help` 走新 import + 闭包无语法错误。
+- `node --test tests/meta-theory/*.test.mjs` → 1071 pass / 0 fail（53 号加 4 个 case）。
+- 其它 suite → 638 pass / 0 fail。
+- `npm run meta:doctor:governance` → `All governance doctor checks passed`。
+
+## [2.8.60] - 2026-06-29
+
+### 解决的问题
+
+`meta:deps:install` / `discover-global-capabilities.mjs` 在 Skills 家族统计那行里只显示前 8 个家族，剩下的折成一个简短后缀。英文版本是 `+N more`，中文版本是 `项未显示` —— 两个都容易被误读成「数据缺失」而不是「截断提示」。行为本身不是 bug（缺的家族用 `--verbose` 还能看到），但措辞让它看着像 bug。
+
+### 变更
+
+- **默认可见家族数从 8 提到 20** - `formatCounts(counts, maxItems = 20, ...)` 函数默认值改为 20，两个调用点同步改。
+- **截断提示自解释** - 英中文案重写，明示隐藏数和原因。英文：`more, remaining {n} hidden due to length`；中文：`等，剩余 {n} 项因篇幅关系未显示`。`{n}` 占位符由 `formatCounts` 实际替换。
+- **回归保护** - 新增 `tests/meta-theory/52-discover-i18n-truncate-format.test.mjs`，守护新文案 + 断言每个平台至少有 10 个可见家族。
+
+### 验证
+
+- 实测：`node scripts/discover-global-capabilities.mjs --zh | grep "Skills 家族统计" -A 4` 输出形如 `Claude Code: vercel 4, agent-browser 1, ..., django-security 1, 等，剩余 56 项因篇幅关系未显示`。
+- `node --test tests/meta-theory/*.test.mjs` → 1067 pass / 0 fail（52 号加 3 个 case）。
+- 其它 suite → 638 pass / 0 fail。
+- `npm run meta:doctor:governance` → `All governance doctor checks passed`。
+
+### 说明
+
+本次只覆盖源码里现有的 2 个语言字符串（en + zh）。其它 locale 继续 fallback 到英文。如果需要加更多语言，下次发版和翻译 review 一起出。
+
+## [2.8.59] - 2026-06-28
+
+### 解决的问题
+
+v2.8.58 只暴露一类 owner（execution agent）。Meta_Kim 实际有 9 类 owner（agent / skill / MCP / command / runtime tool / hook / plugin / memory-graph / dependency），但 lane 解析只在 agent 池里搜，所以想用真 command / MCP / runtime tool 的 lane 会拿到假 agent owner。fan-out orchestrator 也是一维的：≥2 worker 一律走 `agent-teams-playbook`，即使 lane 都是 skill / MCP / command worker（playbook 派不了）。
+
+### 变更
+
+- **owner 解析覆盖全部 9 类** - `findOwnerForLaneTerms` 换成 `resolveProvider({ kind, terms })`，底层是 `PROVIDER_POOL_SOURCES` 类型化 map。lane 按优先级链 `agent → skill → mcp → command → runtimeTool → hook → plugin → memory → dependency` 探测，第一个命中的 kind 即用。
+- **lane 带 `ownerKind` 字段** - 每条 parallel-execution lane 都记录 owner 的能力类目，dispatcher 据此选 host 工具（Task / Skill / Bash / apply_patch / MCP call 等）而不是猜。
+- **orchestrator-kind 分桶取代单 playbook 闸** - `classifyOrchestratorKinds` 按 ownerKind 把 lane 分组，触发最多 6 类并行 orchestrator：`agentTeamsPlaybook`（≥2 agent lane）、`skillComposition` / `mcpComposition` / `commandSequence` / `runtimeToolSequence`（其它桶达 ≥2）、`mixedParallelism`（多种 kind 同时存在）。dispatchBoard 报告触发的集合，`agent-teams-playbook` 不再被强派去管非 agent lane。
+- **workerTaskPacket 透传 `ownerKind` 与 `orchestratorKinds`** - `run-meta-theory-governed-execution.mjs` 把 `ownerKind` 透到每个 workerTaskPacket，host dispatcher 知道每条 lane 用什么工具。
+- **回归保护** - `tests/meta-theory/50-parallel-execution-lanes.test.mjs` 改按 `ownerKind` 分桶断言，`tests/meta-theory/51-orchestrator-kind-bucketing.test.mjs` 守护 orchestrator-kind 触发逻辑。
+
+### 验证
+
+- 实测：`node scripts/run-meta-theory-governed-execution.mjs --runtime claude_code "refactor frontend in src/ui, rebuild backend api in src/api, migrate database schema, deploy config ci"` → `orchestratorKinds: ["agentTeamsPlaybook","mixedParallelism"]`，5 个 worker 的 `ownerKind` 分布 `[agent, agent, agent, command, agent]`；`migrate database schema` lane 现在匹配到真 command provider（`package-script:migrate:meta-kim`），不再是假 agent。
+- `node --test tests/meta-theory/*.test.mjs` → 1064 pass / 0 fail。
+- 其它 suite → 638 pass / 0 fail。
+- `npm run meta:doctor:governance` → `All governance doctor checks passed`。
+
+## [2.8.58] - 2026-06-28
+
+### 解决的问题
+
+`/meta-theory` 在工程类任务下从来不会真正把 `agent-teams-playbook` 当成 fan-out 适配器选中，所以多 worker 并行模式实际上从未生效。route 分析总是收敛到单 worker 兜底分支，playbook 永远停在 `not_required`。同时，`workerTaskPacketDrafts` 和上层 sourceTasks 也只消费 `subjectiveUiCapabilityAmplification.lanes`，根本没有给工程任务开第二扇门。另外 `meta:doctor:governance` 在 Windows 上对带 `--runtime` 参数的 hook command 会报假阳性 hook mismatch。
+
+### 变更
+
+- **工程任务也能拆多 lane** - `select-execution-route.mjs` 新增 `buildParallelExecutionLanes`，从 task 文本里临时识别路径、显式 lane 标记、句子分段等独立工作单元，≥2 个就拆。worker 产出和 dispatchBoard 现在也认这条 lane 源。
+- **owner 必须来自 runtime-scoped discovery** - 新增 `findOwnerForLaneTerms`，把 lane 描述当查询串，去 `candidateExecutionAgents` 的 `id + description + own + boundary + trigger` 里做关键词匹配；命中才用，不硬编码 `frontend/backend/test/docs`。`compactAgent` 同步补齐 description / own / boundary / trigger 字段，语义匹配才有依据。
+- **找不到真 owner 就跳过 lane** - 找不到就不再兜底写假 owner，直接让这条 lane 不进 workerTaskPacketDrafts，由 route gate 自然降级。
+- **Doctor normalizeHookName 跨平台正确** - `doctor-governance.mjs` 在 basename 匹配前先剥掉 trailing CLI 参数，再显式去 `.mjs` 后缀，避免 Windows `path.basename(p, ".mjs")` 把后缀漏进比对。
+
+### 验证
+
+- 实测：`node scripts/run-meta-theory-governed-execution.mjs --runtime claude_code --emit-conversation-notice "refactor frontend components in src/ui, rebuild backend api routes in src/api, and migrate database schema."`，playbook 从 `not_required` 变 `pass / selected=是 / waves=1`，peer mesh 从 1 变 4 peers / 10 handoffs，owner 都是 runtime 真 agent（如 `build-error-resolver / ai-engineer-* / api-documenter-* / database-admin-*`）。
+- 测试：`node --test tests/meta-theory/*.test.mjs` 1058 pass / 0 fail；其它 suite 638 pass / 0 fail；`npm run meta:doctor:governance` 输出 `All governance doctor checks passed`。
+- 回归保护：新增 `tests/meta-theory/50-parallel-execution-lanes.test.mjs` 守护「无假 owner + 多 lane 触发」契约。
+
+## [2.8.57] - 2026-06-25
+
+### 解决的问题
+
+Review follow-up 里真正暴露的风险不是“还缺更多清单”，而是默认路线选择还不够稳：命令目标、runtime 证据、用户本地状态都需要同一个保守规则先发生在 Execution 之前。只要路线关键类型不清楚，Meta_Kim 就应该降级、阻断、返回 `null` 或保持 reference-only，而不是先猜一个路线，再靠 validator 或 hook 事后补洞。
+
+### 变更
+
+- **Type-first route policy** - `select-execution-route` 现在会输出机器可读的 `typeFirstRoutePolicy` 和每轮实际计算的 `routeTypeClassification`，覆盖对象类型、证据类型、归属类型和保守 disposition。
+- **不新增 gate 的契约** - Stage runtime control 只把该 policy 作为路线选择不变量引用，明确它不是新的验收门或 hook loop。
+- **可执行回归覆盖** - Capability routing validator 和测试现在会检查未知对象、证据、归属类型必须保守降级，而不能靠形状猜。
+- **Meta-theory 提示收紧** - canonical meta-theory skill 现在要求 Fetch / Thinking 先分类路线关键类型，再决定是否需要 checklist 或 validator 机制。
+
+### 验证
+
+- `node scripts/select-execution-route.mjs --task "missing dependency task" --runtime codex --os windows --json --compact-json`
+- `npm run meta:route:validate`
+- `npm run meta:prd:stage-runtime-control:validate`
+- `node --test tests/governance/capability-routing.test.mjs`
+- `node --test tests/meta-theory/11-eight-stage-spine.test.mjs`
+- `npm run meta:release:smoke`
+- `git diff --check`
+
+## [2.8.56] - 2026-06-23
+
+### 解决的问题
+
+这次审计确认还有三类治理运行时风险：观察态 hook 仍可能从全局 hook 目录拦住只读 `node -e` Fetch 检查；runtime projection 的失败分类仍会被人类可读文案里的词影响；Graphify 看不到 Meta_Kim agent 之间的治理边，导致 review 只能看到文件引用，缺少治理关系。
+
+### 变更
+
+- **只读 Node eval 不再误拦** - 只读读取、解析、打印本地文件的 `node -e` 检查现在会被识别为 read-only；写文件、起子进程、网络调用、动态 import 和 eval 类执行仍继续拦截。
+- **全局 hook 同步证据** - 修复后的 hook package 已用 `--with-global-hooks` 同步到本机 Claude Code 和 Codex 全局 hook 目录，当前实际运行的 hook 不再沿用旧 read-only whitelist。
+- **结构化 runtime 失败原因** - governed runtime projection evidence 现在记录 `failureReasonCode`；失败分类不再从 `native` / `live` 这类文案词里猜。
+- **能力数字语义拆开** - repo capability index 现在把 canonical inventory totals 和本机 runtime projection actual counts 分开，避免把 `totalHooks` / `totalCommands` 误读成已挂载 hook/command 数。
+- **Graphify 治理边增强** - Graphify rebuild 会补 Meta_Kim agent-governance edges，并给 `file_type` 补 `type` 兼容字段，让 agent 关系和节点类型消费者都可审计。
+
+### 验证
+
+- `node --test tests/meta-theory/11-eight-stage-spine.test.mjs`
+- `node --test tests/meta-theory/32-meta-theory-four-product-targets.test.mjs`
+- `node --test tests/setup/capability-index-inheritance-chain.test.mjs`
+- `node --test tests/setup/graphify-wiring-contract.test.mjs`
+- `npm run meta:release:smoke`
+- `npm run meta:check`
+- `npm run meta:graphify:rebuild`
+- `npm run meta:graphify:check`
+- `git diff --check`
+
+## [2.8.55] - 2026-06-23
+
+### 解决的问题
+
+观察态发布修复还剩一个文本载荷边缘：用 PowerShell here-string 写 release notes 时，正文里如果出现 `git push` 或 `gh release`，hook 仍可能把 release-note 文本误判成真实 shell 发布命令。
+
+### 变更
+
+- **Here-string 文本安全** - 观察态高风险检测现在会先剥离 PowerShell here-string 正文，再匹配命令动词，release-note 或搜索文本不会再被误认为可执行发布命令。
+- **可执行 here-string 继续拦截** - `Invoke-Expression` / `iex` 仍被视为高风险，所以把 here-string 管道给 shell 执行仍会被拦。
+
+### 验证
+
+- `node --test tests/meta-theory/11-eight-stage-spine.test.mjs`
+- `npm run meta:release:smoke`
+- `node scripts/run-verify-all.mjs --no-report`
+- `npm run meta:graphify:check`
+- `git diff --check`
+
+## [2.8.54] - 2026-06-23
+
+### 解决的问题
+
+观察态 hook 仍会让维护发布变成“自己锁自己”。用户已经明确要求提交、推送、发布新版本并更新说明时，同一轮 run 里 `git push` 或 GitHub Release 命令仍可能被拦，因为 hook 只看到高风险外部副作用，没有看到用户的发布授权。它还会把 Graphify / 搜索命令里引号包住的 `git push`、`gh release` 搜索词误判成真实发布命令。
+
+### 变更
+
+- **显式观察态发布意图** - prompt 激活时，如果用户 wording 明确包含提交 / 推送 / 发布 / 版本发布，会写入短期的 user-explicit external publish intent。
+- **窄发布放行** - 在这个 intent 下，观察态只放行非强推的 `git push` 和 GitHub Release `view/create/edit/upload`；`npm publish`、安装、强推和破坏性命令仍继续拦截。
+- **搜索词误伤修复** - read-only 搜索和 Graphify 查询不会再因为引号里的搜索文本提到 `git push` 或 `gh release` 而被当成高风险命令。
+- **全局 hook 同步证据** - 修复后的 hook package 已用 `--with-global-hooks` 同步到本机 Claude Code 和 Codex 全局 hook 目录，并用 release 版全局检查确认。
+
+### 验证
+
+- `node --check canonical/runtime-assets/claude/hooks/enforce-agent-dispatch.mjs`
+- `node --check canonical/runtime-assets/claude/hooks/activate-meta-theory-spine.mjs`
+- `node --check canonical/runtime-assets/shared/hooks/activate-meta-theory-spine.mjs`
+- `node --test tests/meta-theory/11-eight-stage-spine.test.mjs`
+- `npm run meta:prd:stage-runtime-control:validate`
+- `npm run meta:sync`
+- `node scripts/sync-global-meta-theory.mjs --with-global-hooks`
+- `npm run meta:check`
+- `npm run meta:check:global:release`
+- `npm run meta:graphify:check`
+- `git diff --check`
+
+## [2.8.53] - 2026-06-23
+
+### 解决的问题
+
+Meta_Kim 的 runtime hook 仍可能把设计期阶段表现得像是必须先派 Agent。Fetch 阶段真实业务文件写入被拦是正确的，但拒绝文案会提示维护者去 dispatch Agent；这和当前设定冲突，因为 Critical、Fetch、Thinking 都允许主线程推进。相同 gate 还可能拦住 Claude `/plan` 的计划更新，让计划面动作看起来也像被禁止的业务写入。
+
+这会制造错误修复循环：维护者真正需要补的是 Fetch / Thinking 证据，再进入 Execution；但 hook 暗示下一步必须派 Agent。
+
+本次发布审计还发现几类首跑和维护发布风险：`npx github:...` 可能在依赖安装前就失败；全局安装可能静默改用户 home hook 配置；Codex/Cursor hook runtime 仍依赖路径嗅探；MCP Memory 在 `8000` 端口冲突和 Windows Python shim 场景下诊断不清；`meta:verify:all` 的嵌套命令失败时仍不够好定位。
+
+### 变更
+
+- **首跑 setup fallback** - `setup.mjs` 在 `@inquirer/prompts` 尚未安装时会退回数字菜单，让 GitHub/npx fresh setup 能继续走到依赖安装流程。
+- **全局 hooks 显式 opt-in** - 全局通用能力安装不再把 hooks 当成默认全局能力；只有传入 `--with-global-hooks` 时才更新 Claude/Codex/Cursor hook wiring，文档和测试同步锁住这个边界。
+- **Hook runtime 显式选择** - 生成的 Claude、Codex、Cursor hook 命令会传入明确 runtime 参数；canonical dispatcher 仍保留 fallback detection，但正常投影不再依赖路径嗅探。
+- **Capability gate 可见性** - progressive capability gate 的 hook 输出会暴露 grace-window 状态，setup 也会提示维护者如何选择 `warn`、`block` 或 `off`。
+- **MCP Memory 诊断增强** - MCP Memory hooks 和安装路径支持 `MCP_MEMORY_URL` / `META_KIM_MEMORY_PORT`，健康检查失败时提示可能占用端口的进程，并让 Windows Python shim 问题更容易定位。
+- **分阶段 verify runner** - `meta:verify:all` 默认改用 staged runner，支持 `--json`、`--from`、报告输出、每阶段耗时和失败续跑；旧单行链保留为 `meta:verify:all:chain`。
+- **state 可移植性提示** - `meta:status` 会提示 `.meta-kim/state/` 的 machine-portability 风险，避免把含本机绝对路径的 state 当成可分享项目材料。
+- **投影层级文案收紧** - 公开文档现在把 Claude Code 和 Codex 描述为默认投影；OpenClaw 和 Cursor 是兼容投影，需要维护者握手和 native self-test evidence。
+- **设计期阶段语义修正** - Critical、Fetch、Thinking 的拒绝文案现在明确说明：业务 mutation 要等 Execution；主线程仍可继续 read/search、capability discovery、planning/control-plane 更新和 spine-state packet 写入。
+- **Agent 要求只属于 Execution** - stage runtime control contract 现在记录 Fetch 和 Thinking 进行中不要求 Agent dispatch；execution owner/loadout 与 dispatch evidence 仍保留为 Execution 阶段门。
+- **计划控制面放行** - Claude plan-mode surface、task/todo bookkeeping、`.claude/plans/*.md` 和 Meta_Kim planning files 可在 Fetch 阶段、没有 `fetchRecord` 时更新；普通业务文件仍然会被拦。
+- **观察态本地发布步骤放行** - 自动触发的观察态现在允许本地 `git add` 和 `git commit` 检查点，也不会因为搜索文本里出现高风险词而误拦；`git push`、包安装、reset 等外部发布或破坏性命令仍继续拦截。
+- **Hook 路径字段兼容** - hook 的 file-path 提取支持 camelCase 和 target path 变体，确保 runtime planning surface 按真实目标路径分类。
+- **Run-scoped Worker 实机执行回归覆盖** - eight-stage spine、setup、MCP Memory、hook runtime、release docs 和 staged verify 测试覆盖设计期不强制 Agent、planning control-plane 放行、全局 hooks opt-in、显式 runtime 选择，以及业务 mutation 被拦时不得提示用户 dispatch Agent 的精确文案。
+
+### 验证
+
+- `npm run meta:prd:stage-runtime-control:validate`
+- `node --test tests/meta-theory/11-eight-stage-spine.test.mjs`
+- `npm run meta:sync`
+- `npm run discover:global`
+- `npm run meta:check`
+- `npm run meta:check:global`
+- `node scripts/run-verify-all.mjs --no-report`
+- `git diff --check`
+
+## [2.8.52] - 2026-06-23
+
+### 解决的问题
+
+governed execution 强化合并后，Meta_Kim 还需要一次发布收口，把这批 cleanup 和维护者真实风险对齐：维护者应该能从 main 工作区跑正确的验证链，不再依赖散落命令；MCP runtime server 需要显式声明 SDK 依赖；过期 helper scripts 不应该继续像公开入口一样留在仓库里；普通自然语言模糊验收也不能被误报成 Codex native live proof。
+
+这次发布还需要刷新 canonical capability index，让能力发现描述当前合并后的源码树，而不是上一个 release 的快照。
+
+### 变更
+
+- **分阶段验证 runner** - 新增 `meta:verify:stages`，维护者可以直接在 main 工作区按阶段运行或续跑发布级验证链。
+- **MCP runtime 依赖显式化** - 将 `@modelcontextprotocol/sdk` 声明为 package dependency，使 `scripts/mcp/meta-runtime-server.mjs` 在 fresh install 后也能 self-test，不再依赖本机偶然存在的包。
+- **governed runner 证据修复** - 加固 `--temp-output` 覆盖和 capability-need 输出，保证 governed-run artifact 能通过验证，同时继续诚实区分 public-ready 与 host-invocation 证据边界。
+- **死脚本清理** - 移除已无源码引用的旧 cleanup/reporting scripts，并在脚本文档中写清删除规则，避免过期 CLI 变成意外的公开 API。
+- **发布证据刷新** - 基于合并后的 `main` 刷新 canonical capability index、Graphify 图谱、global hooks 和 release checks。
+
+### 验证
+
+- `node scripts/mcp/meta-runtime-server.mjs --self-test`
+- `npm run meta:test:meta-theory`
+- `npm run meta:release:smoke`
+- `npm run meta:verify:all`
+- `npm run meta:graphify:check`
+- `npm run meta:check:global:release`
+- 使用普通中文模糊发布审计请求跑 temp-output governed run；artifact 已验证，spine 到达 Fetch/Thinking/Review/Verification，同时 host evidence 按真实情况保持 `partial`。
+- `git diff --check`
+
+## [2.8.51] - 2026-06-22
+
+### 解决的问题
+
+Meta_Kim 在 governed run 进入 Verification 等后置阶段后，仍可能发生自锁。维护者想运行 `git status`、`Get-Content` 这类只读 Fetch 或诊断命令时，会先被 execution-tool hook 送进 choice surface gate；如果当前 state 缺 Fetch evidence 或 Thinking option frame，这些只读命令也会被拒绝。
+
+这会形成治理悖论：运行需要 Fetch 证据才能继续，但 hook 又拦住了收集或修复证据所需的只读命令。
+
+### 变更
+
+- **只读检查先于 choice gate** - dispatch enforcement hook 现在会在 `checkChoiceSurfaceGate` 前放行安全的只读 Bash inspection，恢复取证和状态修复能力，同时不削弱变更控制。
+- **变更命令仍然被拦** - 同一条 incomplete-state 路径下，`npm install` 等 mutation 命令仍会被拒绝；本次修复恢复的是 Fetch 访问，不是关闭 capability-first gate。
+- **Verification 阶段回归覆盖** - eight-stage spine 测试新增复现：Verification 阶段 choice evidence 不完整时，`git status --short` 可通过，但 mutation 仍拒绝。
+- **全局 Hook 刷新** - fixed canonical hook 已同步到全局 Claude Code 和 Codex hook 包，使当前运行时和源码树行为一致。
+
+### 验证
+
+- `node --test tests/meta-theory/11-eight-stage-spine.test.mjs`
+- `npm run meta:sync`
+- `npm run discover:global`
+- `node scripts/graphify-cli.mjs rebuild --force`
+- `npm run meta:graphify:check`
+- `npm run meta:check`
+- `node scripts/sync-global-meta-theory.mjs --with-global-hooks`
+- `node scripts/sync-global-meta-theory.mjs --check --with-global-hooks`
+- `npm run meta:check:global`
+- `npm run meta:release:smoke`
+- `git diff --check`
+
+## [2.8.50] - 2026-06-22
+
+### 解决的问题
+
+Meta_Kim 已经有规则、validator 和架构说明，但维护者仍然不容易一眼看清：哪些机制真的跑起来了，哪些只是结构或文档，用户可见证据到哪里为止。这样会带来产品风险：Dynamic Workflow、LangGraph-style 控制、Graphify、MCP Memory、evolution 写回、自动化和开源健康，可能被说成同一层“已完成”。
+
+本次还修清了自动化发布边界。自动化可以帮忙收集证据、减少重复动作，但发布判断、Critical/Fetch/Thinking/Review 质量判断和 public-ready 声明，必须继续由人基于证据作决定。
+
+### 变更
+
+- **产品治理证据分层** - governed execution 现在把自动化辅助、人类决策阶段、自测证据、host/native 证据和产品体验状态分层记录。
+- **诚实的产品体验 validator** - 产品体验校验可以在不弹出 native choice 的情况下通过可信自测；但默认 host/native 边界没有 live host 证据时仍保持 `partial`。
+- **Dynamic Workflow 与 LangGraph-style 覆盖** - meta-theory 测试覆盖图式 state、nodes、edges、checkpoint/replay、动态 lane 绑定、agent-team packet 解析和 dispatch envelope 证据。
+- **Graphify 产品化** - Graphify CLI 更清楚地暴露 query、path、explain、check、rebuild 流程，使图谱成为导航和验证辅助，而不是上下文倾倒。
+- **Evolution 写回门** - evolution writeback 现在区分真实写回目标和明确的 `none-with-reason`，避免把临时记录误说成可持续学习闭环。
+- **Global hooks 与 MCP Memory 边界** - 全局 hook 同步和 MCP Memory 说明更清楚地区分注册、生命周期 hook、服务健康和本地记忆写入。
+- **开源健康** - 新增 GitHub community health 与维护文件，包括贡献、安全、代码归属和依赖更新入口，不要求 GitHub Actions workflow。
+
+### 验证
+
+- 合并前 `npm run meta:verify:all`
+- `node scripts/graphify-cli.mjs rebuild --force`
+- `npm run meta:graphify:check`
+- `node scripts/validate-product-experience-core-goals.mjs`
+- `npm run meta:release:smoke`
+- Codex App 新对话一句话模糊发布审计
+- `npm run meta:capabilities:smoke`
+- `npm run meta:test:meta-theory`
+- `npm run meta:test:integration`
+- `git diff --check`
+
+## [2.8.49] - 2026-06-21
+
+### 解决的问题
+
+当用户级 Codex `config.toml` 在 `[features]` 上方有坏掉的 TOML 数组时，macOS 上的 Codex 可能在 Meta_Kim 启动前就失败。宿主错误会指向 `multi_agent = true`，看起来像这个合法 Codex feature 写错了，但真正的问题是上方数组缺逗号或没有闭合。
+
+Meta_Kim 的全局同步和依赖安装路径也会用行级合并修改 Codex 配置，所以需要在写入前拒绝合并结构不安全的配置，并给出可执行的本地修复提示。
+
+### 变更
+
+- **Codex 配置合并护栏** - Codex config merge 在写入 feature flags、App native controls 或 add-only 依赖配置前，会拒绝未闭合的 TOML 数组或 inline table。
+- **人话诊断** - 错误会指出仍处在未闭合 TOML 容器里的行、容器打开的行/列，并展示 `multi_agent = true` 应放在 `[features]` 下。
+- **全局检查可见性** - `meta:check:global` 现在会单独报告 Codex `config.toml` 无效，不再只降级成 `default_mode_request_user_input` 缺失。
+- **回归覆盖** - Setup 测试复现截图里的 `notify = [` 加 `multi_agent = true` 失败形态，同时保持合法多行 TOML 数组可用。
+
+### 验证
+
+- `node --check scripts/codex-config-merge.mjs`
+- `node --check scripts/sync-global-meta-theory.mjs`
+- `node --test tests/setup/codex-config-merge.test.mjs`
+- 临时 Codex home 执行 `sync-global-meta-theory.mjs --check --targets codex` 坏配置复现
+- `npm run meta:test:setup`
+- `npm run meta:check`
+- `npm run meta:check:global`
+- `npm run meta:release:smoke`
+- `git diff --check`
+
+## [2.8.48] - 2026-06-21
+
+### 解决的问题
+
+Graphify 的提示仍可能把 agent 引向大范围读取 `GRAPH_REPORT.md` 或图谱上下文，使大项目上下文过重，也模糊了“图谱导航提示”和“源文件证据”的边界。即使 canonical source 已更新，旧的全局 Codex hook 也可能继续吐出旧版短提示。
+
+全局安装模式在 macOS 上也可能出现假红：`setup.mjs --check` 仍按项目本地投影检查所有 supported runtime，而没有尊重当前 `global_only` 模式和 active targets。
+
+### 变更
+
+- **Graphify Query-First 策略** - meta-theory 现在把 Graphify 视为导航能力，而不是上下文倾倒。聚焦任务应优先用 `graphify query`、`graphify path` 或 `graphify explain` 找候选锚点。
+- **源文件验证边界** - Graphify 结果只算候选文件锚点；会改变路线的判断必须回读源文件验证。结果泛、旧、或被生成状态污染时，回退到定向仓库搜索。
+- **Hook 上下文瘦身** - Claude subagent 与 Graphify hooks 现在明确禁止把完整 `graph.json`、完整 `GRAPH_REPORT.md` 或大范围 graph dump 注入 worker 上下文。
+- **Sync 模板对齐** - Codex runtime sync 和 setup 模板同步使用 query-first 文案，避免项目或全局同步把旧提示刷回来。
+- **Global-Only Setup 检查修复** - Setup check/update 路径现在尊重 `projectProjectionMode=global_only`；全局模式跳过项目本地投影校验，项目模式只校验当前选中的 active targets。
+- **全局 Hook 刷新** - 使用 `--with-global-hooks` 刷新全局 Claude 与 Codex `meta-kim` hooks，使当前运行时提示与 canonical policy 一致。
+- **文档与回归覆盖** - README/CLAUDE 现在说明 Graphify 应通过 query/path/explain 小切片使用，并配合源文件验证；setup 测试会拒绝旧的 compressed-context 文案。
+
+### 验证
+
+- `node --test tests/setup/sync-runtimes-manifest.test.mjs`
+- `node --test tests/setup/graphify-wiring-contract.test.mjs`
+- `node --test tests/setup/setup-update-default-flow.test.mjs`
+- `npm run meta:sync`
+- `npm run meta:validate`
+- `node scripts/graphify-cli.mjs rebuild --force`
+- `npm run meta:graphify:check`
+- `npm run discover:global`
+- `npm run meta:check`
+- `npm run meta:sync:global -- --with-global-hooks`
+- `npm run meta:check:global -- --with-global-hooks`
+- `npm run meta:release:smoke`
+- 当前 Codex 的 `rg` hook probe 已输出新版 query-first/source-verification Graphify 提示。
+- `git diff --check`
+
+## [2.8.47] - 2026-06-21
+
+### 解决的问题
+
+在 Codex/Windows 宿主禁止嵌套 Node 子进程时，governed execution CLI 和 smoke 测试会卡住或崩溃，导致真实模糊指令验收看起来像没跑通，即便路线选择器和 Node 测试本身是有效的。
+
+同时，产品体验支撑门仍会把结构性的 native choice 支撑误写成 pass。一次运行可能已经证明了 worker packets 和 selected providers，但仍有风险把 `selected_not_invoked`、CLI 子进程或 markdown/card artifact 误读成真实 host invocation 或 native choice 证据。
+
+### 变更
+
+- **路线选择器宿主 fallback** - 当 `spawnSync(process.execPath, ...)` 被宿主阻止时，governed execution 会退回同进程 route selector；普通不受限宿主仍走原 CLI 路径。
+- **Selector 紧凑输出** - 新增 runner-compact selector 模式，避免 governed run 携带过大的路线 payload，同时保留 selected providers、worker lanes 和 owner discovery counts。
+- **8 阶段可见进度** - 对话提示和 stage operation plan 现在展示 Critical、Fetch、Thinking、Execution、Review、Meta-Review、Verification、Evolution，不再停在 Review。
+- **能力 Smoke 宿主 fallback** - capability-discovery smoke 复用同进程 selector fallback，并诚实报告 spawn 错误，不再写出 undefined output。
+- **Node 测试包装器 fallback** - 共享 Node 测试包装器在 child-process 不可用时，对本仓本地脚本提供窄范围 worker-backed fallback。
+- **可信 Host Invocation 证据** - governed execution 现在只接受带有真实 family、state、provider 或 surface、合法 evidence kind、非空 evidence ref 的 trusted host evidence；`hostInvocationRequestPacket` 也必须 pass，artifact 才能 pass。
+- **Native Choice 证据门** - P-106 不再因为结构性 card 证据默认 pass。Codex/Claude 的分支决策会保持 `needs-host-invocation`，直到附上可信 `request_user_input` / `AskUserQuestion` 证据。
+- **禁止伪造 Native Choice 快捷口令** - `select-execution-route` 不再把纯字符串 `completed` / `confirmed` 当成可信 native choice 证明；结构化证据也必须带 native surface 和 evidence ref。
+- **Validator 摘要诚实化** - 默认 governed-execution validator 现在拆分 `validationStatus` 与 `governedExecutionStatus`，有效但 partial 的运行不会再被顶层 `status=pass` 混淆。
+
+### 验证
+
+- `node --check scripts/run-meta-theory-governed-execution.mjs scripts/select-execution-route.mjs scripts/run-capability-discovery-smoke.mjs scripts/run-node-tests.mjs scripts/meta-kim-i18n.mjs`
+- `node scripts/run-meta-theory-governed-execution.mjs --task "帮我把这个系统弄得更顺、更能自动处理复杂任务，并让我看见它怎么判断、怎么分工、怎么推进、怎么验收。" --run-id codex-goal-fuzzy-acceptance --state-dir .meta-kim/state/codex-goal-fuzzy --db .meta-kim/state/codex-goal-fuzzy/runs.sqlite --emit-conversation-notice --emit-card-dealing-summary`
+- `node scripts/validate-run-artifact.mjs .meta-kim/state/codex-goal-fuzzy/codex-goal-fuzzy-acceptance.json`
+- `node --test --test-concurrency=1 tests/meta-theory/*.test.mjs`
+- `npm run meta:test:integration`
+- `node --test tests/meta-theory/32-meta-theory-four-product-targets.test.mjs`
+- `node --test tests/governance/core-loop-contract.test.mjs tests/meta-theory/34-run-deliverables.test.mjs tests/governance/capability-routing.test.mjs`
+- `npm run meta:prd:default-execution:validate`
+- `npm run meta:prd:product-experience:validate`
+- 通过 `Start-Process node scripts/run-meta-theory-governed-execution.mjs` 启动干净 host-acceptance 新进程，使用当前 Codex `spawn_agent` 和 `request_user_input` 证据；产物结果为 artifact status `pass`、`hostInvocationRequest=pass`、`realInvocationCoverage=pass`、`nativeChoiceGate=pass`、`productExperience=product_experience_pass`
+- `npm run meta:release:smoke`
+- `npm run meta:verify:all`
+- `node scripts/graphify-cli.mjs rebuild --force`
+- `npm run meta:graphify:check`
+- `git diff --check`
+- 发布边界保持诚实：full verification、validator、graphify check 与干净 host evidence 支撑本次 patch 发布；全 runtime native live proof 仍是单独的 release-grade 目标。
+
+## [2.8.46] - 2026-06-21
+
+### 解决的问题
+
+本次发布修复 Claude Code 会话中断后的续跑边界：当 runtime spine 已经 `session_stop`，后续再说“继续当前 active run”不能再被误读成真的 active governed run。HookPrompt 仍然保持首屏意图增强层，但它的 model-visible context 不再能冒充 Fetch、Thinking、worker、Execution、Verification 或 public-ready 证据。
+
+### 变更
+
+- **HookPrompt 证据边界** - 在 meta-theory skill、抽象能力契约和 runtime safety contract 中明确 HookPrompt 只是 prompt-intake context；它可以澄清意图，但不能推进阶段或满足治理证据。
+- **HookPrompt JSONL Transcript 安全** - Stop hooks 现在会只剥离 HookPrompt 展示片段；当 Claude 把前台提示展示写成一行 escaped newline JSONL 时，不会吞掉后面的真实 transcript 内容。
+- **Public Readiness 状态拆分** - 将 runtime `surfaceState`（`silent` / `notice` / `decision`）和 Warden 拥有的 `publicReadinessState`（`debug-surface` / `internal-ready` / `public-ready`）分离，避免交互展示状态冒充发布就绪。
+- **Dynamic Workflow lane 证据闭环** - Route 选中的 worker lanes 现在直接进入 business-flow blueprint，保留 omitted lanes with reasons，并由 `meta-conductor` 作为编排 synthesis 的 merge owner。
+- **Invocation Truth Public-Ready 硬门** - Run artifact validator 现在会拒绝 selected executable capability 只被选中、不可用、被阻断、缺 host evidence，或 top-level packet 与 `coreLoop` 不一致时的 public-ready 声明。
+- **LangGraph-style Runtime 边界** - 产品证据现在明确这是 LangGraph-style 结构控制图，不新增也不声称真实 LangGraph runtime dependency。
+- **Global-only 能力清单** - Capability discovery 在 `global_only` 投影模式下可读取缓存的全局 runtime inventory，同时继续把项目配置记录保持为 reference-only。
+- **Inactive Run 续跑边界** - `active-run.json` 与 status envelope 现在公开 `deactivatedAt`、`deactivationReason` 和 `continuationBoundary`，让 `session_stop` 历史可见，但不会被当成 active managed run。
+- **Claude Runtime Session-Stop 修复** - Claude spine activation 会先读取 inactive spine state；当用户要求继续时，创建新的 observed run，并记录前一个已停止 run 的边界，而不是声称旧 run 仍然 active。
+- **Continuation 文案识别对齐** - Shared 与 Claude activation hooks 现在识别同一组宽口径续跑说法，例如 `current run`、`same run`、`当前 run`、`同一个 run`。
+- **Stop Hook Transcript 过滤** - Stop compaction 和 progress hook 在 transcript 启发式判断前会剥离 HookPrompt 前台展示块，避免提示词优化文本制造假的阶段进度、finding 或续跑 handoff。
+- **Stop Cleanup 路径安全** - `stop-spine-cleanup` 删除 completed spine state 前会复用 repo-local state resolver，非法 `META_KIM_SPINE_STATE_DIR` 不能删除 `.meta-kim/state` 之外的文件。
+- **Local Continuity 文案降权** - Stop compaction 和 project task state 现在把交接标记为 `local_continuity_only` 并写入 `mustNotClaimActiveRun`，替换容易误导的 “Resume from X stage” 说法。
+- **状态 CLI 诚实输出** - `meta-run-status` 对 inactive `session_stop` 会输出 reason 和 continuation boundary，而不是只折叠成一行笼统 inactive。
+- **发布元数据对齐** - 将包元数据提升到 `2.8.46`，确保 source tree、tag 和 GitHub Release 指向同一版本。
+
+### 验证
+
+- `node --check canonical/runtime-assets/claude/hooks/stop-compaction.mjs canonical/runtime-assets/claude/hooks/stop-save-progress.mjs canonical/runtime-assets/claude/hooks/activate-meta-theory-spine.mjs canonical/runtime-assets/claude/hooks/spine-state.mjs canonical/runtime-assets/shared/hooks/spine-state.mjs scripts/meta-run-status.mjs`
+- `node --test tests/meta-theory/20-run-status-envelope.test.mjs`
+- `node --test tests/meta-theory/09-run-artifact-validator.test.mjs`
+- `node --test tests/meta-theory/32-meta-theory-four-product-targets.test.mjs`
+- `node --test tests/meta-theory/11-eight-stage-spine.test.mjs`
+- `node --test tests/governance/runtime-safety-contract.test.mjs`
+- `node --test tests/governance/capability-inventory-bus.test.mjs`
+- `node --test tests/setup/mcp-memory-hooks.test.mjs`
+- `npm run meta:release:smoke`
+- `npm run meta:verify:all`
+- Public-ready 边界保持诚实：HookPrompt prompt-intake context 不是 runtime invocation、Verification 或 release-grade all-runtime live evidence。
+
+## [2.8.45] - 2026-06-20
+
+### 解决的问题
+
+本次发布补上 Meta_Kim 的 Dynamic Workflow / LangGraph-style governed execution 声明与用户可检查证据之间的断层。默认发布面现在记录最新的 hook 自锁修复，确保私有项目 manual 不进入开源 source 集合，并附带一份 full-pass governed execution artifact，用来证明能力发现、worker fan-out、host invocation truth 与 Verification 已经跑通；同时不把它越级说成 release-grade live all-runtime ready。
+
+### 变更
+
+- **Dynamic Workflow 证据闭环** - 复测 `C:/Users/Kim/AppData/Local/Temp/meta-kim-host-full-db9a8dd9aa5c43418aba89f7b210bd57/artifacts/goalpro-codex-host-full-proof.json`，确认其中包含 `fetchPacket`、`capabilityInventory`、`capabilityRoute`、`dynamicWorkflowRuntimePacket`、`langGraphRunPacket`、`workerTaskPackets`、`workerResultPackets` 与 `verificationPacket`。
+- **Host Invocation Truth** - 确认真实 Codex host 证据覆盖 `spawn_agent_result`、`agent_team_result` 与 `skill_application`，并有 MCP、command/script、runtime-tool 三类 fresh local probes；artifact 中 `realInvocationCoverage.missingFamilies` 为空。
+- **Hook 自锁修复** - Fetch 阶段 dispatch gate 现在可以受限修复自己的 `fetchRecord` 状态，同时在能力发现和 execution clearance 前仍然阻止业务文件写入。
+- **开源 Source 边界** - 从公开 source 树移除私有 manual 文档，并让 README 引用保持在受支持的公开文档面上。
+- **发布元数据对齐** - 将包元数据提升到 `2.8.45`，确保 source tree、tag 和 GitHub Release 指向同一版本。
+
+### 验证
+
+- `npm run meta:validate:run -- C:/Users/Kim/AppData/Local/Temp/meta-kim-host-full-db9a8dd9aa5c43418aba89f7b210bd57/artifacts/goalpro-codex-host-full-proof.json`
+- `npm run meta:test:meta-theory`
+- `npm run meta:release:smoke`
+- `git diff --check`
+- Public-ready 边界保持诚实：`publicReadyDecision.publicReady = false`，因为本次没有附带 release-grade live all-runtime evidence。
+
+## [2.8.44] - 2026-06-19
+
+### 解决的问题
+
+本次发布补上 canonical 源、全局 hook 包和项目 runtime 投影之间的安装/更新断层。新用户和已有项目现在会拿到一致的 governed `meta-theory` 行为；可复用的全局资产不会被误复制进项目镜像；源仓库自检也不会再把预期为空的生成目录误报成安装镜像过期。
+
+### 变更
+
+- **Canonical Runtime Source Projection** - `meta-theory` runtime smoke 检查在项目镜像尚未生成时会回退检查 canonical 源资产；但如果 runtime 镜像已经 materialized 且内容坏掉，仍然会判为不完整。
+- **全局 Hook 依赖闭环** - Claude 全局 hook 脚本现在从打包后的 `hooks/meta-kim/` 目录解析 shared helper，不再导入缺失的项目本地 shared 路径。
+- **Fetch 自锁维修路径** - Fetch 阶段的 hook enforcement 现在允许受限的 repair-only `fetchRecord` 写入 `spine-state.json`；但在完成真实能力发现和执行放行前，业务文件写入仍会被拦住。
+- **安装与更新范围对齐** - setup/update 路径保持全局安装只写全局、项目 bootstrap 只从 canonical 源生成项目镜像，并取消对 Meta_Kim 源仓库的特殊处理。
+- **11 阶段用户可见性** - governed run 报告在 runtime verification 仍然 blocked 时，会把用户可见 business phase 保持在 feedback / acceptance 等待点，同时保留 blocker 证据。
+- **产品交付包 Bootstrap** - product delivery bundle 生成现在让 governed run 和 deliverable generation 共用同一个 run id 与 state dir，修复 clean smoke 中找不到 governed run 的失败。
+- **一等 Memory 能力发现** - canonical memory hooks 现在会作为稳定的 `memory` provider 进入默认 capability inventory；干净 state 下的 governed run 不再依赖已有本地状态文件来证明 memory 能力覆盖。
+- **源仓库健康检查口径** - runtime health 检查区分源仓库自检和用户安装态镜像，避免对空生成目录输出误导性的 stale-mirror 文案。
+
+### 验证
+
+- `npm run meta:verify:all`
+- `npm run meta:release:smoke`
+- `npm run meta:prd:smooth-capability:validate`
+- `npm run meta:prd:stage-runtime-control:validate`
+- `node --test tests/meta-theory/11-eight-stage-spine.test.mjs`
+- `node --test tests/meta-theory/32-meta-theory-four-product-targets.test.mjs`
+- `node --test tests/meta-theory/43-product-delivery-bundle.test.mjs`
+- `node --test tests/meta-theory/49-business-phase-visibility.test.mjs`
+- 隔离 setup/hooks worker：`130 pass / 0 fail`
+- runtime health worker：`meta:public-assets:validate`、`meta:check:runtimes`、hook sync tests、stale projection simulation
+- `git diff --check`
+
+## [2.8.43] - 2026-06-19
+
+### 解决的问题
+
+本次发布解决的是 governed run 看似已经在 hook context 或生成报告里完成，但用户仍然看不到清晰进度、没有原生选择证据、也没有真实能力路线的问题。同时收紧 setup/update 清理路径，让旧安装留下的项目级 Meta_Kim 残留可以被安全移除，而不会删掉用户自己的文件。
+
+### 变更
+
+- **用户可见治理进度** - 新增 host-visible notice contract 和 runtime 指南，要求 Codex 与 Claude Code 在普通 assistant chat 中显示 run start、route、blocker、closure 等关键进度；原生选择面板只用于会改变路线的决策。
+- **自动能力发现** - 扩展 route selection：自然语言 durable work 会先扫描项目/runtime/全局 skills、commands、MCP providers、hooks、scripts、runtime tools，再由 Thinking 绑定 owner；不再要求用户先说出 agent、skill 或协议阶段。
+- **原生选择证据门** - 对主观质量或路线会变化的任务，跟踪 Codex `request_user_input` 与 Claude `AskUserQuestion` 证据后才允许执行；结构化报告不能再冒充真实原生选择。
+- **项目清理与 Bootstrap 安全** - 新增 setup cleanup 路径，用于清理冗余 Meta_Kim 项目资产；`AGENTS.md` / `CLAUDE.md` 改为 managed block 合并；补齐 Codex `.agents/skills` 项目投影覆盖，并增加保护未知本地 skill 与 git-tracked 文件的回归测试。
+- **全局 Hook 与记忆对齐** - 保持 HookPrompt 在 Meta_Kim spine hook 之前运行，新增 Codex 全局 HookPrompt adapter 同步；doctor 检查接受健康的 Claude 全局 hook；MCP memory 检查能识别 `hooks/meta-kim/` 下的 hook。
+
+### 验证
+
+- `npm run meta:verify:all`
+- `npm run meta:release:smoke`
+- `npm run meta:check`
+- `npm run meta:doctor:governance`
+- `npm run meta:check:global:release`
+- `node --test tests/setup/claude-settings-merge.test.mjs tests/setup/lazy-project-bootstrap.test.mjs tests/setup/doctor-governance.test.mjs tests/setup/mcp-memory-hooks.test.mjs`
+- `node scripts/validate-capability-routing.mjs`
+- `git diff --check`
+
+## [2.8.42] - 2026-06-18
+
+### 解决的问题
+
+本次发布解决的是全局可复用安装和项目本地生成状态被混在一起的问题。现在可以端到端验证全局 `meta-theory` 安装，而不把通用 Codex skill 复制进每个项目；项目缓存和 Graphify 输出仍然只落在当前项目。
+
+### 变更
+
+- **Codex 全局 Hook 注册** - 全局同步现在会把 Meta_Kim hook 脚本复制到 `~/.codex/hooks/meta-kim/`，并把 prompt-entry spine hook 合并进 `~/.codex/hooks.json`，带 package-root 证据；用户自己的 hook 会保留，只替换 Meta_Kim 管理项。
+- **项目缓存验证** - 新增 `npm run meta:project-cache:verify`，并支持 `--real-global`，用于证明全局 hook 会在当前项目生成 `.meta-kim/state/default/post-copy-init.json`、`graphify-out/graph.json`、`graphify-out/GRAPH_REPORT.md`，且不会复制 `.agents/skills/meta-theory/`。
+- **安装范围矩阵** - 扩展安装范围验证，覆盖全局默认、全局全正式目标、项目默认、项目全正式目标，并证明预期文件存在、非预期写入不存在。
+- **正式投影口径** - README 现在把 OpenClaw 和 Cursor 说明为非默认但正式投影，不再放进兼容层；候选 probe 仍然保持分层。
+
+### 验证
+
+- `node scripts/sync-global-meta-theory.mjs --check --targets claude,codex,cursor,openclaw --with-global-hooks`
+- `npm run meta:project-cache:verify -- --real-global`
+- `npm run meta:project-cache:verify`
+- `npm run meta:install-scope:verify`
+- `node --test tests/setup/sync-global-hooks-policy.test.mjs tests/setup/install-scope-matrix.test.mjs`
+- `node scripts/validate-runtime-safety-contract.mjs`
+- `git diff --check`
+
+## [2.8.41] - 2026-06-16
+
+### 解决的问题
+
+本次解决的是“Meta_Kim 选中了能力”与“宿主真的调用了能力”之间看不见的断层。现在用户能看到 Claude Code 或 Codex 还需要执行什么动作、什么证据才算数，以及长期 Agent 为什么必须等宿主 reload 并真实调用后才算完成。
+
+### 变更
+
+- **宿主调用请求契约** - 新增 `hostInvocationRequestPacket`；当 Agent、Skill、MCP、command/script、runtime tool、`agent-teams-playbook` 被选中但还没有 live 调用证据时，会明确列出 Claude Code 或 Codex 宿主下一步必须执行的动作，不再把缺失调用藏在 partial 报告里。
+- **可信证据边界** - 收紧 governed execution：host request、CLI/env claim、markdown report、app 可见 badge 都不能当执行证明；只有 trusted host adapter 返回带 state、provider/surface、evidence kind、evidence ref 的新鲜证据才能计入通过。
+- **长期 Agent 生命周期证明** - 新增 `durableAgentLifecyclePacket`；长期智能体必须经过 definition candidate、Warden approval/writeback、host reload/discovery、live invocation proof 四关，才能宣称完成。
+- **Runtime Adapter 指南** - 更新 Claude Code 和 Codex runtime reference，区分 runner handoff、真实宿主 provider 调用、长期项目 agent 发现机制，为后续 adapter 实现留出清晰接口。
+- **产品证据贯通** - 扩展 run report、product delivery bundle、validators 和 support gates，使宿主调用请求和长期 agent 生命周期状态进入产品验收证据链。
+
+### 验证
+
+- `node --test tests/governance/core-loop-contract.test.mjs tests/meta-theory/32-meta-theory-four-product-targets.test.mjs tests/meta-theory/34-run-deliverables.test.mjs tests/meta-theory/43-product-delivery-bundle.test.mjs`
+- `npm run meta:test:meta-theory`
+- `npm run meta:check`
+- `git diff --check`
+
+## [2.8.40] - 2026-06-16
+
+### 解决的问题
+
+本次解决的是全局 Meta_Kim 已更新，但打开的项目仍发现不了新治理入口的问题。Prompt 入口现在会说明为什么启动治理，并在写入任何项目文件前先探测项目就绪状态。
+
+### 变更
+
+- **Prompt 入口治理激活** - Claude Code 和 Codex 的项目级 prompt 入口现在会运行 meta-theory spine hook；自然语言 durable work 和 `critical/fetch/thinking/review` 说法可以在执行前触发治理，不再只依赖显式 Skill 激活。
+- **Claude 全局项目就绪检测** - Claude Code 全局 hooks 现在会安装 prompt-entry bootstrap hook package，并带 package-root 证据；旧项目或未 bootstrap 项目会先收到精简的项目就绪原因，再决定是否应用项目文件。
+- **项目 Bootstrap 安全边界** - Project bootstrap 仍然坚持 dry-run first 和确认门；stale 或 equivalent 项目只显示 `status`、active targets、reason 和 native choice 要求，不会静默写入。
+- **Spine 死锁解除** - 即使 Fetch 正在等待 `fetchRecord`，spine-state 写入也会放行，避免 prompt-entry 实机测试后维护者无法写入 Fetch 证据或关闭运行态。
+- **全局能力证据刷新** - 安装新的 hook package 后刷新全局能力发现；库存现在能看到 Meta_Kim 全局 prompt-entry hook，以及 agents、skills、commands、MCP servers/tools、plugins 和 runtime hooks。
+
+### 验证
+
+- `node --test tests/setup/graphify-wiring-contract.test.mjs tests/meta-theory/11-eight-stage-spine.test.mjs tests/setup/sync-runtimes-manifest.test.mjs tests/setup/sync-global-hooks-policy.test.mjs tests/meta-theory/47-meta-theory-entry-classifier.test.mjs tests/governance/capability-routing.test.mjs`
+- `node --check canonical/runtime-assets/shared/hooks/activate-meta-theory-spine.mjs`
+- `node --check canonical/runtime-assets/claude/hooks/enforce-agent-dispatch.mjs`
+- `npm run meta:sync`
+- `npm run meta:sync:global -- --with-global-hooks`
+- `npm run discover:global`
+- 在 `D:/KimProject/游戏策划案` 中执行 Claude Code 全局 `UserPromptSubmit` 实机 smoke
+- 在 `D:/KimProject/Meta_Kim` 中执行 Codex 项目 `UserPromptSubmit` 实机 smoke
+
+## [2.8.39] - 2026-06-16
+
+### 解决的问题
+
+本次解决的是“发牌写在契约里，但用户看不到也证明不了它触发”的问题。发牌决策现在有评分、证据、反事实检查和精简的用户可见理由。
+
+### 变更
+
+- **发牌准确性标准** - 将 `cardPlanPacket` 升级到 v0.2；每张牌都必须记录 deal/suppress/defer/skip/interrupt/escalate 决策，并带 80 分标准、量化信号、证据引用和反证检查。
+- **用户可见发牌原因** - 在 run-start 和报告里新增精简说明：为什么触发发牌、多少张牌进入节奏控制、最低分是否通过。
+- **契约化发牌证明** - 将 `dealStandard` 设为 `cardPlanPacket` 必填字段，对齐生成的 card shell/source/silence/control decision，并刷新 validator fixtures。
+- **Deep Research 风格发牌审查** - 每张牌的判断都绑定决策影响和反事实检查；不需要的牌会带证据 suppress，不再只是模糊 defer。
+- **全局发现就绪** - 已把更新后的 meta-theory skill 同步到项目和全局 runtime home，并刷新 Claude Code、Codex、OpenClaw、Cursor 的全局能力库存。
+
+### 验证
+
+- `node --test tests/meta-theory/14-card-deck-complete.test.mjs tests/meta-theory/34-run-deliverables.test.mjs tests/meta-theory/12-ten-step-workflow.test.mjs tests/meta-theory/07-contract-compliance.test.mjs`
+- `node scripts/run-meta-theory-governed-execution.mjs --task "帮我做个小红书营销自动发布器" --run-id card-proof --emit-conversation-notice`
+- `npm run meta:check`
+- `npm run meta:test:meta-theory`
+- `npm run discover:global`
+- `npm run meta:sync:global`
+- `npm run meta:check:global`
+- `npm run meta:release:smoke`
+
+## [2.8.38] - 2026-06-16
+
+### 解决的问题
+
+本次解决的是 11 阶段业务流因为列出阶段名就看似完成的问题。每个阶段现在都要有证据、评分，以及 trigger/skip/block/wait 的明确判断。
+
+### 变更
+
+- **11 阶段触发标准** - 将 `businessPhasePlanPacket` 升级到 v0.2；每个阶段都必须记录 trigger/skip/block/wait 决策、评分、证据引用、量化信号和反证检查，不再因为列出 11 个阶段名就通过。
+- **业务流覆盖真实性** - 用契约对齐的 `complete` / `incomplete` 判断和 `coverageDetail` 替换旧的 phase-count-only 字符串，避免把“已记录”和“准确触发”混在一起。
+- **精简开场原因** - 新增 run-start 用户可读说明，解释为什么触发 8 阶段 spine 和 11 阶段业务流；说明保持短句，并绑定证据，不倾倒内部 packet。
+- **Deep Research 风格阶段证据** - 阶段判断现在绑定关键信号、反事实检查和决策证据；例如 Revision 的准确跳过、Feedback 的外部等待会被明确表示。
+- **报告可见性** - 用户可读 meta-theory 报告和 CLI conversation notice 现在会显示触发状态、触发评分和开场原因。
+
+### 验证
+
+- `node --test tests/meta-theory/34-run-deliverables.test.mjs`
+- `node --test tests/meta-theory/12-ten-step-workflow.test.mjs tests/meta-theory/09-run-artifact-validator.test.mjs`
+- `npm run meta:check`
+- `npm run meta:test:meta-theory`
+- `npm run discover:global`
+- `npm run meta:check:global`
+- `npm run meta:release:smoke`
+- `git diff --check`
+
+## [2.8.37] - 2026-06-16
+
+### 解决的问题
+
+本次解决的是 Review、Meta-Review、Evolution 浅层通过的问题。运行现在必须证明证据质量、盲区检查、可复用学习判断和 public-ready 边界，而不是只靠 packet 存在就通过。
+
+### 变更
+
+- **深度 Review 门禁** - Prompt-first live acceptance 现在要求 Review 证明已检查证据质量、反证、决策影响、可证伪性和上游阶段链路，不再只靠 packet 存在就通过。
+- **Meta-Review 深度审计** - 新增机械化深度审计：拒绝浅层 packet-only Review，检查对抗覆盖和审查盲区，并把 public-ready 证据与 live/runtime 证据分开。
+- **Evolution 策略证据** - Evolution 的 `none-with-reason` 现在必须证明已判断可复用模式、写回目标、scar 需求和下次复用 key。
+- **Strict Live Acceptance 回归** - 新增回归覆盖，确保缺失或浅层 Review / Meta-Review / Evolution packet 会失败，而不是被 fallback 数据补成通过。
+
+### 验证
+
+- `node --test tests/governance/prompt-first-live-acceptance.test.mjs`
+- `node --test tests/governance/decision-cross-validation.test.mjs tests/governance/prompt-first-live-acceptance.test.mjs`
+- `npm run meta:check`
+- `npm run meta:test:meta-theory`
+- `npm run meta:sync`
+- `npm run discover:global`
+- `npm run meta:check:global`
+- `npm run meta:prd:prompt-first-live:validate`
+- `git diff --check`
+
+## [2.8.36] - 2026-06-16
+
+### 解决的问题
+
+本次解决的是还没查已有专业能力就新建或路由到执行 Agent 的问题。Meta_Kim 现在先查全局和项目 provider，把 worker task 限定为单次工作单，并在安装或更新后刷新本地能力库存。
+
+### 变更
+
+- **专业 Provider 优先路由** - 治理路线现在必须先查已有的全局/项目专业 provider，再考虑创建或升级 execution agent；覆盖 agents、skills、commands、MCP providers/tools、runtime tools、hooks、plugins、memory/graph providers 和 dependency providers。
+- **WorkerTask 身份边界** - 明确并验证 `workerTaskPacket` 只是绑定到已选 owner/loadout 的单次运行工作单，不是临时小 agent、subagent definition 或长期 provider 身份。
+- **全局能力库存自动刷新** - 安装/更新和全局依赖安装/更新流程会在 runtime home 变化后自动刷新本地 global capability inventory，同时仍然不把机器私有库存提交到 GitHub 源码。
+- **能力缺口证据** - 新增 `fetch.global_professional_providers_checked` 证据和回归覆盖，要求 `create_agent` 决策先证明已有专业 provider 已经查过且不足。
+- **Setup 回归覆盖** - 新增自动刷新全局库存的发布测试，并修正 project deploy 保护式 JSON merge 测试，使其匹配当前“先规划、再写入”的实现结构。
+
+### 验证
+
+- `npm run meta:release:smoke`
+- `npm run meta:test:setup`
+- `npm run meta:validate`
+- `npm run discover:global`
+- `npm run meta:gap:real-input-replay`
+- `npm run meta:prd:smooth-capability:validate`
+- `npm run meta:runtime:validate`
+- `npm run meta:graphify:rebuild`
+- `git diff --check`
+
+## [2.8.35] - 2026-06-16
+
+### 解决的问题
+
+本次解决的是 deep research 只收集来源、没有真正改善决策的问题。Fetch 现在会锁定关键信息、迭代查询和阅读、记录停止条件，并阻止弱证据或未验证声明进入 Thinking。
+
+### 变更
+
+- **决策级 Deep Research** - 将 Fetch 证据从“收集来源”升级为“锁定关键信息目标、记录多轮 query/read/update、声明停止条件、写入决策更新规则”，再进入 Thinking。
+- **Claim Evidence Cards** - 新增 `claimEvidenceCards` 和更严格的 run artifact 校验；会改变路线的 claim 必须绑定可解析 evidence refs、反证记录、置信度、falsification 状态和决策影响。
+- **研究执行证据** - 扩展 live research execution packet，记录 query 迭代次数、证据 gap 是否关闭、confidence 前后变化和反证尝试，避免 blocked evidence 被带入 Thinking。
+- **Canonical 治理对齐** - 更新 Scout、Conductor、Prism 和 meta-theory dispatcher，让 deep research 质量由角色责任、生成 packet、validator、fixtures 和回归测试共同约束，而不是只靠提示词描述。
+
+### 验证
+
+- `node scripts/run-node-tests.mjs "tests/meta-theory/02-clarity-gate.test.mjs" "tests/meta-theory/37-research-preparation-layer.test.mjs" "tests/meta-theory/44-research-execution-and-innovation.test.mjs" "tests/meta-theory/09-run-artifact-validator.test.mjs"`
+- `npm run meta:check`
+- `npm run meta:release:smoke`
+- `node scripts/run-node-tests.mjs "tests/meta-theory/09-run-artifact-validator.test.mjs"`
+- `git diff --check`
+
+## [2.8.34] - 2026-06-16
+
+### 解决的问题
+
+本次解决的是安装/更新时混淆全局通用能力、项目投影和开源包内容的问题。默认目标、平台分层和包边界现在会明确说明什么被安装、什么只是本地生成、什么只是兼容候选 probe。
+
+### 变更
+
+- **安装范围边界** - 恢复并明确默认安装/更新模型：全局通用能力 + 当前项目投影，并修正为按目标平台选择落地；默认回车只投影 Claude Code + Codex，Cursor / OpenClaw 只有作为“正式投影兼容目标”被显式选择时才生成项目文件。
+- **开源 runtime 投影边界** - 新增发布验证器，确保 `.codex/`、`.agents/`、`.claude/`、`.cursor/`、`openclaw/` 等生成的 runtime projection 不进入 GitHub source 或 package files，并明确 Codex adapter / business-role TOML 只是本地宿主投影，不是治理 agent 源码。
+- **平台兼容分层** - 安装契约和验证输出现在会区分正式投影、依赖项目目标和候选 probe；公开文档不再重复上游依赖项目的安装矩阵，也不把它写成 Meta_Kim 支持承诺。
+- **公开平台口径** - 更新 README 徽章、平台支持表和跨平台映射说明，让默认正式投影、显式正式兼容投影、候选兼容 probe 分开可见；同步刷新 Qoder 官方文档链接，并把 Cline 官方 Skills primitive 纳入 catalog。
+- **项目治理体验** - 更新 PRD、setup 与 README 文案：全局 skill 只是可复用的发现入口，其他目录必须先 dry-run 项目 bootstrap 并确认后才允许写入项目文件；`AGENTS.md` 只按平台特性作为上下文资产描述，不再被写成 Codex/Cursor/OpenClaw 的统一入口。
+- **安装范围验证** - 新增 `npm run meta:install-scope:verify`，用临时全局 home 和临时项目 bootstrap 实测各平台项目投影边界，并输出全局层 / 项目层分类结果。
 
 ## [2.8.33] - 2026-06-15
+
+### 解决的问题
+
+本次解决的是用户需要手动维护全局 Meta_Kim 和每个项目运行时投影的问题。项目 bootstrap 现在先 dry-run、展示来源链、保留用户文件，并且只在确认后写入项目。
 
 ### 新增
 
@@ -33,6 +824,10 @@
 
 ## [2.8.32] - 2026-06-15
 
+### 解决的问题
+
+本次解决的是 Codex 治理工作静默退回主线程单干的问题。复杂工作在安全时会进入 fan-out；宿主派发不可用、provider 被选中但没调用，都会作为 partial 证据展示。
+
 ### 变更
 
 - **Codex Meta-Theory 并行编排** - 显式 `/meta-theory` 和复杂治理任务在存在多条安全 worker lane 时，会进入 fan-out eligible 路线，避免 Codex 静默退回主线程单干。
@@ -45,6 +840,10 @@
 - `git diff --check`
 
 ## [2.8.31] - 2026-06-14
+
+### 解决的问题
+
+本次解决的是动态工作流规划和真实并行执行之间缺少桥的问题。Meta_Kim 只在存在多条安全可执行 lane 时选择 agent-teams playbook，并区分 provider 选择、subagent 调用、MCP、skill、command、hook 和本地 worker。
 
 ### 新增
 
@@ -70,6 +869,10 @@
 
 ## [2.8.30] - 2026-06-13
 
+### 解决的问题
+
+本次解决的是运行时支持口径过宽、研究结论太容易被接受的问题。发布说明把主安装默认项与兼容 probe 分开，并把 deep research 变成带来源质量和综合规则的 Fetch 合同。
+
 ### 变更
 
 - **主链安装默认项** - 将安装/更新时直接回车的默认目标改为 Claude Code + Codex，同时保留 OpenClaw、Cursor 的显式 all-runtime 或 `--targets` 选择路径。
@@ -85,6 +888,10 @@
 - `node setup.mjs --update --lang zh --targets claude,codex --project-dir <dir>...`
 
 ## [2.8.29] - 2026-06-13
+
+### 解决的问题
+
+本次解决的是关键分支决策被聊天文字或 artifact fallback 冒充完成的问题。Codex 和 Claude Code 的必需决策必须走原生选择面，同时治理运行能展示用户可读进度。
 
 ### 新增
 
@@ -106,6 +913,10 @@
 - `git diff --check`
 
 ## [2.8.28] - 2026-06-13
+
+### 解决的问题
+
+本次解决的是默认治理执行看似完成、但证据层级混在一起的问题。产品 validator 现在检查核心目标、默认执行证据、research-to-native 采纳、运行时优先级和能力发现，同时避免把结构证据说成 live proof。
 
 ### 新增
 
@@ -132,6 +943,10 @@
 
 ## [2.8.27] - 2026-06-13
 
+### 解决的问题
+
+本次解决的是规划能列很多 lane，却证明不了 owner、依赖和验证是否就绪的问题。编排合同现在要求可用看板、明确依赖策略和可审查交接，之后才能执行。
+
 ### 新增
 
 - **Prompt-first 实机验收** - 新增和 PRD 绑定的 live acceptance contract 与 runner，要求同一套框架型 prompt 在 Claude Code 和 Codex 上都跑通，才能声明 prompt-first 全流程完成。
@@ -153,6 +968,10 @@
 
 ## [2.8.26] - 2026-06-12
 
+### 解决的问题
+
+本次解决的是 local/private PRD 状态、公开文档和实现证据漂移的问题。剩余产品工作现在用更清晰的 dossier、validator 和公开安全的状态语言跟踪。
+
 ### 修复
 
 - **Meta-Theory 深度 Fetch 入口** - 项目/仓库/代码库理解、商业化发展和策略类问题现在会进入治理化 Fetch 路径，不再落到浅层 fast path 回答。
@@ -170,6 +989,10 @@
 
 ## [2.8.25] - 2026-06-12
 
+### 解决的问题
+
+本次解决的是产品目标到底完成、部分完成还是阻塞反复混淆的问题。产品体验清单现在把完成声明绑定到具体证据，而不是宽泛状态词。
+
 ### 修复
 
 - **Claude Code 全局 Hook 清理** - 全局 Meta_Kim 同步现在会校验 Claude Code `settings.json` 里的 hook 命令，不再只检查 `~/.claude/hooks/meta-kim/` 包目录。这样可以抓到指向已删除脚本的旧全局 Meta_Kim hook 注册，避免 Claude Code 在 Stop 阶段反复报 `MODULE_NOT_FOUND`。
@@ -184,6 +1007,10 @@
 - `git diff --check`
 
 ## [2.8.24] - 2026-06-12
+
+### 解决的问题
+
+本次解决的是 host config、hook 协议、删除残留和证据表达经常在发布前漏检的问题。Checklist 和 PR 模板现在要求写清 source of truth、host-state 影响、清扫范围和证据预算。
 
 ### 变更
 
@@ -209,6 +1036,10 @@
 
 ## [2.8.23] - 2026-06-12
 
+### 解决的问题
+
+本次解决的是发布前容易沿用过期图谱或包边界假设的问题。发布路径现在把 Graphify 和开源包边界作为显式检查项。
+
 ### 变更
 
 - **Run-scoped Worker 实机执行** - `meta:theory:run` 现在会通过本地 run-scoped worker executor 执行 bounded worker task packets，不再停在结构化调度就绪。主线程仍然只负责 scope、dispatch、review 和 synthesize；不会额外派外部 Agent。
@@ -219,6 +1050,10 @@
 
 ## [2.8.22] - 2026-06-12
 
+### 解决的问题
+
+本次解决的是生成的 runtime projection 可能偏离 canonical Meta_Kim 行为的问题。同步覆盖和 runtime 检查现在能在发布前更容易抓到投影差距。
+
 ### 变更
 
 - **核心治理线路发布证据收口** - 补齐 PDR 发布清单和最终发布证据，让最终 tag 内包含 commit、tag、push 和 GitHub Release 证明。
@@ -228,6 +1063,10 @@
 - 复用 `2.8.21` 的核心治理线路实现证据，并为最终 `2.8.22` patch 发布重新运行本地发布检查。
 
 ## [2.8.21] - 2026-06-12
+
+### 解决的问题
+
+本次解决的是能力缺口判断从“需要能力”直接跳到“创建 Agent”的问题。现在 capability gap 会先比较 skill、script、MCP provider、runtime tool 和已有 Agent，再允许持久创建。
 
 ### 变更
 
@@ -252,6 +1091,10 @@
 
 ## [2.8.20] - 2026-06-11
 
+### 解决的问题
+
+本次解决的是 Meta_Kim 可以报告治理进度，却证明不了用户可见交付链闭合的问题。Run report 和 product bundle 现在带更清楚的完成、警告和剩余动作证据。
+
 ### 变更
 
 - **项目 Hook 归属合理化** - 项目级运行时导出现在只保留和 Meta_Kim 项目行为强相关的 hook，例如图谱上下文、能力优先调度和 meta-theory 激活。提示词优化、记忆生命周期、planning 辅助、通用危险命令拦截这类个人通用 hook，统一留在全局运行时目录，不再重复投影到每个项目。
@@ -271,6 +1114,10 @@
 - `git diff --check`
 
 ## [2.8.19] - 2026-06-11
+
+### 解决的问题
+
+本次解决的是 GitHub 完成、运行时兼容和本地验证被混成一个 done 结论的问题。完成证据和兼容证据现在分开，每个 blocker 都有 owner 和下一步。
 
 ### 变更
 
@@ -292,6 +1139,10 @@
 - `git diff --check`
 
 ## [2.8.18] - 2026-06-11
+
+### 解决的问题
+
+本次解决的是 live/runtime evidence 中 timeout、skipped、partial 结果容易被误当 release-grade 成功的问题。Runtime probe 现在更严格分类证据，并保留恢复路径。
 
 ### 修复
 
@@ -317,6 +1168,10 @@
 - 已安装用户路径 hook 合并 smoke：重新安装 `planning-with-files` 后，Codex 同时保留 `user_prompt_submit.py` 和 `hookprompt-adapter.mjs`；Cursor 的 `beforeSubmitPrompt` 仍保留 `hookprompt-adapter.mjs`。
 
 ## [2.8.17] - 2026-06-11
+
+### 解决的问题
+
+本次解决的是生成报告和产品表面太散，导致治理运行难以检查的问题。报告现在围绕决策、审查和后续行动需要的证据收束。
 
 ### 修复
 
@@ -344,6 +1199,10 @@
 
 ## [2.8.16] - 2026-06-10
 
+### 解决的问题
+
+本次解决的是复制出来的项目文件存在，但目标项目并没有真正初始化的问题。Post-copy 流程现在在最终项目根目录初始化 Graphify，并避免把临时导出目录当成真实项目。
+
 ### 修复
 
 - **复制后自动初始化 Graphify** - 复制到任意项目根目录的 Meta_Kim 项目级文件夹，不再要求用户记住并手动运行 `node meta-kim-post-copy.mjs`。首次触发 `meta-theory` 时，Meta_Kim 会从最终项目根目录自动启动 post-copy bootstrap。
@@ -365,6 +1224,10 @@
 
 ## [2.8.15] - 2026-06-10
 
+### 解决的问题
+
+本次解决的是用户把生成文件移动到真实项目后，copy-ready 设置失效的问题。Bootstrap 脚本现在从复制后的目标目录运行，并把 Graphify 设置绑定到最终项目目录。
+
 ### 修复
 
 - **可复制目录的 Graphify 初始化** - quick setup 或 install/update 导出的项目级文件夹现在会包含 `meta-kim-post-copy.mjs`。当你先把生成目录放在桌面等临时位置，再把其中全部内容复制到任意项目根目录后，在最终项目里运行 `node meta-kim-post-copy.mjs` 即可为该项目初始化 Graphify。
@@ -382,6 +1245,10 @@
 - `git diff --check`
 
 ## [2.8.14] - 2026-06-10
+
+### 解决的问题
+
+本次解决的是安装/更新输出像失败或英文内部日志，而不是可执行用户状态的问题。提示现在本地化，预期的宿主插件手动步骤会诚实标记，HookPrompt 输出也不会破坏 Markdown 渲染。
 
 ### 修复
 
@@ -408,6 +1275,10 @@
 
 ## [2.8.13] - 2026-06-10
 
+### 解决的问题
+
+本次解决的是 ECC 安装覆盖 Codex App 用户配置、导致原生控制能力断开的风险。Meta_Kim 现在以用户配置为基底，只 add-only 合入 ECC，并恢复 Browser、Chrome、Computer Use 插件设置。
+
 ### 修复
 
 - **Codex App 原生控制保护** - Meta_Kim 现在会在运行 ECC Codex home installer 前保护用户已有的 `~/.codex/config.toml`。这次问题是因为发现 ECC 的 Codex 安装路径会把它自己的 reference `config.toml` 覆盖到用户的 Codex App 配置上，进而导致 Codex 的 Computer Use 和 Chrome 插件连接失效。
@@ -424,6 +1295,10 @@
 - `git diff --check`
 
 ## [2.8.12] - 2026-06-10
+
+### 解决的问题
+
+本次解决的是 HookPrompt 在 Codex 看起来运行了，但优化提示词没有稳定进入模型上下文的问题。Codex 现在使用模型可见的 `additionalContext` 包，UI 提示继续独立。
 
 ### 修复
 
@@ -445,6 +1320,10 @@
 
 ## [2.8.11] - 2026-06-09
 
+### 解决的问题
+
+本次解决的是全局 hook 过重或过度绑定特定 runtime 的问题。Meta_Kim 现在区分安全的全局可复用 hook 和更强的项目级治理 hook，并按 runtime 验证 HookPrompt provider 映射。
+
 ### 变更
 
 - **全局和项目级 Hook 策略** - Meta_Kim 现在明确区分项目级治理 hook 和全局可复用 hook。派工强校验、Graphify 上下文、meta-theory spine 这类强治理能力默认留在项目级；全局安装只放记忆保存、HookPrompt、OpenClaw memory bridge 这类安全可复用入口。
@@ -462,6 +1341,10 @@
 - `node --test tests/governance/provider-capabilities.test.mjs`
 
 ## [2.8.10] - 2026-06-09
+
+### 解决的问题
+
+本次解决的是自然语言持久任务被迫套固定清单，或要求用户懂协议词的问题。Meta_Kim 现在按任务生成必要 lane，检查本地基线证据，并显示人能看懂的进度。
 
 ### 新增
 
@@ -489,6 +1372,10 @@
 
 ## [2.8.8] - 2026-06-09
 
+### 解决的问题
+
+本次解决的是报告和平台声明技术上没错、但用户难以理解的问题。工具支持等级、持久 Agent 边界和 runtime 目标来源现在用更朴素的方式表达。
+
 ### 变更
 
 - **工具端报告文案** - 公开报告保留协议标签，但配上人能看懂的说明。
@@ -509,6 +1396,10 @@
 
 ## [2.8.7] - 2026-06-09
 
+### 解决的问题
+
+本次解决的是能力发现太窄、太依赖工具名的问题。Fetch 现在会在 Thinking 选择 owner/loadout 前记录各支持投影的项目和全局库存。
+
 ### 变更
 
 - **跨工具端 Fetch 发现** - Claude Code、Codex、Cursor、OpenClaw 在 Thinking 前都要记录项目和全局能力库存证据。
@@ -525,6 +1416,10 @@
 - `git diff --check`
 
 ## [2.8.6] - 2026-06-05
+
+### 解决的问题
+
+本次解决的是 capability gap 只像松散脚本任务，而不像完整产品流程的问题。缺口现在有决策合同、回放证据、用户可见交付物、runtime 证据加固和报告卫生。
 
 ### 新增
 
@@ -552,6 +1447,10 @@
 
 ## [2.8.5] - 2026-06-03
 
+### 解决的问题
+
+本次解决的是小文案改动发布检查太重、runtime/security 工作检查又太弱的问题。发布模式现在区分快速常规检查和更严格的 release-grade evidence。
+
 ### 新增
 
 - **发布模式** - 低风险 prompt、文档、治理文案改动走快速发布路径；安装、runtime、hook、provider、dependency、package、安全和 live evidence 相关工作仍走更严格的 release-grade 路径。
@@ -559,6 +1458,10 @@
 - **Live 证据分类** - structural smoke、warning、skipped/needs-auth 和真实 runtime live pass 被明确区分。
 
 ## [2.8.4] - 2026-06-02
+
+### 解决的问题
+
+本次解决的是执行路线可能在没有证明 owner、provider、tool、verification 就绪前就推进的问题。Capability smoke 和 OpenClaw live 分片让真实路线就绪变得可测试。
 
 ### 新增
 
@@ -573,6 +1476,10 @@
 
 ## [2.8.3] - 2026-06-02
 
+### 解决的问题
+
+本次解决的是 provider discovery 散落在 tools、hooks、skills、plugins、MCP、memory、graph 表面的问题。Provider registry 给这些表面统一生命周期和验证模型。
+
 ### 新增
 
 - **Capability Provider Contract** - 增加 provider registry 和生命周期模型，用于管理 runtime-native tools、skills、agents、hooks、commands、rules、plugins、MCP servers、dependency projects、memory 和 graph providers。
@@ -585,6 +1492,10 @@
 
 ## [2.8.2] - 2026-06-02
 
+### 解决的问题
+
+本次解决的是 runtime 支持声明难比较、也容易夸大的问题。兼容性数据现在把 sync 行为、原生表面声明、package targets 和候选 probe 分开记录。
+
 ### 变更
 
 - **Runtime compatibility catalog** - runtime 支持数据归一到兼容性目录，覆盖 sync 行为、原生能力声明和 package targets。
@@ -592,12 +1503,20 @@
 
 ## [2.8.1] - 2026-06-02
 
+### 解决的问题
+
+本次解决的是公开文档没有清楚区分 supported、compatible、candidate runtime 状态的问题。README 和 runtime 文档现在更容易解释和验证这些状态。
+
 ### 变更
 
 - **公开支持口径** - README 和 runtime-facing docs 对齐 supported、compatible、candidate 状态。
 - **投影同步说明** - 项目本地和全局 sync 行为更容易解释和验证。
 
 ## [2.8.0] - 2026-06-01
+
+### 解决的问题
+
+本次解决的是按工具名路由会忽略 provider 就绪、runtime 支持、OS 支持、依赖和验证 owner 的问题。Meta_Kim 转向 provider-first governance，并把发布证据纳入常规流程。
 
 ### 新增
 
@@ -607,12 +1526,20 @@
 
 ## [2.7.0] - 2026-06-01
 
+### 解决的问题
+
+本次解决的是治理工作从 Agent 名字开始，而不是从能力需求开始的问题。Capability-first routing、owner/loadout evidence 和 runtime alignment 成为默认执行形态。
+
 ### 新增
 
 - **能力路由治理** - 引入 capability-first execution routing、owner/loadout evidence 和 provider discovery，作为治理工作的默认形态。
 - **工具端对齐** - Claude Code、Codex、OpenClaw、Cursor 围绕 canonical source 对齐，同时保留真实 runtime 限制。
 
 ## [2.6.x] - 2026-05-29 至 2026-05-30
+
+### 解决的问题
+
+这一组版本解决的是治理运行结束后难以审计的问题。报告、status envelope、研究准备、能力库存和全局发现变得更可见、更有来源。
 
 ### 新增
 
@@ -622,12 +1549,20 @@
 
 ## [2.5.x] - 2026-05-28
 
+### 解决的问题
+
+这一组版本解决的是决策缺少 runtime、OS、dependency、weapon、trigger、intent 和 choice-surface 共同门禁的问题。决策引擎和架构文档把这些检查显式化。
+
 ### 新增
 
 - **治理决策引擎** - 增加 runtime capability、OS compatibility、dependency capability、weapon routing、trigger-action policy、intent amplification、choice surfaces、dynamic lens selection 和 decision-pattern contracts。
 - **面向用户的架构文档** - 扩展 runtime capability、dependency discovery、owner/weapon routing 和 choice surfaces 说明。
 
 ## [2.4.x] - 2026-05-27 至 2026-05-28
+
+### 解决的问题
+
+这一组版本解决的是研究和接口集成工作在缺少检索或合同证据时就影响路线设计的问题。新增研究能力证据、集成 packet、未知字段处理和运行状态输出。
 
 ### 新增
 
@@ -637,6 +1572,10 @@
 
 ## [2.3.x] - 2026-05-26
 
+### 解决的问题
+
+这一组版本解决的是 worker 声称测试、命令成功或静默成功时缺少结构化证明的问题。执行证据和验证 schema 结构被收紧。
+
 ### 新增
 
 - **证据完整性合约** - worker 关于测试和命令成功的声明必须有结构化 execution evidence。
@@ -644,6 +1583,10 @@
 - **Validation contract 结构** - validation rules 迁移为更可复用的 schema 和 runner。
 
 ## [2.2.x] - 2026-05-25
+
+### 解决的问题
+
+这一组版本解决的是治理词汇和 Agent 创建规则太松，难以支撑持久执行的问题。Workflow packets、命名策略、dispatch evidence、agent factory 规则和 sub-agent 边界被显式化。
 
 ### 新增
 
@@ -658,12 +1601,20 @@
 
 ## [2.1.x] - 2026-05-23 至 2026-05-24
 
+### 解决的问题
+
+这一组版本解决的是模糊任务在用户选择和 public-ready 边界未清楚前就进入编排的问题。Critical、Fetch、Verification、summary closure 和 deliverable-chain gate 变得更明确。
+
 ### 新增
 
 - **选择和确认流程** - Critical 和 Fetch 对模糊需求、候选路径、用户确认有了更清晰的准入门。
 - **Public-ready gates** - 声称完成前，必须满足 verification、summary closure 和 deliverable-chain closure。
 
 ## [2.0.x] - 2026-04-11 至 2026-05-23
+
+### 解决的问题
+
+这一组版本解决的是需要一套可复用跨工具端治理架构，而不是散落 prompt 和一次性 runtime 文件的问题。Meta_Kim 2.x 建立了核心 spine、投影、记忆、Graphify、setup/update、打包和治理 Agent 基础。
 
 ### 新增
 

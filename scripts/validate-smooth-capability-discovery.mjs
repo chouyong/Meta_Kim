@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -91,16 +91,50 @@ function validateContract(contract, coreLoop, pkg) {
     "P-067 runtime provider type set drifted",
   );
   assert.equal(contract.expansionPolicy.noExpansionNeededAllowed, true);
+  assert.equal(
+    contract.globalProfessionalProviderFirst?.workerTaskBoundary,
+    "worker_task is a run-scoped dispatch packet for a selected owner/loadout; it is not a temporary agent identity, subagent definition, or durable provider.",
+    "P-067 must preserve workerTask as work order, not temporary agent",
+  );
+  for (const family of [
+    "execution_agent",
+    "skill",
+    "command_script",
+    "mcp_provider",
+    "runtime_tool",
+    "ordinary_tool",
+    "plugin_connector",
+    "dependency_provider",
+    "memory_graph",
+    "hook_runtime_adapter",
+    "prompt_rule_workflow",
+  ]) {
+    assert.ok(
+      contract.globalProfessionalProviderFirst?.providerFamilies?.includes(family),
+      `globalProfessionalProviderFirst missing provider family ${family}`,
+    );
+  }
   for (const forbidden of [
     "skill_only_discovery",
     "mcp_or_tool_swallowed_by_skill_or_script",
     "configured_provider_relabelled_as_live_invocation",
+    "workerTaskPacket_relabelled_as_execution_agent",
+    "temporary_small_agent_created_for_one_run_task",
+    "global_professional_provider_skipped_before_create_agent",
     "noExpansionNeeded_rejected_when_route_safe",
   ]) {
     assert.ok(contract.forbiddenBehaviors.includes(forbidden), `missing forbidden behavior ${forbidden}`);
   }
   assert.equal(contract.acceptanceCriteria.skillOnlyTarget, false);
   assert.equal(contract.acceptanceCriteria.overclaimTarget, 0);
+  assert.ok(
+    /global\/project professional providers/i.test(contract.acceptanceCriteria.professionalProviderFirst ?? ""),
+    "P-067 must require global/project professional provider search before agent creation",
+  );
+  assert.ok(
+    /must not be counted as execution_agent providers/i.test(contract.acceptanceCriteria.workerTaskIdentityBoundary ?? ""),
+    "P-067 must preserve workerTask identity boundary",
+  );
 
   for (const source of REQUIRED_CORE_SOURCES) {
     assert.ok(
@@ -135,7 +169,15 @@ function validateContract(contract, coreLoop, pkg) {
 }
 
 function validateDefaultArtifact(report) {
-  assert.equal(report.status, "pass");
+  assert.ok(
+    ["pass", "partial"].includes(report.status),
+    `default governed run status must be pass or honest partial, got ${report.status}`,
+  );
+  assert.equal(
+    report.defaultRuntimePath.status,
+    report.status,
+    "defaultRuntimePath.status must mirror the top-level governed run status",
+  );
   const discovery = report.coreLoop.fetchPacket.capabilityDiscovery;
   assert.ok(Array.isArray(discovery.searchLog), "capabilityDiscovery.searchLog must be an array");
   assert.ok(discovery.searchLog.length >= 10, "capabilityDiscovery.searchLog must record source families checked");
@@ -156,12 +198,24 @@ function validateDefaultArtifact(report) {
   }
   assert.doesNotMatch(
     serializedDiscovery,
-    /configured_provider_relabelled_as_live_invocation|workerTaskPacket_relabelled_as_workerResult/,
+    /configured_provider_relabelled_as_live_invocation|workerTaskPacket_relabelled_as_workerResult|workerTaskPacket_relabelled_as_execution_agent|temporary_small_agent_created_for_one_run_task|global_professional_provider_skipped_before_create_agent/,
     "capability discovery must not contain forbidden overclaim markers",
   );
 
   const workerTasks = report.coreLoop.thinkingPacket.workerTaskPackets;
   assert.ok(Array.isArray(workerTasks) && workerTasks.length > 0, "workerTaskPackets must stay separate");
+  for (const [index, task] of workerTasks.entries()) {
+    assert.notEqual(
+      task.executionMode,
+      "temporary_agent",
+      `workerTaskPackets[${index}] must not create a temporary small agent`,
+    );
+    assert.doesNotMatch(
+      JSON.stringify(task),
+      /temporary small agent|temporary agent identity|workerTask as agent/i,
+      `workerTaskPackets[${index}] must not describe workerTask as an agent identity`,
+    );
+  }
   assert.equal(
     report.coreLoop.reviewPacket.protocolCompliance.capabilityDiscoveryChecked,
     true,
@@ -170,6 +224,13 @@ function validateDefaultArtifact(report) {
 }
 
 function validatePrdMarkers() {
+  if (!existsSync(PRD_PATH)) {
+    return {
+      status: "private_evidence_not_attached",
+      requiredForPublicValidation: false,
+      path: "docs/ai-native-capability-gap-mvp-prd.zh-CN.md",
+    };
+  }
   const prd = readFileSync(PRD_PATH, "utf8");
   for (const marker of [
     "版本：v0.50",
@@ -184,6 +245,11 @@ function validatePrdMarkers() {
     assert.ok(prd.includes(marker), `PRD missing marker ${marker}`);
   }
   assert.match(prd, /P-067 \| T-006\/T-008[\s\S]*?\| 已测通 \|/);
+  return {
+    status: "attached",
+    requiredForPublicValidation: true,
+    path: "docs/ai-native-capability-gap-mvp-prd.zh-CN.md",
+  };
 }
 
 async function main() {
@@ -193,6 +259,7 @@ async function main() {
   validateContract(contract, coreLoop, pkg);
 
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "meta-kim-smooth-capability-"));
+  let governedExecutionStatus = "unknown";
   try {
     const report = await runMetaTheoryGovernedExecution({
       task: [
@@ -204,17 +271,20 @@ async function main() {
       dbPath: path.join(tempDir, "runs.sqlite"),
     });
     validateDefaultArtifact(report);
+    governedExecutionStatus = report.status;
   } finally {
     await rm(tempDir, { recursive: true, force: true });
   }
 
-  validatePrdMarkers();
+  const prdEvidence = validatePrdMarkers();
   process.stdout.write(
     `${JSON.stringify({
       status: "pass",
+      governedExecutionStatus,
       contract: "config/contracts/smooth-capability-discovery-contract.json",
       providerTypes: REQUIRED_PROVIDER_TYPES,
       firstClassFamilies: REQUIRED_FAMILIES.length,
+      privateEvidence: [prdEvidence],
     }, null, 2)}\n`,
   );
 }

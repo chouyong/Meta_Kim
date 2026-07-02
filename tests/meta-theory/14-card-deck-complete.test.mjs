@@ -120,6 +120,45 @@ describe("Part A: cardGovernance contract", async () => {
       );
     }
   });
+
+  test("dealAccuracyStandard is measurable and evidence-backed", () => {
+    const standard = cg.dealAccuracyStandard ?? {};
+    assert.equal(standard.schemaVersion, "card-deal-standard-v0.1");
+    assert.equal(standard.passThreshold, 80);
+    for (const state of [
+      "accurate_deal",
+      "accurate_interrupt",
+      "accurate_suppress",
+      "weak_deal",
+      "weak_interrupt",
+      "unsupported_suppress",
+    ]) {
+      assert.ok(
+        standard.decisionStateEnum?.includes(state),
+        `missing card decision state: ${state}`,
+      );
+    }
+    for (const field of [
+      "decisionState",
+      "accuracyScore",
+      "passThreshold",
+      "expectedDecision",
+      "activationRule",
+      "quantitativeSignals",
+      "evidenceRefs",
+      "falsificationChecks",
+    ]) {
+      assert.ok(standard.requiredFields?.includes(field), `missing field: ${field}`);
+    }
+    for (const field of ["signal", "observed", "expected", "pass"]) {
+      assert.ok(
+        standard.signalRequiredFields?.includes(field),
+        `missing signal field: ${field}`,
+      );
+    }
+    assert.match(standard.rule ?? "", /Deck presence or hardcoded order is not enough evidence/i);
+    assert.match(standard.deepResearchBinding ?? "", /deep-research claim evidence cards/i);
+  });
 });
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -294,8 +333,11 @@ describe("Part E: card protocol structures", async () => {
     const required = [
       "dealerOwner",
       "dealerMode",
-      "cards",
+      "cardEvents",
+      "cardTypeCatalog",
+      "cardTypeDecisions",
       "deliveryShells",
+      "dealStandard",
       "silenceDecision",
       "controlDecisions",
       "defaultShellId",
@@ -589,18 +631,19 @@ describe("Part I: warden escalation integration", async () => {
   });
 
   test("warden owns public display gate", () => {
-    // Warden controls surfaceState: public-ready, debug-surface, internal-ready
+    // Warden controls publicReadinessState: public-ready, debug-surface, internal-ready.
+    // Runtime surfaceState remains silent/notice/decision interaction mode.
     // This is the public display gate ownership
     const patterns = [
       /public.*display/i,
       /public.display/i,
       /gate.*ownership/i,
-      /surfaceState.*public/i,
+      /publicReadinessState.*public/i,
       /public.*ready.*warden/i,
     ];
     assert.ok(
       patterns.some((p) => p.test(warden)),
-      "meta-warden must own public display gate (controls surfaceState)",
+      "meta-warden must own public display gate (controls publicReadinessState)",
     );
   });
 });

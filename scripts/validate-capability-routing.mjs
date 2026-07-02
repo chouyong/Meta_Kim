@@ -22,30 +22,45 @@ assert(Array.isArray(fuzzy.ownerDiscoveryPacket?.projectRuntimeSkillProviders), 
 assert(Array.isArray(fuzzy.ownerDiscoveryPacket?.localGlobalSkillProviders), "Route output must expose local/global skill provider discovery");
 assert(Array.isArray(fuzzy.ownerDiscoveryPacket?.projectRuntimeCapabilityProviders), "Route output must expose project runtime capability provider discovery");
 assert(Array.isArray(fuzzy.ownerDiscoveryPacket?.localGlobalCapabilityProviders), "Route output must expose local/global capability provider discovery");
+const projectProjectionPolicy = fuzzy.ownerDiscoveryPacket?.projectProjectionPolicy ?? {};
+const projectRuntimeProvidersExpected = projectProjectionPolicy.projectRuntimeProvidersExpected !== false;
+assert(typeof projectProjectionPolicy.projectProjectionMode === "string", "Route output must expose project projection mode");
 assert(
-  fuzzy.ownerDiscoveryPacket.projectRuntimeCapabilityProviders.some((provider) => provider.id === "codex-hooks-json" && provider.sourceRef === ".codex/hooks.json"),
-  "Route output must expose .codex/hooks.json as a real Codex hook config provider",
+  ["project_runtime_inventory", "local_global_runtime_inventory"].includes(projectProjectionPolicy.validationProviderLayer),
+  "Route output must expose which provider layer validates runtime projections",
 );
-for (const [providerId, providerPath] of [
-  ["claude-settings-json", ".claude/settings.json"],
-  ["cursor-hooks-json", ".cursor/hooks.json"],
-  ["openclaw-template-json", "openclaw/openclaw.template.json"],
-]) {
+if (projectRuntimeProvidersExpected) {
   assert(
-    fuzzy.ownerDiscoveryPacket.projectRuntimeCapabilityProviders.some((provider) => provider.id === providerId && provider.sourceRef === providerPath),
-    `Route output must expose ${providerPath} as a real runtime config provider`,
+    fuzzy.ownerDiscoveryPacket.projectRuntimeCapabilityProviders.some((provider) => provider.id === "codex-hooks-json" && provider.sourceRef === ".codex/hooks.json"),
+    "Route output must expose .codex/hooks.json as a real Codex hook config provider",
+  );
+  for (const [providerId, providerPath] of [
+    ["claude-settings-json", ".claude/settings.json"],
+    ["cursor-hooks-json", ".cursor/hooks.json"],
+    ["openclaw-template-json", "openclaw/openclaw.template.json"],
+  ]) {
+    assert(
+      fuzzy.ownerDiscoveryPacket.projectRuntimeCapabilityProviders.some((provider) => provider.id === providerId && provider.sourceRef === providerPath),
+      `Route output must expose ${providerPath} as a real runtime config provider`,
+    );
+  }
+  assert(fuzzy.ownerDiscoveryPacket?.capabilityProviderCoverage?.projectRuntimeLightScan?.hooks >= 1, "Route output must expose project hook provider coverage");
+  assert(fuzzy.ownerDiscoveryPacket?.capabilityProviderCoverage?.projectRuntimeLightScan?.rules >= 1, "Route output must expose project rule/prompt provider coverage");
+} else {
+  assert(projectProjectionPolicy.projectProjectionMode === "global_only", "Project runtime providers may be absent only under global_only projection mode");
+  assert(projectProjectionPolicy.validationProviderLayer === "local_global_runtime_inventory", "global_only validation must use local/global runtime inventory");
+  assert(fuzzy.ownerDiscoveryPacket?.capabilityProviderCoverage?.localGlobalCached?.hooks >= 1, "global_only route validation must expose cached global hook provider coverage");
+}
+if (projectRuntimeProvidersExpected) {
+  assert(
+    fuzzy.ownerDiscoveryPacket.projectRuntimeAgents.some((agent) => agent.runtime === "openclaw" && agent.sourceRef?.startsWith("openclaw/workspaces/")),
+    "Route output must expose OpenClaw workspace agents as project runtime agent providers",
   );
 }
-assert(
-  fuzzy.ownerDiscoveryPacket.projectRuntimeAgents.some((agent) => agent.runtime === "openclaw" && agent.sourceRef?.startsWith("openclaw/workspaces/")),
-  "Route output must expose OpenClaw workspace agents as project runtime agent providers",
-);
 assert(
   fuzzy.ownerDiscoveryPacket.projectRuntimeCapabilityProviders.some((provider) => provider.id?.startsWith("package-script:") && provider.sourceRef?.startsWith("package.json#scripts.")),
   "Route output must expose package.json scripts as real command providers",
 );
-assert(fuzzy.ownerDiscoveryPacket?.capabilityProviderCoverage?.projectRuntimeLightScan?.hooks >= 1, "Route output must expose project hook provider coverage");
-assert(fuzzy.ownerDiscoveryPacket?.capabilityProviderCoverage?.projectRuntimeLightScan?.rules >= 1, "Route output must expose project rule/prompt provider coverage");
 assert(fuzzy.ownerDiscoveryPacket?.capabilityProviderCoverage?.localGlobalCached?.plugins >= 1, "Route output must expose cached global plugin provider coverage");
 assert(fuzzy.ownerDiscoveryPacket?.runtimeToolProviders?.some((provider) => provider.type === "runtimeTools"), "Route output must expose runtime tool providers");
 assert(fuzzy.ownerDiscoveryPacket?.capabilityProviderCoverage?.projectRuntimeLightScan?.runtimeTools >= 1, "Route output must count runtime tool providers");
@@ -53,6 +68,52 @@ assert(fuzzy.ownerDiscoveryPacket?.globalInventoryFreshness?.mode === "cached_gl
 assert(fuzzy.ownerDiscoveryPacket?.globalInventoryFreshness?.staleAfterMinutes === 20160, "Route output must use a 14-day global inventory stale threshold");
 assert(fuzzy.ownerDiscoveryPacket?.globalInventoryFreshness?.staleAfterDays === 14, "Route output must expose the 2-week capability refresh cadence");
 assert(typeof fuzzy.ownerDiscoveryPacket?.globalInventoryFreshness?.refreshRequiredBeforeExecution === "boolean", "Route output must expose whether refresh is required before execution");
+assert(fuzzy.autonomousCapabilityDiscovery?.requiredByDefault === true, "Governed durable work must self-start capability discovery by default");
+assert(
+  fuzzy.autonomousCapabilityDiscovery?.sourcesChecked?.includes("project_runtime_inventory") &&
+    fuzzy.autonomousCapabilityDiscovery?.sourcesChecked?.includes("claude_global_inventory_cache") &&
+    fuzzy.autonomousCapabilityDiscovery?.sourcesChecked?.includes("codex_global_inventory_cache") &&
+    fuzzy.autonomousCapabilityDiscovery?.sourcesChecked?.includes("cursor_global_inventory_cache") &&
+    fuzzy.autonomousCapabilityDiscovery?.sourcesChecked?.includes("openclaw_global_inventory_cache") &&
+    fuzzy.autonomousCapabilityDiscovery?.sourcesChecked?.includes("codex_global_skill_filesystem_light_scan") &&
+    fuzzy.autonomousCapabilityDiscovery?.sourcesChecked?.includes("mcp_inventory") &&
+    fuzzy.autonomousCapabilityDiscovery?.sourcesChecked?.includes("package_json_scripts"),
+  "Autonomous capability discovery must cover project inventory, all runtime global caches, global skills, MCP, and commands",
+);
+assert(
+  /~\/\.codex.*~\/\.claude.*~\/\.cursor.*~\/\.openclaw.*~\/\.agents/i.test(fuzzy.autonomousCapabilityDiscovery?.sourceRefPolicy ?? ""),
+  "Reportable sourceRef policy must be cross-runtime and home-relative",
+);
+assert(fuzzy.typeFirstRoutePolicy?.policyKind === "route_selection_invariant", "Route output must expose type-first route policy");
+assert(fuzzy.typeFirstRoutePolicy?.mustNotBecomeChecklist === true, "Type-first route policy must not become another checklist");
+assert(
+  fuzzy.typeFirstRoutePolicy?.axes?.objectType?.unclearAction === "return_null_or_capabilityGapPacket_or_reference_only",
+  "Unknown object types must return null, capability gap, or reference-only instead of guessing",
+);
+assert(
+  fuzzy.typeFirstRoutePolicy?.axes?.evidenceType?.forbiddenFallback === "validator_pass_as_runtime_truth",
+  "Evidence typing must forbid promoting validator pass into runtime truth",
+);
+assert(
+  fuzzy.typeFirstRoutePolicy?.axes?.ownershipType?.unclearAction === "preserve_or_block_until_owner_is_known",
+  "Unknown ownership must preserve or block instead of overwriting state",
+);
+assert(
+  fuzzy.routeExecutionGate?.typeFirstPolicyRef === "typeFirstRoutePolicy",
+  "Execution gate must point to the route type policy instead of adding a separate gate",
+);
+assert(
+  fuzzy.routeTypeClassification?.policyRef === "typeFirstRoutePolicy",
+  "Route output must classify current route types from the executable policy",
+);
+assert(
+  fuzzy.routeTypeClassification?.evidenceType?.claimLimit === "route_preview_not_runtime_truth",
+  "Route type classification must limit structural evidence claims",
+);
+assert(
+  fuzzy.routeTypeClassification?.objectType?.forbiddenFallbackAvoided === true,
+  "Route type classification must record that object fallback guessing was avoided",
+);
 assert(fuzzy.routeExecutionGate?.canPreviewRoute === true, "Stale cache may still allow route preview");
 assert(typeof fuzzy.routeExecutionGate?.canEnterExecution === "boolean", "Route output must expose whether Execution may start");
 assert(fuzzy.ownerDiscoveryPacket?.candidateReusableCapabilityProviders?.length > 0, "Route output must expose reusable capability providers before agent creation");
@@ -61,7 +122,7 @@ assert(Array.isArray(fuzzy.ownerDiscoveryPacket?.capabilityDiscoverySearchLog), 
 const routeSearchRefs = fuzzy.ownerDiscoveryPacket.capabilityDiscoverySearchLog
   .map((entry) => `${entry.source}:${entry.sourceRef}`)
   .join("\n");
-for (const requiredRef of [
+const projectRuntimeSearchRefs = [
   ".codex/agents",
   ".agents/skills",
   ".codex/commands",
@@ -75,11 +136,6 @@ for (const requiredRef of [
   ".claude/commands",
   ".claude/hooks",
   ".claude/settings.json",
-  "~/.claude/agents",
-  "~/.claude/skills",
-  "~/.claude/commands",
-  "~/.claude/hooks",
-  "~/.claude/settings.json",
   ".cursor/agents",
   ".cursor/skills",
   ".cursor/rules",
@@ -87,6 +143,17 @@ for (const requiredRef of [
   ".cursor/hooks",
   ".cursor/hooks.json",
   ".cursor/mcp.json",
+  "openclaw/workspaces",
+  "openclaw/skills",
+  "openclaw/hooks",
+  "openclaw/openclaw.template.json",
+];
+const globalRuntimeSearchRefs = [
+  "~/.claude/agents",
+  "~/.claude/skills",
+  "~/.claude/commands",
+  "~/.claude/hooks",
+  "~/.claude/settings.json",
   "~/.cursor/agents",
   "~/.cursor/skills",
   "~/.cursor/rules",
@@ -94,10 +161,6 @@ for (const requiredRef of [
   "~/.cursor/hooks",
   "~/.cursor/hooks.json",
   "~/.cursor/mcp.json",
-  "openclaw/workspaces",
-  "openclaw/skills",
-  "openclaw/hooks",
-  "openclaw/openclaw.template.json",
   "~/.openclaw/openclaw.json",
   "~/.openclaw/workspace-*",
   "~/.openclaw/skills",
@@ -109,6 +172,10 @@ for (const requiredRef of [
   "~/.codex/hooks.json",
   "~/.codex/config.toml",
   "~/.agents/skills",
+];
+for (const requiredRef of [
+  ...(projectRuntimeProvidersExpected ? projectRuntimeSearchRefs : [".meta-kim/local.overrides.json"]),
+  ...globalRuntimeSearchRefs,
 ]) {
   assert(routeSearchRefs.includes(requiredRef), `Route Fetch searchLog must include ${requiredRef}`);
 }
@@ -121,6 +188,24 @@ assert(fuzzy.recommendedRoute?.verificationOwner, "Recommended route needs verif
 assert(fuzzy.recommendedRoute?.runtime, "Recommended route needs runtime");
 assert(fuzzy.recommendedRoute?.os, "Recommended route needs OS");
 assert(fuzzy.recommendedRoute?.verificationMethod, "Recommended route needs verification method");
+
+const subjectiveQuality = route("这个页面不好看，帮我弄高级一点", "codex", "windows");
+assert(
+  subjectiveQuality.recommendedRoute?.id === "subjective-ui-design-orchestration:codex:windows",
+  "No-keyword subjective UI request must route to subjective UI orchestration",
+);
+assert(subjectiveQuality.autonomousCapabilityDiscovery?.userReminderDetected === false, "Subjective UI discovery must not depend on explicit stage words");
+assert(subjectiveQuality.recommendedRoute?.blockedReasons?.length === 0, "Subjective UI route should naturally bind providers before the choice gate");
+assert(
+  subjectiveQuality.workerTaskPacketDrafts?.some((packet) => packet.roleDisplayName === "frontend") &&
+    subjectiveQuality.workerTaskPacketDrafts?.some((packet) => packet.roleDisplayName === "test") &&
+    subjectiveQuality.workerTaskPacketDrafts?.some((packet) => packet.roleDisplayName === "review"),
+  "Subjective UI route must amplify into frontend, test, and review lanes",
+);
+assert(
+  !JSON.stringify(subjectiveQuality.recommendedRoute?.selectedCapabilityProviders ?? {}).includes("C:/Users/"),
+  "Route provider refs must not leak local absolute home paths",
+);
 
 const code = route("complex code refactor with tests");
 assert(!code.rankedRoutes.some((item) => item.dependencyProject === "kim-decision"), "Kim_Decision must not become implementation owner for pure code execution");
@@ -148,6 +233,14 @@ assert(missing.capabilityGapDecision?.decisionEvidence?.status === "pass", "Capa
 assert(missing.capabilityGapDecision?.decisionEvidence?.missingEvidence?.length === 0, "Capability-gap route decision must not miss required evidence");
 assert(missing.routeExecutionGate?.canEnterExecution === false, "Blocked capability-gap decision must close the Execution gate");
 assert(missing.routeExecutionGate?.blockedBy?.includes("capability_gap_decision_blocks_execution"), "Execution gate must name the capability-gap blocker");
+assert(
+  ["classified_route_can_be_scored", "blocked_with_reason", "capabilityGapPacket"].includes(missing.routeExecutionGate?.typeFirstDisposition),
+  "Explicit capability gap route must classify or degrade instead of guessing",
+);
+assert(
+  missing.routeTypeClassification?.gapDecisionRef === "capabilityGapDecision",
+  "Explicit capability gap route must connect type classification to capabilityGapDecision",
+);
 
 const claudeAgentSearch = route("在 Claude Code 里运行 agent 搜索不对 critical and fetch thinking and review", "claude_code", "windows");
 assert(

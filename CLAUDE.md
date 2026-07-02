@@ -8,11 +8,11 @@ If you only keep six rules in mind:
 
 - `meta-warden` is the public front door; the other meta agents are backstage specialists.
 - `canonical/agents/`, `canonical/skills/meta-theory/`, `canonical/runtime-assets/`, `config/contracts/`, and `config/capability-index/` are the durable sources of truth.
-- `.claude/` is a runtime projection generated from canonical assets. Sync it instead of hand-forking it.
+- `.claude/` is a runtime projection generated from canonical assets. It is gitignored — run `npm run meta:sync` after clone to generate hooks/agents/skills locally. Sync it instead of hand-forking it.
 - When `meta-theory` is active, the main Claude thread dispatches; it does not execute complex work directly.
 - Critical, Fetch, Thinking, and Review must make the run executable before mutation; hooks are final safeguards, not the primary design path.
 - Capability-first dispatch is **mechanically enforced** in Claude Code via the `enforce-agent-dispatch.mjs` PreToolUse hook (deny payload). Codex and Cursor v1.7+ use the same projected hook; OpenClaw remains declarative. The current matrix lives in `AGENTS.md` under Mechanical Enforcement.
-- User-visible worker names must be coarse English business role-family names such as `frontend`, `backend`, or `test`, not scoped work items or host-generated personal nicknames. Localized trigger words may be recognized as input, but durable governance files stay English.
+- User-visible run-scoped worker labels may be coarse English role-family names such as `frontend`, `backend`, or `test`, but Meta_Kim does not project those execution labels as durable agents. Durable governance files stay with the nine `meta-*` owners.
 
 ## What This Repository Is
 
@@ -184,6 +184,7 @@ Keep three names separate:
 
 Rules:
 
+- `roleDisplayName` is a run-scoped task-packet label, not a durable agent identity and not a projection file.
 - Do not expose random personal nicknames as the primary agent name.
 - Prefer short role names over long task sentences.
 - Do not put concrete work items into `roleDisplayName`; when the same role has parallel shards, keep the same coarse role name and put shard scope in `roleInstanceId` / `shardScope`.
@@ -299,12 +300,13 @@ Repository policy:
 
 This repo keeps a knowledge graph under `graphify-out/`.
 
-Use it as compressed codebase context, not as an infallible truth source:
+Use it as a query-first navigation index, not as compressed context or an infallible truth source:
 
-- for broad architecture review, start with `graphify-out/GRAPH_REPORT.md`
+- for focused questions, start with `graphify query "<question>" --budget 1000`, `graphify path`, or `graphify explain`
+- for broad architecture review, use `graphify-out/GRAPH_REPORT.md` only as orientation
 - if `graphify-out/wiki/index.md` exists, use it for broad navigation
-- for focused questions, prefer graph queries or subgraph extraction when available
-- treat ambiguous graph nodes as uncertain dependencies requiring manual verification
+- treat graph results as candidate file anchors, then verify route-changing claims against source files
+- treat ambiguous graph nodes as uncertain dependencies requiring manual verification, and fall back to targeted repository search when graph results are generic or stale
 - `npm run meta:graphify:check` and `npm run meta:validate` compare the graph's built commit with current `git rev-parse HEAD` and fail when `GRAPH_REPORT.md` is stale
 - after modifying code files, run `npm run meta:graphify:rebuild`
 

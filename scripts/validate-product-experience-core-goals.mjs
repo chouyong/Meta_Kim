@@ -36,16 +36,54 @@ const REQUIRED_BINDING_COVERAGE = [
   "workerResults",
 ];
 
+const SELF_TEST_HOST_INVOCATION_EVIDENCE = [
+  {
+    family: "agent_subagent",
+    state: "invoked",
+    providerId: "codex-reviewer",
+    hostSurface: "spawn_agent",
+    evidenceKind: "spawn_agent_result",
+    evidenceRef: "self-test:spawn_agent_result:completed",
+  },
+  {
+    family: "skill",
+    state: "applied",
+    providerId: "meta-theory",
+    hostSurface: "skill",
+    evidenceKind: "skill_application",
+    evidenceRef: "self-test:skill_application:meta-theory",
+  },
+  {
+    family: "agent_teams_playbook",
+    state: "invoked",
+    providerId: "agent-teams-playbook",
+    hostSurface: "spawn_agent",
+    evidenceKind: "agent_team_result",
+    evidenceRef: "self-test:agent_team_result:fanout-completed",
+  },
+];
+
+const SELF_TEST_NATIVE_CHOICE_EVIDENCE = [
+  {
+    runtime: "codex",
+    stage: "Thinking",
+    state: "answered",
+    surface: "request_user_input",
+    evidenceKind: "request_user_input_answer",
+    evidenceRef: "self-test:request_user_input_answer:interactive-surface-validated",
+  },
+];
+
 function assertPacketStatus(report) {
   assert.equal(report.coreLoop.goalContractPacket.status, "pass");
   assert.equal(report.coreLoop.langGraphRunPacket.status, "pass");
   assert.equal(report.coreLoop.dynamicWorkflowRuntimePacket.status, "pass");
   assert.equal(report.coreLoop.peerAgentMeshPacket.status, "pass");
   assert.equal(report.coreLoop.agentTeamsPlaybookPacket.status, "pass");
-  assert.equal(report.coreLoop.capabilityInvocationTruthPacket.status, "pass");
-  assert.equal(report.coreLoop.userPerceptionPacket.status, "pass");
-  assert.equal(report.coreLoop.productExperiencePacket.status, "product_experience_pass");
-  assert.equal(report.productExperiencePacket.status, "product_experience_pass");
+  assert.equal(report.coreLoop.capabilityInvocationTruthPacket.status, "partial");
+  assert.equal(report.coreLoop.userPerceptionPacket.status, "partial");
+  assert.equal(report.coreLoop.productExperiencePacket.status, "partial");
+  assert.equal(report.productExperiencePacket.status, "partial");
 }
 
 function assertLangGraphStyle(report) {
@@ -58,6 +96,10 @@ function assertLangGraphStyle(report) {
   assert.ok(packet.eventLog.length >= 8);
   assert.equal(packet.checkpoint.count, packet.nodes.length);
   assert.equal(packet.replay.supported, true);
+  assert.equal(packet.evidenceKind, "langgraph_style_structural_pass");
+  assert.equal(packet.runtimeDependency, "none");
+  assert.equal(packet.runtimeExecutionEvidence, "not_claimed");
+  assert.match(packet.runtimeBoundary, /does not claim execution by a LangGraph runtime/);
 }
 
 function assertDynamicWorkflow(report) {
@@ -107,9 +149,22 @@ function assertUserPerception(report) {
     "怎么算验收通过",
     "什么时候暂停",
     "编排和真实能力调用在哪里看",
+    "谁做决策",
   ]) {
     assert.ok(cues.includes(cue), `missing user perception cue ${cue}`);
   }
+  assert.equal(packet.humanDecisionControl.status, "pass");
+  assert.equal(packet.humanDecisionControl.decisionAuthority, "human_required");
+  assert.deepEqual(packet.humanDecisionControl.humanJudgmentStages, [
+    "Critical",
+    "Fetch",
+    "Thinking",
+    "Review",
+  ]);
+  assert.equal(packet.humanDecisionControl.automationRole, "assistive_only");
+  assert.ok(
+    packet.humanDecisionControl.automationForbidden.includes("claim public-ready"),
+  );
   assert.ok(
     packet.surfaces.some(
       (surface) => surface.surface === "user_readable_run_report" && surface.status === "pass",
@@ -120,7 +175,7 @@ function assertUserPerception(report) {
 
 function assertVisibleMetaTheorySurface(report) {
   const packet = report.coreLoop.visibleMetaTheorySurfacePacket;
-  assert.equal(packet.status, "pass");
+  assert.equal(packet.status, "partial");
   assert.ok(packet.requiredVisibleTopics.includes("orchestration"));
   assert.ok(packet.requiredVisibleTopics.includes("dynamic_workflow"));
   assert.ok(packet.requiredVisibleTopics.includes("capability_inventory_not_skill_only"));
@@ -132,7 +187,7 @@ function assertVisibleMetaTheorySurface(report) {
   assert.ok(packet.capabilityInventory.nonSkillCapabilityTypeCount > 0);
   assert.equal(packet.dynamicWorkflow.status, "pass");
   assert.ok(packet.dynamicWorkflow.visibleRows.length > 0);
-  assert.equal(packet.capabilityInvocationTruth.status, "pass");
+  assert.equal(packet.capabilityInvocationTruth.status, "partial");
   assert.ok(packet.capabilityInvocationTruth.visibleRows.length >= REQUIRED_INVOCATION_FAMILIES.length);
   assert.equal(packet.agentTeamsPlaybook.status, "pass");
   assert.equal(packet.agentTeamsPlaybook.selected, true);
@@ -143,12 +198,12 @@ function assertVisibleMetaTheorySurface(report) {
   assert.ok(packet.langGraph.nodeCount >= 8);
   assert.ok(packet.langGraph.edgeCount >= 7);
   assert.ok(packet.langGraph.checkpointCount >= 8);
-  assert.equal(report.runReportPanelContract.visibleMetaTheorySurface.status, "pass");
+  assert.equal(report.runReportPanelContract.visibleMetaTheorySurface.status, "partial");
 }
 
 function assertCapabilityInvocationTruth(report) {
   const packet = report.coreLoop.capabilityInvocationTruthPacket;
-  assert.equal(packet.status, "pass");
+  assert.equal(packet.status, "partial");
   for (const state of [
     "invoked",
     "applied",
@@ -176,6 +231,12 @@ function assertCapabilityInvocationTruth(report) {
   assert.equal(byFamily.get("command_script").state, "invoked");
   assert.equal(byFamily.get("runtime_tool").state, "invoked");
   assert.equal(byFamily.get("agent_teams_playbook").state, "selected_not_invoked");
+  assert.equal(packet.realInvocationCoverage.status, "partial");
+  assert.deepEqual(packet.realInvocationCoverage.missingFamilies.sort(), [
+    "agent_subagent",
+    "agent_teams_playbook",
+    "skill",
+  ]);
   assert.deepEqual(packet.callableInvocationCoverage.missingFamilies, []);
   assert.ok(packet.callableInvocationCoverage.invokedFamilies.includes("mcp"));
   assert.ok(packet.callableInvocationCoverage.invokedFamilies.includes("command_script"));
@@ -202,7 +263,7 @@ function assertCapabilityInvocationTruth(report) {
       .get("agent_teams_playbook")
       .mustNotClaimAs.includes("live_agent_team_created"),
   );
-  assert.equal(report.runReportPanelContract.capabilityInvocationTruth.status, "pass");
+  assert.equal(report.runReportPanelContract.capabilityInvocationTruth.status, "partial");
 }
 
 function assertInvocationProbes(report) {
@@ -251,6 +312,9 @@ async function assertReadableReportShowsVisibleSurface(report) {
     "Agent Teams Playbook",
     "Peer Agent Mesh",
     "LangGraph-style",
+    "自动化与人工决策边界",
+    "Automation assists; humans decide.",
+    "human_required",
     "能力发现矩阵",
     "真实能力调用状态",
     "agent_subagent",
@@ -269,12 +333,21 @@ function assertProductExperience(report) {
     packet.goals.map((goal) => goal.id),
     REQUIRED_GOAL_IDS,
   );
-  assert.ok(packet.goals.every((goal) => goal.status === "pass"));
+  const goalById = new Map(packet.goals.map((goal) => [goal.id, goal]));
+  assert.equal(goalById.get("P-102").status, "pass");
+  assert.equal(goalById.get("P-103").status, "partial");
+  assert.equal(goalById.get("P-104").status, "partial");
   assert.deepEqual(
     packet.supportGates.map((gate) => gate.id),
     REQUIRED_SUPPORT_GATE_IDS,
   );
-  assert.ok(packet.supportGates.every((gate) => gate.status === "pass"));
+  const supportGateById = new Map(packet.supportGates.map((gate) => [gate.id, gate]));
+  assert.equal(supportGateById.get("P-105").status, "pass");
+  assert.equal(supportGateById.get("P-106").status, "partial");
+  assert.equal(supportGateById.get("P-107").status, "pass");
+  assert.equal(supportGateById.get("P-108").status, "pass");
+  assert.equal(supportGateById.get("P-109").status, "partial");
+  assert.equal(supportGateById.get("P-110").status, "pass");
   assert.equal(packet.noOverclaimGate.status, "pass");
   assert.equal(packet.noOverclaimGate.acceptedEvidenceTier, "product_experience_pass");
   assert.ok(packet.noOverclaimGate.forbiddenAsProductPass.includes("chat_card_as_native_popup"));
@@ -288,10 +361,10 @@ function assertProductExperience(report) {
       "agent_teams_playbook_selected_as_live_agent_team",
     ),
   );
-  assert.equal(packet.nativeChoiceSurfaceGate.status, "pass");
+  assert.equal(packet.nativeChoiceSurfaceGate.status, "partial");
   assert.equal(
     packet.nativeChoiceSurfaceGate.liveRuntimeBoundary.status,
-    "not_claimed_by_structural_runner",
+    "needs-host-invocation",
   );
   assert.equal(packet.nativeChoiceSurfaceGate.liveRuntimeBoundary.requiredForNativePass, true);
   assert.ok(
@@ -309,8 +382,27 @@ function assertProductExperience(report) {
     ),
   );
   assert.equal(packet.generalizationGate.status, "pass");
-  assert.equal(packet.capabilityInvocationTruthGate.status, "pass");
+  assert.equal(packet.capabilityInvocationTruthGate.status, "partial");
   assert.equal(packet.agentTeamsPlaybookGate.status, "pass");
+  assert.equal(packet.automationDecisionBoundary.status, "pass");
+  assert.equal(packet.automationDecisionBoundary.decisionAuthority, "human_required");
+  assert.deepEqual(packet.automationDecisionBoundary.humanJudgmentStages, [
+    "Critical",
+    "Fetch",
+    "Thinking",
+    "Review",
+  ]);
+  assert.equal(packet.automationDecisionBoundary.automationRole, "assistive_only");
+  assert.ok(
+    packet.automationDecisionBoundary.automationForbidden.includes(
+      "route_selection_without_human_evidence",
+    ),
+  );
+  assert.ok(
+    packet.automationDecisionBoundary.automationForbidden.includes(
+      "review_judgment_replacement",
+    ),
+  );
   assert.ok(
     packet.capabilityInvocationTruthGate.forbiddenRelabels.includes(
       "selected_not_invoked_as_invoked",
@@ -322,7 +414,7 @@ function assertProductExperience(report) {
     "fixture non-hardcoding gate must include the desktop sticky-notes fixture class",
   );
   assert.match(packet.nativeRuntimeBoundary, /does not claim Claude Code\/Codex native live UI/);
-  assert.match(report.runReportPanelContract.productExperience.status, /product_experience_pass/);
+  assert.match(report.runReportPanelContract.productExperience.status, /partial/);
   assert.equal(report.runReportPanelContract.productExperience.supportGates.length, 6);
   assert.equal(report.runReportPanelContract.productExperience.agentTeamsPlaybookGate.status, "pass");
 }
@@ -340,6 +432,41 @@ function assertMcpSelfTest() {
   return parsed;
 }
 
+function summarizeReport(report) {
+  return {
+    status: report.status,
+    evidenceTier: report.coreLoop.productExperiencePacket.evidenceTier,
+    goals: report.coreLoop.productExperiencePacket.goals.map((goal) => ({
+      id: goal.id,
+      status: goal.status,
+    })),
+    supportGates: report.coreLoop.productExperiencePacket.supportGates.map((gate) => ({
+      id: gate.id,
+      status: gate.status,
+    })),
+    nativeChoiceSurface:
+      report.coreLoop.productExperiencePacket.nativeChoiceSurfaceGate.liveRuntimeBoundary.status,
+    productExperience: report.coreLoop.productExperiencePacket.status,
+    visibleMetaTheorySurface: report.coreLoop.visibleMetaTheorySurfacePacket.status,
+    capabilityInvocationTruth: {
+      status: report.coreLoop.capabilityInvocationTruthPacket.status,
+      states: report.coreLoop.capabilityInvocationTruthPacket.stateCounts,
+      callableInvocationCoverage:
+        report.coreLoop.capabilityInvocationTruthPacket.callableInvocationCoverage,
+      realInvocationCoverage:
+        report.coreLoop.capabilityInvocationTruthPacket.realInvocationCoverage,
+      appVisibleSubagentState:
+        report.coreLoop.capabilityInvocationTruthPacket.rows.find(
+          (row) => row.family === "app_visible_subagent",
+        )?.state ?? "missing",
+      agentTeamsPlaybookState:
+        report.coreLoop.capabilityInvocationTruthPacket.rows.find(
+          (row) => row.family === "agent_teams_playbook",
+        )?.state ?? "missing",
+    },
+  };
+}
+
 async function main() {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "meta-kim-product-experience-"));
   try {
@@ -351,7 +478,7 @@ async function main() {
       emitConversationNotice: true,
       invokeCapabilityProbes: true,
     });
-    assert.equal(report.status, "pass");
+    assert.equal(report.status, "partial");
     assertPacketStatus(report);
     assertLangGraphStyle(report);
     assertDynamicWorkflow(report);
@@ -363,21 +490,45 @@ async function main() {
     assertUserPerception(report);
     assertProductExperience(report);
     await assertReadableReportShowsVisibleSurface(report);
+
+    const selfTestReport = await runMetaTheoryGovernedExecution({
+      task: PRODUCT_EXPERIENCE_TASK,
+      runId: "validate-product-experience-self-test-pass",
+      stateDir: tempDir,
+      dbPath: path.join(tempDir, "runs.sqlite"),
+      emitConversationNotice: false,
+      invokeCapabilityProbes: true,
+      hostInvocationEvidenceTrusted: true,
+      hostInvocationEvidence: SELF_TEST_HOST_INVOCATION_EVIDENCE,
+      nativeChoiceEvidenceTrusted: true,
+      nativeChoiceEvidence: SELF_TEST_NATIVE_CHOICE_EVIDENCE,
+    });
+    assert.equal(selfTestReport.status, "pass");
+    assert.equal(
+      selfTestReport.coreLoop.productExperiencePacket.status,
+      "product_experience_pass",
+    );
+    assert.equal(
+      selfTestReport.coreLoop.productExperiencePacket.nativeChoiceSurfaceGate.status,
+      "pass",
+    );
+    assert.equal(
+      selfTestReport.coreLoop.capabilityInvocationTruthPacket.realInvocationCoverage.status,
+      "pass",
+    );
+
     const mcp = assertMcpSelfTest();
     process.stdout.write(
       `${JSON.stringify(
         {
           status: "pass",
-          evidenceTier: report.coreLoop.productExperiencePacket.evidenceTier,
-          goals: report.coreLoop.productExperiencePacket.goals.map((goal) => ({
-            id: goal.id,
-            status: goal.status,
-          })),
-          supportGates: report.coreLoop.productExperiencePacket.supportGates.map((gate) => ({
-            id: gate.id,
-            status: gate.status,
-          })),
-          nativeChoiceSurface: report.coreLoop.productExperiencePacket.nativeChoiceSurfaceGate.liveRuntimeBoundary.status,
+          validationStatus: "pass",
+          evidenceMode: "default-boundary-plus-trusted-self-test",
+          defaultBoundaryRun: summarizeReport(report),
+          selfTestEvidenceRun: summarizeReport(selfTestReport),
+          noPopupDuringSelfTest: true,
+          selfTestEvidenceBoundary:
+            "The validator supplies trusted self-test evidence instead of opening a native choice surface; defaultBoundaryRun still proves Meta_Kim does not relabel missing live host evidence.",
           repeatFailureDesign:
             report.coreLoop.productExperiencePacket.repeatFailureDesignGate.actionOnSecondOccurrence,
           generalizationGate: report.coreLoop.productExperiencePacket.generalizationGate.status,
@@ -388,26 +539,13 @@ async function main() {
           },
           dynamicWorkflow: report.coreLoop.dynamicWorkflowRuntimePacket.capabilityBindingCoverage,
           peers: report.coreLoop.peerAgentMeshPacket.peers.length,
-          capabilityInvocationTruth: {
-            status: report.coreLoop.capabilityInvocationTruthPacket.status,
-            states: report.coreLoop.capabilityInvocationTruthPacket.stateCounts,
-            callableInvocationCoverage:
-              report.coreLoop.capabilityInvocationTruthPacket.callableInvocationCoverage,
-            appVisibleSubagentState:
-              report.coreLoop.capabilityInvocationTruthPacket.rows.find(
-                (row) => row.family === "app_visible_subagent",
-              )?.state ?? "missing",
-            agentTeamsPlaybookState:
-              report.coreLoop.capabilityInvocationTruthPacket.rows.find(
-                (row) => row.family === "agent_teams_playbook",
-              )?.state ?? "missing",
-          },
           agentTeamsPlaybook: {
             status: report.coreLoop.agentTeamsPlaybookPacket.status,
             selected: report.coreLoop.agentTeamsPlaybookPacket.selected,
             waves: report.coreLoop.agentTeamsPlaybookPacket.waves.length,
           },
-          visibleMetaTheorySurface: report.coreLoop.visibleMetaTheorySurfacePacket.status,
+          automationDecisionBoundary:
+            report.coreLoop.productExperiencePacket.automationDecisionBoundary,
           userPerceptionCues: report.coreLoop.userPerceptionPacket.plainLanguageCues.length,
           mcpTools: mcp.tools,
         },

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -162,6 +162,13 @@ function validateDefaultArtifact(report) {
 }
 
 function validatePrdMarkers() {
+  if (!existsSync(PRD_PATH)) {
+    return {
+      status: "private_evidence_not_attached",
+      requiredForPublicValidation: false,
+      path: "docs/ai-native-capability-gap-mvp-prd.zh-CN.md",
+    };
+  }
   const prd = readFileSync(PRD_PATH, "utf8");
   for (const marker of [
     "版本：v0.49",
@@ -175,6 +182,29 @@ function validatePrdMarkers() {
   ]) {
     assert.ok(prd.includes(marker), `PRD missing marker ${marker}`);
   }
+  return {
+    status: "attached",
+    requiredForPublicValidation: true,
+    path: "docs/ai-native-capability-gap-mvp-prd.zh-CN.md",
+  };
+}
+
+function validateDefaultRunStatus(report) {
+  assert.ok(
+    ["pass", "partial"].includes(report.status),
+    `default governed run status must be pass or honest partial, got ${report.status}`,
+  );
+  assert.equal(
+    report.defaultRuntimePath.status,
+    report.status,
+    "defaultRuntimePath.status must mirror the top-level governed run status",
+  );
+  if (report.status === "partial") {
+    assert.equal(
+      report.coreLoop.capabilityInvocationTruthPacket.realInvocationCoverage.status,
+      "partial",
+    );
+  }
 }
 
 async function main() {
@@ -183,6 +213,7 @@ async function main() {
   validateContractShape(contract, pkg);
 
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "meta-kim-prompt-architecture-"));
+  let governedExecutionStatus = "unknown";
   try {
     const report = await runMetaTheoryGovernedExecution({
       task: [
@@ -194,20 +225,23 @@ async function main() {
       stateDir: tempDir,
       dbPath: path.join(tempDir, "runs.sqlite"),
     });
-    assert.equal(report.status, "pass");
+    validateDefaultRunStatus(report);
     validateDefaultArtifact(report);
+    governedExecutionStatus = report.status;
   } finally {
     await rm(tempDir, { recursive: true, force: true });
   }
 
-  validatePrdMarkers();
+  const prdEvidence = validatePrdMarkers();
   process.stdout.write(
     `${JSON.stringify({
       status: "pass",
+      governedExecutionStatus,
       contract: "config/contracts/framework-prompt-architecture-contract.json",
       layers: REQUIRED_LAYERS.length,
       reviewDimensions: REQUIRED_DIMENSIONS.length,
       fixtureTypes: REQUIRED_FIXTURE_TYPES,
+      privateEvidence: [prdEvidence],
     }, null, 2)}\n`,
   );
 }

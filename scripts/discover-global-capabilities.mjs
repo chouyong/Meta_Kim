@@ -22,6 +22,8 @@ const CANONICAL_CAPABILITY_INDEX =
   "config/capability-index/meta-kim-capabilities.json";
 const LOCAL_GLOBAL_INVENTORY =
   ".meta-kim/state/{profile}/capability-index/global-capabilities.json";
+const HOME_GLOBAL_INVENTORY =
+  "~/.meta-kim/state/{profile}/capability-index/global-capabilities.json";
 const LONG_TERM_META_SKILL_PROVIDER_IDS = [
   "meta-theory",
   "agent-teams-playbook",
@@ -178,6 +180,37 @@ const PLATFORMS = {
     },
   },
 };
+
+const TARGET_ALIASES = {
+  claude: "claudeCode",
+  claudeCode: "claudeCode",
+  "claude-code": "claudeCode",
+  codex: "codex",
+  openclaw: "openclaw",
+  cursor: "cursor",
+};
+
+function argValue(args, name) {
+  const eq = args.find((arg) => arg.startsWith(`${name}=`));
+  if (eq) return eq.slice(name.length + 1);
+  const index = args.indexOf(name);
+  if (index >= 0 && args[index + 1]) return args[index + 1];
+  return null;
+}
+
+function normalizePlatformTargets(rawValue) {
+  if (!rawValue) return [];
+  return [
+    ...new Set(
+      String(rawValue)
+        .split(",")
+        .map((part) => part.trim())
+        .filter(Boolean)
+        .map((part) => TARGET_ALIASES[part] ?? TARGET_ALIASES[part.toLowerCase()] ?? part)
+        .filter((part) => Object.prototype.hasOwnProperty.call(PLATFORMS, part)),
+    ),
+  ];
+}
 
 // ========== 通用扫描函数 ==========
 
@@ -496,6 +529,9 @@ async function scanHookFiles(dir) {
     ) {
       const stat = await fs.stat(filePath);
       const relPath = path.relative(dir, filePath);
+      if (relPath.replace(/\\/g, "/").startsWith(".meta-kim-legacy-backup/")) {
+        continue;
+      }
       const id = relPath.replace(/\\/g, "/");
       results.push({
         id,
@@ -662,7 +698,7 @@ async function scanMcpConfig(configPath) {
 
     servers.push(serverEntry);
 
-    const selfTest = runKnownMcpSelfTest(command, args);
+    const selfTest = runKnownMcpSelfTest(command, resolveRepoPlaceholdersInArgs(args));
     if (selfTest?.ok) {
       serverEntry.metadata.permissionStatus = "self_test_verified";
       serverEntry.metadata.toolCount = String(selfTest.tools.length);
@@ -701,6 +737,14 @@ async function scanMcpConfig(configPath) {
   }
 
   return { servers, tools };
+}
+
+function resolveRepoPlaceholdersInArgs(args) {
+  return args.map((arg) =>
+    typeof arg === "string"
+      ? arg.replaceAll("__REPO_ROOT__", repoRoot.replace(/\\/g, "/"))
+      : arg,
+  );
 }
 
 async function scanCodexTomlMcpServers(configPath) {
@@ -1044,7 +1088,9 @@ async function collectRepoCanonicalCapabilities() {
   const codexCommands = await scanCommandFiles(
     path.join(repoRoot, "canonical", "runtime-assets", "codex", "commands"),
   );
-  const mcpDiscovery = await scanMcpConfig(path.join(repoRoot, ".mcp.json"));
+  const mcpDiscovery = await scanMcpConfig(
+    path.join(repoRoot, "canonical", "runtime-assets", "claude", "mcp.json"),
+  );
   const skillsManifest = await readJsonIfExists(
     path.join(repoRoot, "config", "skills.json"),
   );
@@ -1160,6 +1206,7 @@ async function collectRepoCanonicalCapabilities() {
 async function buildRepoCapabilityIndex() {
   const capabilities = await collectRepoCanonicalCapabilities();
   const metaSkillProviderContract = buildMetaSkillProviderContract();
+  const runtimeActualCounts = await buildRuntimeActualCounts(capabilities);
   const index = {
     generatedAt: new Date().toISOString(),
     registryName: "meta-kim-capabilities",
@@ -1187,6 +1234,11 @@ async function buildRepoCapabilityIndex() {
       totalMcpTools: capabilities.mcpTools.length,
       totalPlugins: capabilities.plugins.length,
       totalCommands: capabilities.commands.length,
+      countSemantics: {
+        totalHooks: "canonical_inventory_entries",
+        totalCommands: "canonical_inventory_entries",
+      },
+      runtimeActualCounts,
     },
     ...metaSkillProviderContract,
     byCapabilityType: {
@@ -1296,6 +1348,101 @@ async function readJsonIfExists(filePath) {
   }
 }
 
+async function listFilesIfExists(relativeDir, predicate = () => true) {
+  try {
+    const entries = await fs.readdir(path.join(repoRoot, relativeDir), {
+      withFileTypes: true,
+    });
+    return entries
+      .filter((entry) => entry.isFile() && predicate(entry.name))
+      .map((entry) => entry.name)
+      .sort();
+  } catch {
+    return [];
+  }
+}
+
+function countCommandFields(value) {
+  if (!value || typeof value !== "object") return 0;
+  if (Array.isArray(value)) {
+    return value.reduce((sum, item) => sum + countCommandFields(item), 0);
+  }
+  let count = typeof value.command === "string" ? 1 : 0;
+  for (const item of Object.values(value)) {
+    count += countCommandFields(item);
+  }
+  return count;
+}
+
+async function buildRuntimeActualCounts(capabilities) {
+  const readRuntimeJson = (relativePath) =>
+    readJsonIfExists(path.join(repoRoot, relativePath));
+  const [claudeSettings, codexHooks, cursorHooks, openclawTemplate] =
+    await Promise.all([
+      readRuntimeJson(".claude/settings.json"),
+      readRuntimeJson(".codex/hooks.json"),
+      readRuntimeJson(".cursor/hooks.json"),
+      readRuntimeJson("openclaw/openclaw.template.json"),
+    ]);
+  const markdownFiles = (relativeDir) =>
+    listFilesIfExists(relativeDir, (name) => name.endsWith(".md"));
+  const hookFiles = (relativeDir) =>
+    listFilesIfExists(relativeDir, (name) => name.endsWith(".mjs"));
+
+  const [
+    claudeCommandFiles,
+    claudeHookFiles,
+    codexCommandFiles,
+    codexHookFiles,
+    cursorCommandFiles,
+    cursorHookFiles,
+    openclawSkillFiles,
+  ] = await Promise.all([
+    markdownFiles(".claude/commands"),
+    hookFiles(".claude/hooks"),
+    markdownFiles(".codex/commands"),
+    hookFiles(".codex/hooks"),
+    markdownFiles(".cursor/commands"),
+    hookFiles(".cursor/hooks"),
+    markdownFiles("openclaw/skills"),
+  ]);
+
+  return {
+    scope: "local_project_projection_when_present",
+    note:
+      "Canonical totals count source inventory entries; runtimeActualCounts counts generated local projection files/settings when those gitignored runtime folders exist.",
+    canonicalInventory: {
+      hooks: capabilities.hooks.length,
+      commands: capabilities.commands.length,
+    },
+    claude: {
+      projectionPresent: claudeSettings !== null || claudeHookFiles.length > 0,
+      hookCommandEntries: countCommandFields(claudeSettings?.hooks ?? {}),
+      hookFiles: claudeHookFiles.length,
+      commandFiles: claudeCommandFiles.length,
+    },
+    codex: {
+      projectionPresent: codexHooks !== null || codexHookFiles.length > 0,
+      hookCommandEntries: countCommandFields(codexHooks ?? {}),
+      hookFiles: codexHookFiles.length,
+      commandFiles: codexCommandFiles.length,
+    },
+    cursor: {
+      projectionPresent: cursorHooks !== null || cursorHookFiles.length > 0,
+      hookCommandEntries: countCommandFields(cursorHooks ?? {}),
+      hookFiles: cursorHookFiles.length,
+      commandFiles: cursorCommandFiles.length,
+    },
+    openclaw: {
+      projectionPresent: openclawTemplate !== null || openclawSkillFiles.length > 0,
+      hookCommandEntries: countCommandFields(openclawTemplate?.hooks ?? {}),
+      hookFiles: 0,
+      commandFiles: 0,
+      skillFiles: openclawSkillFiles.length,
+    },
+  };
+}
+
 async function buildGlobalCapabilityInventory(scannedResults, profile) {
   const index = {
     generatedAt: new Date().toISOString(),
@@ -1349,8 +1496,319 @@ async function buildGlobalCapabilityInventory(scannedResults, profile) {
 
 // ========== 输出格式 ==========
 
-function formatTableOutput(index) {
-  let output = "\n📊 Global Capability Summary\n\n";
+const META_KIM_HOOK_FILE_NAMES = new Set([
+  "activate-meta-theory-spine.mjs",
+  "bash-readonly-whitelist.mjs",
+  "block-dangerous-bash.mjs",
+  "codex_hook_adapter.py",
+  "codex_hook_runner.mjs",
+  "enforce-agent-dispatch.mjs",
+  "graphify-context.mjs",
+  "hookprompt-adapter.mjs",
+  "meta-kim-memory-save.mjs",
+  "planning-with-files-adapter.mjs",
+  "post-console-log-warn.mjs",
+  "post-format.mjs",
+  "post-typecheck.mjs",
+  "post_tool_use.py",
+  "post-tool-use.ps1",
+  "post-tool-use.sh",
+  "pre_tool_use.py",
+  "pre-tool-use.ps1",
+  "pre-tool-use.sh",
+  "pre-compact.sh",
+  "session_start.py",
+  "session-start.sh",
+  "skip-reminder.mjs",
+  "spine-state.mjs",
+  "stop.py",
+  "stop.sh",
+  "stop-compaction.mjs",
+  "stop-completion-guard.mjs",
+  "stop-console-log-audit.mjs",
+  "stop-spine-cleanup.mjs",
+  "subagent-context.mjs",
+  "utils.mjs",
+]);
+
+const SUMMARY_TYPE_ORDER = [
+  "agents",
+  "skills",
+  "hooks",
+  "mcpServers",
+  "mcpTools",
+  "plugins",
+  "commands",
+  "rules",
+  "prompts",
+];
+
+function formatCountLine(label, count) {
+  return `${label}: ${count}`;
+}
+
+function capabilityTypesForOutput(index, filterType) {
+  if (filterType) {
+    return Object.prototype.hasOwnProperty.call(
+      index.byCapabilityType ?? {},
+      filterType,
+    )
+      ? [filterType]
+      : [];
+  }
+  return SUMMARY_TYPE_ORDER.filter((type) =>
+    Object.prototype.hasOwnProperty.call(index.byCapabilityType ?? {}, type),
+  );
+}
+
+function hookFileName(cap) {
+  const rel = String(cap.relativePath || cap.id || "").replace(/\\/g, "/");
+  return rel.split("/").pop() || rel;
+}
+
+function classifyHookCapability(cap) {
+  const rel = String(cap.relativePath || cap.id || "").replace(/\\/g, "/");
+  const fileName = hookFileName(cap);
+  const providerKind = cap.metadata?.providerKind;
+
+  if (
+    providerKind === "hook-config" ||
+    providerKind === "runtime-config" ||
+    providerKind === "runtime-settings"
+  ) {
+    return "runtime config";
+  }
+
+  if (rel.startsWith("meta-kim/")) {
+    return "Meta_Kim namespaced";
+  }
+
+  if (META_KIM_HOOK_FILE_NAMES.has(fileName)) {
+    return "Meta_Kim legacy root";
+  }
+
+  if (/-[a-f0-9]{10,}\.(?:js|mjs|py|sh|ps1)$/i.test(fileName)) {
+    return "generated/hash variant";
+  }
+
+  if (rel.startsWith("optional/")) {
+    return "optional hook pack";
+  }
+
+  return "third-party/user";
+}
+
+function countBy(items, classifier) {
+  const counts = new Map();
+  for (const item of items) {
+    const key = classifier(item);
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  return [...counts.entries()].sort((left, right) => {
+    if (right[1] !== left[1]) return right[1] - left[1];
+    return left[0].localeCompare(right[0]);
+  });
+}
+
+function skillFamily(cap) {
+  const id = String(cap.id || "").replace(/\\/g, "/");
+  if (!id) return "unknown";
+  const first = id.split("/")[0];
+  if (first === "gstack" || first === "cli-anything") return first;
+  if (id.startsWith("openai-")) return "openai";
+  if (id.startsWith("superpowers")) return "superpowers";
+  if (id.startsWith("data-analytics")) return "data-analytics";
+  if (id.startsWith("creative-production")) return "creative-production";
+  if (id.startsWith("vercel")) return "vercel";
+  return first;
+}
+
+const OUTPUT_I18N = {
+  en: {
+    title: "Global Capability Summary",
+    byPlatform: "By platform",
+    hooksByCategory: "Hooks by category",
+    skillsByFamily: "Skills by family",
+    detailsHidden:
+      "Details hidden by default. Use --verbose or --details to print every capability id.",
+    noMatchingCapabilities: "no matching capabilities",
+    noMatchingCapabilityType: "No matching capability type",
+    warnings: "warnings",
+    more: "more, remaining {n} hidden due to length",
+    none: "none",
+    scanning: "Scanning global capabilities across platforms...",
+    scanningPlatform: (name) => `  Scanning ${name}...`,
+    errors: "errors",
+    detailedInventory: "Detailed Inventory",
+    governanceRules: "Governance Rules",
+    canonicalIndexWritten: (target) => `Canonical index written to ${target}`,
+    localInventoryWritten: (target) => `Local inventory written to ${target}`,
+    canonicalIndexMirrored: (count) =>
+      `Repo canonical index refreshed in ${count} runtime mirror directories (not the scan target list):`,
+    searchIndexWritten: (count) =>
+      `Search index written to capability-search-index.tsv (${count} entries)`,
+  },
+  zh: {
+    title: "Meta_Kim 全局能力摘要",
+    byPlatform: "按平台统计",
+    hooksByCategory: "Hooks 分类统计",
+    skillsByFamily: "Skills 家族统计",
+    detailsHidden:
+      "默认只显示分类统计；使用 --verbose 或 --details 查看每个能力 id。",
+    noMatchingCapabilities: "没有匹配的能力",
+    noMatchingCapabilityType: "没有匹配的能力类型",
+    warnings: "警告",
+    more: "等，剩余 {n} 项因篇幅关系未显示",
+    none: "无",
+    scanning: "正在扫描全局能力...",
+    scanningPlatform: (name) => `  正在扫描 ${name}...`,
+    errors: "错误",
+    detailedInventory: "详细清单",
+    governanceRules: "治理规则",
+    canonicalIndexWritten: (target) => `canonical 能力索引已写入 ${target}`,
+    localInventoryWritten: (target) => `本机全局能力清单已写入 ${target}`,
+    canonicalIndexMirrored: (count) =>
+      `仓库内 canonical 能力索引已刷新到 ${count} 个 runtime 镜像目录（这不是本次扫描范围）：`,
+    searchIndexWritten: (count) =>
+      `搜索索引已写入 capability-search-index.tsv（${count} 条）`,
+  },
+  "ja-JP": {
+    title: "Meta_Kim グローバル能力サマリ",
+    byPlatform: "プラットフォーム別",
+    hooksByCategory: "フックカテゴリ別",
+    skillsByFamily: "スキルファミリ別",
+    detailsHidden:
+      "デフォルトは分類統計のみ表示。--verbose または --details で各能力 id を確認できます。",
+    noMatchingCapabilities: "一致する能力なし",
+    noMatchingCapabilityType: "一致する能力タイプなし",
+    warnings: "警告",
+    more: "等、残り {n} 件は篇幅の都合により非表示",
+    none: "なし",
+    scanning: "グローバル能力をスキャン中...",
+    scanningPlatform: (name) => `  ${name} をスキャン中...`,
+    errors: "エラー",
+    detailedInventory: "詳細インベントリ",
+    governanceRules: "ガバナンスルール",
+    canonicalIndexWritten: (target) => `canonical 能力インデックスを ${target} に書き込み`,
+    localInventoryWritten: (target) => `ローカルグローバル能力インベントリを ${target} に書き込み`,
+    canonicalIndexMirrored: (count) =>
+      `${count} 個の runtime ミラーディレクトリに canonical インデックスを反映（今回のスキャン対象外）:`,
+    searchIndexWritten: (count) =>
+      `検索インデックスを capability-search-index.tsv に書き込み（${count} 件）`,
+  },
+  "ko-KR": {
+    title: "Meta_Kim 전역 능력 요약",
+    byPlatform: "플랫폼별",
+    hooksByCategory: "훅 카테고리별",
+    skillsByFamily: "스킬 패밀리별",
+    detailsHidden:
+      "기본은 분류 통계만 표시합니다. --verbose 또는 --details 로 각 능력 id 를 확인하세요.",
+    noMatchingCapabilities: "일치하는 능력 없음",
+    noMatchingCapabilityType: "일치하는 능력 유형 없음",
+    warnings: "경고",
+    more: "등, 나머지 {n}개 항목은 분량상 표시되지 않음",
+    none: "없음",
+    scanning: "전역 능력 스캔 중...",
+    scanningPlatform: (name) => `  ${name} 스캔 중...`,
+    errors: "오류",
+    detailedInventory: "상세 인벤토리",
+    governanceRules: "거버넌스 규칙",
+    canonicalIndexWritten: (target) => `canonical 능력 인덱스를 ${target} 에 기록`,
+    localInventoryWritten: (target) => `로컬 전역 능력 인벤토리를 ${target} 에 기록`,
+    canonicalIndexMirrored: (count) =>
+      `${count} 개 runtime 미러 디렉토리에 canonical 인덱스 반영 (이번 스캔 대상 아님):`,
+    searchIndexWritten: (count) =>
+      `검색 인덱스를 capability-search-index.tsv 에 기록 (${count} 건)`,
+  },
+};
+
+function normalizeOutputLang(lang = "en") {
+  const raw = String(lang || "en").toLowerCase();
+  if (raw.startsWith("zh")) return "zh";
+  if (raw.startsWith("ja")) return "ja-JP";
+  if (raw.startsWith("ko")) return "ko-KR";
+  return "en";
+}
+
+function outputText(lang) {
+  return OUTPUT_I18N[normalizeOutputLang(lang)] ?? OUTPUT_I18N.en;
+}
+
+function formatCounts(counts, maxItems = 20, labels = OUTPUT_I18N.en) {
+  if (counts.length === 0) return labels.none;
+  const shown = counts
+    .slice(0, maxItems)
+    .map(([label, count]) => `${label} ${count}`)
+    .join(", ");
+  const hidden = counts.length - maxItems;
+  if (hidden > 0) {
+    const suffix = typeof labels.more === "string" ? labels.more.replace("{n}", String(hidden)) : `${hidden} ${labels.more}`;
+    return `${shown}, ${suffix}`;
+  }
+  return shown;
+}
+
+function flattenCapabilitiesByType(index, type) {
+  return Object.values(index.byCapabilityType?.[type] ?? {});
+}
+
+function formatDefaultSummary(index, { filterType, lang } = {}) {
+  const labels = outputText(lang);
+  let output = `\n📊 ${labels.title}\n\n`;
+
+  const summaryTypes = capabilityTypesForOutput(index, filterType);
+  const totalLine = summaryTypes
+    .map((type) =>
+      formatCountLine(type, Object.keys(index.byCapabilityType?.[type] ?? {}).length),
+    )
+    .join(" | ");
+  output += `${totalLine || labels.noMatchingCapabilityType}\n\n`;
+
+  output += `🔹 ${labels.byPlatform}\n`;
+  for (const [, data] of Object.entries(index.byPlatform ?? {})) {
+    const counts = summaryTypes
+      .map((type) => [type, data.capabilities?.[type]?.length ?? 0])
+      .filter(([, count]) => count > 0)
+      .map(([type, count]) => `${type} ${count}`)
+      .join(", ");
+    output += `  ${data.platform}: ${counts || labels.noMatchingCapabilities}`;
+    if (data.errors?.length > 0) {
+      output += `; ${labels.warnings} ${data.errors.length}`;
+    }
+    output += "\n";
+  }
+
+  if (!filterType || filterType === "hooks") {
+    const hooks = flattenCapabilitiesByType(index, "hooks");
+    output += `\n🧩 ${labels.hooksByCategory}\n`;
+    for (const [, data] of Object.entries(index.byPlatform ?? {})) {
+      const platformHooks = hooks.filter(
+        (cap) => cap.platformId === data.platformId,
+      );
+      if (platformHooks.length === 0) continue;
+      output += `  ${data.platform}: ${formatCounts(countBy(platformHooks, classifyHookCapability), 20, labels)}\n`;
+    }
+  }
+
+  if (!filterType || filterType === "skills") {
+    const skills = flattenCapabilitiesByType(index, "skills");
+    output += `\n🧠 ${labels.skillsByFamily}\n`;
+    for (const [, data] of Object.entries(index.byPlatform ?? {})) {
+      const platformSkills = skills.filter(
+        (cap) => cap.platformId === data.platformId,
+      );
+      if (platformSkills.length === 0) continue;
+      output += `  ${data.platform}: ${formatCounts(countBy(platformSkills, skillFamily), 20, labels)}\n`;
+    }
+  }
+
+  output += `\n${labels.detailsHidden}\n`;
+  return output;
+}
+
+function formatDetailedInventory(index, { filterType, lang } = {}) {
+  const labels = outputText(lang);
+  let output = `\n📊 ${labels.title}\n\n`;
 
   for (const [platformId, data] of Object.entries(index.byPlatform)) {
     output += `🔹 ${data.platform} (${data.baseDir})\n`;
@@ -1360,13 +1818,14 @@ function formatTableOutput(index) {
       }
     }
     if (data.errors.length > 0) {
-      output += `   ⚠️  Errors: ${data.errors.length}\n`;
+      output += `   ⚠️  ${labels.errors}: ${data.errors.length}\n`;
     }
   }
 
-  output += "\n📋 Detailed Inventory\n\n";
+  output += `\n📋 ${labels.detailedInventory}\n\n`;
 
-  for (const [type, items] of Object.entries(index.byCapabilityType)) {
+  for (const type of capabilityTypesForOutput(index, filterType)) {
+    const items = index.byCapabilityType[type] ?? {};
     const keys = Object.keys(items);
     if (keys.length === 0) continue;
 
@@ -1404,7 +1863,7 @@ function formatTableOutput(index) {
 
   // Add governance rules summary
   if (index.governanceRules) {
-    output += "\n🛡️ Governance Rules\n\n";
+    output += `\n🛡️ ${labels.governanceRules}\n\n`;
     output += `  ${index.governanceRules.metaAgentDispatchRule}\n`;
     output += `  ${index.governanceRules.fallbackBehavior}\n`;
   }
@@ -1412,39 +1871,66 @@ function formatTableOutput(index) {
   return output;
 }
 
+export function formatTableOutput(index, options = {}) {
+  return options.verbose
+    ? formatDetailedInventory(index, options)
+    : formatDefaultSummary(index, options);
+}
+
 // ========== 主函数 ==========
 
 async function main() {
   const args = process.argv.slice(2);
   const outputFormat = args.includes("--json") ? "json" : "table";
-  const filterPlatform = args
-    .find((a) => a.startsWith("--platform="))
-    ?.split("=")[1];
-  const filterType = args.find((a) => a.startsWith("--type="))?.split("=")[1];
+  const verboseOutput =
+    args.includes("--verbose") || args.includes("--details");
+  const runtimeInventoryOnly =
+    args.includes("--runtime-inventory-only") || args.includes("--local-only");
+  const writeRepoIndex = !runtimeInventoryOnly;
+  const langArg = argValue(args, "--lang");
+  const outputLang = normalizeOutputLang(
+    langArg || process.env.META_KIM_LANG || process.env.LANG || "en",
+  );
+  const labels = outputText(outputLang);
+  const filterTargets = normalizePlatformTargets(
+    argValue(args, "--targets") || argValue(args, "--platform"),
+  );
+  const filterType = argValue(args, "--type");
 
-  const platformsToScan = filterPlatform
-    ? { [filterPlatform]: PLATFORMS[filterPlatform] }
-    : PLATFORMS;
+  const platformsToScan =
+    filterTargets.length > 0
+      ? Object.fromEntries(
+          filterTargets.map((target) => [target, PLATFORMS[target]]),
+        )
+      : PLATFORMS;
 
-  console.error("🔍 Scanning global capabilities across platforms...\n");
+  console.error(`🔍 ${labels.scanning}\n`);
 
   const scannedResults = [];
   for (const [platformId, platform] of Object.entries(platformsToScan)) {
-    console.error(`  Scanning ${platform.name}...`);
+    console.error(labels.scanningPlatform(platform.name));
     const result = await scanPlatform(platformId, platform);
     scannedResults.push(result);
 
     if (result.errors.length > 0) {
-      console.error(`    ⚠️  ${result.errors.length} errors`);
+      console.error(`    ⚠️  ${result.errors.length} ${labels.errors}`);
     }
   }
 
-  const profileState = await ensureProfileState();
+  const profileName = process.env.META_KIM_PROFILE || "default";
+  const profileState = runtimeInventoryOnly
+    ? {
+        profile: profileName,
+        profileDir: path.join(os.homedir(), ".meta-kim", "state", profileName),
+      }
+    : await ensureProfileState();
   const canonicalIndexPath = path.join(repoRoot, CANONICAL_CAPABILITY_INDEX);
-  const repoCapabilityIndex = preserveGeneratedAtWhenUnchanged(
-    await buildRepoCapabilityIndex(),
-    await readJsonIfExists(canonicalIndexPath),
-  );
+  const repoCapabilityIndex = writeRepoIndex
+    ? preserveGeneratedAtWhenUnchanged(
+        await buildRepoCapabilityIndex(),
+        await readJsonIfExists(canonicalIndexPath),
+      )
+    : null;
   const globalInventory = await buildGlobalCapabilityInventory(
     scannedResults,
     profileState.profile,
@@ -1453,31 +1939,13 @@ async function main() {
   if (outputFormat === "json") {
     console.log(JSON.stringify(globalInventory, null, 2));
   } else {
-    console.log(formatTableOutput(globalInventory));
-  }
-
-  // Write the repo-neutral canonical index, then mirror only that index into
-  // runtime projections. Machine-specific global inventory stays local-only.
-  const repoContent = `${JSON.stringify(repoCapabilityIndex, null, 2)}\n`;
-  await fs.mkdir(path.dirname(canonicalIndexPath), { recursive: true });
-  await fs.writeFile(canonicalIndexPath, repoContent);
-
-  const platformIndexDirs = [
-    path.join(repoRoot, ".claude", "capability-index"),
-    path.join(repoRoot, ".codex", "capability-index"),
-    path.join(repoRoot, "openclaw", "capability-index"),
-    path.join(repoRoot, ".cursor", "capability-index"),
-  ];
-
-  for (const indexDir of platformIndexDirs) {
-    await fs.mkdir(indexDir, { recursive: true });
-    await fs.writeFile(
-      path.join(indexDir, "meta-kim-capabilities.json"),
-      repoContent,
+    console.log(
+      formatTableOutput(globalInventory, {
+        verbose: verboseOutput,
+        filterType,
+        lang: outputLang,
+      }),
     );
-    await fs.rm(path.join(indexDir, "global-capabilities.json"), {
-      force: true,
-    });
   }
 
   const localInventoryPath = path.join(
@@ -1491,18 +1959,47 @@ async function main() {
     `${JSON.stringify(globalInventory, null, 2)}\n`,
   );
 
+  let platformIndexDirs = [];
+  if (writeRepoIndex) {
+    // Write the repo-neutral canonical index, then mirror only that index into
+    // runtime projections. Machine-specific global inventory stays local-only.
+    const repoContent = `${JSON.stringify(repoCapabilityIndex, null, 2)}\n`;
+    await fs.mkdir(path.dirname(canonicalIndexPath), { recursive: true });
+    await fs.writeFile(canonicalIndexPath, repoContent);
+
+    platformIndexDirs = [
+      path.join(repoRoot, ".claude", "capability-index"),
+      path.join(repoRoot, ".codex", "capability-index"),
+      path.join(repoRoot, "openclaw", "capability-index"),
+      path.join(repoRoot, ".cursor", "capability-index"),
+    ];
+
+    for (const indexDir of platformIndexDirs) {
+      await fs.mkdir(indexDir, { recursive: true });
+      await fs.writeFile(
+        path.join(indexDir, "meta-kim-capabilities.json"),
+        repoContent,
+      );
+      await fs.rm(path.join(indexDir, "global-capabilities.json"), {
+        force: true,
+      });
+    }
+
+    console.error(`\n✅ ${labels.canonicalIndexWritten(CANONICAL_CAPABILITY_INDEX)}`);
+  }
   console.error(
-    `\n✅ Canonical index written to ${CANONICAL_CAPABILITY_INDEX}`,
+    `✅ ${labels.localInventoryWritten(
+      runtimeInventoryOnly
+        ? HOME_GLOBAL_INVENTORY.replace("{profile}", profileState.profile)
+        : path.relative(repoRoot, localInventoryPath).replace(/\\/g, "/"),
+    )}`,
   );
-  console.error(
-    `✅ Local inventory written to ${path.relative(repoRoot, localInventoryPath).replace(/\\/g, "/")}`,
-  );
-  console.error(
-    `✅ Canonical index mirrored to ${platformIndexDirs.length} platforms:`,
-  );
-  for (const dir of platformIndexDirs) {
-    const rel = path.relative(repoRoot, dir).replace(/\\/g, "/");
-    console.error(`   ${rel}/`);
+  if (writeRepoIndex) {
+    console.error(`✅ ${labels.canonicalIndexMirrored(platformIndexDirs.length)}`);
+    for (const dir of platformIndexDirs) {
+      const rel = path.relative(repoRoot, dir).replace(/\\/g, "/");
+      console.error(`   ${rel}/`);
+    }
   }
 
   // Generate grep-friendly search index
@@ -1527,9 +2024,7 @@ async function main() {
     "capability-search-index.tsv",
   );
   await fs.writeFile(searchIndexPath, searchLines.join("\n") + "\n", "utf8");
-  console.error(
-    `✅ Search index written to capability-search-index.tsv (${searchLines.length} entries)`,
-  );
+  console.error(`✅ ${labels.searchIndexWritten(searchLines.length)}`);
 }
 
 if (

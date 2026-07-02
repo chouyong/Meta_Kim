@@ -18,7 +18,8 @@
  *      - Auto-fixes invalid Python paths (e.g., bare "python" on Windows)
  *   6. Register the Stop hook in ~/.claude/settings.json (stop-save-progress.mjs + stop-memory-save.mjs)
  *   7. Install lifecycle memory bridges for Codex, Cursor, and OpenClaw
- *   8. Warn if MCP server not responding on http://localhost:8000
+ *   8. Warn if MCP server is not responding on the configured endpoint
+ *      (MCP_MEMORY_URL, META_KIM_MEMORY_PORT, or http://localhost:8000)
  *
  * Usage:
  *   node scripts/install-mcp-memory-hooks.mjs                         # Install all runtime hooks
@@ -198,8 +199,81 @@ function isMemoryProcessRunning() {
   }
 }
 
-function checkServerHealthStatus(url = "http://localhost:8000/api/health") {
+function configuredMemoryEndpoint() {
+  if (process.env.MCP_MEMORY_URL) return process.env.MCP_MEMORY_URL;
+  const port = process.env.META_KIM_MEMORY_PORT || "8000";
+  return `http://localhost:${port}`;
+}
+
+function memoryHealthUrl(endpoint = configuredMemoryEndpoint()) {
+  try {
+    return new URL("/api/health", endpoint).toString();
+  } catch {
+    return "http://localhost:8000/api/health";
+  }
+}
+
+function endpointPort(endpoint = configuredMemoryEndpoint()) {
+  try {
+    const url = new URL(endpoint);
+    if (url.port) return url.port;
+    return url.protocol === "https:" ? "443" : "80";
+  } catch {
+    return "8000";
+  }
+}
+
+function findProcessUsingPort(port) {
+  if (!port) return null;
+  if (process.platform === "win32") {
+    const netstat = run("netstat", ["-ano", "-p", "tcp"]);
+    if (netstat.status === 0) {
+      const lines = netstat.stdout.split(/\r?\n/);
+      const listeningLine = lines.find((line) => {
+        const parts = line.trim().split(/\s+/);
+        return (
+          /LISTENING/i.test(line) &&
+          parts.some((part) => part.endsWith(`:${port}`))
+        );
+      });
+      const pid = listeningLine?.trim().split(/\s+/).pop();
+      if (pid && /^\d+$/.test(pid)) {
+        const task = run("tasklist", ["/FI", `PID eq ${pid}`, "/FO", "CSV", "/NH"]);
+        const name = task.stdout.match(/^"([^"]+)"/)?.[1] || "unknown";
+        return { pid, name };
+      }
+    }
+    return null;
+  }
+
+  const lsof = run("lsof", ["-nP", `-iTCP:${port}`, "-sTCP:LISTEN"]);
+  if (lsof.status === 0 && lsof.stdout) {
+    const line = lsof.stdout.split(/\r?\n/).find((entry) => /^\S+\s+\d+\s/u.test(entry));
+    if (line) {
+      const parts = line.trim().split(/\s+/);
+      return { pid: parts[1], name: parts[0] };
+    }
+  }
+  return null;
+}
+
+function printMemoryPortDiagnostic(endpoint = configuredMemoryEndpoint()) {
+  const port = endpointPort(endpoint);
+  const owner = findProcessUsingPort(port);
+  if (!owner) {
+    info(`Endpoint checked: ${endpoint}`);
+    info("Use MCP_MEMORY_URL or META_KIM_MEMORY_PORT to point hooks at a different service.");
+    return;
+  }
+  warn(`Port ${port} is already used by PID ${owner.pid} (${owner.name}).`);
+  info(
+    `Choose another endpoint, for example: set META_KIM_MEMORY_PORT=8001 or set MCP_MEMORY_URL=http://localhost:8001`,
+  );
+}
+
+function checkServerHealthStatus(endpoint = configuredMemoryEndpoint()) {
   const curl = process.platform === "win32" ? "curl.exe" : "curl";
+  const url = memoryHealthUrl(endpoint);
   try {
     const result = run(curl, ["--noproxy", "*", "-s", "--max-time", "2", url]);
     if (result.status === 0 && result.stdout) {
@@ -216,6 +290,27 @@ function ensureDir(dir) {
   if (!existsSync(dir)) {
     mkdirSync(dir, { recursive: true });
     info(`Created ${dir}`);
+  }
+}
+
+function backupBeforeForce(filePath) {
+  if (!filePath || !existsSync(filePath)) return null;
+  try {
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+    const backupRoot = join(
+      homedir(),
+      ".meta-kim",
+      "backups",
+      `pre-force-${stamp}`,
+    );
+    const safeBase = String(filePath).replace(/[\\/]+/g, "__");
+    const backupPath = join(backupRoot, safeBase);
+    mkdirSync(dirname(backupPath), { recursive: true });
+    copyFileSync(filePath, backupPath);
+    return backupPath;
+  } catch (err) {
+    warn(`Backup failed for ${filePath}: ${err.message}`);
+    return null;
   }
 }
 
@@ -519,6 +614,16 @@ function registerSessionStartHook() {
     return false;
   }
 
+  // F4 fix: require explicit --force (FORCE_UPDATE) or META_KIM_CONFIRM_GLOBAL to write to user-global settings
+  if (!FORCE_UPDATE && !process.env.META_KIM_CONFIRM_GLOBAL) {
+    warn(
+      "Refusing to write to user-global settings without explicit consent. " +
+      "Pass --force or set META_KIM_CONFIRM_GLOBAL=1 to allow global mutation. " +
+      `Target: ${CLAUDE_SETTINGS}`,
+    );
+    return false;
+  }
+
   try {
     const settings = JSON.parse(readFileSync(CLAUDE_SETTINGS, "utf8"));
     const pythonCmd = pickPythonCommand();
@@ -583,6 +688,9 @@ function registerSessionStartHook() {
     }
 
     // Need to update the existing entry
+    if (FORCE_UPDATE) {
+      backupBeforeForce(CLAUDE_SETTINGS);
+    }
     const updatedBlocks = [...existingBlocks];
     updatedBlocks[existingBlockIndex] = {
       ...updatedBlocks[existingBlockIndex],
@@ -768,7 +876,7 @@ function copyCrossRuntimeMemoryHook(runtimeHome) {
     return null;
   }
 
-  const hooksDir = join(runtimeHome, "hooks");
+  const hooksDir = crossRuntimeMemoryHookDir(runtimeHome);
   ensureDir(hooksDir);
   const target = join(hooksDir, CROSS_RUNTIME_HOOK_FILE);
   if (
@@ -781,6 +889,27 @@ function copyCrossRuntimeMemoryHook(runtimeHome) {
     ok(`Cross-runtime memory hook copied -> ${target}`);
   }
   return target;
+}
+
+function crossRuntimeMemoryHookDir(runtimeHome) {
+  const globalMetaKimHooksDir = join(runtimeHome, "hooks", "meta-kim");
+  if (existsSync(globalMetaKimHooksDir)) {
+    return globalMetaKimHooksDir;
+  }
+  return join(runtimeHome, "hooks");
+}
+
+function crossRuntimeMemoryHookCandidates(runtimeHome) {
+  return [
+    join(runtimeHome, "hooks", "meta-kim", CROSS_RUNTIME_HOOK_FILE),
+    join(runtimeHome, "hooks", CROSS_RUNTIME_HOOK_FILE),
+  ];
+}
+
+function findInstalledCrossRuntimeMemoryHook(runtimeHome) {
+  return crossRuntimeMemoryHookCandidates(runtimeHome).find((candidate) =>
+    existsSync(candidate),
+  ) ?? null;
 }
 
 function registerCodexMemoryHook(hookPath) {
@@ -837,6 +966,7 @@ function registerCodexMemoryHook(hookPath) {
     },
     ...withoutMemoryBlocks("Stop"),
   ];
+  backupBeforeForce(hooksJson);
   writeFileSync(hooksJson, JSON.stringify(settings, null, 2) + "\n");
   ok(`Codex lifecycle memory hooks registered first in ${hooksJson}`);
   return true;
@@ -869,6 +999,7 @@ function registerCursorMemoryHook(hookPath) {
     },
     ...withoutMemoryHooks("stop"),
   ];
+  backupBeforeForce(hooksJson);
   writeFileSync(hooksJson, JSON.stringify(settings, null, 2) + "\n");
   ok(`Cursor prompt/stop memory hooks registered first in ${hooksJson}`);
   return true;
@@ -933,6 +1064,7 @@ function removeCrossRuntimeMemoryHooks(targets) {
       if (settings.hooks[eventName].length === 0)
         delete settings.hooks[eventName];
     }
+    backupBeforeForce(hooksJson);
     writeFileSync(hooksJson, JSON.stringify(settings, null, 2) + "\n");
   }
 
@@ -975,15 +1107,17 @@ async function install(targets) {
 
   console.log("");
   info("Checking MCP Memory Service health...");
-  const health = checkServerHealthStatus();
+  const endpoint = configuredMemoryEndpoint();
+  const health = checkServerHealthStatus(endpoint);
   if (health === "healthy") {
-    ok("MCP Memory Service is running on http://localhost:8000");
+    ok(`MCP Memory Service is running on ${endpoint}`);
   } else if (health === "unknown") {
     warn(
-      "Could not verify http://localhost:8000 from this shell, but memory.exe is running",
+      `Could not verify ${endpoint} from this shell, but memory.exe is running`,
     );
   } else {
-    warn("MCP Memory Service is NOT responding on http://localhost:8000");
+    warn(`MCP Memory Service is NOT responding on ${endpoint}`);
+    printMemoryPortDiagnostic(endpoint);
     info(
       "Start the HTTP service with: MCP_ALLOW_ANONYMOUS_ACCESS=true memory server --http",
     );
@@ -1060,10 +1194,12 @@ function check(targets) {
   ]) {
     const targetId = label.toLowerCase();
     if (!targets.includes(targetId)) continue;
-    const hookFile = join(runtimeHome, "hooks", CROSS_RUNTIME_HOOK_FILE);
-    existsSync(hookFile)
+    const hookFile = findInstalledCrossRuntimeMemoryHook(runtimeHome);
+    hookFile
       ? ok(`${label} memory hook installed: ${hookFile}`)
-      : warn(`${label} memory hook missing: ${hookFile}`);
+      : warn(
+          `${label} memory hook missing: ${crossRuntimeMemoryHookCandidates(runtimeHome).join(" or ")}`,
+        );
     const cfg = readJsonFile(join(runtimeHome, hooksFile), null);
     for (const eventName of eventNames) {
       const entries = cfg?.hooks?.[eventName] ?? [];
@@ -1091,15 +1227,17 @@ function check(targets) {
       : warn(`OpenClaw MCP memory hook missing: ${openclawHookDir}`);
   }
 
-  const health = checkServerHealthStatus();
+  const endpoint = configuredMemoryEndpoint();
+  const health = checkServerHealthStatus(endpoint);
   if (health === "healthy") {
-    ok("MCP Memory Service responding on :8000");
+    ok(`MCP Memory Service responding on ${endpoint}`);
   } else if (health === "unknown") {
     warn(
-      "MCP Memory Service health could not be verified from this shell, but memory.exe is running",
+      `MCP Memory Service health could not be verified at ${endpoint}, but memory.exe is running`,
     );
   } else {
-    warn("MCP Memory Service NOT responding on :8000");
+    warn(`MCP Memory Service NOT responding on ${endpoint}`);
+    printMemoryPortDiagnostic(endpoint);
   }
 
   console.log("");

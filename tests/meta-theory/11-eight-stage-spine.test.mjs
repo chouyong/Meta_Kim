@@ -309,19 +309,20 @@ function runEnforceHook(state, payload, options = {}) {
   const { runtime = "codex" } = options;
   const cwd = mkdtempSync(join(tmpdir(), "meta-kim-hook-"));
   try {
-    const hookDir = join(cwd, "hooks");
+    const hookDir = join(cwd, "canonical", "runtime-assets", "claude", "hooks");
     mkdirSync(hookDir, { recursive: true });
     for (const fileName of [
       "enforce-agent-dispatch.mjs",
       "bash-readonly-whitelist.mjs",
       "spine-state.mjs",
+      "utils.mjs",
     ]) {
       copyFileSync(
         join(REPO_ROOT, "canonical/runtime-assets/claude/hooks", fileName),
         join(hookDir, fileName),
       );
     }
-    for (const fileName of ["utils.mjs", "skip-reminder.mjs", "hook-i18n.mjs"]) {
+    for (const fileName of ["utils.mjs", "skip-reminder.mjs", "spine-state.mjs"]) {
       copyFileSync(
         join(REPO_ROOT, "canonical/runtime-assets/shared/hooks", fileName),
         join(hookDir, fileName),
@@ -349,6 +350,98 @@ function runEnforceHook(state, payload, options = {}) {
         },
       },
     );
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+}
+
+function runEnforceHookWithState(state, payload, options = {}) {
+  const { runtime = "codex" } = options;
+  const cwd = mkdtempSync(join(tmpdir(), "meta-kim-hook-"));
+  try {
+    const hookDir = join(cwd, "canonical", "runtime-assets", "claude", "hooks");
+    mkdirSync(hookDir, { recursive: true });
+    for (const fileName of [
+      "enforce-agent-dispatch.mjs",
+      "bash-readonly-whitelist.mjs",
+      "spine-state.mjs",
+      "utils.mjs",
+    ]) {
+      copyFileSync(
+        join(REPO_ROOT, "canonical/runtime-assets/claude/hooks", fileName),
+        join(hookDir, fileName),
+      );
+    }
+    for (const fileName of ["utils.mjs", "skip-reminder.mjs", "spine-state.mjs"]) {
+      copyFileSync(
+        join(REPO_ROOT, "canonical/runtime-assets/shared/hooks", fileName),
+        join(hookDir, fileName),
+      );
+    }
+    const spineDir = join(cwd, ".meta-kim", "state", "test", "spine");
+    mkdirSync(spineDir, { recursive: true });
+    const spinePath = join(spineDir, "spine-state.json");
+    writeFileSync(spinePath, JSON.stringify(state, null, 2), "utf8");
+    const result = spawnSync(
+      process.execPath,
+      [join(hookDir, "enforce-agent-dispatch.mjs")],
+      {
+        cwd,
+        input: JSON.stringify(payload),
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          META_KIM_SPINE_STATE_DIR: ".meta-kim/state/test/spine",
+          META_KIM_CAPABILITY_GATE: "block",
+          META_KIM_HOOK_RUNTIME: runtime,
+        },
+      },
+    );
+    const updatedState = JSON.parse(readFileSync(spinePath, "utf8"));
+    return { result, updatedState };
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+}
+
+function runActivateHook(existingState, payload, options = {}) {
+  const cwd = mkdtempSync(join(tmpdir(), "meta-kim-activate-"));
+  const { runtime = "shared", staleMinutes = "360" } = options;
+  try {
+    const hookDir = join(cwd, "hooks");
+    mkdirSync(hookDir, { recursive: true });
+    const sourceDir =
+      runtime === "claude"
+        ? "canonical/runtime-assets/claude/hooks"
+        : "canonical/runtime-assets/shared/hooks";
+    for (const fileName of ["activate-meta-theory-spine.mjs", "spine-state.mjs", "utils.mjs"]) {
+      copyFileSync(
+        join(REPO_ROOT, sourceDir, fileName),
+        join(hookDir, fileName),
+      );
+    }
+    const spineDir = join(cwd, ".meta-kim", "state", "test", "spine");
+    mkdirSync(spineDir, { recursive: true });
+    const spinePath = join(spineDir, "spine-state.json");
+    if (existingState) {
+      writeFileSync(spinePath, JSON.stringify(existingState, null, 2), "utf8");
+    }
+    const result = spawnSync(
+      process.execPath,
+      [join(hookDir, "activate-meta-theory-spine.mjs")],
+      {
+        cwd,
+        input: JSON.stringify(payload),
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          META_KIM_SPINE_STATE_DIR: ".meta-kim/state/test/spine",
+          META_KIM_SPINE_STALE_MINUTES: staleMinutes,
+        },
+      },
+    );
+    const nextState = JSON.parse(readFileSync(spinePath, "utf8"));
+    return { result, nextState };
   } finally {
     rmSync(cwd, { recursive: true, force: true });
   }
@@ -1027,7 +1120,12 @@ describe("Part E: valid run artifact contains all 8-stage products", async () =>
       fixture.cardPlanPacket,
       "valid-run.json must have cardPlanPacket",
     );
-    assert.ok(fixture.cardPlanPacket.cards, "cardPlanPacket must have cards");
+    assert.ok(fixture.cardPlanPacket.cardEvents, "cardPlanPacket must have cardEvents");
+    assert.ok(fixture.cardPlanPacket.cardTypeCatalog, "cardPlanPacket must have cardTypeCatalog");
+    assert.ok(
+      fixture.cardPlanPacket.cardTypeDecisions,
+      "cardPlanPacket must have cardTypeDecisions",
+    );
   });
 
   test("valid-run.json fixture contains dispatchEnvelopePacket", async () => {
@@ -1186,6 +1284,510 @@ describe("Part F: gate state enforcement", async () => {
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 describe("Part F2: choice surface runtime gate", async () => {
+  test("auto prompt activation creates observed advisory state instead of managed hard-gate state", () => {
+    const { result, nextState } = runActivateHook(null, {
+      prompt: "critical and fetch thinking and review 帮我修复 hook 反复卡住的问题",
+    });
+
+    assert.equal(result.status, 0);
+    assert.equal(nextState.stageRuntimeControl?.activationMode, "hook_observed");
+    assert.equal(nextState.stageRuntimeControl?.driverMode, "hook_observed");
+    assert.equal(nextState.stageRuntimeControl?.hookGateMode, "advisory");
+    assert.equal(nextState.stageRuntimeControl?.userLanguage, "zh-CN");
+    assert.ok(nextState.stageRuntimeControl?.promptFingerprint);
+    assert.equal(nextState.stageRuntimeControl?.factGatePolicy, "managed_gate_required_for_public_ready");
+  });
+
+  test("auto prompt activation records explicit external publish intent for release wording", () => {
+    for (const runtime of ["shared", "claude"]) {
+      const { result, nextState } = runActivateHook(
+        null,
+        {
+          prompt:
+            "critical and fetch thinking and review 提交 推送 发布新版本 更新更新说明",
+        },
+        { runtime },
+      );
+
+      assert.equal(result.status, 0, `${runtime}: ${result.stderr}`);
+      assert.equal(
+        nextState.stageRuntimeControl?.externalPublishIntent?.status,
+        "user_explicit",
+      );
+      assert.deepEqual(
+        nextState.stageRuntimeControl?.externalPublishIntent?.allowedCommandFamilies,
+        ["git_push", "github_release"],
+      );
+      assert.ok(nextState.stageRuntimeControl?.externalPublishIntent?.promptFingerprint);
+    }
+  });
+
+  test("auto prompt activation rotates stale legacy active state for a new prompt", () => {
+    const legacy = {
+      ...createInitialState({
+        taskClassification: "meta_theory_auto",
+        triggerReason: "legacy-test",
+      }),
+      runId: "meta-stale-legacy",
+      triggeredAt: "2000-01-01T00:00:00.000Z",
+    };
+    delete legacy.stageRuntimeControl;
+
+    const { result, nextState } = runActivateHook(legacy, {
+      prompt: "critical and fetch thinking and review 请继续修复新的任务",
+    });
+
+    assert.equal(result.status, 0);
+    assert.notEqual(nextState.runId, "meta-stale-legacy");
+    assert.equal(nextState.stageRuntimeControl?.hookGateMode, "advisory");
+  });
+
+  test("continuation wording after session_stop records inactive-run boundary", () => {
+    for (const runtime of ["shared", "claude"]) {
+      const stopped = {
+        ...createInitialState({
+          taskClassification: "meta_theory_auto",
+          triggerReason: "previous-test",
+        }),
+        active: false,
+        runId: "meta-stopped-session",
+        currentStage: "critical",
+        deactivatedAt: "2026-06-20T18:27:05.423Z",
+        deactivationReason: "session_stop",
+      };
+
+      const { result, nextState } = runActivateHook(
+        stopped,
+        {
+          prompt:
+            "继续当前 active run，不退出、不重启 critical and fetch thinking and review",
+        },
+        { runtime },
+      );
+
+      assert.equal(result.status, 0, `${runtime}: ${result.stderr}`);
+      assert.equal(nextState.active, true);
+      assert.notEqual(nextState.runId, "meta-stopped-session");
+      assert.equal(
+        nextState.continuationBoundary?.mode,
+        "session_stop_continuation_request",
+      );
+      assert.equal(nextState.continuationBoundary?.previousRunId, "meta-stopped-session");
+      assert.equal(nextState.continuationBoundary?.previousActive, false);
+      assert.match(
+        nextState.continuationBoundary?.authority,
+        /HookPrompt may preserve/,
+      );
+    }
+  });
+
+  test("shared and Claude activation recognize broad continuation wording consistently", () => {
+    for (const runtime of ["shared", "claude"]) {
+      for (const prompt of [
+        "继续当前 run，不退出、不重启 critical and fetch thinking and review",
+        "resume same run and continue critical and fetch thinking and review",
+      ]) {
+        const stopped = {
+          ...createInitialState({
+            taskClassification: "meta_theory_auto",
+            triggerReason: "previous-test",
+          }),
+          active: false,
+          runId: "meta-stopped-session",
+          currentStage: "critical",
+          deactivatedAt: "2026-06-20T18:27:05.423Z",
+          deactivationReason: "session_stop",
+        };
+
+        const { result, nextState } = runActivateHook(
+          stopped,
+          { prompt },
+          { runtime },
+        );
+
+        assert.equal(result.status, 0, `${runtime}: ${result.stderr}`);
+        assert.equal(nextState.active, true);
+        assert.notEqual(nextState.runId, "meta-stopped-session");
+        assert.equal(
+          nextState.continuationBoundary?.mode,
+          "session_stop_continuation_request",
+          `${runtime} failed prompt: ${prompt}`,
+        );
+        assert.equal(nextState.continuationBoundary?.previousRunId, "meta-stopped-session");
+      }
+    }
+  });
+
+  test("Fetch in progress does not require fetchRecord until stage commit", () => {
+    const state = {
+      ...createInitialState({
+        taskClassification: "meta_theory_auto",
+        triggerReason: "test",
+      }),
+      currentStage: "fetch",
+    };
+
+    const inProgress = checkStageRequirements(state);
+    assert.equal(inProgress.met, true);
+
+    const commit = checkStageRequirements({
+      ...state,
+      stageTransitionIntent: "commit",
+    });
+    assert.equal(commit.met, false);
+    assert.deepEqual(commit.missing, ["fetchRecord in spine state"]);
+  });
+
+  test("Fetch and Thinking in progress do not require Agent dispatch", () => {
+    for (const stage of ["fetch", "thinking"]) {
+      const state = {
+        ...createInitialState({
+          taskClassification: "meta_theory_auto",
+          triggerReason: "test",
+        }),
+        currentStage: stage,
+        dispatchChain: {},
+      };
+      delete state.fetchRecord;
+
+      const requirements = checkStageRequirements(state);
+      assert.equal(requirements.met, true, `${stage} should be in-progress ready`);
+
+      const governanceDispatch = runEnforceHook(state, {
+        tool_name: "Agent",
+        tool_input: {
+          description: `meta-artisan ${stage} capability discovery`,
+          prompt: `meta-artisan continue ${stage} evidence collection`,
+        },
+      });
+      assert.equal(governanceDispatch.status, 0);
+      assert.doesNotMatch(governanceDispatch.stdout, /permissionDecision/);
+    }
+  });
+
+  test("Type-first route policy is a route selection invariant, not another gate", async () => {
+    const contract = await readJson(
+      "config/contracts/stage-runtime-control-contract.json",
+    );
+
+    assert.equal(
+      contract.routeSelectionPolicy?.typeFirstRouteRef,
+      "scripts/select-execution-route.mjs#typeFirstRoutePolicy",
+    );
+    assert.equal(contract.routeSelectionPolicy?.kind, "route_selection_invariant");
+    assert.equal(contract.routeSelectionPolicy?.mustNotBecomeNewGate, true);
+    assert.equal(
+      contract.routeSelectionPolicy?.unclearTypeDisposition,
+      "degrade_or_block_not_guess",
+    );
+    assert.equal(contract.controlPlaneRules?.hookRole, "last_resort_fuse");
+  });
+
+  test("observed hook state allows ordinary local file mutation with one readable notice", () => {
+    const state = {
+      ...createInitialState({
+        taskClassification: "meta_theory_auto",
+        triggerReason: "test",
+        activationMode: "hook_observed",
+        driverMode: "hook_observed",
+        hookGateMode: "advisory",
+        latestUserInputLanguage: "zh-CN",
+      }),
+      currentStage: "critical",
+    };
+
+    const { result, updatedState } = runEnforceHookWithState(state, {
+      tool_name: "Write",
+      tool_input: {
+        file_path: "src/main.go",
+        content: "package main\n",
+      },
+    });
+
+    assert.equal(result.status, 0);
+    assert.doesNotMatch(result.stdout, /permissionDecision/);
+    assert.match(result.stderr, /观察态/);
+    assert.ok(updatedState.stageRuntimeControl?.observedNoticeEmittedAt);
+  });
+
+  test("observed hook state still denies high-risk external side-effect commands", () => {
+    const state = {
+      ...createInitialState({
+        taskClassification: "meta_theory_auto",
+        triggerReason: "test",
+        activationMode: "hook_observed",
+        driverMode: "hook_observed",
+        hookGateMode: "advisory",
+        latestUserInputLanguage: "zh-CN",
+      }),
+      currentStage: "critical",
+    };
+
+    const result = runEnforceHook(state, {
+      tool_name: "Bash",
+      tool_input: {
+        command: "npm install left-pad",
+      },
+    });
+
+    assert.equal(result.status, 0);
+    assert.match(result.stdout, /permissionDecision/);
+    assert.match(result.stdout, /高风险|external side-effect/);
+  });
+
+  test("observed hook state allows local git stage and commit but not push", () => {
+    const state = {
+      ...createInitialState({
+        taskClassification: "meta_theory_auto",
+        triggerReason: "test",
+        activationMode: "hook_observed",
+        driverMode: "hook_observed",
+        hookGateMode: "advisory",
+        latestUserInputLanguage: "zh-CN",
+      }),
+      currentStage: "critical",
+    };
+
+    for (const command of [
+      "git add CHANGELOG.md",
+      "git commit -m \"test local publication checkpoint\"",
+    ]) {
+      const result = runEnforceHook(state, {
+        tool_name: "Bash",
+        tool_input: { command },
+      });
+      assert.equal(result.status, 0);
+      assert.doesNotMatch(result.stdout, /permissionDecision/);
+    }
+
+    const pushResult = runEnforceHook(state, {
+      tool_name: "Bash",
+      tool_input: { command: "git push origin main" },
+    });
+
+    assert.equal(pushResult.status, 0);
+    assert.match(pushResult.stdout, /permissionDecision/);
+    assert.match(pushResult.stdout, /高风险|external side-effect/);
+  });
+
+  test("observed hook state ignores high-risk words inside quoted search text", () => {
+    const state = {
+      ...createInitialState({
+        taskClassification: "meta_theory_auto",
+        triggerReason: "test",
+        activationMode: "hook_observed",
+        driverMode: "hook_observed",
+        hookGateMode: "advisory",
+        latestUserInputLanguage: "zh-CN",
+      }),
+      currentStage: "critical",
+    };
+
+    for (const command of [
+      "graphify query \"Meta_Kim hook blocks git push and gh release during release\" --budget 1000",
+      "rg \"git push origin main\" canonical tests",
+      "Get-Content CHANGELOG.md | Select-String \"gh release create\"",
+    ]) {
+      const result = runEnforceHook(state, {
+        tool_name: "Bash",
+        tool_input: { command },
+      });
+
+      assert.equal(result.status, 0, command);
+      assert.doesNotMatch(result.stdout, /permissionDecision/, command);
+    }
+  });
+
+  test("observed hook state allows explicit user-authorized release commands only", () => {
+    const state = {
+      ...createInitialState({
+        taskClassification: "meta_theory_auto",
+        triggerReason: "test",
+        activationMode: "hook_observed",
+        driverMode: "hook_observed",
+        hookGateMode: "advisory",
+        latestUserInputLanguage: "zh-CN",
+      }),
+      currentStage: "critical",
+    };
+    state.stageRuntimeControl.externalPublishIntent = {
+      status: "user_explicit",
+      source: "prompt_intake",
+      scope: "git_remote_and_github_release",
+      createdAt: new Date().toISOString(),
+      expiresAfterMinutes: 240,
+      allowedCommandFamilies: ["git_push", "github_release"],
+      deniedCommandFamilies: [
+        "npm_publish",
+        "package_install",
+        "destructive_git",
+        "force_push",
+      ],
+    };
+
+    for (const command of [
+      "git push origin main",
+      "git push origin v2.8.54",
+      "gh release create v2.8.54 --title v2.8.54 --notes-file CHANGELOG.md",
+      "gh release view v2.8.54 --json tagName",
+    ]) {
+      const result = runEnforceHook(state, {
+        tool_name: "Bash",
+        tool_input: { command },
+      });
+      assert.equal(result.status, 0, command);
+      assert.doesNotMatch(result.stdout, /permissionDecision/, command);
+      assert.match(result.stderr, /明确要求提交|Explicit user release intent/, command);
+    }
+
+    for (const command of [
+      "git push --force origin main",
+      "npm publish",
+      "npm install left-pad",
+    ]) {
+      const result = runEnforceHook(state, {
+        tool_name: "Bash",
+        tool_input: { command },
+      });
+      assert.equal(result.status, 0, command);
+      assert.match(result.stdout, /permissionDecision/, command);
+      assert.match(result.stdout, /高风险|external side-effect/, command);
+    }
+  });
+
+  test("observed hook state ignores high-risk words inside PowerShell here-string data", () => {
+    const state = {
+      ...createInitialState({
+        taskClassification: "meta_theory_auto",
+        triggerReason: "test",
+        activationMode: "hook_observed",
+        driverMode: "hook_observed",
+        hookGateMode: "advisory",
+        latestUserInputLanguage: "zh-CN",
+      }),
+      currentStage: "critical",
+    };
+
+    const notesResult = runEnforceHook(state, {
+      tool_name: "Bash",
+      tool_input: {
+        command:
+          "@'\ngit push origin main\ngh release create v2.8.55\n'@ | Set-Content -LiteralPath '.meta-kim\\state\\default\\release-notes.md' -Encoding UTF8",
+      },
+    });
+
+    assert.equal(notesResult.status, 0);
+    assert.doesNotMatch(notesResult.stdout, /permissionDecision/);
+
+    const executionResult = runEnforceHook(state, {
+      tool_name: "Bash",
+      tool_input: {
+        command: "@'\ngit push origin main\n'@ | Invoke-Expression",
+      },
+    });
+
+    assert.equal(executionResult.status, 0);
+    assert.match(executionResult.stdout, /permissionDecision/);
+    assert.match(executionResult.stdout, /高风险|external side-effect/);
+
+    const shellWrapperResult = runEnforceHook(state, {
+      tool_name: "Bash",
+      tool_input: {
+        command: "bash -lc \"git push origin main\"",
+      },
+    });
+
+    assert.equal(shellWrapperResult.status, 0);
+    assert.match(shellWrapperResult.stdout, /permissionDecision/);
+    assert.match(shellWrapperResult.stdout, /高风险|external side-effect/);
+  });
+
+  test("observed hook state allows PowerShell read-only pipelines", () => {
+    const state = {
+      ...createInitialState({
+        taskClassification: "meta_theory_auto",
+        triggerReason: "test",
+        activationMode: "hook_observed",
+        driverMode: "hook_observed",
+        hookGateMode: "advisory",
+        latestUserInputLanguage: "zh-CN",
+      }),
+      currentStage: "critical",
+    };
+
+    const result = runEnforceHook(state, {
+      tool_name: "Bash",
+      tool_input: {
+        command:
+          "Get-Content tests\\setup\\install-plugin-bundles.test.mjs | Select-Object -First 40",
+      },
+    });
+
+    assert.equal(result.status, 0);
+    assert.doesNotMatch(result.stdout, /permissionDecision/);
+  });
+
+  test("observed hook state allows read-only Node eval inspection", () => {
+    const state = {
+      ...createInitialState({
+        taskClassification: "meta_theory_auto",
+        triggerReason: "test",
+        activationMode: "hook_observed",
+        driverMode: "hook_observed",
+        hookGateMode: "advisory",
+        latestUserInputLanguage: "zh-CN",
+      }),
+      currentStage: "fetch",
+    };
+
+    const readOnlyResult = runEnforceHook(state, {
+      tool_name: "Bash",
+      tool_input: {
+        command:
+          "node -e \"const fs=require('fs'); const raw=fs.readFileSync('graphify-out/graph.json','utf8'); const graph=JSON.parse(raw); console.log((graph.nodes||[]).length);\"",
+      },
+    });
+
+    assert.equal(readOnlyResult.status, 0);
+    assert.doesNotMatch(readOnlyResult.stdout, /permissionDecision/);
+
+    const writeResult = runEnforceHook(state, {
+      tool_name: "Bash",
+      tool_input: {
+        command:
+          "node -e \"const fs=require('fs'); fs.writeFileSync('tmp.txt','mutated');\"",
+      },
+    });
+
+    assert.equal(writeResult.status, 0);
+    assert.match(writeResult.stdout, /permissionDecision/);
+    assert.match(writeResult.stdout, /高风险|external side-effect/);
+  });
+
+  test("observed hook state does not treat install in a file path as high risk", () => {
+    const state = {
+      ...createInitialState({
+        taskClassification: "meta_theory_auto",
+        triggerReason: "test",
+        activationMode: "hook_observed",
+        driverMode: "hook_observed",
+        hookGateMode: "advisory",
+        latestUserInputLanguage: "zh-CN",
+      }),
+      currentStage: "critical",
+    };
+
+    const result = runEnforceHook(state, {
+      tool_name: "Bash",
+      tool_input: {
+        command: "node --test tests/setup/install-plugin-bundles.test.mjs",
+      },
+    });
+
+    assert.equal(result.status, 0);
+    assert.doesNotMatch(result.stdout, /permissionDecision/);
+  });
+
   test("initial Critical state does not allow execution confirmation", () => {
     const state = createInitialState({
       taskClassification: "meta_theory_auto",
@@ -1431,6 +2033,47 @@ describe("Part F2: choice surface runtime gate", async () => {
     assert.doesNotMatch(result.stdout, /permissionDecision/);
   });
 
+  test("Verification stage allows read-only inspection even when choice evidence is incomplete", () => {
+    const state = {
+      ...createInitialState({
+        taskClassification: "meta_theory_auto",
+        triggerReason: "test",
+      }),
+      currentStage: "verification",
+    };
+
+    const result = runEnforceHook(state, {
+      tool_name: "Bash",
+      tool_input: {
+        command: "git status --short",
+      },
+    });
+
+    assert.equal(result.status, 0);
+    assert.doesNotMatch(result.stdout, /permissionDecision/);
+  });
+
+  test("Verification stage still denies mutation when choice evidence is incomplete", () => {
+    const state = {
+      ...createInitialState({
+        taskClassification: "meta_theory_auto",
+        triggerReason: "test",
+      }),
+      currentStage: "verification",
+    };
+
+    const result = runEnforceHook(state, {
+      tool_name: "Bash",
+      tool_input: {
+        command: "npm install left-pad",
+      },
+    });
+
+    assert.equal(result.status, 0);
+    assert.match(result.stdout, /permissionDecision/);
+    assert.match(result.stdout, /Execution cannot start before Fetch evidence/);
+  });
+
   test("Critical stage setup does not force meta-warden dispatch", () => {
     assert.deepEqual(STAGE_META_AGENT_MAP.critical.required, []);
     assert.doesNotMatch(STAGE_META_AGENT_MAP.critical.label, /Warden/i);
@@ -1456,7 +2099,7 @@ describe("Part F2: choice surface runtime gate", async () => {
     assert.match(result.stdout, /Current stage: Critical/i);
   });
 
-  test("Critical planning-file write advances the active run into Fetch", () => {
+  test("Critical planning-file write does not auto-advance the active run", () => {
     const state = {
       ...createInitialState({
         taskClassification: "meta_theory_auto",
@@ -1467,19 +2110,20 @@ describe("Part F2: choice surface runtime gate", async () => {
 
     const cwd = mkdtempSync(join(tmpdir(), "meta-kim-hook-stage-"));
     try {
-      const hookDir = join(cwd, "hooks");
+      const hookDir = join(cwd, "canonical", "runtime-assets", "claude", "hooks");
       mkdirSync(hookDir, { recursive: true });
       for (const fileName of [
         "enforce-agent-dispatch.mjs",
         "bash-readonly-whitelist.mjs",
         "spine-state.mjs",
+        "utils.mjs",
       ]) {
         copyFileSync(
           join(REPO_ROOT, "canonical/runtime-assets/claude/hooks", fileName),
           join(hookDir, fileName),
         );
       }
-      for (const fileName of ["utils.mjs", "skip-reminder.mjs", "hook-i18n.mjs"]) {
+      for (const fileName of ["utils.mjs", "skip-reminder.mjs", "spine-state.mjs"]) {
         copyFileSync(
           join(REPO_ROOT, "canonical/runtime-assets/shared/hooks", fileName),
           join(hookDir, fileName),
@@ -1521,15 +2165,15 @@ describe("Part F2: choice surface runtime gate", async () => {
       const nextState = JSON.parse(
         readFileSync(join(spineDir, "spine-state.json"), "utf8"),
       );
-      assert.equal(nextState.currentStage, "fetch");
-      assert.equal(nextState.stages.critical.status, "completed");
-      assert.equal(nextState.stages.fetch.status, "in_progress");
+      assert.equal(nextState.currentStage, "critical");
+      assert.notEqual(nextState.stages.critical.status, "completed");
+      assert.notEqual(nextState.stages.critical.autoCompleted, true);
     } finally {
       rmSync(cwd, { recursive: true, force: true });
     }
   });
 
-  test("Critical fetch-style repo inspection advances the active run into Fetch", () => {
+  test("Critical fetch-style repo inspection does not auto-advance the active run", () => {
     const state = {
       ...createInitialState({
         taskClassification: "meta_theory_auto",
@@ -1540,19 +2184,20 @@ describe("Part F2: choice surface runtime gate", async () => {
 
     const cwd = mkdtempSync(join(tmpdir(), "meta-kim-hook-fetch-"));
     try {
-      const hookDir = join(cwd, "hooks");
+      const hookDir = join(cwd, "canonical", "runtime-assets", "claude", "hooks");
       mkdirSync(hookDir, { recursive: true });
       for (const fileName of [
         "enforce-agent-dispatch.mjs",
         "bash-readonly-whitelist.mjs",
         "spine-state.mjs",
+        "utils.mjs",
       ]) {
         copyFileSync(
           join(REPO_ROOT, "canonical/runtime-assets/claude/hooks", fileName),
           join(hookDir, fileName),
         );
       }
-      for (const fileName of ["utils.mjs", "skip-reminder.mjs", "hook-i18n.mjs"]) {
+      for (const fileName of ["utils.mjs", "skip-reminder.mjs", "spine-state.mjs"]) {
         copyFileSync(
           join(REPO_ROOT, "canonical/runtime-assets/shared/hooks", fileName),
           join(hookDir, fileName),
@@ -1594,15 +2239,15 @@ describe("Part F2: choice surface runtime gate", async () => {
       const nextState = JSON.parse(
         readFileSync(join(spineDir, "spine-state.json"), "utf8"),
       );
-      assert.equal(nextState.currentStage, "fetch");
-      assert.equal(nextState.stages.critical.status, "completed");
-      assert.equal(nextState.stages.fetch.status, "in_progress");
+      assert.equal(nextState.currentStage, "critical");
+      assert.notEqual(nextState.stages.critical.status, "completed");
+      assert.notEqual(nextState.stages.critical.autoCompleted, true);
     } finally {
       rmSync(cwd, { recursive: true, force: true });
     }
   });
 
-  test("Critical evidence gathering can transition into Fetch before baseline test verification", () => {
+  test("Critical evidence gathering requires explicit stage transition before Fetch verification", () => {
     const state = {
       ...createInitialState({
         taskClassification: "meta_theory_auto",
@@ -1613,19 +2258,20 @@ describe("Part F2: choice surface runtime gate", async () => {
 
     const cwd = mkdtempSync(join(tmpdir(), "meta-kim-hook-sequence-"));
     try {
-      const hookDir = join(cwd, "hooks");
+      const hookDir = join(cwd, "canonical", "runtime-assets", "claude", "hooks");
       mkdirSync(hookDir, { recursive: true });
       for (const fileName of [
         "enforce-agent-dispatch.mjs",
         "bash-readonly-whitelist.mjs",
         "spine-state.mjs",
+        "utils.mjs",
       ]) {
         copyFileSync(
           join(REPO_ROOT, "canonical/runtime-assets/claude/hooks", fileName),
           join(hookDir, fileName),
         );
       }
-      for (const fileName of ["utils.mjs", "skip-reminder.mjs", "hook-i18n.mjs"]) {
+      for (const fileName of ["utils.mjs", "skip-reminder.mjs", "spine-state.mjs"]) {
         copyFileSync(
           join(REPO_ROOT, "canonical/runtime-assets/shared/hooks", fileName),
           join(hookDir, fileName),
@@ -1663,7 +2309,14 @@ describe("Part F2: choice surface runtime gate", async () => {
       assert.doesNotMatch(inspectResult.stdout, /permissionDecision/);
 
       const fetchState = JSON.parse(readFileSync(stateFile, "utf8"));
-      assert.equal(fetchState.currentStage, "fetch");
+      assert.equal(fetchState.currentStage, "critical");
+      fetchState.currentStage = "fetch";
+      fetchState.stages.fetch = {
+        status: "in_progress",
+        startedAt: "2026-06-17T00:00:00.000Z",
+        completedAt: null,
+      };
+      writeFileSync(stateFile, JSON.stringify(fetchState, null, 2), "utf8");
 
       const verifyResult = spawnSync(
         process.execPath,
@@ -1727,6 +2380,29 @@ describe("Part F2: choice surface runtime gate", async () => {
 
     assert.equal(result.status, 0);
     assert.doesNotMatch(result.stdout, /permissionDecision/);
+  });
+
+  test("read-only hook allowance does not auto-advance Critical to Fetch", () => {
+    const state = {
+      ...createInitialState({
+        taskClassification: "meta_theory_auto",
+        triggerReason: "test",
+      }),
+      currentStage: "critical",
+    };
+
+    const { result, updatedState } = runEnforceHookWithState(state, {
+      tool_name: "Bash",
+      tool_input: {
+        command: "rg ownerMode canonical/skills/meta-theory/SKILL.md",
+      },
+    });
+
+    assert.equal(result.status, 0);
+    assert.doesNotMatch(result.stdout, /permissionDecision/);
+    assert.equal(updatedState.currentStage, "critical");
+    assert.notEqual(updatedState.stages?.critical?.status, "completed");
+    assert.notEqual(updatedState.stages?.critical?.autoCompleted, true);
   });
 
   test("Fetch stage allows baseline test verification before route selection", () => {
@@ -1834,6 +2510,35 @@ describe("Part F2: choice surface runtime gate", async () => {
     }
   });
 
+  test("Fetch business mutation denial does not instruct Agent dispatch", () => {
+    const state = {
+      ...createInitialState({
+        taskClassification: "meta_theory_auto",
+        triggerReason: "test",
+      }),
+      currentStage: "fetch",
+      stageTransitionIntent: "commit",
+    };
+    delete state.fetchRecord;
+
+    const result = runEnforceHook(state, {
+      tool_name: "Write",
+      tool_input: {
+        file_path: "src/main.go",
+        content: "package main\n",
+      },
+    });
+
+    assert.equal(result.status, 0);
+    assert.match(result.stdout, /permissionDecision/);
+    assert.match(result.stdout, /fetchRecord in spine state/);
+    assert.match(result.stdout, /Agent dispatch is not required before Execution/);
+    assert.match(result.stdout, /continue read\/search Fetch evidence/);
+    assert.doesNotMatch(result.stdout, /Dispatch them via Agent tool/);
+    assert.doesNotMatch(result.stdout, /description must contain the meta-agent name/);
+    assert.doesNotMatch(result.stdout, /planning\/control-plane updates/);
+  });
+
   test("queryBypass allows read-only inspection but still denies mutation", () => {
     const state = {
       ...createInitialState({
@@ -1892,6 +2597,290 @@ describe("Part F2: choice surface runtime gate", async () => {
     });
     assert.equal(businessWrite.status, 0);
     assert.match(businessWrite.stdout, /permissionDecision/);
+  });
+
+  test("Fetch stage allows Bash spine-state writes even before fetchRecord exists", () => {
+    const state = {
+      ...createInitialState({
+        taskClassification: "meta_theory_auto",
+        triggerReason: "test",
+      }),
+      currentStage: "fetch",
+      dispatchChain: {
+        fetch: ["meta-artisan"],
+      },
+    };
+
+    const spineWrite = runEnforceHook(state, {
+      tool_name: "Bash",
+      tool_input: {
+        command:
+          "$p='.meta-kim/state/test/spine/spine-state.json'; " +
+          "$j=Get-Content $p -Raw | ConvertFrom-Json; " +
+          "$j | Add-Member -NotePropertyName fetchRecord -NotePropertyValue ([pscustomobject]@{ capabilitySearchPerformed=$true }) -Force; " +
+          "$j | ConvertTo-Json -Depth 20 | Set-Content $p -Encoding UTF8",
+      },
+    });
+    assert.equal(spineWrite.status, 0);
+    assert.doesNotMatch(spineWrite.stdout, /permissionDecision/);
+
+    const businessWrite = runEnforceHook(state, {
+      tool_name: "Bash",
+      tool_input: {
+        command: "Set-Content src/main.go 'package main'",
+      },
+    });
+    assert.equal(businessWrite.status, 0);
+    assert.match(businessWrite.stdout, /permissionDecision/);
+
+    const misleadingContentWrite = runEnforceHook(state, {
+      tool_name: "Bash",
+      tool_input: {
+        command: "Set-Content src/main.go 'spine-state.json fetchRecord'",
+      },
+    });
+    assert.equal(misleadingContentWrite.status, 0);
+    assert.match(misleadingContentWrite.stdout, /permissionDecision/);
+  });
+
+  test("Fetch stage allows apply_patch spine-state patches before fetchRecord exists", () => {
+    const state = {
+      ...createInitialState({
+        taskClassification: "meta_theory_auto",
+        triggerReason: "test",
+      }),
+      currentStage: "fetch",
+      dispatchChain: {
+        fetch: ["meta-artisan"],
+      },
+    };
+    delete state.fetchRecord;
+
+    const spinePatch = runEnforceHook(state, {
+      tool_name: "apply_patch",
+      tool_input: {
+        patch:
+          "*** Begin Patch\n" +
+          "*** Update File: .meta-kim/state/test/spine/spine-state.json\n" +
+          "@@\n" +
+          "+  \"fetchRecord\": {\"capabilitySearchPerformed\": true}\n" +
+          "*** End Patch\n",
+      },
+    });
+
+    assert.equal(spinePatch.status, 0);
+    assert.doesNotMatch(spinePatch.stdout, /permissionDecision/);
+
+    const mixedPatch = runEnforceHook(state, {
+      tool_name: "apply_patch",
+      tool_input: {
+        patch:
+          "*** Begin Patch\n" +
+          "*** Update File: .meta-kim/state/test/spine/spine-state.json\n" +
+          "@@\n" +
+          "+  \"fetchRecord\": {\"capabilitySearchPerformed\": true}\n" +
+          "*** Update File: src/main.go\n" +
+          "@@\n" +
+          "+package main\n" +
+          "*** End Patch\n",
+      },
+    });
+
+    assert.equal(mixedPatch.status, 0);
+    assert.match(mixedPatch.stdout, /permissionDecision/);
+  });
+
+  test("Fetch self-lock allows repair-only Node fetchRecord spine-state write", () => {
+    const state = {
+      ...createInitialState({
+        taskClassification: "meta_theory_auto",
+        triggerReason: "test",
+      }),
+      currentStage: "fetch",
+      dispatchChain: {
+        fetch: ["meta-sentinel"],
+      },
+    };
+    delete state.fetchRecord;
+
+    const repairWrite = runEnforceHook(state, {
+      tool_name: "Bash",
+      tool_input: {
+        command:
+          "node -e \"const fs=require('fs'); " +
+          "const p='.meta-kim/state/test/spine/spine-state.json'; " +
+          "const s=JSON.parse(fs.readFileSync(p,'utf8')); " +
+          "s.fetchRecord={status:'repair_only_fetch_record',repairOnly:true,capabilitySearchPerformed:false,executionClearance:false,researchRequired:false,researchValidationPerformed:false}; " +
+          "fs.writeFileSync(p, JSON.stringify(s, null, 2));\"",
+      },
+    });
+    assert.equal(repairWrite.status, 0);
+    assert.doesNotMatch(repairWrite.stdout, /permissionDecision/);
+
+    const pathJoinRepairWrite = runEnforceHook(state, {
+      tool_name: "Bash",
+      tool_input: {
+        command:
+          "node -e \"const fs=require('fs'); const path=require('path'); " +
+          "const root='.'; " +
+          "const statePath=path.join(root,'.meta-kim/state/test/spine/spine-state.json'); " +
+          "const s=JSON.parse(fs.readFileSync(statePath,'utf8')); " +
+          "s.fetchRecord={status:'repair_only_fetch_record',repairOnly:true,capabilitySearchPerformed:false,executionClearance:false,researchRequired:false,researchValidationPerformed:false}; " +
+          "fs.writeFileSync(statePath, JSON.stringify(s, null, 2));\"",
+      },
+    });
+    assert.equal(pathJoinRepairWrite.status, 0);
+    assert.doesNotMatch(pathJoinRepairWrite.stdout, /permissionDecision/);
+
+    const businessNodeWrite = runEnforceHook(state, {
+      tool_name: "Bash",
+      tool_input: {
+        command:
+          "node -e \"const fs=require('fs'); " +
+          "const p='src/main.go'; " +
+          "const note='spine-state.json fetchRecord repairOnly executionClearance:false'; " +
+          "fs.writeFileSync(p, note);\"",
+      },
+    });
+    assert.equal(businessNodeWrite.status, 0);
+    assert.match(businessNodeWrite.stdout, /permissionDecision/);
+  });
+
+  test("planning file mentions do not bypass Fetch business-file writes", () => {
+    const state = {
+      ...createInitialState({
+        taskClassification: "meta_theory_auto",
+        triggerReason: "test",
+      }),
+      currentStage: "fetch",
+      dispatchChain: {
+        fetch: ["meta-artisan"],
+      },
+    };
+    delete state.fetchRecord;
+
+    const planningOnlyWrite = runEnforceHook(state, {
+      tool_name: "Bash",
+      tool_input: {
+        command: "Set-Content -Path progress.md -Value 'fetch noted'",
+      },
+    });
+    assert.equal(planningOnlyWrite.status, 0);
+    assert.doesNotMatch(planningOnlyWrite.stdout, /permissionDecision/);
+
+    const mixedBusinessWrite = runEnforceHook(state, {
+      tool_name: "Bash",
+      tool_input: {
+        command:
+          "Get-Content -Path progress.md | Out-Null; " +
+          "Set-Content src/main.go 'package main'",
+      },
+    });
+    assert.equal(mixedBusinessWrite.status, 0);
+    assert.match(mixedBusinessWrite.stdout, /permissionDecision/);
+  });
+
+  test("Fetch stage allows planning files before fetchRecord exists", () => {
+    const state = {
+      ...createInitialState({
+        taskClassification: "meta_theory_auto",
+        triggerReason: "test",
+      }),
+      currentStage: "fetch",
+      stageTransitionIntent: "commit",
+    };
+    delete state.fetchRecord;
+
+    const nativePlanWrite = runEnforceHook(state, {
+      tool_name: "Write",
+      tool_input: {
+        filePath: "C:/Users/Kim/.claude/plans/meta-kim-plan.md",
+        content: "# Plan\n",
+      },
+    });
+    assert.equal(nativePlanWrite.status, 0);
+    assert.doesNotMatch(nativePlanWrite.stdout, /permissionDecision/);
+
+    const nativePlanBashWrite = runEnforceHook(state, {
+      tool_name: "Bash",
+      tool_input: {
+        command:
+          "Set-Content -Path C:/Users/Kim/.claude/plans/meta-kim-plan.md -Value '# Plan'",
+      },
+    });
+    assert.equal(nativePlanBashWrite.status, 0);
+    assert.doesNotMatch(nativePlanBashWrite.stdout, /permissionDecision/);
+
+    for (const tool of ["EnterPlanMode", "ExitPlanMode"]) {
+      const result = runEnforceHook(state, {
+        tool_name: tool,
+        tool_input: {
+          plan: "# Plan",
+          todos: [{ content: "Plan the repair", status: "pending" }],
+        },
+      });
+      assert.equal(result.status, 0);
+      assert.doesNotMatch(result.stdout, /permissionDecision/);
+    }
+
+    const businessWriteWithPlanMention = runEnforceHook(state, {
+      tool_name: "Bash",
+      tool_input: {
+        command:
+          "Set-Content -Path src/main.go -Value 'C:/Users/Kim/.claude/plans/meta-kim-plan.md'",
+      },
+    });
+    assert.equal(businessWriteWithPlanMention.status, 0);
+    assert.match(businessWriteWithPlanMention.stdout, /permissionDecision/);
+  });
+
+  test("Fetch stage delays task bookkeeping before Fetch evidence exists", () => {
+    const state = {
+      ...createInitialState({
+        taskClassification: "meta_theory_auto",
+        triggerReason: "test",
+      }),
+      currentStage: "fetch",
+      stageTransitionIntent: "commit",
+    };
+    delete state.fetchRecord;
+
+    for (const tool of ["TaskCreate", "TaskUpdate", "TodoWrite"]) {
+      const result = runEnforceHook(state, {
+        tool_name: tool,
+        tool_input: {
+          plan: "# Plan",
+          todos: [{ content: "Plan the repair", status: "pending" }],
+        },
+      });
+      assert.equal(result.status, 0);
+      assert.match(result.stdout, /permissionDecision/);
+      assert.match(result.stdout, /Task\/todo bookkeeping/);
+      assert.match(result.stdout, /Continue Fetch with read\/search\/capability discovery/);
+      assert.match(result.stdout, /Do not start by creating or updating a task list/);
+    }
+
+    const stateWithFetchEvidence = {
+      ...state,
+      fetchRecord: {
+        capabilitySearchPerformed: true,
+        capabilityMatches: [
+          {
+            name: "runtime hook evidence",
+            score: 3,
+          },
+        ],
+      },
+    };
+
+    const allowedAfterEvidence = runEnforceHook(stateWithFetchEvidence, {
+      tool_name: "TodoWrite",
+      tool_input: {
+        todos: [{ content: "Summarize Fetch evidence", status: "pending" }],
+      },
+    });
+    assert.equal(allowedAfterEvidence.status, 0);
+    assert.doesNotMatch(allowedAfterEvidence.stdout, /permissionDecision/);
   });
 
   test("simpleMode residue in spine state cannot skip dispatch governance", () => {

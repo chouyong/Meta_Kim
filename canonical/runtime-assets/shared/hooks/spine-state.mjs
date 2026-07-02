@@ -13,7 +13,7 @@ export const STAGE_ORDER = [
   "thinking",
   "execution",
   "review",
-  "meta_review",
+  "meta-review",
   "verification",
   "evolution",
 ];
@@ -24,7 +24,7 @@ export const STAGE_PUBLIC_LABELS = {
   thinking: "Thinking",
   execution: "Execution",
   review: "Review",
-  meta_review: "Meta-Review",
+  "meta-review": "Meta-Review",
   verification: "Verification",
   evolution: "Evolution",
 };
@@ -42,7 +42,7 @@ const STAGE_PROGRESS_PERCENT = {
   thinking: 38,
   execution: 50,
   review: 63,
-  meta_review: 75,
+  "meta-review": 75,
   verification: 88,
   evolution: 100,
 };
@@ -73,7 +73,6 @@ const DEFAULT_READ_ONLY_VERIFIER_COMMANDS = [
   "npm run meta:check:sync-coverage",
   "npm run meta:validate",
   "node --check",
-  "node -e",
   "node --test",
   "gh release view",
   "gh pr view",
@@ -122,7 +121,7 @@ export const STAGE_META_AGENT_MAP = {
   fetch: {
     required: [],
     label: "Fetch (capability discovery)",
-    requiresFetchRecord: true,
+    requiresFetchRecordOnCommit: true,
     readOnlyInspectionEnabled: true,
     readOnlyInspectionCommands: DEFAULT_READ_ONLY_INSPECTION_COMMANDS,
     readOnlyVerifierEnabled: true,
@@ -131,7 +130,7 @@ export const STAGE_META_AGENT_MAP = {
   thinking: {
     required: [],
     label: "Thinking (route and loadout selection)",
-    requiresFetchRecord: true,
+    requiresFetchRecordOnCommit: true,
   },
   execution: { required: [], label: "Execution", requiresAgentDispatch: true },
   review: {
@@ -140,7 +139,7 @@ export const STAGE_META_AGENT_MAP = {
     readOnlyVerifierEnabled: true,
     readOnlyVerifierCommands: DEFAULT_READ_ONLY_VERIFIER_COMMANDS,
   },
-  meta_review: {
+  "meta-review": {
     required: [],
     label: "Meta-Review (standards check)",
     readOnlyVerifierEnabled: true,
@@ -173,6 +172,61 @@ function createRunId(timestamp = new Date().toISOString()) {
 function isWithin(parent, target) {
   const rel = relative(parent, target);
   return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
+}
+
+/**
+ * Evaluate the execution-stage fan-out gate (META_KIM_FANOUT_GATE).
+ *
+ * Pure function: reads spine-state fields only, no env, no I/O. The hook layer
+ * (enforce-agent-dispatch.mjs and any runtime hook that imports this shared
+ * spine-state) calls this and then applies the env-resolved mode
+ * (block / warn / progressive / off) to decide deny vs stderr-warn.
+ *
+ * Lives in BOTH canonical/runtime-assets/claude/hooks/spine-state.mjs and
+ * shared/hooks/spine-state.mjs because the test helper `runEnforceHookWithState`
+ * (tests/meta-theory/11-eight-stage-spine.test.mjs) copies the shared copy on
+ * top of the canonical copy when staging the hook under a temp cwd, and the
+ * hook imports `./spine-state.mjs` which resolves to the last-copied file.
+ * Removing this duplicate would break the 8-stage-spine test suite with
+ * ReferenceError on the first Execution-stage mutation attempt.
+ *
+ * Triggered when: execution stage ∧ zero recorded dispatches ∧ ≥2 worker lanes
+ * ∧ not explicitly degraded. Single-lane work is exempt (Codex/Cursor/OpenClaw
+ * dispatch-event coverage differences must not block legitimate single-owner
+ * runs). Degraded mode is the explicit, auditable exit: a run that declares
+ * degraded is marked internal-ready and never public-ready.
+ *
+ * @param {object|null} state - Spine state.
+ * @returns {{ triggered: boolean, dispatched: number, workerCount: number,
+ *            stage: string|null, degraded: boolean, reason: string|null }}
+ */
+export function evaluateFanoutGate(state) {
+  const s = state || {};
+  const dispatched = Array.isArray(s.dispatchedAgents)
+    ? s.dispatchedAgents.length
+    : 0;
+  const workerCount = Array.isArray(s.workerTaskPackets)
+    ? s.workerTaskPackets.length
+    : 0;
+  const stage = typeof s.currentStage === "string" ? s.currentStage : null;
+  const degraded = s.degradedMode === true;
+  const triggered =
+    stage === "execution" && dispatched === 0 && workerCount >= 2 && !degraded;
+  return {
+    triggered,
+    dispatched,
+    workerCount,
+    stage,
+    degraded,
+    reason: triggered
+      ? "Execution-stage fan-out run has 0 recorded Agent dispatches " +
+        `(dispatched=${dispatched}, workerLanes=${workerCount}, stage=${stage}). ` +
+        "Dispatch an Agent (spawn_agent / Agent tool) for the worker lanes, " +
+        "or explicitly declare degraded by writing spine state " +
+        "`degradedMode: true` (then this run is marked internal-ready, not " +
+        "public-ready)."
+      : null,
+  };
 }
 
 export function sanitizeStateProfile(input) {
@@ -291,6 +345,17 @@ export async function readSpineState(cwd) {
   }
 }
 
+export async function readSpineStateIncludingInactive(cwd) {
+  const filePath = spineStatePath(cwd);
+  try {
+    const raw = await readFile(filePath, "utf-8");
+    const status = JSON.parse(raw);
+    return status && typeof status === "object" ? status : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function writeSpineState(cwd, state) {
   const filePath = spineStatePath(cwd);
   await ensureDir(filePath);
@@ -298,13 +363,42 @@ export async function writeSpineState(cwd, state) {
   await writeMetaRunStatus(cwd, state);
 }
 
-export function createInitialState({ taskClassification, triggerReason }) {
+export function createInitialState({
+  taskClassification,
+  triggerReason,
+  activationMode = "managed_stage_runtime",
+  driverMode = "managed",
+  hookGateMode = "block",
+  promptFingerprint = null,
+  latestUserInputLanguage = null,
+  factGatePolicy = null,
+  executionLeasePolicy = null,
+} = {}) {
   const triggeredAt = new Date().toISOString();
+  const stageRuntimeControl = {
+    activationMode,
+    driverMode,
+    hookGateMode,
+    promptFingerprint,
+    userLanguage: latestUserInputLanguage,
+    factGatePolicy:
+      factGatePolicy ||
+      (hookGateMode === "advisory"
+        ? "managed_gate_required_for_public_ready"
+        : "required_before_mutation"),
+    executionLeasePolicy:
+      executionLeasePolicy ||
+      (hookGateMode === "advisory"
+        ? "advisory_until_managed_stage_driver"
+        : "required_for_business_mutation"),
+    createdAt: triggeredAt,
+  };
   return {
     active: true,
     version: 2,
     runId: createRunId(triggeredAt),
     triggeredAt,
+    stageRuntimeControl,
     currentStage: "critical",
     stages: {
       critical: { status: "in_progress", completedAt: null },
@@ -312,7 +406,7 @@ export function createInitialState({ taskClassification, triggerReason }) {
       thinking: { status: "pending", completedAt: null },
       execution: { status: "pending", completedAt: null },
       review: { status: "pending", completedAt: null },
-      meta_review: { status: "pending", completedAt: null },
+      "meta-review": { status: "pending", completedAt: null },
       verification: { status: "pending", completedAt: null },
       evolution: { status: "pending", completedAt: null },
     },
@@ -325,6 +419,7 @@ export function createInitialState({ taskClassification, triggerReason }) {
     surfaceState: "silent",
     choiceSurfaceState: "not_allowed",
     queryBypass: false,
+    latestUserInputLanguage,
     executionStarted: false,
     criticalFetchLoopCount: 0,
     criticalFetchLoopMax: 3,
@@ -335,6 +430,18 @@ export function createInitialState({ taskClassification, triggerReason }) {
     // Audit trail for skipped hooks
     skippedHooks: [],
   };
+}
+
+export function isHookObservedState(state) {
+  const control = state?.stageRuntimeControl || {};
+  return (
+    control.activationMode === "hook_observed" ||
+    control.driverMode === "hook_observed" ||
+    control.hookGateMode === "advisory" ||
+    state?.activationMode === "hook_observed" ||
+    state?.driverMode === "hook_observed" ||
+    state?.hookGateMode === "advisory"
+  );
 }
 
 export function createMetaRunStatusEnvelope(state, options = {}) {
@@ -358,10 +465,43 @@ export function createMetaRunStatusEnvelope(state, options = {}) {
     state?.stagePurpose ||
     state?.stagePurposes?.[languageResolution.language] ||
     null;
+  const runtimeControl = state?.stageRuntimeControl || {};
+  const hookObserved = isHookObservedState(state);
+  const driverMode =
+    runtimeControl.driverMode ||
+    state?.driverMode ||
+    (hookObserved ? "hook_observed" : "managed");
+  const hookGateMode =
+    runtimeControl.hookGateMode ||
+    state?.hookGateMode ||
+    (hookObserved ? "advisory" : "managed");
+  const authorityMode = hookObserved
+    ? "hook_observed_advisory"
+    : "managed_runtime_spine";
+  const active = state?.active !== false;
+  const deactivatedAt = active ? null : state?.deactivatedAt || null;
+  const deactivationReason = active ? null : state?.deactivationReason || null;
+  const continuationBoundary =
+    state?.continuationBoundary ||
+    (active
+      ? {
+          status: "active_run",
+          mode: "not_applicable",
+          reason: null,
+        }
+      : {
+          status: "inactive_run",
+          mode:
+            deactivationReason === "session_stop"
+              ? "session_stop_requires_new_run_or_offline_audit"
+              : "inactive_run_requires_state_reconciliation",
+          reason:
+            "Inactive run status is history only. A later prompt may start a new run or offline audit, but it must not claim this run is still active.",
+        });
 
   return {
     schemaVersion: 1,
-    active: state?.active !== false,
+    active,
     runId,
     triggeredBy:
       state?.triggerReason || state?.triggeredBy || "meta-theory",
@@ -373,6 +513,18 @@ export function createMetaRunStatusEnvelope(state, options = {}) {
     completed,
     next: nextStage ? STAGE_PUBLIC_LABELS[nextStage] : null,
     blockedOn: state?.blockedOn || null,
+    authorityMode,
+    driverMode,
+    hookGateMode,
+    publicReadyAuthority: false,
+    publicReadyBoundary: {
+      status: "not_public_ready_authority",
+      reason:
+        "Run status reports current runtime progress only. Public-ready requires summary, verification, real invocation coverage, and Warden gates.",
+    },
+    deactivatedAt,
+    deactivationReason,
+    continuationBoundary,
     startedAt,
     updatedAt,
     lastUserVisibleNotice: state?.lastUserVisibleNotice || null,
@@ -418,7 +570,7 @@ export async function readMetaRunStatus(cwd, profile) {
   try {
     const raw = await readFile(filePath, "utf-8");
     const status = JSON.parse(raw);
-    return status?.active === false ? null : status;
+    return status && typeof status === "object" ? status : null;
   } catch {
     return null;
   }
@@ -1036,14 +1188,17 @@ export function checkStageRequirements(state) {
     }
   }
 
-  // Verify fetchRecord exists when stage requires it
-  if (req.requiresFetchRecord && !state.fetchRecord) {
+  if (
+    req.requiresFetchRecordOnCommit &&
+    !state.fetchRecord &&
+    state.stageTransitionIntent === "commit"
+  ) {
     return {
       met: false,
       missing: ["fetchRecord in spine state"],
       reason:
-        "Fetch stage must produce a fetchRecord before advancing to Thinking. " +
-        "Complete capability search, write fetchRecord to spine state, then return to Thinking.",
+        "Stage commit requires a fetchRecord before advancing. " +
+        "During Fetch, read/search/capability-scan/state-write actions remain allowed; complete capability search, write fetchRecord to spine state, then commit the stage.",
     };
   }
 
@@ -1085,7 +1240,7 @@ export function checkStageRequirements(state) {
     missing,
     reason:
       missing.length > 0
-        ? `Stage "${stage}" requires meta-agent(s): ${missing.join(", ")}. Dispatch them via Agent tool first.`
+        ? `Stage "${stage}" requires stage owner record(s): ${missing.join(", ")}. Record the missing stage evidence before advancing.`
         : "requirements met",
   };
 }

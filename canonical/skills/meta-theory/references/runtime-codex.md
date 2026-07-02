@@ -4,6 +4,17 @@ In Codex, `/meta-theory` is user-visible authorization to use available subagent
 
 Codex must not self-degrade to "single-thread dispatcher" merely because it is running in Codex App. If `spawn_agent` / subagent tooling is exposed, Thinking may select it after Fetch evidence and the dispatcher must show which temporary workers were spawned. If the tool is absent or fails, record `subagentCapabilityStatus=unavailable` and a concrete `degradationReason`.
 
+Codex Execution is capability-wide, not agent-only. When Thinking selects a capability family, the dispatcher must either call the real Codex-exposed surface or record a partial/blocking state:
+
+- subagents/custom agents through the host `spawn_agent` / multi-agent surface when exposed and authorized
+- skills by applying the selected skill instructions and recording the skill evidence reference
+- MCP tools through the active MCP tool call surface
+- commands/scripts through the selected shell or package-script command with fresh output
+- runtime tools such as `apply_patch`, browser, Playwright, data widgets, or other loaded tool surfaces
+- prompt/rule providers as `applied`, not as external tool calls
+
+`runtimeInvocationPlanPacket` records the selected executable families, the real invocation evidence, and missing families. `hostInvocationRequestPacket` is the adapter handoff: for each missing selected family it states the Codex action to run, the worker task refs if relevant, and the exact trusted evidence fields to return. The Node runner must not treat the request as proof; only the active Codex host or a trusted host adapter can execute `spawn_agent`, skill activation, MCP calls, slash commands, or runtime tools and then pass `hostInvocationEvidenceTrusted=true` with fresh evidence. `capabilityInvocationTruthPacket.realInvocationCoverage.status` must be `pass` for product-experience pass. `selected_not_invoked` is valid truth, but it is never completion evidence.
+
 ## Honest Subagent Contract
 
 If `spawn_agent` / `Agent` equivalent is unavailable:
@@ -16,12 +27,12 @@ If `spawn_agent` is available and the user explicitly authorized subagents:
 
 - use it for independent, bounded worker or review lanes after Thinking creates `workerTaskPackets`
 - keep each worker's write scope disjoint when it edits files
-- size fan-out from Codex `[agents].max_threads`, current runtime capacity, task DAG, and collision boundaries instead of a fixed Meta_Kim cap
+- size fan-out from Codex host/config capacity such as `[agents].max_threads`, current runtime capacity, task DAG, and collision boundaries instead of a fixed Meta_Kim cap
 - show the dispatch board before or alongside dispatch
 - distinguish temporary `runtimeInstanceAlias` from durable `roleDisplayName` and `ownerAgent`
 - do not describe the temporary subagent prompt as the created/iterated project agent
 
-`agent-teams-playbook` is the Codex fan-out adapter after Thinking, not a substitute for Thinking. Select it when there are 2+ executable `workerTaskPackets` with proven DAG, collision, workspace-isolation, and external-write safety; record `not_required` for single-lane work and partial/degraded for unsafe fan-out. A selected playbook provider is `agent_teams_playbook=selected_not_invoked` until a live Skill/Agent Team/spawn_agent call is actually attached as host evidence.
+`agent-teams-playbook` is the Codex fan-out adapter after Thinking, not a substitute for Thinking. Select it when there are 2+ executable `workerTaskPackets` with proven DAG, collision, workspace-isolation, and external-write safety; record `not_required` for single-lane work and partial/degraded for unsafe fan-out. A selected playbook provider is `agent_teams_playbook=selected_not_invoked` until a live Skill/Agent Team/spawn_agent call is actually attached as host evidence. Meta_Kim must not set its own maximum lower than Codex host/config capacity.
 
 ## Codex Durable Agent Projection
 
@@ -33,6 +44,15 @@ For cross-tool compatibility, every durable project-agent candidate must include
 - abstract loadout slots instead of concrete one-run skill/command choices
 - no Windows absolute paths, current file lists, tickets, `todayTask`, `scopeFiles`, `deliverableLink`, or `verifySteps` in identity
 
+Durable Codex agent completion is a four-step lifecycle, not a file write:
+
+1. Generate a reviewed project-agent definition candidate.
+2. Apply Warden-approved writeback to `.codex/agents/<agent>.toml` or the configured projection target.
+3. Reload or restart the Codex host so it discovers the agent definition, then attach `durable_agent` evidence with `evidenceKind=host_discovery_reload`.
+4. Invoke that durable agent through Codex and attach `durable_agent` evidence with `evidenceKind=durable_agent_live_invocation`.
+
+Until steps 3 and 4 are attached, `durableAgentLifecyclePacket.status` remains partial even if the file exists.
+
 Other formal tool projections follow `config/sync.json` and `config/runtime-compatibility-catalog.json`; keep `needs_probe`, `partial`, or `reference_only` statuses as evidence instead of promoting them by wording.
 
 ## Choice Surfaces
@@ -42,6 +62,14 @@ Use native `request_user_input` only when exposed, and only with a payload accep
 If `request_user_input` is unavailable, returns API 400, returns empty, or is rejected by the host, record `nativeChoiceSurfaceBlocked` with the concrete reason, stop before Execution, and return to Critical or Thinking. Do not continue with a localized markdown decision card as acceptance evidence.
 
 Trigger proof rule: when `request_user_input` is present in the active Codex tool set and `choiceSurfaceState` is `critical_clarification_allowed` or `execution_confirmation_allowed`, the assistant must call `request_user_input` in the current chat turn before Execution. A `cardPlanPacket`, CLI `conversationNotice`, markdown report, hook warning, or generated artifact only records that a choice is needed; it is not evidence that a native Codex choice surface was shown. Completion proof is the returned `request_user_input` answer, or a blocking `nativeChoiceSurfaceBlocked` record when the native surface cannot run.
+
+False native choice claim guard: do not announce "I used the Codex choice panel", "the choice panel did not return", "the popup failed", or equivalent localized wording unless a `request_user_input` call returned or a `nativeChoiceSurfaceBlocked` record exists. The only valid pre-call text is a short notice that the run is about to ask through the Codex choice surface, immediately followed by the tool call. If the tool is absent, record the blocked state; do not invent an empty response.
+
+## Visible Status Boundary
+
+Codex `UserPromptSubmit` hook output and `hookSpecificOutput.additionalContext` are model/developer context, not the primary product surface. `systemMessage` can appear as a UI warning or event-stream warning, but it is not a governed progress notice. For Codex App, the reliable user-visible status surface is normal assistant chat text, or a captured CLI stdout notice only when the CLI command is explicitly invoked and its stdout is shown to the user. A hook warning, hidden developer context, markdown report, or JSON artifact does not satisfy `conversationNoticeEmitted`.
+
+Therefore every governed Codex run must render localized chat notices for run start, route selected before Execution, blocker/degraded state when present, and closure. Use `request_user_input` only for branch-changing decisions; do not turn routine status into a popup.
 
 Visible Decision cards need at least two meaningful options and a recommended default. Critical clarification can appear before Fetch when the user's wording is too ambiguous to collect the right evidence. Notices can stay concise.
 

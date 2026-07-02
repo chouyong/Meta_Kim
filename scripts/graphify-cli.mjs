@@ -14,6 +14,7 @@ import {
   readProcessText,
   runPythonModule,
 } from "./graphify-runtime.mjs";
+import { enrichMetaKimGraph } from "./graphify-enrichment.mjs";
 
 const command = process.argv[2] || "check";
 
@@ -190,7 +191,11 @@ function stampGraphFreshness(cwd = process.cwd()) {
 
   if (existsSync(graphPath)) {
     const graph = JSON.parse(readFileSync(graphPath, "utf8"));
-    if (!commitsMatch(String(graph.built_at_commit ?? ""), currentHead)) {
+    const enrichment = enrichMetaKimGraph(graph);
+    if (
+      enrichment.changed ||
+      !commitsMatch(String(graph.built_at_commit ?? ""), currentHead)
+    ) {
       graph.built_at_commit = currentHead;
       writeFileSync(graphPath, `${JSON.stringify(graph, null, 2)}\n`, "utf8");
       changed = true;
@@ -285,7 +290,11 @@ function installGraphify({ upgrade = false } = {}) {
 }
 
 function runRebuild() {
-  const direct = spawnSync("graphify", ["update", "."], {
+  const graphifyArgs = ["update", "."];
+  if (process.argv.includes("--force")) {
+    graphifyArgs.push("--force");
+  }
+  const direct = spawnSync("graphify", graphifyArgs, {
     stdio: "inherit",
     shell: false,
   });
@@ -304,7 +313,7 @@ function runRebuild() {
 
   const result = runPythonModule(
     python,
-    ["-m", "graphify", "update", "."],
+    ["-m", "graphify", ...graphifyArgs],
     undefined,
     { stdio: "inherit" },
   );
@@ -312,6 +321,31 @@ function runRebuild() {
   if ((result.status || 0) === 0) {
     stampGraphFreshness();
   }
+}
+
+function runGraphifyPassthrough() {
+  const graphifyArgs = process.argv.slice(2);
+  const direct = spawnSync("graphify", graphifyArgs, {
+    stdio: "inherit",
+    shell: false,
+  });
+  if (!direct.error) {
+    process.exitCode = direct.status ?? 1;
+    return;
+  }
+
+  const python = ensurePython({ requirePip: true });
+  if (!python) {
+    return;
+  }
+
+  const result = runPythonModule(
+    python,
+    ["-m", "graphify", ...graphifyArgs],
+    undefined,
+    { stdio: "inherit" },
+  );
+  process.exitCode = result.status ?? 1;
 }
 
 switch (command) {
@@ -326,6 +360,11 @@ switch (command) {
     break;
   case "rebuild":
     runRebuild();
+    break;
+  case "query":
+  case "path":
+  case "explain":
+    runGraphifyPassthrough();
     break;
   default:
     fail(`Unknown graphify command: ${command}`);

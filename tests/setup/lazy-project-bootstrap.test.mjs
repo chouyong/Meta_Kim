@@ -23,6 +23,7 @@ function runSetup(args, options = {}) {
   return spawnSync(process.execPath, ["setup.mjs", ...args], {
     cwd: REPO_ROOT,
     encoding: "utf8",
+    maxBuffer: 32 * 1024 * 1024,
     timeout: 120_000,
     ...options,
   });
@@ -32,6 +33,7 @@ function runBin(args, options = {}) {
   return spawnSync(process.execPath, ["bin/meta-kim.mjs", ...args], {
     cwd: REPO_ROOT,
     encoding: "utf8",
+    maxBuffer: 32 * 1024 * 1024,
     timeout: 120_000,
     ...options,
   });
@@ -51,8 +53,27 @@ function runBootstrap(projectDir, extraArgs = []) {
   return JSON.parse(result.stdout);
 }
 
+function runBootstrapForTargets(projectDir, targets, extraArgs = []) {
+  const result = runSetup([
+    "--project-bootstrap",
+    "--targets",
+    targets,
+    "--project-dir",
+    projectDir,
+    "--json",
+    ...extraArgs,
+  ]);
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  return JSON.parse(result.stdout);
+}
+
 function readJson(filePath) {
   return JSON.parse(readFileSync(filePath, "utf8"));
+}
+
+function parseTrailingJson(stdout) {
+  const start = stdout.lastIndexOf("\n{");
+  return JSON.parse(stdout.slice(start === -1 ? 0 : start + 1));
 }
 
 test("lazy project bootstrap dry-run exposes source chain and writes nothing", () => {
@@ -73,13 +94,56 @@ test("lazy project bootstrap dry-run exposes source chain and writes nothing", (
     assert.equal(plan.sourceChain.syncManifest, "config/sync.json");
     assert.equal(plan.sourceChain.canonicalRoots.skills, "canonical/skills");
     assert.ok(plan.sourceChain.generatedTargets.claude.includes(".claude/skills"));
-    assert.ok(plan.sourceChain.generatedTargets.codex.includes(".agents/skills"));
+    assert.equal(
+      plan.sourceChain.generatedTargets.codex.includes(".agents/skills"),
+      true,
+    );
+    assert.deepEqual(plan.writePreview.globalWrites, []);
+    assert.ok(plan.writePreview.projectWrites.some((file) => file.relPath === "AGENTS.md"));
+    assert.equal(plan.writePreview.backup.requiredBeforeApply, false);
+    assert.equal(plan.writePreview.backup.backupRootPattern, ".meta-kim/backups/project-bootstrap/<timestamp>");
+    assert.equal(plan.writePreview.rollbackPlan.availableAfterApply, true);
+    assert.equal(
+      plan.writePreview.rollbackPlan.stateManifest,
+      ".meta-kim/state/default/project-bootstrap.json",
+    );
+    assert.equal(plan.choiceSurface.required, true);
+    assert.equal(plan.choiceSurface.trigger, "runtime_native_choice_required_before_apply");
+    assert.match(plan.choiceSurface.runtimeRequirement, /AskUserQuestion/);
+    assert.match(plan.choiceSurface.runtimeRequirement, /request_user_input/);
+    assert.equal(plan.choiceSurface.recommendedOptionId, "apply_project_bootstrap");
+    assert.ok(plan.choiceSurface.options.length >= 3);
+    assert.match(plan.decisions.defaultTargets, /Claude Code \+ Codex/);
+    assert.match(plan.decisions.defaultTargets, /--targets/);
+    assert.match(plan.decisions.defaultTargets, /\.meta-kim\/local\.overrides\.json/);
+    for (const id of [
+      "apply_project_bootstrap",
+      "inspect_dry_run_only",
+      "skip_this_project",
+    ]) {
+      const option = plan.choiceSurface.options.find((entry) => entry.id === id);
+      assert.ok(option, `${id} option should be present`);
+      assert.ok(option.label);
+      assert.ok(option.expectedResult);
+      assert.ok(option.advantage);
+      assert.ok(option.risk);
+      assert.ok(option.verificationImpact);
+    }
 
     const byRel = new Map(plan.files.map((file) => [file.relPath, file]));
-    assert.equal(byRel.get("AGENTS.md")?.mergePolicy, "generated_projection_create");
     assert.equal(
-      byRel.get(".agents/skills/meta-theory/SKILL.md")?.mergePolicy,
-      "generated_projection_create",
+      plan.files.some((file) =>
+        file.relPath.includes("same-set-reusable-flow-for-project-file-inventor"),
+      ),
+      false,
+      "project bootstrap must not project internal canonical skills into runtime skill mirrors",
+    );
+    assert.equal(byRel.get("AGENTS.md")?.mergePolicy, "managed_block_preserve_user_text");
+    assert.equal(byRel.get("AGENTS.md")?.action, "merge");
+    assert.equal(
+      byRel.has(".agents/skills/meta-theory/SKILL.md"),
+      true,
+      "Codex project bootstrap should use the current .agents/skills project skill root",
     );
     assert.equal(
       byRel.get(".claude/settings.json")?.mergePolicy,
@@ -89,9 +153,64 @@ test("lazy project bootstrap dry-run exposes source chain and writes nothing", (
       byRel.get(".codex/hooks.json")?.mergePolicy,
       "additive_preserve_user_state_json",
     );
-    assert.equal(byRel.get(".codex/config.toml")?.mergePolicy, "never_touch");
+    if (byRel.has(".codex/config.toml")) {
+      assert.equal(byRel.get(".codex/config.toml")?.mergePolicy, "never_touch");
+    }
+    assert.equal(
+      byRel.has(".meta-kim/meta-kim-post-copy.mjs"),
+      false,
+      "global-first project bootstrap must not copy post-copy executables into the project",
+    );
 
     assert.deepEqual(new Set([]), before);
+    assert.equal(existsSync(path.join(projectDir, ".meta-kim")), false);
+  } finally {
+    rmSync(projectDir, { recursive: true, force: true });
+  }
+});
+
+test("lazy project bootstrap dry-run previews backup and rollback without writing", () => {
+  const projectDir = tempProject();
+  try {
+    writeFileSync(path.join(projectDir, "AGENTS.md"), "# User Project\n\nKeep this local note.\n");
+    mkdirSync(path.join(projectDir, ".codex"), { recursive: true });
+    mkdirSync(path.join(projectDir, ".codex", "hooks"), { recursive: true });
+    writeFileSync(
+      path.join(projectDir, ".codex", "hooks", "user-custom-hook.mjs"),
+      "console.log('custom hook');\n",
+    );
+    writeFileSync(
+      path.join(projectDir, ".codex", "hooks.json"),
+      JSON.stringify(
+        {
+          hooks: {
+            UserPromptSubmit: [{ hooks: [{ command: "node user-hook.mjs" }] }],
+          },
+        },
+        null,
+        2,
+      ) + "\n",
+    );
+
+    const summary = runBootstrap(projectDir, ["--dry-run"]);
+    const plan = summary.results[0];
+    assert.equal(summary.mode, "dry-run");
+    assert.deepEqual(plan.writePreview.globalWrites, []);
+    assert.ok(
+      plan.writePreview.projectWrites.some(
+        (file) => file.relPath === "AGENTS.md" && file.backupBeforeApply === true,
+      ),
+    );
+    assert.ok(
+      plan.writePreview.backup.entries.some((entry) => entry.relPath === "AGENTS.md"),
+    );
+    assert.equal(
+      plan.writePreview.projectWrites.some((file) =>
+        file.relPath.startsWith(".codex/hooks/"),
+      ),
+      true,
+    );
+    assert.match(plan.writePreview.rollbackPlan.policy, /Restore backed-up files/);
     assert.equal(existsSync(path.join(projectDir, ".meta-kim")), false);
   } finally {
     rmSync(projectDir, { recursive: true, force: true });
@@ -112,7 +231,7 @@ test("meta-kim CLI exposes project bootstrap subcommand for global-first skill u
       "--json",
     ]);
     assert.equal(result.status, 0, result.stderr || result.stdout);
-    const summary = JSON.parse(result.stdout);
+    const summary = parseTrailingJson(result.stdout);
     assert.equal(summary.mode, "dry-run");
     assert.equal(summary.results[0].sourceChain.binEntrypoint, "bin/meta-kim.mjs");
   } finally {
@@ -124,7 +243,26 @@ test("lazy project bootstrap apply preserves user text/config, skips Codex proje
   const projectDir = tempProject();
   try {
     writeFileSync(path.join(projectDir, "AGENTS.md"), "# User Project\n\nKeep this local note.\n");
+    mkdirSync(path.join(projectDir, ".claude"), { recursive: true });
+    writeFileSync(
+      path.join(projectDir, ".claude", "settings.json"),
+      JSON.stringify(
+        {
+          hooks: {
+            PreToolUse: [{ matcher: "Bash", hooks: [{ command: "node user-claude-hook.mjs" }] }],
+          },
+          permissions: { allow: ["Bash(npm test)"] },
+        },
+        null,
+        2,
+      ) + "\n",
+    );
     mkdirSync(path.join(projectDir, ".codex"), { recursive: true });
+    mkdirSync(path.join(projectDir, ".codex", "hooks"), { recursive: true });
+    writeFileSync(
+      path.join(projectDir, ".codex", "hooks", "user-custom-hook.mjs"),
+      "console.log('custom hook');\n",
+    );
     writeFileSync(
       path.join(projectDir, ".codex", "hooks.json"),
       JSON.stringify(
@@ -154,7 +292,30 @@ test("lazy project bootstrap apply preserves user text/config, skips Codex proje
 
     const codexHooks = readJson(path.join(projectDir, ".codex", "hooks.json"));
     assert.match(JSON.stringify(codexHooks), /node user-hook\.mjs/);
-    assert.match(JSON.stringify(codexHooks), /hookprompt-adapter|meta-kim-memory-save|enforce-agent-dispatch|graphify-context/);
+    assert.match(
+      JSON.stringify(codexHooks),
+      /enforce-agent-dispatch|graphify-context|activate-meta-theory-spine/,
+    );
+    assert.doesNotMatch(
+      JSON.stringify(codexHooks),
+      /hookprompt-adapter|meta-kim-memory-save/,
+    );
+    assert.equal(
+      existsSync(path.join(projectDir, ".codex", "hooks", "activate-meta-theory-spine.mjs")),
+      true,
+    );
+    assert.equal(
+      existsSync(path.join(projectDir, ".codex", "hooks", "enforce-agent-dispatch.mjs")),
+      true,
+    );
+    assert.equal(
+      readFileSync(path.join(projectDir, ".codex", "hooks", "user-custom-hook.mjs"), "utf8"),
+      "console.log('custom hook');\n",
+    );
+
+    const claudeSettings = readJson(path.join(projectDir, ".claude", "settings.json"));
+    assert.match(JSON.stringify(claudeSettings), /node user-claude-hook\.mjs/);
+    assert.deepEqual(claudeSettings.permissions.allow, ["Bash(npm test)"]);
 
     const mcp = readJson(path.join(projectDir, ".mcp.json"));
     assert.equal(mcp.mcpServers.custom.command, "custom-mcp");
@@ -174,10 +335,653 @@ test("lazy project bootstrap apply preserves user text/config, skips Codex proje
     assert.equal(manifest.protectedMergeDecisions.protectedMerge.includes(".codex/config.toml"), true);
     assert.equal(manifest.backup.created, true);
     assert.ok(manifest.backup.entries.some((entry) => entry.relPath === "AGENTS.md"));
-    assert.ok(manifest.backup.entries.some((entry) => entry.relPath === ".codex/hooks.json"));
+    assert.equal(
+      manifest.backup.entries.some((entry) => entry.relPath === ".codex/hooks.json"),
+      true,
+    );
+    assert.equal(
+      manifest.managedFiles.some(
+        (entry) => entry.relPath === ".meta-kim/meta-kim-post-copy.mjs",
+      ),
+      false,
+    );
 
-    const postCopyBootstrap = path.join(projectDir, "meta-kim-post-copy.mjs");
-    assert.equal(existsSync(postCopyBootstrap), true);
+    const currentSummary = runBootstrap(projectDir, ["--dry-run"]);
+    const currentPlan = currentSummary.results[0];
+    assert.equal(currentPlan.state.status, "ready");
+    assert.equal(currentPlan.state.requiresConfirmation, false);
+    assert.equal(currentPlan.state.counts.pending, 0);
+    assert.equal(currentPlan.writePreview.projectWrites.length, 0);
+    assert.equal(currentPlan.writePreview.confirmation.required, false);
+    assert.equal(currentPlan.writePreview.backup.requiredBeforeApply, false);
+    assert.equal(currentPlan.choiceSurface.required, false);
+    assert.equal(currentPlan.choiceSurface.trigger, "no_choice_needed_current");
+    assert.equal(
+      currentPlan.files.some((file) => file.relPath === ".meta-kim/meta-kim-post-copy.mjs"),
+      false,
+    );
+
+    const noOpApply = runBootstrap(projectDir, ["--apply"]);
+    assert.equal(noOpApply.results[0].applied, false);
+    assert.equal(noOpApply.results[0].noOp, true);
+    assert.equal(noOpApply.results[0].backup.created, false);
+  } finally {
+    rmSync(projectDir, { recursive: true, force: true });
+  }
+});
+
+test("lazy project bootstrap creates AGENTS and CLAUDE only as managed blocks", () => {
+  const projectDir = tempProject();
+  try {
+    runBootstrapForTargets(projectDir, "claude,codex", ["--apply"]);
+
+    const agents = readFileSync(path.join(projectDir, "AGENTS.md"), "utf8");
+    const claude = readFileSync(path.join(projectDir, "CLAUDE.md"), "utf8");
+    assert.match(agents, /^<!-- BEGIN META_KIM MANAGED BLOCK: AGENTS\.md -->/);
+    assert.match(agents, /<!-- END META_KIM MANAGED BLOCK: AGENTS\.md -->\s*$/);
+    assert.match(claude, /^<!-- BEGIN META_KIM MANAGED BLOCK: CLAUDE\.md -->/);
+    assert.match(claude, /<!-- END META_KIM MANAGED BLOCK: CLAUDE\.md -->\s*$/);
+    assert.equal(agents.trimStart().startsWith("# Meta_Kim for Codex"), false);
+    assert.equal(claude.trimStart().startsWith("# Meta_Kim for Claude Code"), false);
+  } finally {
+    rmSync(projectDir, { recursive: true, force: true });
+  }
+});
+
+test("global cleanup removes old full-file Meta_Kim AGENTS and CLAUDE projections", () => {
+  const projectDir = tempProject();
+  try {
+    writeFileSync(
+      path.join(projectDir, "AGENTS.md"),
+      [
+        readFileSync(path.join(REPO_ROOT, "AGENTS.md"), "utf8")
+          .replace("This file is the Codex entrypoint", "This old file was the Codex entrypoint")
+          .trimEnd(),
+        "",
+        "<!-- BEGIN META_KIM MANAGED BLOCK: AGENTS.md -->",
+        readFileSync(path.join(REPO_ROOT, "AGENTS.md"), "utf8").trimEnd(),
+        "<!-- END META_KIM MANAGED BLOCK: AGENTS.md -->",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+    writeFileSync(
+      path.join(projectDir, "CLAUDE.md"),
+      readFileSync(path.join(REPO_ROOT, "CLAUDE.md"), "utf8"),
+      "utf8",
+    );
+
+    const result = runSetup([
+      "--cleanup-projects",
+      "--targets",
+      "claude,codex",
+      "--project-dir",
+      projectDir,
+      "--json",
+    ]);
+    assert.equal(result.status, 0, result.stderr);
+    const summary = parseTrailingJson(result.stdout);
+    assert.equal(summary.ok, true);
+    assert.equal(existsSync(path.join(projectDir, "AGENTS.md")), false);
+    assert.equal(existsSync(path.join(projectDir, "CLAUDE.md")), false);
+    const removed = summary.results.flatMap((entry) => entry.cleanup?.removed ?? []);
+    assert.ok(removed.includes("AGENTS.md"));
+    assert.ok(removed.includes("CLAUDE.md"));
+  } finally {
+    rmSync(projectDir, { recursive: true, force: true });
+  }
+});
+
+test("project cleanup json output is machine-parseable without log prefix", () => {
+  const projectDir = tempProject();
+  try {
+    runBootstrapForTargets(projectDir, "claude,codex", ["--apply"]);
+    const result = runSetup([
+      "--project-cleanup",
+      "--targets",
+      "claude,codex",
+      "--project-dir",
+      projectDir,
+      "--json",
+    ]);
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    assert.equal(result.stdout.trimStart().startsWith("{"), true);
+    const summary = JSON.parse(result.stdout);
+    assert.equal(summary.ok, true);
+    assert.equal(summary.resultCount, 1);
+  } finally {
+    rmSync(projectDir, { recursive: true, force: true });
+  }
+});
+
+test("global cleanup removes signed Meta_Kim residue but preserves unknown local skills", () => {
+  const projectDir = tempProject();
+  try {
+    const generatedSkillDir = path.join(
+      projectDir,
+      ".agents",
+      "skills",
+      "same-set-reusable-flow-for-project-file-inventor",
+    );
+    const userSkillDir = path.join(projectDir, ".agents", "skills", "user-local-skill");
+    mkdirSync(generatedSkillDir, { recursive: true });
+    mkdirSync(userSkillDir, { recursive: true });
+    writeFileSync(
+      path.join(generatedSkillDir, "SKILL.md"),
+      [
+        "---",
+        "name: same-set-reusable-flow-for-project-file-inventor",
+        "author: Meta_Kim",
+        "sourceGapId: gap-create-skill-same-set-reusable-flow",
+        "---",
+        "",
+        "# Generated",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+    writeFileSync(
+      path.join(userSkillDir, "SKILL.md"),
+      "---\nname: user-local-skill\n---\n\n# User local skill\n",
+      "utf8",
+    );
+
+    mkdirSync(path.join(projectDir, ".claude"), { recursive: true });
+    mkdirSync(path.join(projectDir, ".claude", "skills", "empty-local", "evals"), {
+      recursive: true,
+    });
+    mkdirSync(path.join(projectDir, ".codex"), { recursive: true });
+    mkdirSync(path.join(projectDir, ".cursor"), { recursive: true });
+    mkdirSync(path.join(projectDir, "openclaw"), { recursive: true });
+    mkdirSync(path.join(projectDir, "openclaw", "hooks", "mcp-memory-service"), {
+      recursive: true,
+    });
+    mkdirSync(path.join(projectDir, "openclaw", "workspaces", "meta-warden", ".openclaw"), {
+      recursive: true,
+    });
+    mkdirSync(path.join(projectDir, ".meta-kim", "state", "default"), { recursive: true });
+    writeFileSync(
+      path.join(projectDir, ".claude", "settings.json"),
+      readFileSync(
+        path.join(REPO_ROOT, "canonical", "runtime-assets", "claude", "settings.json"),
+        "utf8",
+      ),
+      "utf8",
+    );
+    writeFileSync(
+      path.join(projectDir, ".codex", "hooks.json"),
+      JSON.stringify({ hooks: {} }, null, 2) + "\n",
+      "utf8",
+    );
+    writeFileSync(
+      path.join(projectDir, ".mcp.json"),
+      JSON.stringify({ mcpServers: {} }, null, 2) + "\n",
+      "utf8",
+    );
+    writeFileSync(
+      path.join(projectDir, ".cursor", "hooks.json"),
+      JSON.stringify({ version: 1, hooks: {} }, null, 2) + "\n",
+      "utf8",
+    );
+    writeFileSync(
+      path.join(projectDir, ".cursor", "mcp.json"),
+      JSON.stringify({ mcpServers: {} }, null, 2) + "\n",
+      "utf8",
+    );
+    writeFileSync(
+      path.join(projectDir, "openclaw", "openclaw.template.json"),
+      readFileSync(
+        path.join(
+          REPO_ROOT,
+          "canonical",
+          "runtime-assets",
+          "openclaw",
+          "openclaw.template.json",
+        ),
+        "utf8",
+      ),
+      "utf8",
+    );
+    writeFileSync(
+      path.join(projectDir, "openclaw", "hooks", "mcp-memory-service", "HOOK.md"),
+      "---\nname: mcp-memory-service\n---\n\n# MCP Memory Service Bridge\n\nMeta_Kim hook.\n",
+      "utf8",
+    );
+    writeFileSync(
+      path.join(projectDir, ".claude", "project-task-state.json"),
+      JSON.stringify({
+        sessions: [{ note: "auto-save from Stop hook" }],
+        tags: ["meta_kim"],
+      }),
+      "utf8",
+    );
+    writeFileSync(
+      path.join(projectDir, ".meta-kim", "state", "default", "project-bootstrap.json"),
+      JSON.stringify({ schemaVersion: "meta-kim-project-bootstrap-v0.1" }),
+      "utf8",
+    );
+
+    const result = runSetup([
+      "--cleanup-projects",
+      "--targets",
+      "claude,codex,cursor,openclaw",
+      "--project-dir",
+      projectDir,
+      "--json",
+    ]);
+    assert.equal(result.status, 0, result.stderr);
+    const summary = parseTrailingJson(result.stdout);
+    assert.equal(summary.ok, true);
+    const removed = summary.results.flatMap((entry) => entry.cleanup?.removed ?? []);
+    assert.equal(existsSync(generatedSkillDir), false);
+    assert.equal(existsSync(userSkillDir), true);
+    assert.equal(existsSync(path.join(projectDir, ".claude", "settings.json")), false);
+    assert.equal(existsSync(path.join(projectDir, ".claude", "skills", "empty-local")), false);
+    assert.equal(existsSync(path.join(projectDir, ".codex", "hooks.json")), false);
+    assert.equal(existsSync(path.join(projectDir, ".mcp.json")), false);
+    assert.equal(existsSync(path.join(projectDir, ".cursor")), false);
+    assert.equal(existsSync(path.join(projectDir, "openclaw")), false);
+    assert.equal(existsSync(path.join(projectDir, ".meta-kim")), false);
+    assert.ok(removed.includes(".agents/skills/same-set-reusable-flow-for-project-file-inventor"));
+    assert.ok(removed.includes(".claude/settings.json"));
+    assert.ok(removed.includes(".meta-kim"));
+  } finally {
+    rmSync(projectDir, { recursive: true, force: true });
+  }
+});
+
+test("global cleanup preserves git-tracked Meta_Kim residue for explicit migration", () => {
+  const projectDir = tempProject();
+  try {
+    const generatedSkillDir = path.join(
+      projectDir,
+      ".agents",
+      "skills",
+      "same-set-reusable-flow-for-project-file-inventor",
+    );
+    mkdirSync(generatedSkillDir, { recursive: true });
+    writeFileSync(
+      path.join(generatedSkillDir, "SKILL.md"),
+      "---\nname: same-set-reusable-flow-for-project-file-inventor\nauthor: Meta_Kim\n---\n",
+      "utf8",
+    );
+    const trackedHookPath = path.join(
+      projectDir,
+      ".codex",
+      "hooks",
+      "activate-meta-theory-spine.mjs",
+    );
+    mkdirSync(path.dirname(trackedHookPath), { recursive: true });
+    writeFileSync(trackedHookPath, "console.log('tracked hook');\n", "utf8");
+    const trackedHooksConfigPath = path.join(projectDir, ".codex", "hooks.json");
+    writeFileSync(
+      trackedHooksConfigPath,
+      JSON.stringify(
+        {
+          hooks: {
+            UserPromptSubmit: [{ command: "node .codex/hooks/activate-meta-theory-spine.mjs" }],
+          },
+        },
+        null,
+        2,
+      ),
+      "utf8",
+    );
+    const init = spawnSync("git", ["init"], {
+      cwd: projectDir,
+      encoding: "utf8",
+      windowsHide: true,
+    });
+    assert.equal(init.status, 0, init.stderr);
+    const add = spawnSync("git", ["add", "."], {
+      cwd: projectDir,
+      encoding: "utf8",
+      windowsHide: true,
+    });
+    assert.equal(add.status, 0, add.stderr);
+
+    const result = runSetup([
+      "--cleanup-projects",
+      "--targets",
+      "codex",
+      "--project-dir",
+      projectDir,
+      "--json",
+    ]);
+    assert.equal(result.status, 0, result.stderr);
+    const summary = parseTrailingJson(result.stdout);
+    assert.equal(summary.ok, true);
+    assert.equal(existsSync(path.join(generatedSkillDir, "SKILL.md")), true);
+    assert.equal(readFileSync(trackedHookPath, "utf8"), "console.log('tracked hook');\n");
+    assert.match(
+      readFileSync(trackedHooksConfigPath, "utf8"),
+      /activate-meta-theory-spine\.mjs/,
+    );
+    const skipped = summary.results.flatMap((entry) => entry.cleanup?.skipped ?? []);
+    assert.ok(
+      skipped.some(
+        (item) =>
+          item.relPath === ".agents/skills/same-set-reusable-flow-for-project-file-inventor" &&
+          item.reason === "git_tracked_preserved",
+      ),
+    );
+  } finally {
+    rmSync(projectDir, { recursive: true, force: true });
+  }
+});
+
+test("global cleanup removes empty runtime shell directories after residue cleanup", () => {
+  const projectDir = tempProject();
+  try {
+    mkdirSync(path.join(projectDir, ".claude", "skills", "laojin", "evals"), {
+      recursive: true,
+    });
+    mkdirSync(path.join(projectDir, ".agents"), { recursive: true });
+    mkdirSync(path.join(projectDir, ".codex"), { recursive: true });
+
+    const result = runSetup([
+      "--cleanup-projects",
+      "--targets",
+      "claude,codex",
+      "--project-dir",
+      projectDir,
+      "--json",
+    ]);
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(existsSync(path.join(projectDir, ".claude")), false);
+    assert.equal(existsSync(path.join(projectDir, ".agents")), false);
+    assert.equal(existsSync(path.join(projectDir, ".codex")), false);
+  } finally {
+    rmSync(projectDir, { recursive: true, force: true });
+  }
+});
+
+test("lazy project bootstrap projects Codex hook files and preserves user hooks", () => {
+  const projectDir = tempProject();
+  const userHookPath = path.join(
+    projectDir,
+    ".codex",
+    "hooks",
+    "user-custom-hook.mjs",
+  );
+  try {
+    mkdirSync(path.dirname(userHookPath), { recursive: true });
+    writeFileSync(userHookPath, "console.log('user hook stays');\n", "utf8");
+
+    const dryRun = runBootstrapForTargets(projectDir, "codex", ["--dry-run"]);
+    const plan = dryRun.results[0];
+    assert.notEqual(plan.state.status, "conflict");
+    assert.equal(plan.state.counts.conflict, 0);
+    assert.equal(plan.writePreview.projectConflicts.length, 0);
+    assert.equal(
+      plan.writePreview.projectWrites.some(
+        (file) => file.relPath === ".codex/hooks/activate-meta-theory-spine.mjs",
+      ),
+      true,
+    );
+
+    const apply = runSetup([
+      "--project-bootstrap",
+      "--targets",
+      "codex",
+      "--project-dir",
+      projectDir,
+      "--json",
+      "--apply",
+    ]);
+    assert.equal(apply.status, 0, apply.stderr || apply.stdout);
+    assert.equal(readFileSync(userHookPath, "utf8"), "console.log('user hook stays');\n");
+    assert.equal(
+      existsSync(path.join(projectDir, ".codex", "hooks", "activate-meta-theory-spine.mjs")),
+      true,
+    );
+    assert.equal(
+      existsSync(path.join(projectDir, ".codex", "hooks", "graphify-context.mjs")),
+      true,
+    );
+  } finally {
+    rmSync(projectDir, { recursive: true, force: true });
+  }
+});
+
+test("lazy project bootstrap apply restores managed project hooks instead of pruning hook dirs", () => {
+  const projectDir = tempProject();
+  try {
+    mkdirSync(path.join(projectDir, ".claude", "hooks"), { recursive: true });
+    writeFileSync(
+      path.join(projectDir, ".claude", "hooks", "hook-i18n.mjs"),
+      "console.log('legacy');\n",
+      "utf8",
+    );
+    mkdirSync(path.join(projectDir, ".codex", "hooks"), { recursive: true });
+    writeFileSync(
+      path.join(projectDir, ".codex", "hooks", "activate-meta-theory-spine.mjs"),
+      "console.log('legacy');\n",
+      "utf8",
+    );
+    mkdirSync(path.join(projectDir, ".cursor", "hooks"), { recursive: true });
+    writeFileSync(
+      path.join(projectDir, ".cursor", "hooks", "graphify-context.mjs"),
+      "console.log('legacy');\n",
+      "utf8",
+    );
+
+    const summary = runBootstrapForTargets(projectDir, "claude,codex,cursor", [
+      "--apply",
+    ]);
+    assert.equal(summary.ok, true);
+    assert.equal(existsSync(path.join(projectDir, ".claude", "hooks")), true);
+    assert.equal(existsSync(path.join(projectDir, ".codex", "hooks")), true);
+    assert.equal(existsSync(path.join(projectDir, ".cursor", "hooks")), true);
+    assert.notEqual(
+      readFileSync(path.join(projectDir, ".codex", "hooks", "activate-meta-theory-spine.mjs"), "utf8"),
+      "console.log('legacy');\n",
+    );
+    assert.notEqual(
+      readFileSync(path.join(projectDir, ".cursor", "hooks", "graphify-context.mjs"), "utf8"),
+      "console.log('legacy');\n",
+    );
+  } finally {
+    rmSync(projectDir, { recursive: true, force: true });
+  }
+});
+
+test("lazy project bootstrap removes stale manifest-managed project capability assets only", () => {
+  const projectDir = tempProject();
+  const staleRel = ".codex/skills/legacy-meta-kim/SKILL.md";
+  const userRel = ".codex/skills/user-skill/SKILL.md";
+  try {
+    runBootstrapForTargets(projectDir, "codex", ["--apply"]);
+
+    const stalePath = path.join(projectDir, ...staleRel.split("/"));
+    const userPath = path.join(projectDir, ...userRel.split("/"));
+    mkdirSync(path.dirname(stalePath), { recursive: true });
+    mkdirSync(path.dirname(userPath), { recursive: true });
+    writeFileSync(stalePath, "# Legacy Meta_Kim projection\n", "utf8");
+    writeFileSync(userPath, "# User project skill\n", "utf8");
+
+    const manifestPath = path.join(
+      projectDir,
+      ".meta-kim",
+      "state",
+      "default",
+      "project-bootstrap.json",
+    );
+    const manifest = readJson(manifestPath);
+    manifest.managedFiles.push({
+      relPath: staleRel,
+      ownership: "manifest_managed",
+      action: "create",
+      effectiveAction: "unchanged",
+      mergePolicy: "generated_projection_create",
+    });
+    writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + "\n", "utf8");
+
+    const result = runSetup([
+      "--project-bootstrap",
+      "--targets",
+      "codex",
+      "--project-dir",
+      projectDir,
+      "--lang",
+      "zh",
+      "--apply",
+    ]);
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    assert.match(result.stdout, /项目级目标已按本次选择重新计算/);
+    assert.match(result.stdout, /这是项目目录更新的一部分/);
+    assert.doesNotMatch(result.stdout, /Meta_Kim 正转为全局通用能力/);
+    assert.match(result.stdout, /Codex skills: 1/);
+    assert.equal(existsSync(stalePath), false);
+    assert.equal(
+      existsSync(path.join(projectDir, ".codex", "skills", "legacy-meta-kim")),
+      false,
+    );
+    assert.equal(readFileSync(userPath, "utf8"), "# User project skill\n");
+  } finally {
+    rmSync(projectDir, { recursive: true, force: true });
+  }
+});
+
+test("lazy project bootstrap replaces direct legacy Codex project skill root with .agents skill root", () => {
+  const projectDir = tempProject();
+  const legacyRel = ".codex/skills/meta-theory/SKILL.md";
+  const userRel = ".codex/skills/user-skill/SKILL.md";
+  try {
+    const legacyPath = path.join(projectDir, ...legacyRel.split("/"));
+    const userPath = path.join(projectDir, ...userRel.split("/"));
+    mkdirSync(path.dirname(legacyPath), { recursive: true });
+    mkdirSync(path.dirname(userPath), { recursive: true });
+    writeFileSync(legacyPath, "# Stale project Meta_Kim skill\n", "utf8");
+    writeFileSync(userPath, "# User project skill\n", "utf8");
+
+    const result = runSetup([
+      "--project-bootstrap",
+      "--targets",
+      "codex",
+      "--project-dir",
+      projectDir,
+      "--lang",
+      "zh",
+      "--apply",
+    ]);
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    assert.equal(
+      existsSync(path.join(projectDir, ".agents", "skills", "meta-theory", "SKILL.md")),
+      true,
+    );
+    assert.equal(existsSync(path.join(projectDir, ".codex", "skills", "meta-theory")), false);
+    assert.equal(readFileSync(userPath, "utf8"), "# User project skill\n");
+  } finally {
+    rmSync(projectDir, { recursive: true, force: true });
+  }
+});
+
+test("lazy project bootstrap merges managed project hook commands into hooks.json", () => {
+  const projectDir = tempProject();
+  const hooksJsonPath = path.join(projectDir, ".codex", "hooks.json");
+  try {
+    mkdirSync(path.dirname(hooksJsonPath), { recursive: true });
+    writeFileSync(
+      hooksJsonPath,
+      JSON.stringify(
+        {
+          hooks: {
+            UserPromptSubmit: [{ hooks: [{ command: "node user-hook.mjs" }] }],
+          },
+        },
+        null,
+        2,
+      ) + "\n",
+      "utf8",
+    );
+
+    const dryRun = runBootstrapForTargets(projectDir, "codex", ["--dry-run"]);
+    const plan = dryRun.results[0];
+    assert.notEqual(plan.state.status, "conflict");
+    const hooksPlan = plan.files.find((file) => file.relPath === ".codex/hooks.json");
+    assert.equal(hooksPlan.effectiveAction, "merge");
+    assert.equal(hooksPlan.mergePolicy, "additive_preserve_user_state_json");
+    assert.equal(plan.writePreview.projectConflicts.length, 0);
+
+    runBootstrapForTargets(projectDir, "codex", ["--apply"]);
+    const merged = readFileSync(hooksJsonPath, "utf8");
+    assert.match(merged, /\.codex\/hooks\/activate-meta-theory-spine\.mjs/);
+    assert.match(merged, /\.codex\/hooks\/enforce-agent-dispatch\.mjs/);
+    assert.match(merged, /user-hook\.mjs/);
+    const current = runBootstrapForTargets(projectDir, "codex", ["--dry-run"]);
+    assert.equal(current.results[0].state.status, "ready");
+  } finally {
+    rmSync(projectDir, { recursive: true, force: true });
+  }
+});
+
+test("lazy project bootstrap retargeting strips stale project hook config and preserves user hooks", () => {
+  const projectDir = tempProject();
+  const hooksJsonPath = path.join(projectDir, ".codex", "hooks.json");
+  try {
+    mkdirSync(path.dirname(hooksJsonPath), { recursive: true });
+    writeFileSync(
+      hooksJsonPath,
+      JSON.stringify(
+        {
+          hooks: {
+            UserPromptSubmit: [{ hooks: [{ command: "node user-hook.mjs" }] }],
+          },
+        },
+        null,
+        2,
+      ) + "\n",
+      "utf8",
+    );
+
+    runBootstrapForTargets(projectDir, "claude,codex", ["--apply"]);
+    assert.equal(existsSync(path.join(projectDir, ".codex", "hooks")), true);
+    assert.match(readFileSync(hooksJsonPath, "utf8"), /\.codex\/hooks\//);
+
+    const summary = runBootstrapForTargets(projectDir, "claude", ["--apply"]);
+    assert.equal(summary.ok, true);
+
+    const codexHooks = readFileSync(hooksJsonPath, "utf8");
+    assert.match(codexHooks, /user-hook\.mjs/);
+    assert.doesNotMatch(codexHooks, /\.codex\/hooks\//);
+    assert.equal(existsSync(path.join(projectDir, ".codex", "hooks")), false);
+    assert.equal(
+      existsSync(path.join(projectDir, ".agents", "skills", "meta-theory")),
+      false,
+    );
+
+    const manifest = readJson(
+      path.join(projectDir, ".meta-kim", "state", "default", "project-bootstrap.json"),
+    );
+    assert.deepEqual(manifest.activeTargets, ["claude"]);
+    assert.ok(
+      manifest.cleanup.removed.some((relPath) =>
+        relPath.startsWith(".codex/hooks/"),
+      ),
+    );
+    assert.deepEqual(manifest.cleanup.strippedHookConfigs, [".codex/hooks.json"]);
+  } finally {
+    rmSync(projectDir, { recursive: true, force: true });
+  }
+});
+
+test("lazy project bootstrap retargeting removes empty inactive hook folders", () => {
+  const projectDir = tempProject();
+  try {
+    runBootstrapForTargets(projectDir, "claude", ["--apply"]);
+    assert.equal(existsSync(path.join(projectDir, ".claude", "hooks")), true);
+
+    const summary = runBootstrapForTargets(projectDir, "codex", ["--apply"]);
+    assert.equal(summary.ok, true);
+    assert.equal(existsSync(path.join(projectDir, ".claude", "hooks")), false);
+    assert.equal(existsSync(path.join(projectDir, ".codex", "hooks")), true);
+
+    const claudeSettings = readFileSync(
+      path.join(projectDir, ".claude", "settings.json"),
+      "utf8",
+    );
+    assert.doesNotMatch(claudeSettings, /\.claude\/hooks\//);
   } finally {
     rmSync(projectDir, { recursive: true, force: true });
   }
@@ -234,11 +1038,117 @@ test("lazy project bootstrap does not report success for a read-only project tar
       "--apply",
     ]);
     assert.notEqual(result.status, 0, "read-only target must not be reported as apply success");
-    assert.match(result.stderr || result.stdout, /Setup error|EACCES|EPERM|permission|read-only/i);
+    const summary = JSON.parse(result.stdout);
+    assert.equal(summary.ok, false);
+    assert.match(summary.results[0].error.message, /EACCES|EPERM|permission|read-only/i);
+    assert.match(summary.results[0].error.status, /blocked|failed/);
   } finally {
     try {
       chmodSync(agentsPath, 0o666);
     } catch {}
+    rmSync(projectDir, { recursive: true, force: true });
+  }
+});
+
+test("lazy project bootstrap respects target-conditional project projection boundaries", () => {
+  const cases = [
+    {
+      targets: "claude",
+      present: ["CLAUDE.md", ".claude/settings.json", ".mcp.json"],
+      absent: ["AGENTS.md", ".codex", ".agents", ".cursor", "openclaw"],
+    },
+    {
+      targets: "codex",
+      present: ["AGENTS.md", ".codex/hooks.json", ".agents/skills/meta-theory/SKILL.md"],
+      absent: ["CLAUDE.md", ".claude", ".cursor", "openclaw"],
+    },
+    {
+      targets: "cursor",
+      present: [
+        "AGENTS.md",
+        ".cursor/hooks.json",
+        ".cursor/mcp.json",
+        ".cursor/rules",
+        ".cursor/skills/meta-theory/SKILL.md",
+      ],
+      absent: ["CLAUDE.md", ".claude", ".codex", ".agents", "openclaw"],
+    },
+    {
+      targets: "openclaw",
+      present: [
+        "AGENTS.md",
+        "openclaw/openclaw.template.json",
+        "openclaw/skills/meta-theory/SKILL.md",
+        "openclaw/workspaces",
+      ],
+      absent: ["CLAUDE.md", ".claude", ".codex", ".agents", ".cursor"],
+    },
+    {
+      targets: "claude,codex",
+      present: [
+        "CLAUDE.md",
+        "AGENTS.md",
+        ".claude/settings.json",
+        ".codex/hooks.json",
+        ".agents/skills/meta-theory/SKILL.md",
+        ".mcp.json",
+      ],
+      absent: [".cursor", "openclaw"],
+    },
+  ];
+
+  for (const entry of cases) {
+    const projectDir = tempProject();
+    try {
+      const expectedTargets = entry.targets.split(",");
+      const dryRun = runBootstrapForTargets(projectDir, entry.targets, ["--dry-run"]);
+      assert.equal(dryRun.mode, "dry-run");
+      assert.deepEqual(dryRun.results[0].state.activeTargets, expectedTargets);
+      assert.deepEqual(dryRun.results[0].writePreview.globalWrites, []);
+      assert.equal(existsSync(path.join(projectDir, ".meta-kim")), false);
+
+      runBootstrapForTargets(projectDir, entry.targets, ["--apply"]);
+      const manifest = readJson(
+        path.join(projectDir, ".meta-kim", "state", "default", "project-bootstrap.json"),
+      );
+      assert.deepEqual(manifest.activeTargets, expectedTargets);
+
+      for (const relPath of entry.present) {
+        assert.equal(
+          existsSync(path.join(projectDir, ...relPath.split("/"))),
+          true,
+          `${entry.targets} should project ${relPath}`,
+        );
+      }
+      for (const relPath of entry.absent) {
+        assert.equal(
+          existsSync(path.join(projectDir, ...relPath.split("/"))),
+          false,
+          `${entry.targets} should not project ${relPath}`,
+        );
+      }
+    } finally {
+      rmSync(projectDir, { recursive: true, force: true });
+    }
+  }
+});
+
+test("lazy project bootstrap can project the full compatibility runtime surface when explicitly selected", () => {
+  const projectDir = tempProject();
+  try {
+    runBootstrapForTargets(projectDir, "claude,codex,openclaw,cursor", ["--apply"]);
+    assert.equal(existsSync(path.join(projectDir, "CLAUDE.md")), true);
+    assert.equal(existsSync(path.join(projectDir, "AGENTS.md")), true);
+    assert.equal(existsSync(path.join(projectDir, ".claude", "settings.json")), true);
+    assert.equal(existsSync(path.join(projectDir, ".codex", "hooks.json")), true);
+    assert.equal(existsSync(path.join(projectDir, ".agents", "skills", "meta-theory")), true);
+    assert.equal(existsSync(path.join(projectDir, ".cursor", "hooks.json")), true);
+    assert.equal(existsSync(path.join(projectDir, "openclaw", "openclaw.template.json")), true);
+    assert.equal(
+      existsSync(path.join(projectDir, ".meta-kim", "state", "default", "project-bootstrap.json")),
+      true,
+    );
+  } finally {
     rmSync(projectDir, { recursive: true, force: true });
   }
 });
@@ -264,7 +1174,155 @@ test("lazy project bootstrap detects stale previous manifest before update", () 
 
     const summary = runBootstrap(projectDir, ["--dry-run"]);
     assert.equal(summary.results[0].state.status, "stale");
+    assert.equal(summary.results[0].state.requiresConfirmation, true);
     assert.equal(summary.results[0].state.previousManifest.metaKimVersion, "0.0.0");
+
+    const update = runBootstrap(projectDir, ["--apply"]);
+    assert.equal(update.mode, "apply");
+    assert.equal(update.results[0].applied, true);
+
+    const current = runBootstrap(projectDir, ["--dry-run"]);
+    assert.equal(current.results[0].state.status, "ready");
+    assert.equal(current.results[0].state.requiresConfirmation, false);
+    assert.equal(current.results[0].state.counts.pending, 0);
+    assert.equal(current.results[0].writePreview.projectWrites.length, 0);
+  } finally {
+    rmSync(projectDir, { recursive: true, force: true });
+  }
+});
+
+test("lazy project bootstrap treats equivalent files without manifest as confirmation-only", () => {
+  const projectDir = tempProject();
+  try {
+    runBootstrap(projectDir, ["--apply"]);
+    rmSync(path.join(projectDir, ".meta-kim", "state"), {
+      recursive: true,
+      force: true,
+    });
+
+    const summary = runBootstrap(projectDir, ["--dry-run"]);
+    const plan = summary.results[0];
+    assert.equal(plan.state.status, "ready_with_existing_config");
+    assert.equal(plan.state.requiresConfirmation, true);
+    assert.equal(plan.state.counts.pending, 0);
+    assert.equal(plan.writePreview.projectWrites.length, 0);
+    assert.equal(plan.writePreview.manifestWrite.requiredBeforeReady, true);
+    assert.equal(plan.choiceSurface.required, true);
+    assert.match(plan.choiceSurface.question, /Pending project writes: 0/);
+
+    const rewriteManifest = runBootstrap(projectDir, ["--apply"]);
+    assert.equal(rewriteManifest.results[0].applied, true);
+    const current = runBootstrap(projectDir, ["--dry-run"]);
+    assert.equal(current.results[0].state.status, "ready");
+    assert.equal(current.results[0].state.requiresConfirmation, false);
+  } finally {
+    rmSync(projectDir, { recursive: true, force: true });
+  }
+});
+
+test("lazy project bootstrap does not manage project-local post-copy executable", () => {
+  const projectDir = tempProject();
+  try {
+    runBootstrap(projectDir, ["--apply"]);
+
+    const summary = runBootstrap(projectDir, ["--dry-run"]);
+    const plan = summary.results[0];
+    assert.equal(plan.state.status, "ready");
+    assert.equal(plan.state.requiresConfirmation, false);
+    assert.equal(
+      plan.files.some((file) => file.relPath === ".meta-kim/meta-kim-post-copy.mjs"),
+      false,
+    );
+    assert.equal(
+      existsSync(path.join(projectDir, ".meta-kim", "meta-kim-post-copy.mjs")),
+      false,
+    );
+  } finally {
+    rmSync(projectDir, { recursive: true, force: true });
+  }
+});
+
+test("lazy project bootstrap detects active target changes separately from version updates", () => {
+  const projectDir = tempProject();
+  try {
+    runBootstrapForTargets(projectDir, "claude", ["--apply"]);
+
+    const summary = runBootstrapForTargets(projectDir, "claude,codex", ["--dry-run"]);
+    const plan = summary.results[0];
+    assert.equal(plan.state.status, "target_scope_changed");
+    assert.equal(plan.state.requiresConfirmation, true);
+    assert.deepEqual(plan.state.previousManifest.activeTargets, ["claude"]);
+    assert.equal(plan.state.previousManifest.targetChanged, true);
+    assert.ok(plan.writePreview.projectWrites.some((file) => file.relPath === "AGENTS.md"));
+
+    runBootstrapForTargets(projectDir, "claude,codex", ["--apply"]);
+    const current = runBootstrapForTargets(projectDir, "claude,codex", ["--dry-run"]);
+    assert.equal(current.results[0].state.status, "ready");
+    assert.equal(current.results[0].state.requiresConfirmation, false);
+    assert.equal(current.results[0].state.counts.pending, 0);
+  } finally {
+    rmSync(projectDir, { recursive: true, force: true });
+  }
+});
+
+test("lazy project bootstrap detects generated file drift even with current manifest", () => {
+  const projectDir = tempProject();
+  try {
+    runBootstrap(projectDir, ["--apply"]);
+    const hookPath = path.join(
+      projectDir,
+      ".codex",
+      "hooks",
+      "enforce-agent-dispatch.mjs",
+    );
+    writeFileSync(hookPath, "// drifted local hook mirror\n", "utf8");
+
+    const summary = runBootstrap(projectDir, ["--dry-run"]);
+    const plan = summary.results[0];
+    assert.equal(plan.state.status, "repair_required");
+    assert.equal(plan.state.requiresConfirmation, true);
+    assert.ok(
+      plan.writePreview.projectWrites.some(
+        (file) =>
+          file.relPath === ".codex/hooks/enforce-agent-dispatch.mjs" &&
+          file.action === "replace",
+      ),
+    );
+
+    runBootstrap(projectDir, ["--apply"]);
+    const current = runBootstrap(projectDir, ["--dry-run"]);
+    assert.equal(current.results[0].state.status, "ready");
+    assert.equal(current.results[0].writePreview.projectWrites.length, 0);
+  } finally {
+    rmSync(projectDir, { recursive: true, force: true });
+  }
+});
+
+test("lazy project bootstrap treats corrupt manifest as needing confirmation but not file rewrites", () => {
+  const projectDir = tempProject();
+  try {
+    runBootstrap(projectDir, ["--apply"]);
+    const manifestPath = path.join(
+      projectDir,
+      ".meta-kim",
+      "state",
+      "default",
+      "project-bootstrap.json",
+    );
+    writeFileSync(manifestPath, "{not json\n", "utf8");
+
+    const summary = runBootstrap(projectDir, ["--dry-run"]);
+    const plan = summary.results[0];
+    assert.equal(plan.state.status, "ready_with_existing_config");
+    assert.equal(plan.state.requiresConfirmation, true);
+    assert.equal(plan.state.previousManifest, null);
+    assert.equal(plan.state.counts.pending, 0);
+    assert.equal(plan.writePreview.projectWrites.length, 0);
+
+    runBootstrap(projectDir, ["--apply"]);
+    const current = runBootstrap(projectDir, ["--dry-run"]);
+    assert.equal(current.results[0].state.status, "ready");
+    assert.equal(current.results[0].state.requiresConfirmation, false);
   } finally {
     rmSync(projectDir, { recursive: true, force: true });
   }

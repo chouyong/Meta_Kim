@@ -31,6 +31,7 @@ export const RUNTIME_HOOK_CAPABILITIES = {
       sessionStart: "SessionStart",
       preToolUse: "PreToolUse",
       postToolUse: "PostToolUse",
+      subagentStart: "SubagentStart",
       skill: "Skill",
       stop: "Stop",
     },
@@ -57,6 +58,7 @@ export const RUNTIME_HOOK_CAPABILITIES = {
       sessionStart: "sessionStart",
       preToolUse: "preToolUse",
       postToolUse: "postToolUse",
+      subagentStart: "subagentStart",
       stop: "stop",
     },
   },
@@ -100,6 +102,101 @@ export function hookCommand(command, timeout, extra = {}) {
     command,
     ...(timeout ? { timeout } : {}),
   };
+}
+
+const PROJECT_META_KIM_HOOK_FILES = new Set([
+  "activate-meta-theory-spine.mjs",
+  "bash-readonly-whitelist.mjs",
+  "block-dangerous-bash.mjs",
+  "codex_hook_adapter.py",
+  "codex_hook_runner.mjs",
+  "enforce-agent-dispatch.mjs",
+  "graphify-context.mjs",
+  "hook-i18n.mjs",
+  "hookprompt-adapter.mjs",
+  "meta-kim-memory-save.mjs",
+  "permission_request.py",
+  "planning-with-files-adapter.mjs",
+  "post-console-log-warn.mjs",
+  "post-format.mjs",
+  "post-tool-use.ps1",
+  "post-tool-use.sh",
+  "post_tool_use.py",
+  "post-typecheck.mjs",
+  "pre-compact.sh",
+  "pre-git-push-confirm.mjs",
+  "pre-tool-use.ps1",
+  "pre-tool-use.sh",
+  "pre_tool_use.py",
+  "resolve-plan-dir.sh",
+  "session-start.sh",
+  "session_start.py",
+  "skip-reminder.mjs",
+  "spine-state.mjs",
+  "stop-compaction.mjs",
+  "stop-completion-guard.mjs",
+  "stop-console-log-audit.mjs",
+  "stop-save-progress.mjs",
+  "stop-spine-cleanup.mjs",
+  "stop.ps1",
+  "stop.py",
+  "stop.sh",
+  "subagent-context.mjs",
+  "user-prompt-submit.sh",
+  "user_prompt_submit.py",
+  "utils.mjs",
+]);
+
+export function isProjectMetaKimHookCommand(command) {
+  if (typeof command !== "string") return false;
+  const normalized = command.replace(/\\\\/g, "\\").replace(/\\/g, "/");
+  const hasProjectHookDir =
+    normalized.includes(".claude/hooks/") ||
+    normalized.includes(".codex/hooks/") ||
+    normalized.includes(".cursor/hooks/") ||
+    normalized.includes("openclaw/hooks/");
+  if (!hasProjectHookDir) return false;
+  return [...PROJECT_META_KIM_HOOK_FILES].some(
+    (file) =>
+      normalized.endsWith(file) ||
+      normalized.includes(`/hooks/${file}`) ||
+      normalized.includes(`/mcp-memory-service/${file}`),
+  );
+}
+
+function stripProjectMetaKimHooksFromList(entries = []) {
+  const kept = [];
+  for (const entry of entries) {
+    if (entry && Array.isArray(entry.hooks)) {
+      const hooks = entry.hooks.filter(
+        (hook) => !isProjectMetaKimHookCommand(hook?.command ?? ""),
+      );
+      if (hooks.length > 0) {
+        kept.push({ ...entry, hooks });
+      }
+      continue;
+    }
+    if (isProjectMetaKimHookCommand(entry?.command ?? "")) {
+      continue;
+    }
+    kept.push(entry);
+  }
+  return kept;
+}
+
+export function stripProjectMetaKimHooksFromHookConfig(config = {}) {
+  const next = structuredClone(config && typeof config === "object" ? config : {});
+  const hooks = {};
+  for (const [event, entries] of Object.entries(next.hooks ?? {})) {
+    const kept = Array.isArray(entries)
+      ? stripProjectMetaKimHooksFromList(entries)
+      : entries;
+    if (!Array.isArray(kept) || kept.length > 0) {
+      hooks[event] = kept;
+    }
+  }
+  next.hooks = hooks;
+  return next;
 }
 
 export function buildHookPromptAdapterSource(runtimeId) {
@@ -197,12 +294,17 @@ export function buildCodexHooksJson({
   graphifyHookPath = ".codex/hooks/graphify-context.mjs",
   memoryHookPath = ".codex/hooks/meta-kim-memory-save.mjs",
   spineHookPath = ".codex/hooks/activate-meta-theory-spine.mjs",
+  packageRoot = null,
   enforceAgentDispatchHookPath = ".codex/hooks/enforce-agent-dispatch.mjs",
   medusaEnqueueHookPath = ".codex/hooks/medusa-postscan-enqueue.mjs",
   medusaSurfaceHookPath = ".codex/hooks/medusa-findings-surface.mjs",
   hookPromptAdapterPath = null,
 } = {}) {
   const userPromptHooks = [];
+  const spineHookArgs = packageRoot ? ["--package-root", packageRoot] : [];
+  if (spineHookPath) {
+    userPromptHooks.push(hookCommand(nodeHookCommand(spineHookPath, spineHookArgs), 5));
+  }
   if (memoryHookPath) {
     userPromptHooks.push(
       hookCommand(nodeHookCommand(memoryHookPath, ["--event", "user-prompt"]), 10),
@@ -228,7 +330,12 @@ export function buildCodexHooksJson({
       // PreToolUse logic so it can short-circuit unsafe dispatches.
       {
         matcher: "Bash|apply_patch|Edit|Write|MultiEdit|NotebookEdit|Agent|spawn_agent",
-        hooks: [hookCommand(nodeHookCommand(enforceAgentDispatchHookPath), 10)],
+        hooks: [
+          hookCommand(
+            nodeHookCommand(enforceAgentDispatchHookPath, ["--runtime", "codex"]),
+            10,
+          ),
+        ],
       },
       {
         matcher: "Bash",
@@ -238,7 +345,7 @@ export function buildCodexHooksJson({
     Skill: [
       {
         matcher: "meta-theory",
-        hooks: [hookCommand(nodeHookCommand(spineHookPath), 5)],
+        hooks: [hookCommand(nodeHookCommand(spineHookPath, spineHookArgs), 5)],
       },
     ],
   };
@@ -306,14 +413,16 @@ export function buildCursorHooksJson({
   graphifyHookPath = ".cursor/hooks/graphify-context.mjs",
   memoryHookPath = ".cursor/hooks/meta-kim-memory-save.mjs",
   spineHookPath = ".cursor/hooks/activate-meta-theory-spine.mjs",
+  packageRoot = null,
   enforceAgentDispatchHookPath = ".cursor/hooks/enforce-agent-dispatch.mjs",
   medusaEnqueueHookPath = ".cursor/hooks/medusa-postscan-enqueue.mjs",
   medusaSurfaceHookPath = ".cursor/hooks/medusa-findings-surface.mjs",
   hookPromptAdapterPath = null,
 } = {}) {
+  const spineHookArgs = packageRoot ? ["--package-root", packageRoot] : [];
   const beforeSubmitPromptHooks = [
     {
-      command: nodeHookCommand(spineHookPath),
+      command: nodeHookCommand(spineHookPath, spineHookArgs),
       timeout: 5,
     },
     {
@@ -340,7 +449,7 @@ export function buildCursorHooksJson({
       // Capability-first + meta-readonly deny gate. failClosed=true ensures
       // Cursor honors the deny payload even if the hook crashes.
       {
-        command: nodeHookCommand(enforceAgentDispatchHookPath),
+        command: nodeHookCommand(enforceAgentDispatchHookPath, ["--runtime", "cursor"]),
         timeout: 10,
         failClosed: true,
       },

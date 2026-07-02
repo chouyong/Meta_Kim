@@ -19,9 +19,19 @@ const CONTRACT = JSON.parse(
   readFileSync("config/governance/runtime-safety-hardening-contract.json", "utf8"),
 );
 const PACKAGE = JSON.parse(readFileSync("package.json", "utf8"));
+const RUNTIME_COMPATIBILITY_CATALOG = JSON.parse(
+  readFileSync("config/runtime-compatibility-catalog.json", "utf8"),
+);
 const HOOKPROMPT_FIXTURES = JSON.parse(
   readFileSync("tests/fixtures/hookprompt-bad-inputs.json", "utf8"),
 );
+
+function productIdsByTier(tier) {
+  return RUNTIME_COMPATIBILITY_CATALOG.products
+    .filter((product) => product.tier === tier)
+    .map((product) => product.id)
+    .sort();
+}
 
 test("runtime safety contract covers the five recent hardening lanes", () => {
   assert.equal(CONTRACT.contractId, "meta-kim-runtime-safety-hardening-contract");
@@ -72,6 +82,20 @@ test("Codex host merge contract matches implementation constants", () => {
     CONTRACT.hostConfigMerge.codexNativeControls.requiredPluginIds,
     CODEX_APP_NATIVE_PLUGIN_IDS,
   );
+  assert.ok(
+    CONTRACT.hostConfigMerge.protectedState.includes(
+      "userOwnedGlobalInstructionFiles",
+    ),
+  );
+  assert.deepEqual(
+    CONTRACT.hostConfigMerge.codexGlobalInstructionFiles.protectedFiles,
+    ["~/.codex/AGENTS.md"],
+  );
+  assert.ok(
+    CONTRACT.hostConfigMerge.codexGlobalInstructionFiles.policy.includes(
+      "quarantine exact ECC baseline if it appears in global AGENTS.md",
+    ),
+  );
   assert.equal(CONTRACT.hostConfigMerge.codexNativeControls.windowsSandbox, "unelevated");
   assert.ok(
     CONTRACT.hostConfigMerge.forbiddenOutcomes.includes("pinStaleBundledMarketplaceSource"),
@@ -90,6 +114,20 @@ test("lazy project bootstrap contract keeps source chain, merge, and rollback ex
   );
   assert.equal(CONTRACT.lazyProjectBootstrap.sourceChain.globalEntrypoint, "bin/meta-kim.mjs");
   assert.equal(CONTRACT.lazyProjectBootstrap.sourceChain.syncManifest, "config/sync.json");
+  assert.equal(
+    CONTRACT.lazyProjectBootstrap.postCopyInitializerPolicy.executorLocation,
+    "installed package root scripts/project-post-copy-init.mjs",
+  );
+  assert.ok(
+    CONTRACT.lazyProjectBootstrap.postCopyInitializerPolicy.projectOutputs.includes(
+      "graphify-out/graph.json",
+    ),
+  );
+  assert.ok(
+    CONTRACT.lazyProjectBootstrap.postCopyInitializerPolicy.forbiddenProjectExecutables.includes(
+      ".meta-kim/meta-kim-post-copy.mjs",
+    ),
+  );
   assert.ok(
     CONTRACT.lazyProjectBootstrap.sourceChain.canonicalRoots.includes("canonical/skills"),
   );
@@ -110,6 +148,110 @@ test("lazy project bootstrap contract keeps source chain, merge, and rollback ex
   );
 });
 
+test("install experience contract separates global capability, project projection, and directory authorization", () => {
+  assert.equal(
+    CONTRACT.installExperienceModel.goal,
+    "clear_global_or_project_install_paths_with_optional_manifest_proven_project_cleanup",
+  );
+  assert.ok(
+    CONTRACT.installExperienceModel.principles.includes(
+      "project-level complete projections are preserved when the user explicitly selects project directory updates",
+    ),
+  );
+  assert.deepEqual(
+    CONTRACT.installExperienceModel.layers.projectCompleteProjectionLayer.defaultActiveTargets,
+    ["claude", "codex"],
+  );
+  assert.equal(
+    CONTRACT.installExperienceModel.layers.projectCompleteProjectionLayer.defaultProjectionSet.includes(
+      ".agents/skills/",
+    ),
+    false,
+  );
+  assert.deepEqual(
+    CONTRACT.installExperienceModel.layers.projectCompleteProjectionLayer.targetConditionalProjectionSets.claude,
+    ["CLAUDE.md", ".claude/", ".mcp.json", ".meta-kim/state", ".meta-kim/backups"],
+  );
+  assert.ok(
+    CONTRACT.installExperienceModel.layers.projectCompleteProjectionLayer.targetConditionalProjectionSets.codex.includes(
+      ".codex/",
+    ),
+  );
+  assert.ok(
+    CONTRACT.installExperienceModel.layers.projectCompleteProjectionLayer.targetConditionalProjectionSets.cursor.includes(
+      ".cursor/",
+    ),
+  );
+  assert.ok(
+    CONTRACT.installExperienceModel.layers.projectCompleteProjectionLayer.targetConditionalProjectionSets.openclaw.includes(
+      "openclaw/",
+    ),
+  );
+  assert.match(
+    CONTRACT.installExperienceModel.layers.projectCompleteProjectionLayer.selectionInvariant,
+    /activeTargets/,
+  );
+  assert.equal(
+    CONTRACT.installExperienceModel.installOptions.find((option) => option.id === "global")
+      .defaultOnEnter,
+    true,
+  );
+  assert.equal(
+    CONTRACT.installExperienceModel.installOptions.find(
+      (option) => option.id === "project",
+    ).defaultOnEnter,
+    false,
+  );
+  assert.equal(
+    CONTRACT.installExperienceModel.installOptions.find(
+      (option) => option.id === "project_cleanup_after_global",
+    ).requiresInstallOption,
+    "global",
+  );
+  assert.equal(
+    CONTRACT.installExperienceModel.installOptions.some((option) => option.id === "both"),
+    false,
+  );
+  assert.equal(
+    CONTRACT.installExperienceModel.installOptions.some(
+      (option) => option.id === "advanced_global_controls",
+    ),
+    false,
+  );
+  assert.match(
+    CONTRACT.installExperienceModel.layers.projectCleanupLayer.deletePolicy,
+    /manifest/,
+  );
+  assert.ok(
+    CONTRACT.installExperienceModel.noSkillSemantics.mustNotSkip.includes(
+      "project projection when project scope is selected",
+    ),
+  );
+  assert.ok(
+    CONTRACT.installExperienceModel.dryRunDisclosure.mustShow.includes("rollbackPlan"),
+  );
+});
+
+test("install experience contract keeps full platform compatibility tiers explicit", () => {
+  const tiers = CONTRACT.installExperienceModel.platformSupportTiers;
+
+  assert.equal(tiers.sourceOfTruth, "config/runtime-compatibility-catalog.json");
+  assert.deepEqual(tiers.formalProjectionTargets.toSorted(), productIdsByTier("runtime_projection"));
+  assert.deepEqual(tiers.defaultSelectedTargets.toSorted(), ["claude", "codex"]);
+  assert.deepEqual(tiers.nonDefaultFormalProjectionTargets.toSorted(), [
+    "cursor",
+    "openclaw",
+  ]);
+  assert.deepEqual(
+    tiers.dependencyInstallTargets.toSorted(),
+    productIdsByTier("dependency_install_target"),
+  );
+  assert.deepEqual(tiers.candidateProbeTargets.toSorted(), productIdsByTier("candidate_probe"));
+  assert.match(tiers.boundary, /formal Meta_Kim projection targets/);
+  assert.match(tiers.promotionInvariant, /runtime profile/);
+  assert.match(tiers.promotionInvariant, /sync tests/);
+});
+
 test("HookPrompt protocol contract binds source, adapter, host, and model-visible fields", () => {
   const codexSource = buildHookPromptAdapterSource("codex");
   const cursorSource = buildHookPromptAdapterSource("cursor");
@@ -122,6 +264,18 @@ test("HookPrompt protocol contract binds source, adapter, host, and model-visibl
   assert.doesNotMatch(codexSource, /systemMessage:\s*additionalContext/);
   assert.match(cursorSource, /prompt:\s*additionalContext/);
   assert.match(JSON.stringify(codexHooks), /hookprompt-adapter\.mjs/);
+  assert.ok(
+    CONTRACT.hookPromptProtocol.rules.some(
+      (rule) =>
+        /prompt-intake context only/i.test(rule) &&
+        /active-run/i.test(rule) &&
+        /Fetch/i.test(rule) &&
+        /Thinking/i.test(rule) &&
+        /verification/i.test(rule) &&
+        /public-ready/i.test(rule),
+    ),
+    "HookPrompt must stay as prompt-intake context, not runtime evidence",
+  );
 });
 
 test("HookPrompt bad-input fixtures flow through adapter into model-visible fields", () => {

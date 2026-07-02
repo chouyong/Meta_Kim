@@ -76,6 +76,10 @@ const REQUIRED_PROVIDER_TYPES = [
   "graph_provider",
 ];
 
+const OPTIONAL_PROJECT_INVENTORY_SOURCES = new Set([
+  ".mcp.json",
+]);
+
 const TARGETED_PROMPT_ASSETS = [
   "canonical/skills/same-set-reusable-flow-for-project-file-inventor/SKILL.md",
   "canonical/runtime-assets/claude/commands/meta-theory.md",
@@ -142,6 +146,9 @@ for (const source of contract.inventorySources ?? []) {
   if (source.includes("{profile}") || source.startsWith("graphify-out")) continue;
   const sourceExists = await exists(repoPath(source));
   if (source.includes(".meta-kim/state/default/capability-index/global-capabilities.json")) {
+    continue;
+  }
+  if (!sourceExists && OPTIONAL_PROJECT_INVENTORY_SOURCES.has(source)) {
     continue;
   }
   assert(sourceExists, `inventory source missing ${source}`);
@@ -237,24 +244,45 @@ const promptAssetFiles = [
 const uniquePromptAssets = [...new Set(promptAssetFiles)].sort();
 assert(uniquePromptAssets.length >= 36, `expected at least 36 prompt-like assets, found ${uniquePromptAssets.length}`);
 
-const docsReport = await readText("docs/prompt-acceptance-deep-research.zh-CN.md");
-for (const marker of [
-  "Abstract Capability Framework Acceptance",
-  "full project capability surface",
-  "36 pass, 0 partial, 0 research_required",
-  "prompt-abstract-capability-contract",
+const privateEvidence = [];
+for (const privateDoc of [
+  {
+    path: "docs/prompt-acceptance-deep-research.zh-CN.md",
+    markers: [
+      "Abstract Capability Framework Acceptance",
+      "full project capability surface",
+      "36 pass, 0 partial, 0 research_required",
+      "prompt-abstract-capability-contract",
+    ],
+  },
+  {
+    path: "docs/ai-native-capability-gap-mvp-prd.zh-CN.md",
+    markers: [
+      "版本：v0.42",
+      "abstractCapabilityFrameworkPacket",
+      "prompt-abstract-capability-contract",
+      "36 pass、0 partial、0 research_required",
+    ],
+  },
 ]) {
-  assert(docsReport.includes(marker), `prompt acceptance docs report missing ${marker}`);
-}
-
-const prd = await readText("docs/ai-native-capability-gap-mvp-prd.zh-CN.md");
-for (const marker of [
-  "版本：v0.42",
-  "abstractCapabilityFrameworkPacket",
-  "prompt-abstract-capability-contract",
-  "36 pass、0 partial、0 research_required",
-]) {
-  assert(prd.includes(marker), `PRD missing abstract capability marker ${marker}`);
+  const absPath = repoPath(privateDoc.path);
+  if (!(await exists(absPath))) {
+    privateEvidence.push({
+      path: privateDoc.path,
+      status: "private_evidence_not_attached",
+      requiredForPublicValidation: false,
+    });
+    continue;
+  }
+  const text = await fs.readFile(absPath, "utf8");
+  for (const marker of privateDoc.markers) {
+    assert(text.includes(marker), `${privateDoc.path} private evidence missing ${marker}`);
+  }
+  privateEvidence.push({
+    path: privateDoc.path,
+    status: "private_evidence_validated",
+    requiredForPublicValidation: false,
+  });
 }
 
 const globalInventoryPath = repoPath(".meta-kim/state/default/capability-index/global-capabilities.json");
@@ -263,4 +291,14 @@ if (await exists(globalInventoryPath)) {
   assert((globalInventory.summary?.totalSkills ?? 0) >= 1, "global inventory exists but has no skills");
 }
 
-console.log(`prompt abstract capabilities valid: ${uniquePromptAssets.length} prompt-like assets checked`);
+console.log(
+  JSON.stringify(
+    {
+      status: "pass",
+      promptLikeAssetsChecked: uniquePromptAssets.length,
+      privateEvidence,
+    },
+    null,
+    2,
+  ),
+);

@@ -115,6 +115,52 @@ async function fileExists(filePath) {
   }
 }
 
+async function readCanonicalAgentIds() {
+  return (await fs.readdir(canonicalAgentsDir))
+    .filter((file) => file.endsWith(".md"))
+    .map((file) => file.replace(/\.md$/, ""))
+    .sort();
+}
+
+async function readRuntimeAgentIdsOrCanonical(runtimeAgentsDir, extension) {
+  if (await fileExists(runtimeAgentsDir)) {
+    return {
+      source: path.relative(repoRoot, runtimeAgentsDir).replace(/\\/g, "/"),
+      ids: (await fs.readdir(runtimeAgentsDir))
+        .filter((file) => file.endsWith(extension))
+        .map((file) => file.slice(0, -extension.length))
+        .sort(),
+    };
+  }
+  return {
+    source: "canonical/agents",
+    ids: await readCanonicalAgentIds(),
+  };
+}
+
+async function readTextOrCanonical(primaryPath, fallbackPath) {
+  if (await fileExists(primaryPath)) {
+    return {
+      source: path.relative(repoRoot, primaryPath).replace(/\\/g, "/"),
+      text: await fs.readFile(primaryPath, "utf8"),
+    };
+  }
+  return {
+    source: path.relative(repoRoot, fallbackPath).replace(/\\/g, "/"),
+    text: await fs.readFile(fallbackPath, "utf8"),
+  };
+}
+
+async function readFilesOrCanonical(primaryDir, fallbackDir, extension) {
+  const sourceDir = (await fileExists(primaryDir)) ? primaryDir : fallbackDir;
+  return {
+    source: path.relative(repoRoot, sourceDir).replace(/\\/g, "/"),
+    files: (await fs.readdir(sourceDir))
+      .filter((file) => file.endsWith(extension))
+      .sort(),
+  };
+}
+
 /**
  * Node child processes may inherit a shorter PATH than an interactive terminal
  * (npm global shims are often under `%AppData%\\npm`). These dirs are checked first.
@@ -1516,39 +1562,53 @@ async function readOpenClawSessionPayload(
   return null;
 }
 
-function extractOpenClawPayloadFromSessionEvents(events, sessionPath) {
-  const assistantEvent = [...events]
-    .reverse()
-    .find((event) => event.message?.role === "assistant");
-  const text = assistantEvent?.message?.content?.find(
-    (item) => item?.type === "text" && typeof item.text === "string",
-  )?.text;
-  if (!text) {
-    return null;
-  }
+function isOpenClawBoundaryPayload(payload) {
+  return (
+    payload &&
+    typeof payload === "object" &&
+    typeof payload.agent === "string" &&
+    Array.isArray(payload.owns) &&
+    Array.isArray(payload.refuses) &&
+    typeof payload.artifact === "string" &&
+    Array.isArray(payload.delegates_to)
+  );
+}
 
+function extractOpenClawPayloadFromSessionEvents(events, sessionPath) {
   const bootstrapFull = events.some(
     (event) => event.customType === "openclaw:bootstrap-context:full",
   );
-  const payloadObject = parseJsonObjectFromText(text);
-  if (payloadObject) {
-    return {
-      ...payloadObject,
-      sessionRecovery: {
-        recoveredFromSession: true,
-        sessionPath,
-        bootstrapFull,
-      },
-    };
+  const assistantEvents = [...events]
+    .reverse()
+    .filter((event) => event.message?.role === "assistant");
+
+  for (const assistantEvent of assistantEvents) {
+    const content = assistantEvent.message?.content ?? [];
+    const hasToolCall = content.some((item) => item?.type === "toolCall");
+    const textItems = content.filter(
+      (item) => item?.type === "text" && typeof item.text === "string",
+    );
+
+    for (const item of textItems) {
+      const payloadObject = parseJsonObjectFromText(item.text);
+      if (isOpenClawBoundaryPayload(payloadObject)) {
+        return {
+          ...payloadObject,
+          sessionRecovery: {
+            recoveredFromSession: true,
+            sessionPath,
+            bootstrapFull,
+          },
+        };
+      }
+    }
+
+    if (hasToolCall) {
+      continue;
+    }
   }
-  return {
-    raw: text.trim(),
-    sessionRecovery: {
-      recoveredFromSession: true,
-      sessionPath,
-      bootstrapFull,
-    },
-  };
+
+  return null;
 }
 
 function normalizeOpenClawAgentPayload(agentId, payload) {
@@ -1686,16 +1746,26 @@ async function runOpenClawAgentTurn(command, args, options) {
         return;
       }
       if (code === 0) {
-        try {
-          void settle(null, {
-            stdout,
-            stderr,
-            payload: extractOpenClawReply(mergeCommandOutput(stdout, stderr)),
-            recoveredFromSession: false,
+        recoverFromSession()
+          .then((result) => {
+            if (result) {
+              void settle(null, result);
+              return;
+            }
+            try {
+              void settle(null, {
+                stdout,
+                stderr,
+                payload: extractOpenClawReply(mergeCommandOutput(stdout, stderr)),
+                recoveredFromSession: false,
+              });
+            } catch (error) {
+              void settle(error);
+            }
+          })
+          .catch((error) => {
+            void settle(error);
           });
-        } catch (error) {
-          void settle(error);
-        }
         return;
       }
 
@@ -2768,17 +2838,16 @@ async function runClaudeDiscovery(agentIds) {
   const supportsAgentsCommand = /^\s{2}agents\s/m.test(help.stdout);
 
   async function discoverFromProjectFiles(extra = {}) {
-    const projectAgentFiles = (
-      await fs.readdir(path.join(repoRoot, ".claude", "agents"))
-    )
-      .filter((file) => file.endsWith(".md"))
-      .map((file) => file.replace(/\.md$/, ""));
-    const projectAgents = new Set(projectAgentFiles);
+    const discoveredAgents = await readRuntimeAgentIdsOrCanonical(
+      path.join(repoRoot, ".claude", "agents"),
+      ".md",
+    );
+    const projectAgents = new Set(discoveredAgents.ids);
     const missing = agentIds.filter((agentId) => !projectAgents.has(agentId));
     return {
       ok: missing.length === 0,
       missing,
-      source: "project-files",
+      source: discoveredAgents.source,
       cliSupportsAgentsCommand: false,
       ...extra,
     };
@@ -2856,9 +2925,16 @@ async function runClaudeCases(agentIds) {
     try {
       let finalResult = null;
       for (let attempt = 1; attempt <= 2; attempt += 1) {
+        const scoutInstruction =
+          agentId === "meta-scout"
+            ? "meta-scout 的 owns 必须分别覆盖：能力基线/发现，tool-skill-MCP/ROI，外部候选/采纳建议；refuses 必须分别覆盖：不直接执行工具或运行时动作，不负责协调/dispatch/loadout/final approval。"
+            : "owns 必须覆盖自身定义里三个不同责任族；refuses 必须覆盖不执行业务任务和跨 owner 边界。";
         const prompt =
-          "你正在做 Meta_Kim 元 agent 角色边界自检。只返回符合 schema 的 JSON，不要解释。" +
-          "agent 写你的 agent id；owns 写你只负责的 3 个短语；refuses 写你明确不负责的 2 个短语；" +
+          "你正在做 Meta_Kim 元 agent 角色边界自检。先依据当前 Claude Code 已加载的 agent 定义、frontmatter、AGENTS/CLAUDE 上下文和边界说明，不要凭通用 agent 印象补写。" +
+          "只返回符合 schema 的 JSON，不要解释。JSON 必须包含 agent、owns、refuses、artifact、delegates_to。" +
+          `agent 字段必须精确写 ${agentId}；` +
+          "owns 写 3 个短语，每条必须来自不同责任族；refuses 写 2 个短语，每条必须是明确拒绝边界；" +
+          scoutInstruction +
           "artifact 写你最核心的产物；delegates_to 写跨边界时最常升级/委派的 2 个 agent id。";
 
         const cmd = await getResolvedClaudeCommand();
@@ -2973,18 +3049,18 @@ async function runCodexSmoke() {
 
   const configExamplePath = path.join(repoRoot, "codex", "config.toml.example");
   const configExample = await fs.readFile(configExamplePath, "utf8");
-  const codexAgentFiles = (
-    await fs.readdir(path.join(repoRoot, ".codex", "agents"))
-  )
-    .filter((file) => file.endsWith(".toml"))
-    .sort();
+  const codexAgents = await readRuntimeAgentIdsOrCanonical(
+    path.join(repoRoot, ".codex", "agents"),
+    ".toml",
+  );
   const payload = {
     runtime: "codex",
     cli_version: versionStdout.trim(),
     entrypoint: "AGENTS.md",
     canonical_skill_root: "canonical/skills/meta-theory",
     sync_manifest: "config/sync.json",
-    custom_agents: codexAgentFiles.map((file) => file.replace(/\.toml$/, "")),
+    custom_agents: codexAgents.ids,
+    custom_agents_source: codexAgents.source,
     mcp_supported: configExample.includes("[mcp_servers.meta_kim_runtime]"),
     sandbox_configurable: configExample.includes("sandbox_mode"),
     approvals_configurable: configExample.includes("approval_policy"),
@@ -3052,18 +3128,18 @@ async function runCodexLive() {
 
   const configExamplePath = path.join(repoRoot, "codex", "config.toml.example");
   const configExample = await fs.readFile(configExamplePath, "utf8");
-  const codexAgentFiles = (
-    await fs.readdir(path.join(repoRoot, ".codex", "agents"))
-  )
-    .filter((file) => file.endsWith(".toml"))
-    .sort();
+  const codexAgents = await readRuntimeAgentIdsOrCanonical(
+    path.join(repoRoot, ".codex", "agents"),
+    ".toml",
+  );
   const payload = {
     runtime: "codex",
     cli_version: versionStdout.trim(),
     entrypoint: "AGENTS.md",
     canonical_skill_root: "canonical/skills/meta-theory",
     sync_manifest: "config/sync.json",
-    custom_agents: codexAgentFiles.map((file) => file.replace(/\.toml$/, "")),
+    custom_agents: codexAgents.ids,
+    custom_agents_source: codexAgents.source,
     mcp_supported: configExample.includes("[mcp_servers.meta_kim_runtime]"),
     sandbox_configurable: configExample.includes("sandbox_mode"),
     approvals_configurable: configExample.includes("approval_policy"),
@@ -3227,14 +3303,20 @@ async function runCursorSmoke() {
   );
   const cursorHooksPath = path.join(repoRoot, ".cursor", "hooks.json");
   const cursorRulesDir = path.join(repoRoot, ".cursor", "rules");
-  const agentFiles = (await fs.readdir(cursorAgentsDir))
-    .filter((file) => file.endsWith(".md"))
-    .sort();
-  const skillText = await fs.readFile(cursorSkillPath, "utf8");
-  const hooksText = await fs.readFile(cursorHooksPath, "utf8");
-  const ruleFiles = (await fs.readdir(cursorRulesDir))
-    .filter((file) => file.endsWith(".mdc"))
-    .sort();
+  const cursorAgents = await readRuntimeAgentIdsOrCanonical(cursorAgentsDir, ".md");
+  const skill = await readTextOrCanonical(
+    cursorSkillPath,
+    path.join(canonicalAgentsDir, "..", "skills", "meta-theory", "SKILL.md"),
+  );
+  const hooks = await readTextOrCanonical(
+    cursorHooksPath,
+    path.join(canonicalRuntimeAssetsDir, "cursor", "hooks.json"),
+  );
+  const rules = await readFilesOrCanonical(
+    cursorRulesDir,
+    path.join(canonicalRuntimeAssetsDir, "cursor", "rules"),
+    ".mdc",
+  );
   const payload = {
     runtime: "cursor",
     mode: "smoke",
@@ -3242,11 +3324,15 @@ async function runCursorSmoke() {
     canonical_skill_root: "canonical/skills/meta-theory",
     generated_skill: ".cursor/skills/meta-theory/SKILL.md",
     generated_hooks: ".cursor/hooks.json",
-    generated_rules: ruleFiles.map((file) => `.cursor/rules/${file}`),
-    custom_agents: agentFiles.map((file) => file.replace(/\.md$/, "")),
-    skill_mentions_warden: /meta-warden/i.test(skillText),
-    skill_mentions_conductor: /meta-conductor/i.test(skillText),
-    hook_surface_configured: /preToolUse|postToolUse|failClosed/i.test(hooksText),
+    generated_rules: rules.files.map((file) => `.cursor/rules/${file}`),
+    custom_agents: cursorAgents.ids,
+    custom_agents_source: cursorAgents.source,
+    skill_source: skill.source,
+    hooks_source: hooks.source,
+    rules_source: rules.source,
+    skill_mentions_warden: /meta-warden/i.test(skill.text),
+    skill_mentions_conductor: /meta-conductor/i.test(skill.text),
+    hook_surface_configured: /preToolUse|postToolUse|failClosed/i.test(hooks.text),
     native_live_turn_harness: false,
   };
   const ok =
@@ -3570,8 +3656,8 @@ async function collectOpenClawBaseStatus({ useMainConfig = false } = {}) {
       command.toArgs(["hooks", "list", "--verbose"]),
       {
         cwd: repoRoot,
-        timeout: 60_000,
-        env,
+        timeout: 20_000,
+        env: { ...env, CI: "1", NO_COLOR: "1" },
       },
     );
     const hooksOutput = mergeCommandOutput(hooks.stdout, hooks.stderr);
@@ -3669,21 +3755,35 @@ async function runOpenClawSmoke() {
     throw error;
   }
   try {
-    const ok =
-      baseStatus.validationOutput.toLowerCase().includes("config valid") &&
-      baseStatus.hooksDiscovery.ok;
+    const configOk = baseStatus.validationOutput
+      .toLowerCase()
+      .includes("config valid");
+    let hooksOk = baseStatus.hooksDiscovery.ok;
+    let hooksDiscoveryOutput = baseStatus.hooksDiscovery.output;
+    let smokeSource = "binary-hooks-list";
 
+    if (!hooksOk) {
+      // hooks list failed (e.g. Windows cmd.exe /d /c nesting incompatibility with openclaw.cmd batch wrapper).
+      // Fall back to structural template validation (file-system only, no openclaw.cmd invocation).
+      const structural = await runOpenClawStructuralSmoke(
+        new Error(baseStatus.hooksDiscovery.output || "openclaw hooks list unavailable"),
+      );
+      hooksOk = Boolean(structural.hooksOk);
+      hooksDiscoveryOutput = `structural fallback (binary hooks list failed: ${baseStatus.hooksDiscovery.output}); structural hooksOk=${structural.hooksOk}`;
+      smokeSource = "structural-fallback";
+    }
+
+    const ok = configOk && hooksOk;
     return {
       status: ok ? "passed" : "failed",
       ok,
       mode: "smoke",
+      source: smokeSource,
       evalModel: baseStatus.tempConfig.evalModel,
       configSource: baseStatus.tempConfig.configSource,
-      configOk: baseStatus.validationOutput
-        .toLowerCase()
-        .includes("config valid"),
-      hooksOk: baseStatus.hooksDiscovery.ok,
-      hooksDiscovery: baseStatus.hooksDiscovery.output,
+      configOk,
+      hooksOk,
+      hooksDiscovery: hooksDiscoveryOutput,
       validation: baseStatus.validationOutput,
       ...(shouldKeepOpenClawEvalTemp()
         ? {
@@ -3749,16 +3849,17 @@ async function runOpenClawLive() {
         const caseConfig = claudeCases[agentId];
         const refusalInstruction =
           agentId === "meta-scout"
-            ? "refuses：字符串数组，恰好 2 条；一条说明你不直接执行工具或运行时动作，一条说明你不负责协调、统筹或综合；"
-            : "refuses：字符串数组，恰好 2 条，每条是你明确不负责的短句；";
+            ? "refuses：字符串数组，恰好 2 个独立字符串；第一条说明你不直接执行工具或运行时动作，第二条说明你不负责协调、统筹或综合；不要把两条合并成一个字符串；"
+            : "refuses：字符串数组，恰好 2 个独立字符串，每条是你明确不负责的短句；不要把两条合并成一个字符串；";
         const prompt =
-          "你正在做 Meta_Kim 元 agent 角色边界自检。只输出一段 JSON，不要解释。" +
-          "JSON 必须包含 agent、owns、refuses、artifact、delegates_to 这 5 个字段。" +
+          "你正在做 Meta_Kim 元 agent 角色边界自检。先依据已注入的 SOUL.md、IDENTITY.md、AGENTS.md 和 frontmatter，不要凭通用 agent 印象补写。" +
+          "只输出一段 JSON，不要解释。JSON 必须包含 agent、owns、refuses、artifact、delegates_to 这 5 个字段。" +
           `agent 字段必须精确写 ${agentId}（不能翻译、不能改写、不能写角色名）。` +
-          "owns：字符串数组，恰好 3 条，每条是你明确负责的短句；" +
+          "owns：字符串数组，恰好 3 条，优先来自 SOUL.md 的 Own、Responsibility Boundary、Primary stage 或 Core Truths；" +
           refusalInstruction +
-          "artifact：一个字符串，你最核心的产物；" +
-          "delegates_to：字符串数组，恰好 2 个 agent id，跨边界时最常委派给谁。";
+          "refuses 必须优先来自 SOUL.md/frontmatter 的 Do Not Touch、Must not execute in、Refuses 或 CANNOT/NEVER 边界，不要用泛泛的 meta-agent 职责代替；" +
+          "artifact：一个字符串，优先来自 SOUL.md 中该 agent 的核心产物或 artifact 描述；" +
+          "delegates_to：字符串数组，恰好 2 个 agent id，优先来自 SOUL.md 的 Handoff owner、Do Not Touch 或协作边界。";
             let turn = null;
             let lastTurnError = null;
             let turnAttempt = 0;

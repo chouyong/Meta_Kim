@@ -335,6 +335,32 @@ async function validateCoreLoopContract() {
         stage.gateConditions.length > 0,
       `core-loop-contract ${stage.stage} must have non-empty IO, skip, and gate policy.`,
     );
+    const decision = stage.decisionResponsibilities ?? {};
+    for (const field of [
+      "responsibilityRef",
+      "decisionQuestion",
+      "informationToCollect",
+      "decisionOutputs",
+      "userChoiceWhen",
+    ]) {
+      assert(
+        decision[field] !== undefined,
+        `core-loop-contract ${stage.stage} decisionResponsibilities missing ${field}.`,
+      );
+    }
+    assert(
+      typeof decision.responsibilityRef === "string" &&
+        decision.responsibilityRef.length > 0 &&
+        typeof decision.decisionQuestion === "string" &&
+        decision.decisionQuestion.length > 0 &&
+        Array.isArray(decision.informationToCollect) &&
+        decision.informationToCollect.length >= 3 &&
+        Array.isArray(decision.decisionOutputs) &&
+        decision.decisionOutputs.length >= 2 &&
+        typeof decision.userChoiceWhen === "string" &&
+        decision.userChoiceWhen.length > 0,
+      `core-loop-contract ${stage.stage} must define responsibility-matched decision information.`,
+    );
   }
   const byStage = Object.fromEntries(stages.map((stage) => [stage.stage, stage]));
   for (const field of [
@@ -551,6 +577,41 @@ async function validateWorkflowContract() {
     qualityFirst.promptPrecisionPolicy?.compactNotationAllowed === true,
     "workflow-contract.json qualityFirstPolicy must allow compact internal prompt notation.",
   );
+  const visibleNotice = qualityFirst.hostVisibleNoticeContract ?? {};
+  assert(
+    visibleNotice.required === true &&
+      visibleNotice.primaryUserVisibleSurface === "assistant_chat_message",
+    "workflow-contract.json qualityFirstPolicy.hostVisibleNoticeContract must require assistant-chat progress notices.",
+  );
+  for (const hiddenSurface of [
+    "hookSpecificOutput.additionalContext",
+    "markdown_report_only",
+  ]) {
+    assert(
+      visibleNotice.notUserVisibleSurfaces?.includes(hiddenSurface),
+      `workflow-contract.json hostVisibleNoticeContract.notUserVisibleSurfaces must include ${hiddenSurface}.`,
+    );
+  }
+  for (const requiredMoment of [
+    "run_start",
+    "route_selected_before_execution",
+    "closure",
+  ]) {
+    assert(
+      visibleNotice.requiredMoments?.includes(requiredMoment),
+      `workflow-contract.json hostVisibleNoticeContract.requiredMoments must include ${requiredMoment}.`,
+    );
+  }
+  assert(
+    visibleNotice.runtimeAdapters?.codex?.choiceSurface === "request_user_input" &&
+      visibleNotice.runtimeAdapters?.claude?.choiceSurface === "AskUserQuestion",
+    "workflow-contract.json hostVisibleNoticeContract must preserve native Codex and Claude choice surfaces.",
+  );
+  assert(
+    visibleNotice.i18n?.languageOrder?.includes("latest_user_input_language") &&
+      visibleNotice.i18n?.maxBulletsPerNotice === 3,
+    "workflow-contract.json hostVisibleNoticeContract must define i18n language fallback and concise notice size.",
+  );
 
   const requiredPackets = protocolFirst.requiredPackets ?? [];
   for (const packet of [
@@ -664,6 +725,15 @@ async function validateWorkflowContract() {
     "crossCheckStrategy",
     "originalSynthesisRules",
     "decisionImpactCriteria",
+    "decisionQualityFrame",
+    "competingHypotheses",
+    "minimumDecisionTest",
+    "evidenceConfidencePolicy",
+    "decisionReadinessGate",
+    "keyInformationTargets",
+    "iterationPlan",
+    "stopCondition",
+    "decisionUpdateRule",
   ]) {
     assert(
       researchQualityGate.requiredPlanFields?.includes(field),
@@ -682,6 +752,32 @@ async function validateWorkflowContract() {
     researchQualityGate.minimumIndependentSourcesForRouteChangingClaim >= 2,
     "workflow-contract.json deepResearchPlanQualityGate must require cross-source route evidence.",
   );
+  for (const field of ["intent", "subject", "path", "constraints", "evidenceUse", "outputCommitment"]) {
+    assert(
+      researchQualityGate.decisionQualityFrameRequiredFields?.includes(field),
+      `workflow-contract.json deepResearchPlanQualityGate decisionQualityFrame must require ${field}.`,
+    );
+  }
+  for (const field of ["goal", "input", "action", "output", "passCondition", "failSignal", "nextStep", "doNotDo"]) {
+    assert(
+      researchQualityGate.minimumDecisionTestRequiredFields?.includes(field),
+      `workflow-contract.json deepResearchPlanQualityGate minimumDecisionTest must require ${field}.`,
+    );
+  }
+  assert(
+    researchQualityGate.competingHypothesesPolicy?.minimumHypotheses >= 2,
+    "workflow-contract.json deepResearchPlanQualityGate must require competing hypotheses.",
+  );
+  assert(
+    researchQualityGate.evidenceConfidencePolicy?.sourceStates?.includes("confirmed") &&
+      researchQualityGate.evidenceConfidencePolicy?.sourceStates?.includes("unconfirmed"),
+    "workflow-contract.json deepResearchPlanQualityGate must require evidence confidence states.",
+  );
+  assert(
+    researchQualityGate.decisionReadinessGate?.requiredSignals?.includes("real_alternatives") &&
+      researchQualityGate.decisionReadinessGate?.requiredSignals?.includes("action_commitment"),
+    "workflow-contract.json deepResearchPlanQualityGate must require decision readiness signals.",
+  );
   assert(
     researchQualityGate.originalSynthesisPolicy?.forbidden?.includes(
       "copying third-party prompt text",
@@ -690,6 +786,94 @@ async function validateWorkflowContract() {
         "using cosmetic rewrites to disguise copied wording",
       ),
     "workflow-contract.json deepResearchPlanQualityGate must forbid copied prompt text and cosmetic disguise.",
+  );
+  const contentEvidenceRequired =
+    contract.protocols?.contentEvidencePacket?.requiredFields ?? [];
+  for (const field of ["iterationLog", "claimEvidenceCards"]) {
+    assert(
+      contentEvidenceRequired.includes(field),
+      `workflow-contract.json contentEvidencePacket must require ${field}.`,
+    );
+    assert(
+      contract.protocols?.contentEvidencePacket?.deepResearchRequiredFields?.includes(field),
+      `workflow-contract.json deepResearchRequiredFields must require ${field}.`,
+    );
+  }
+  const iterationGate =
+    contract.protocols?.contentEvidencePacket?.iterationLogQualityGate ?? {};
+  assert(
+    iterationGate.minimumIterationLogEntries >= 1,
+    "workflow-contract.json iterationLogQualityGate must require iterative evidence logs.",
+  );
+  for (const field of [
+    "iteration",
+    "trigger",
+    "queryOrAction",
+    "observation",
+    "gapClosed",
+    "nextStepDecision",
+    "stopCheck",
+  ]) {
+    assert(
+      iterationGate.requiredFields?.includes(field),
+      `workflow-contract.json iterationLogQualityGate must require ${field}.`,
+    );
+  }
+  const claimCardGate =
+    contract.protocols?.contentEvidencePacket?.claimEvidenceCardQualityGate ?? {};
+  assert(
+    claimCardGate.minimumClaimEvidenceCards >= 1,
+    "workflow-contract.json claimEvidenceCardQualityGate must require claim evidence cards.",
+  );
+  for (const field of [
+    "claim",
+    "sourceRefs",
+    "evidenceAnchor",
+    "confidence",
+    "counterevidence",
+    "decisionImpact",
+    "falsificationStatus",
+  ]) {
+    assert(
+      claimCardGate.requiredFields?.includes(field),
+      `workflow-contract.json claimEvidenceCardQualityGate must require ${field}.`,
+    );
+  }
+
+  const decisionImpactValues =
+    contract.protocols?.contentEvidencePacket?.decisionImpactStageEnum ?? [];
+  for (const value of [
+    "Critical",
+    "Fetch",
+    "Thinking",
+    "Execution",
+    "Review",
+    "Meta-Review",
+    "Verification",
+    "Evolution",
+    "business_phase",
+    "meta_phase",
+    "business_lane",
+    "capability_route",
+    "owner_weapon_dependency",
+    "runtime_os_support",
+    "tool_or_provider",
+    "verification_path",
+    "evolution_writeback",
+    "user_interaction_surface",
+  ]) {
+    assert(
+      decisionImpactValues.includes(value),
+      `workflow-contract.json decisionImpactStageEnum must include ${value}.`,
+    );
+  }
+  const decisionScopePolicy =
+    contract.protocols?.contentEvidencePacket?.decisionImpactScopePolicy ?? {};
+  assert(
+    decisionScopePolicy.spineStageValues?.includes("Evolution") &&
+      decisionScopePolicy.nonSpineValues?.includes("business_phase") &&
+      decisionScopePolicy.nonSpineValues?.includes("tool_or_provider"),
+    "workflow-contract.json decisionImpactScopePolicy must cover spine and non-spine decision boundaries.",
   );
 
   const optionFrame = contract.protocols?.preDecisionOptionFrame ?? {};
@@ -788,6 +972,83 @@ async function validateWorkflowContract() {
     businessFlow.coverageJudgmentEnum?.includes("incomplete") &&
       businessFlow.coverageJudgmentEnum?.includes("intentionally_reduced"),
     "workflow-contract.json businessFlowBlueprintPacket must distinguish incomplete coverage from intentional scope reduction.",
+  );
+
+  const decisionContext =
+    contract.businessWorkflow?.decisionContextPolicy ?? {};
+  for (const field of [
+    "scopeType",
+    "scopeId",
+    "responsibility",
+    "decisionQuestion",
+    "informationToCollect",
+    "candidateOptions",
+    "recommendationOrNextState",
+    "userChoiceImpact",
+    "evidenceRefs",
+  ]) {
+    assert(
+      decisionContext.requiredDecisionRecordFields?.includes(field),
+      `workflow-contract.json decisionContextPolicy must require ${field}.`,
+    );
+  }
+  for (const scope of [
+    "spine_stage",
+    "business_phase",
+    "meta_phase",
+    "business_lane",
+    "capability_route",
+    "owner_weapon_dependency",
+    "runtime_os_support",
+    "tool_or_provider",
+    "verification_path",
+    "evolution_writeback",
+    "user_interaction_surface",
+  ]) {
+    assert(
+      decisionContext.scopeTypes?.includes(scope),
+      `workflow-contract.json decisionContextPolicy.scopeTypes must include ${scope}.`,
+    );
+  }
+
+  const assertDecisionSemantics = (container, ids, label) => {
+    const requiredFields = container?.requiredPhaseFields ?? [];
+    for (const field of [
+      "responsibility",
+      "decisionQuestion",
+      "informationToCollect",
+      "decisionOutputs",
+    ]) {
+      assert(
+        requiredFields.includes(field),
+        `workflow-contract.json ${label} must require ${field}.`,
+      );
+    }
+    for (const id of ids) {
+      const entry = container?.phases?.[id];
+      assert(entry, `workflow-contract.json ${label} missing ${id}.`);
+      assert(
+        typeof entry.responsibility === "string" &&
+          entry.responsibility.length > 0 &&
+          typeof entry.decisionQuestion === "string" &&
+          entry.decisionQuestion.length > 0 &&
+          Array.isArray(entry.informationToCollect) &&
+          entry.informationToCollect.length >= 3 &&
+          Array.isArray(entry.decisionOutputs) &&
+          entry.decisionOutputs.length >= 2,
+        `workflow-contract.json ${label}.${id} must define responsibility-matched decision information.`,
+      );
+    }
+  };
+  assertDecisionSemantics(
+    contract.businessWorkflow?.phaseDecisionSemantics,
+    contract.businessWorkflow?.phases ?? [],
+    "businessWorkflow.phaseDecisionSemantics",
+  );
+  assertDecisionSemantics(
+    contract.metaWorkflow?.phaseDecisionSemantics,
+    contract.metaWorkflow?.phases ?? [],
+    "metaWorkflow.phaseDecisionSemantics",
   );
 
   const runArtifactValidation = contract.runDiscipline?.runArtifactValidation ?? {};
@@ -1175,6 +1436,18 @@ async function validateCapabilityIndexSchema(index) {
   );
 }
 
+async function readProjectProjectionMode() {
+  try {
+    const overridesPath = path.join(repoRoot, ".meta-kim", "local.overrides.json");
+    const overrides = JSON.parse(await fs.readFile(overridesPath, "utf8"));
+    return typeof overrides.projectProjectionMode === "string"
+      ? overrides.projectProjectionMode
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 async function validateCapabilityIndex() {
   const indexPath = path.join(
     canonicalCapabilityIndexDir,
@@ -1236,6 +1509,15 @@ async function validateCapabilityIndex() {
   );
 
   const canonicalContent = await fs.readFile(indexPath, "utf8");
+  // In "global_only" project projection mode, sync-runtimes.mjs intentionally
+  // does not maintain project-local capability-index mirrors (selectedTargets
+  // is forced to [] when projectProjectionMode === "global_only"). Requiring
+  // project-local mirror presence or byte identity contradicts that mode and
+  // produces false failures, so skip project-local mirror validation there.
+  const projectProjectionMode = await readProjectProjectionMode();
+  if (projectProjectionMode === "global_only") {
+    return;
+  }
   for (const mirror of index.mirroredTo ?? []) {
     const mirrorPath = path.join(repoRoot, mirror);
     assert(await exists(mirrorPath), `Missing capability index mirror: ${mirror}.`);
@@ -1383,6 +1665,7 @@ async function validateSyncConfiguration() {
   const availableTargets = manifest.availableTargets ?? Object.keys(profiles);
   const generatedTargets = manifest.generatedTargets ?? {};
   const canonicalRoots = manifest.canonicalRoots ?? {};
+  const projectPolicy = manifest.projectMaterializationPolicy ?? {};
 
   assert(
     supportedTargets.length >= 1,
@@ -1427,6 +1710,43 @@ async function validateSyncConfiguration() {
     canonicalRoots.capabilityIndex === "config/capability-index",
     "config/sync.json canonicalRoots.capabilityIndex must be config/capability-index.",
   );
+  assert(
+    projectPolicy.defaultAssetMode === "global_reusable_by_default",
+    "config/sync.json projectMaterializationPolicy.defaultAssetMode must keep reusable assets global by default.",
+  );
+  for (const assetType of ["agents", "commands", "mcp", "skills"]) {
+    assert(
+      projectPolicy.globalByDefault?.includes(assetType),
+      `config/sync.json projectMaterializationPolicy.globalByDefault must include ${assetType}.`,
+    );
+  }
+  assert(
+    !projectPolicy.globalByDefault?.includes("hooks"),
+    "config/sync.json projectMaterializationPolicy.globalByDefault must keep hooks opt-in, not default-global.",
+  );
+  assert(
+    projectPolicy.projectMaterializationTrigger ===
+      "project_specific_customization_or_iteration_innovation",
+    "config/sync.json project materialization must require project-specific customization or iteration innovation.",
+  );
+  assert(
+    projectPolicy.projectRuntimeAssetCopyPolicy ===
+      "copy_to_project_when_explicit_project_update_or_project_dedicated_extension",
+    "config/sync.json must copy reusable runtime assets into projects only after explicit project update selection or when a project-dedicated extension is needed.",
+  );
+  assert(
+    projectPolicy.projectAllowedBase?.includes("runtime_entry_context") &&
+      projectPolicy.projectAllowedBase?.includes("merged_project_config") &&
+      projectPolicy.projectAllowedBase?.includes("project_cache_state") &&
+      projectPolicy.projectAllowedBase?.includes("project_specific_capability_overrides"),
+    "config/sync.json projectMaterializationPolicy.projectAllowedBase must preserve context/config/state and project-specific overrides only.",
+  );
+  assert(
+    projectPolicy.projectStatePaths?.includes(".meta-kim/state") &&
+      projectPolicy.projectStatePaths?.includes(".meta-kim/backups") &&
+      projectPolicy.projectStatePaths?.includes(".meta-kim/local.overrides.json"),
+    "config/sync.json projectMaterializationPolicy.projectStatePaths must keep project state under .meta-kim.",
+  );
 
   assert(
     profiles.codex.projection.outputPaths.skillsDir === ".agents/skills" &&
@@ -1438,12 +1758,12 @@ async function validateSyncConfiguration() {
     profiles.claude.projection.outputPaths.skillsDir === ".claude/skills" &&
       profiles.openclaw.projection.outputPaths.skillsDir === "openclaw/skills" &&
       profiles.cursor.projection.outputPaths.skillsDir === ".cursor/skills",
-    "Runtime profiles must declare skillsDir for full canonical/skills projection.",
+    "Runtime profiles must declare skillsDir for project runtime skill mirrors.",
   );
   assert(
     profiles.codex.projection.outputPaths.hooksDir === ".codex/hooks" &&
       profiles.codex.projection.outputPaths.hooksFile === ".codex/hooks.json",
-    "Codex runtime profile must declare hook output paths.",
+    "Codex runtime profile must declare hook cleanup/config paths.",
   );
   assert(
     profiles.cursor.projection.assetTypes.includes("hooks") &&
@@ -1451,13 +1771,13 @@ async function validateSyncConfiguration() {
       profiles.cursor.projection.outputPaths.hooksDir === ".cursor/hooks" &&
       profiles.cursor.projection.outputPaths.hooksFile === ".cursor/hooks.json" &&
       profiles.cursor.projection.outputPaths.rulesDir === ".cursor/rules",
-    "Cursor runtime profile must declare hook and rule output paths.",
+    "Cursor runtime profile must declare hook cleanup/config and rule output paths.",
   );
   assert(
-    (manifest.generatedTargets?.cursor ?? []).includes(".cursor/hooks") &&
+    !(manifest.generatedTargets?.cursor ?? []).includes(".cursor/hooks") &&
       (manifest.generatedTargets?.cursor ?? []).includes(".cursor/hooks.json") &&
       (manifest.generatedTargets?.cursor ?? []).includes(".cursor/rules"),
-    "config/sync.json must advertise generated Cursor lifecycle hook and rule paths.",
+    "config/sync.json must advertise Cursor hook config/rule paths without project hook dirs.",
   );
 }
 
@@ -1764,8 +2084,8 @@ async function validateSkillsManifest() {
     (skill) => skill.id === "planning-with-files",
   );
   assert(
-    planning?.hookSubdirs?.cursor && planning?.hookConfigFiles?.cursor,
-    "planning-with-files must install Cursor lifecycle hooks.",
+    planning?.globalHookSubdirs?.cursor && planning?.globalHookConfigFiles?.cursor,
+    "planning-with-files must install Cursor lifecycle hooks globally.",
   );
 }
 

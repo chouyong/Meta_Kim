@@ -2,6 +2,7 @@ import { describe, test } from "node:test";
 import assert from "node:assert/strict";
 import {
   chmodSync,
+  existsSync,
   mkdtempSync,
   mkdirSync,
   readFileSync,
@@ -12,6 +13,7 @@ import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { enrichMetaKimGraph } from "../../scripts/graphify-enrichment.mjs";
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), "../..");
 
@@ -51,9 +53,33 @@ describe("graphify idempotent wiring (contract)", () => {
     );
 
     assert.match(src, /function runRebuild\(\)/);
-    assert.match(src, /spawnSync\("graphify", \["update", "\."\]/);
-    assert.match(src, /\["-m", "graphify", "update", "\."\]/);
+    assert.match(src, /const graphifyArgs = \["update", "\."\]/);
+    assert.match(src, /spawnSync\("graphify", graphifyArgs/);
+    assert.match(src, /\["-m", "graphify", \.\.\.graphifyArgs\]/);
     assert.match(src, /case "rebuild":/);
+  });
+
+  test("graphify-cli.mjs forwards query/path/explain to the graphify CLI", () => {
+    const src = readFileSync(path.join(root, "scripts/graphify-cli.mjs"), "utf8");
+
+    assert.match(src, /function runGraphifyPassthrough\(\)/);
+    assert.match(src, /const graphifyArgs = process\.argv\.slice\(2\)/);
+    assert.match(src, /spawnSync\("graphify", graphifyArgs/);
+    assert.match(src, /direct\.status \?\? 1/);
+    assert.match(src, /\["-m", "graphify", \.\.\.graphifyArgs\]/);
+    assert.match(src, /case "query":/);
+    assert.match(src, /case "path":/);
+    assert.match(src, /case "explain":/);
+  });
+
+  test("graphify-cli.mjs can forward --force for intentional smaller rebuilds", () => {
+    const src = readFileSync(
+      path.join(root, "scripts/graphify-cli.mjs"),
+      "utf8",
+    );
+
+    assert.match(src, /process\.argv\.includes\("--force"\)/);
+    assert.match(src, /graphifyArgs\.push\("--force"\)/);
   });
 
   test("graphify-cli.mjs stamps freshness metadata after successful rebuild", () => {
@@ -67,8 +93,49 @@ describe("graphify idempotent wiring (contract)", () => {
 
     assert.match(src, /function stampGraphFreshness\(/);
     assert.match(src, /graph\.built_at_commit = currentHead/);
+    assert.match(src, /enrichMetaKimGraph\(graph\)/);
     assert.ok(src.includes("Built from commit:\\s*`?([0-9a-f]{7,40})`?"));
     assert.match(rebuildBody, /stampGraphFreshness\(\)/);
+  });
+
+  test("graphify enrichment adds Meta_Kim agent governance edges and node type aliases", () => {
+    const graph = {
+      nodes: [
+        {
+          id: "agents_meta_warden",
+          source_file: "canonical/agents/meta-warden.md",
+          file_type: "document",
+        },
+        {
+          id: "agents_meta_conductor",
+          source_file: "canonical/agents/meta-conductor.md",
+          file_type: "document",
+        },
+        { id: "canonical/agents/meta-prism.md", file_type: "document" },
+        { id: "canonical/agents/meta-chrysalis.md", file_type: "document" },
+        { id: "canonical/agents/meta-artisan.md", file_type: "document" },
+        { id: "canonical/agents/meta-librarian.md", file_type: "document" },
+        { id: "canonical/agents/meta-sentinel.md", file_type: "document" },
+        { id: "canonical/agents/meta-genesis.md", file_type: "document" },
+        { id: "canonical/agents/meta-scout.md", file_type: "document" },
+      ],
+      links: [],
+    };
+
+    const result = enrichMetaKimGraph(graph);
+
+    assert.equal(result.changed, true);
+    assert.ok(result.addedAgentGovernanceEdges >= 8);
+    assert.equal(graph.nodes[0].type, "document");
+    assert.ok(
+      graph.links.some(
+        (edge) =>
+          edge.source === "agents_meta_warden" &&
+          edge.target === "agents_meta_conductor" &&
+          edge.relation === "governs" &&
+          edge.kind === "agent_governance",
+      ),
+    );
   });
 
   test("package exposes a cross-platform graphify rebuild script", () => {
@@ -127,7 +194,7 @@ describe("graphify idempotent wiring (contract)", () => {
 
     assert.match(
       src,
-      /async function installPythonTools\(\s*activeTargets,\s*inUpdateMode = false,\s*targetDir = PROJECT_DIR,\s*\)/,
+      /async function installPythonTools\(\s*activeTargets,\s*inUpdateMode = false,\s*targetDir = PROJECT_DIR,\s*options = \{\},\s*\)/,
     );
     assert.match(src, /const graphifyDir = resolve\(targetDir\)/);
     assert.match(src, /join\(graphifyDir, "\.git"\)/);
@@ -146,23 +213,28 @@ describe("graphify idempotent wiring (contract)", () => {
     );
   });
 
-  test("setup deploy export writes a copy-ready graphify bootstrap", () => {
+  test("setup deploy export uses global post-copy initializer", () => {
     const src = readFileSync(path.join(root, "setup.mjs"), "utf8");
     const start = src.indexOf("async function copyToDeployDir(");
     const end = src.indexOf("async function runQuickDeploy()", start);
     assert.notEqual(start, -1);
     assert.notEqual(end, -1);
     const body = src.slice(start, end);
+    const applyStart = src.indexOf("async function applyProjectBootstrapToDir(");
+    const applyEnd = src.indexOf("function classifyProjectBootstrapError", applyStart);
+    assert.notEqual(applyStart, -1);
+    assert.notEqual(applyEnd, -1);
+    const applyBody = src.slice(applyStart, applyEnd);
 
-    assert.match(src, /const POST_COPY_BOOTSTRAP_FILENAME = "meta-kim-post-copy\.mjs"/);
-    assert.match(body, /writePostCopyBootstrap\(targetDir, activeTargets\)/);
+    assert.match(body, /applyProjectBootstrapToDir\(activeTargets, targetDir\)/);
+    assert.doesNotMatch(applyBody, /writePostCopyBootstrap\(targetDir, activeTargets\)/);
+    assert.match(applyBody, /writeProjectBootstrapManifest\(targetDir, plan, backup, cleanup\)/);
     assert.match(body, /printPostCopyBootstrapHint\(\)/);
     assert.doesNotMatch(body, /installGraphify/);
     assert.doesNotMatch(body, /installPythonTools\(activeTargets, false, targetDir\)/);
     assert.ok(
-      body.indexOf("deployPlatformFiles(platformId, targetDir)") <
-        body.indexOf("writePostCopyBootstrap(targetDir, activeTargets)"),
-      "the bootstrap must be written after runtime files are copied",
+        applyBody.includes("deployPlatformFiles(platformId, targetDir)"),
+      "the project bootstrap apply path must still copy runtime entry/config files",
     );
   });
 
@@ -184,7 +256,7 @@ describe("graphify idempotent wiring (contract)", () => {
     }
   });
 
-  test("quick deploy writes a portable post-copy bootstrap after copying platform files", () => {
+  test("quick deploy does not copy post-copy executable into the project", () => {
     const src = readFileSync(path.join(root, "setup.mjs"), "utf8");
     const start = src.indexOf("async function runQuickDeploy()");
     const end = src.indexOf("// ── Install scope selection", start);
@@ -192,35 +264,26 @@ describe("graphify idempotent wiring (contract)", () => {
     assert.notEqual(end, -1);
     const body = src.slice(start, end);
 
-    assert.match(body, /writePostCopyBootstrap\(targetDir, \[platformId\]\)/);
-    assert.match(body, /printPostCopyBootstrapHint\(\)/);
+    assert.doesNotMatch(body, /writePostCopyBootstrap\(targetDir, \[platformId\]\)/);
     assert.doesNotMatch(body, /installPythonTools\([\s\S]*?targetDir/);
     assert.ok(
-      body.indexOf("deployPlatformFiles(platformId, targetDir)") <
-        body.indexOf("writePostCopyBootstrap(targetDir, [platformId])"),
-      "quick deploy must create the bootstrap after target runtime files are copied",
+      body.includes("deployPlatformFiles(platformId, targetDir)"),
+      "quick deploy must still copy target runtime entry/config files",
     );
   });
 
-  test("post-copy bootstrap initializes graphify from the copied project root", () => {
-    const src = readFileSync(path.join(root, "setup.mjs"), "utf8");
-    const start = src.indexOf("function buildPostCopyBootstrapScript(");
-    const end = src.indexOf("function writePostCopyBootstrap(", start);
-    assert.notEqual(start, -1);
-    assert.notEqual(end, -1);
-    const body = src.slice(start, end);
+  test("global post-copy initializer writes graphify outputs in the current project root", () => {
+    const body = readFileSync(
+      path.join(root, "scripts", "project-post-copy-init.mjs"),
+      "utf8",
+    );
 
-    assert.match(body, /fileURLToPath\(import\.meta\.url\)/);
-    assert.match(body, /const scriptPath = fileURLToPath\(import\.meta\.url\)/);
-    assert.match(body, /const rootDir = dirname\(scriptPath\)/);
+    assert.match(body, /const rootDir = process\.cwd\(\)/);
     assert.match(body, /\["-m", "pip", "show", "graphifyy"\]/);
     assert.match(body, /\["-m", "pip", "install", "graphifyy"\]/);
     assert.match(body, /\["-m", "graphify", "hook", "install"\]/);
     assert.match(body, /\["-m", "graphify", platform, "install"\]/);
     assert.match(body, /\["-m", "graphify", "update", "\."\]/);
-    assert.match(body, /homebrewPythonCandidates/);
-    assert.match(body, /\/opt\/homebrew/);
-    assert.match(body, /\/home\/linuxbrew\/\.linuxbrew/);
     assert.match(body, /process\.argv\.includes\("--auto"\)/);
     assert.match(body, /process\.argv\.includes\("--auto-worker"\)/);
     assert.match(body, /post-copy-init\.json/);
@@ -228,8 +291,6 @@ describe("graphify idempotent wiring (contract)", () => {
     assert.match(body, /detached: true/);
     assert.match(body, /failedRetryMs/);
     assert.doesNotMatch(body, /PROJECT_DIR/);
-    assert.doesNotMatch(body, /D:[\\/]/);
-    assert.doesNotMatch(body, /Meta_Kim[\\/]/);
   });
 
   test("meta-theory activation hook starts post-copy auto-init without blocking startup", () => {
@@ -237,18 +298,179 @@ describe("graphify idempotent wiring (contract)", () => {
       path.join(root, "canonical/runtime-assets/shared/hooks/activate-meta-theory-spine.mjs"),
       "utf8",
     );
+    const claudeSettings = readFileSync(
+      path.join(root, "canonical/runtime-assets/claude/settings.json"),
+      "utf8",
+    );
 
-    assert.match(src, /meta-kim-post-copy\.mjs/);
+    assert.match(src, /project-post-copy-init\.mjs/);
+    assert.match(src, /--package-root/);
     assert.match(src, /spawnSync\(process\.execPath, \[scriptPath, "--auto"\]/);
     assert.match(src, /timeout: 4000/);
     assert.match(src, /stdio: "ignore"/);
     assert.match(src, /META_KIM_POST_COPY_AUTO === "off"/);
     assert.match(src, /catch \{\s*\/\/ Post-copy auto-init is opportunistic/s);
-    assert.match(src, /startProjectBootstrapProbe/);
-    assert.match(src, /"--project-bootstrap", "--dry-run", "--project-dir", cwd, "--json"/);
-    assert.match(src, /"project", "bootstrap", "--dry-run", "--project-dir", cwd, "--json"/);
-    assert.match(src, /project-bootstrap-probe\.json/);
+    assert.match(src, /critical_fetch_thinking_review_requested/);
+    assert.match(src, /natural_language_durable_work/);
+    assert.match(claudeSettings, /"UserPromptSubmit"/);
+    assert.match(claudeSettings, /activate-meta-theory-spine\.mjs/);
+    assert.doesNotMatch(src, /projectBootstrapProbe/);
+    assert.doesNotMatch(src, /project-bootstrap-daily-probe\.json/);
+    assert.doesNotMatch(src, /packageUpdateReminderFlag/);
+    assert.doesNotMatch(src, /META_KIM_UPDATE_REMINDER_DAYS/);
+    assert.doesNotMatch(src, /additionalContext/);
+    assert.doesNotMatch(src, /decision: "block"/);
+    assert.doesNotMatch(src, /suppressOriginalPrompt: false/);
     assert.doesNotMatch(src, /"--apply"/);
+  });
+
+  test("meta-theory activation hook launches global post-copy initializer for current project", () => {
+    const tempDir = mkdtempSync(path.join(os.tmpdir(), "meta-kim-post-copy-auto-"));
+    const packageRoot = mkdtempSync(path.join(os.tmpdir(), "meta-kim-package-root-"));
+    try {
+      const globalScript = path.join(packageRoot, "scripts", "project-post-copy-init.mjs");
+      mkdirSync(path.dirname(globalScript), { recursive: true });
+      writeFileSync(
+        globalScript,
+        [
+          'import { mkdirSync, writeFileSync } from "node:fs";',
+          'import { join } from "node:path";',
+          'const stateDir = join(process.cwd(), ".meta-kim", "state", "default");',
+          'mkdirSync(stateDir, { recursive: true });',
+          'writeFileSync(join(stateDir, "post-copy-init.json"), JSON.stringify({ status: "stubbed" }) + "\\n");',
+        ].join("\n"),
+        "utf8",
+      );
+      const hookPath = path.join(
+        root,
+        "canonical/runtime-assets/shared/hooks/activate-meta-theory-spine.mjs",
+      );
+      const result = spawnSync(process.execPath, [hookPath, "--package-root", packageRoot], {
+        cwd: tempDir,
+        input: JSON.stringify({
+          hook_event_name: "UserPromptSubmit",
+          prompt: "critical and fetch thinking and review 初始化这个项目",
+        }),
+        encoding: "utf8",
+        timeout: 120_000,
+        windowsHide: true,
+      });
+
+      assert.equal(result.status, 0, result.stderr || result.stdout);
+      assert.equal(
+        existsSync(path.join(tempDir, ".meta-kim", "state", "default", "post-copy-init.json")),
+        true,
+      );
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+      rmSync(packageRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("meta-theory activation hook starts spine without project bootstrap automation", () => {
+    const tempDir = mkdtempSync(path.join(os.tmpdir(), "meta-kim-activation-no-write-"));
+    try {
+      const hookPath = path.join(
+        root,
+        "canonical/runtime-assets/shared/hooks/activate-meta-theory-spine.mjs",
+      );
+      const result = spawnSync(process.execPath, [hookPath], {
+        cwd: tempDir,
+        input: JSON.stringify({
+          tool_name: "Skill",
+          tool_input: { skill_name: "meta-theory" },
+        }),
+        encoding: "utf8",
+        timeout: 120_000,
+        windowsHide: true,
+        env: {
+          ...process.env,
+          META_KIM_PACKAGE_ROOT: root,
+          META_KIM_POST_COPY_AUTO: "off",
+        },
+      });
+
+      assert.equal(result.status, 0, result.stderr || result.stdout);
+      assert.equal(
+        existsSync(path.join(tempDir, ".meta-kim", "state", "default", "spine", "spine-state.json")),
+        true,
+      );
+      assert.equal(
+        existsSync(path.join(tempDir, ".meta-kim", "state", "default", "project-bootstrap.json")),
+        false,
+      );
+      assert.equal(result.stdout.trim(), "");
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  test("bootstrap probe off still allows prompt-entry spine activation", () => {
+    const tempDir = mkdtempSync(path.join(os.tmpdir(), "meta-kim-probe-off-spine-"));
+    const globalStateDir = mkdtempSync(path.join(os.tmpdir(), "meta-kim-probe-off-state-"));
+    try {
+      const hookPath = path.join(
+        root,
+        "canonical/runtime-assets/shared/hooks/activate-meta-theory-spine.mjs",
+      );
+      const result = spawnSync(process.execPath, [hookPath, "--package-root", root], {
+        cwd: tempDir,
+        input: JSON.stringify({
+          hook_event_name: "UserPromptSubmit",
+          prompt:
+            "critical and fetch thinking and review 帮我修复项目入口，完成后实机测试、提交、推送、发布新版本",
+        }),
+        encoding: "utf8",
+        timeout: 120_000,
+        windowsHide: true,
+        env: {
+          ...process.env,
+          META_KIM_PROJECT_BOOTSTRAP_PROBE: "off",
+          META_KIM_GLOBAL_STATE_DIR: globalStateDir,
+          META_KIM_POST_COPY_AUTO: "off",
+        },
+      });
+
+      assert.equal(result.status, 0, result.stderr || result.stdout);
+      assert.equal(result.stdout.trim(), "");
+      assert.equal(existsSync(path.join(tempDir, ".meta-kim", "state", "default", "spine", "spine-state.json")), true);
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+      rmSync(globalStateDir, { recursive: true, force: true });
+    }
+  });
+
+  test("Meta_Kim source root is not blocked by project bootstrap prompt entry", () => {
+    const tempDir = mkdtempSync(path.join(os.tmpdir(), "meta-kim-source-root-prompt-"));
+    mkdirSync(path.join(tempDir, "canonical", "skills", "meta-theory"), { recursive: true });
+    writeFileSync(path.join(tempDir, "package.json"), JSON.stringify({ name: "meta-kim" }));
+    writeFileSync(path.join(tempDir, "setup.mjs"), "");
+    writeFileSync(path.join(tempDir, "canonical", "skills", "meta-theory", "SKILL.md"), "");
+    const hookPath = path.join(
+      root,
+      "canonical/runtime-assets/shared/hooks/activate-meta-theory-spine.mjs",
+    );
+    try {
+      const result = spawnSync(process.execPath, [hookPath, "--package-root", root], {
+        cwd: tempDir,
+        input: JSON.stringify({
+          hook_event_name: "UserPromptSubmit",
+          prompt: "critical and fetch thinking and review 帮我修复并验证 Meta_Kim",
+        }),
+        encoding: "utf8",
+        timeout: 120_000,
+        windowsHide: true,
+        env: {
+          ...process.env,
+          META_KIM_POST_COPY_AUTO: "off",
+        },
+      });
+
+      assert.equal(result.status, 0, result.stderr || result.stdout);
+      assert.doesNotMatch(result.stdout, /project bootstrap dry-run found this directory is not ready/);
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
   });
 
   test("setup.mjs skips guide-mutating graphify platform install when guide section exists", () => {
@@ -266,15 +488,16 @@ describe("graphify idempotent wiring (contract)", () => {
 
   test("install uses scoped validation and release validation keeps graphify check", () => {
     const setupSrc = readFileSync(path.join(root, "setup.mjs"), "utf8");
-    const pkg = JSON.parse(
-      readFileSync(path.join(root, "package.json"), "utf8"),
+    const verifyRunner = readFileSync(
+      path.join(root, "scripts", "run-verify-all.mjs"),
+      "utf8",
     );
 
     assert.match(
       setupSrc,
       /"scripts\/validate-project\.mjs"[\s\S]*\["--context", "install"\]/,
     );
-    assert.match(pkg.scripts["meta:verify:all"], /meta:graphify:check/);
+    assert.match(verifyRunner, /meta:graphify:check/);
   });
 
   test("graphify-out remains a local generated artifact, not a package file", () => {
@@ -314,7 +537,7 @@ describe("graphify idempotent wiring (contract)", () => {
     assert.match(wiring, /\["-m", "graphify", "hook", "install"\]/);
   });
 
-  test("canonical subagent-context mentions GRAPH_REPORT.md", () => {
+  test("canonical subagent-context treats Graphify as query-first navigation", () => {
     const src = readFileSync(
       path.join(
         root,
@@ -323,6 +546,28 @@ describe("graphify idempotent wiring (contract)", () => {
       "utf8",
     );
     assert.match(src, /GRAPH_REPORT\.md/);
+    assert.match(src, /graphify query/);
+    assert.match(src, /graphify path/);
+    assert.match(src, /graphify explain/);
+    assert.match(src, /candidate file anchors/);
+    assert.match(src, /verify route-changing claims against source files/);
+    assert.match(src, /Never inject full graph\.json or full GRAPH_REPORT\.md/);
+    assert.doesNotMatch(src, /compressed codebase context/);
+  });
+
+  test("setup embedded graphify hook source stays query-first", () => {
+    const src = readFileSync(path.join(root, "setup.mjs"), "utf8");
+    const idx = src.indexOf("function buildCodexGraphifyContextHookSource()");
+    assert.notEqual(idx, -1);
+    const hookSource = src.slice(idx, idx + 1500);
+
+    assert.match(hookSource, /graphify query/);
+    assert.match(hookSource, /graphify path/);
+    assert.match(hookSource, /graphify explain/);
+    assert.match(hookSource, /candidate file anchors/);
+    assert.match(hookSource, /verify route-changing claims against source files/);
+    assert.match(hookSource, /never inject full graph\.json or full GRAPH_REPORT\.md/);
+    assert.doesNotMatch(hookSource, /Read graphify-out\/GRAPH_REPORT\.md/);
   });
 
   test("graphify check fails when GRAPH_REPORT.md was built from an older HEAD", () => {

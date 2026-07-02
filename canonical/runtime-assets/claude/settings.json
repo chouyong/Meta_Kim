@@ -39,6 +39,10 @@
             "type": "command",
             "command": "node .claude/hooks/medusa-findings-surface.mjs --event user-prompt",
             "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "node .claude/hooks/activate-meta-theory-spine.mjs"
           }
         ]
       }
@@ -58,7 +62,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node .claude/hooks/enforce-agent-dispatch.mjs"
+            "command": "node .claude/hooks/enforce-agent-dispatch.mjs --runtime claude"
           }
         ]
       },
@@ -103,7 +107,7 @@
     ],
     "SubagentStart": [
       {
-        "matcher": "*",
+        "matcher": "meta-*",
         "hooks": [
           {
             "type": "command",

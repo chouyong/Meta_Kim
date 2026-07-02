@@ -276,14 +276,11 @@ describe("Part A: SKILL.md documents all capability types", async () => {
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 describe("Part B: Runtime MCP Integration", async () => {
-  test(".mcp.json exists and configures meta-kim-runtime", async () => {
-    const exists = await fileExists(".mcp.json");
-    assert.ok(exists, ".mcp.json must exist");
-
-    const mcpConfig = await readJson(".mcp.json");
+  test("canonical MCP config declares meta-kim-runtime", async () => {
+    const mcpConfig = await readJson("canonical/runtime-assets/claude/mcp.json");
     assert.ok(
       mcpConfig.mcpServers?.["meta-kim-runtime"],
-      ".mcp.json must configure meta-kim-runtime server",
+      "canonical MCP config must declare meta-kim-runtime server",
     );
   });
 
@@ -307,6 +304,10 @@ describe("Part B: Runtime MCP Integration", async () => {
     assert.ok(
       content.includes("get_meta_runtime_capabilities"),
       "meta-runtime-server.mjs must implement get_meta_runtime_capabilities tool",
+    );
+    assert.ok(
+      content.includes("dispatch_meta_agent"),
+      "meta-runtime-server.mjs must implement dispatch_meta_agent tool",
     );
   });
 
@@ -347,6 +348,10 @@ describe("Part B: Runtime MCP Integration", async () => {
       assert.ok(
         result.tools.includes("get_meta_agent"),
         "self-test must expose get_meta_agent tool",
+      );
+      assert.ok(
+        result.tools.includes("dispatch_meta_agent"),
+        "self-test must expose dispatch_meta_agent tool",
       );
     } catch (err) {
       assert.fail(`meta-runtime-server.mjs self-test failed: ${err.message}`);
@@ -543,12 +548,12 @@ describe("Part D: Skill Discovery", async () => {
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 describe("Part E: MCP Tool Discovery", async () => {
-  test(".mcp.json references at least one server", async () => {
-    const mcpConfig = await readJson(".mcp.json");
+  test("canonical MCP config references at least one server", async () => {
+    const mcpConfig = await readJson("canonical/runtime-assets/claude/mcp.json");
     const servers = mcpConfig.mcpServers;
     assert.ok(
       servers && Object.keys(servers).length > 0,
-      ".mcp.json must have at least one MCP server configured",
+      "canonical MCP config must have at least one MCP server configured",
     );
   });
 
@@ -569,6 +574,23 @@ describe("Part E: MCP Tool Discovery", async () => {
       toolCount >= 3,
       `meta-runtime-server.mjs must register at least 3 tools/resources (found ${toolCount})`,
     );
+  });
+
+  test("dispatch_meta_agent is guarded by explicit execution approval", async () => {
+    const serverPath = path.join(
+      REPO_ROOT,
+      "scripts",
+      "mcp",
+      "meta-runtime-server.mjs",
+    );
+    const content = await fs.readFile(serverPath, "utf8");
+
+    assert.match(content, /dispatch_meta_agent/);
+    assert.match(content, /executionApproved/);
+    assert.match(content, /blocked_pending_execution_approval/);
+    assert.match(content, /--temp-output/);
+    assert.match(content, /spawn\(process\.execPath/);
+    assert.doesNotMatch(content, /shell:\s*true/);
   });
 
   test("SKILL.md mentions MCP integration for tool discovery", async () => {

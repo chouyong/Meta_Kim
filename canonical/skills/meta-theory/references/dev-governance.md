@@ -50,13 +50,119 @@ Owner-resolution branches: existing owner, upgrade existing owner, create owner,
 
 Default execution route proof: for a real execution demand, the route must naturally resolve the full provider chain before mutation. Evidence must name the selected execution owner, the checked execution-agent sources, the agent creation capability or reason no creation is needed, the selected skill and checked skill sources, the skill creation capability or reason no creation is needed, the MCP provider or no-impact reason, the command/runtime tool, and the verification owner plus verification method. This proof belongs to Fetch and Thinking, not to a validator after Execution.
 
-Change facts before mutation: for any non-trivial, new-file, data-file, runtime-facing, or hook-gated file change, Fetch creates `fileChangeFactCard` before Execution. It records target files, the consumer/caller/distribution path, same-purpose overlap search and reuse decision, data fields/structure/date formats with redacted or synthetic examples when relevant, and the current user instruction verbatim. Thinking binds those facts into `workerTaskPackets` so Execution writes files because they have a delivery contract, not because the worker needed somewhere to put output.
+Autonomous discovery proof: natural-language durable work must carry an `autonomousCapabilityDiscovery` record before Execution. It proves that capability discovery was triggered by entry classification and Fetch/Thinking policy, not by the user explicitly reminding the system to search agents, skills, MCP, commands, tools, or stage names. A vague product request with no stage words must still search project runtime inventory, global runtime inventory, global skills, MCP/provider configs, package scripts, runtime tools, and verification owners, then build the same candidate lanes as an explicit `critical/fetch/thinking/review` request when the intent is otherwise equivalent.
+
+Reportable provider references must be cross-runtime and machine-portable: use repo-relative refs, runtime ids, or home-relative refs such as `~/.codex`, `~/.claude`, `~/.cursor`, `~/.openclaw`, and `~/.agents`. Do not emit local absolute home paths in route reports.
+
+Change facts before mutation: for any non-trivial, new-file, data-file, runtime-facing, or hook-gated file change, Fetch reads the current content of every target file and creates `fileChangeFactCard` before Execution. It records target files, the consumer/caller/distribution path, same-purpose overlap search and reuse decision, data fields/structure/date formats with redacted or synthetic examples when relevant, and the current user instruction verbatim. Thinking binds those facts into `workerTaskPackets` so Execution writes files because they have a delivery contract and current-file context, not because the worker needed somewhere to put output.
 
 Step 1.7 Business-flow capability matrix: for executable deliverables, Fetch expands the work into product, UX, UI, frontend, backend, database, auth/security, motion, accessibility, browser QA, performance, release, install, feedback, and evolution lanes. Each lane records needed capability, owner candidates, dependency, and omission reason. Interface Integration Contract Layer adds `interfaceIntegrationContractPacket` for `third_party_integration` and internal integration work: interface_contract, provider_adapter, permission, contract_test, observability, rollout_rollback, blocking_unknown, and auth/signature evidence.
 
 User-visible agent naming: `roleDisplayName` is a short business role such as frontend, backend, test, review, analysis, verify, or docs. Runtime nicknames and random personal aliases belong only in `runtimeInstanceAlias`. Put shard detail in `roleInstanceId` or `shardScope`, not the visible role name.
 
 Parallelism rule: the same owner may run multiple instances only with shardKey, shardScope, workspaceIsolation, artifactNamespace, collisionPolicy, shared `parallelGroup`, and one `mergeOwner`. Missing shard or merge evidence is fake parallelism.
+
+## Stage 0 — Global-First Discovery Pre-Dispatch Checklist
+
+A dispatch is invalid unless the dispatcher (main thread or conductor) can show **evidence** that it ran a global-first owner discovery **before** the Wave 1 fan-out. "I remember the name" is not evidence. The discovery must produce a `capabilityInventory` recorded in the `dispatchEnvelopePacket`; without it, Wave 1 cannot start.
+
+The discovery is run as **Stage 0**, before the 4-Stage Parallel Fan-out Protocol below. A run that skips Stage 0 is fake-parallel and must be rejected by Meta-Review.
+
+### Stage 0 steps (in this order)
+
+1. **Read capability indexes.** Read every file under `config/capability-index/` (`meta-kim-capabilities.json`, `provider-registry.json`, `weapon-registry.json`, `dependency-project-registry.json`) and record the registered provider types, weapons, and dependency projects relevant to the current task. Skip a source only with a recorded `no-impact` reason.
+2. **Scan canonical sources.** Walk `canonical/agents/`, `canonical/skills/`, `canonical/runtime-assets/` and record the 9 meta agents + every canonical skill + every runtime asset. Note the canonical owner for each capability family.
+3. **Scan global runtime homes.** For each host that this run will touch (Claude Code, Codex, Cursor, OpenClaw), list the global assets under `~/.claude/agents/`, `~/.claude/skills/`, `~/.codex/agents/`, `~/.codex/skills/`, `~/.cursor/agents/`, `~/.cursor/skills/`, `~/.openclaw/workspaces/`, `~/.openclaw/skills/`, `~/.agents/skills/`. Note specialists that could be alternative owners.
+4. **Scan runtime package providers.** Read `package.json` `scripts` block and record the candidate `meta:*` and `discover:*` commands that could be invoked as tools. Note commands that the host exposes directly.
+5. **Scan MCP and hook config.** Read `.mcp.json`, `.codex/config.toml` mcp section, `.cursor/mcp.json`, runtime hook registries. Note which MCP servers and hooks are available as providers.
+6. **Match owner.** Only now: for the current Wave's stage and role, pick the owner from the inventory. The owner must be one of the candidate names that appeared in steps 1-5. If no candidate fits, return to Critical with `capabilityGapPacket`; do not fall back to `general-purpose` or any hardcoded name.
+7. **Record the inventory.** Write `dispatchEnvelopePacket.capabilityInventory` containing the scanned sources, the candidate set per stage, the selected owner, and the rejected candidates with reasons.
+
+### What the inventory must look like
+
+`dispatchEnvelopePacket.capabilityInventory` is a structured record (machine-readable JSON or a fenced code block in markdown). The minimum fields:
+
+- `scannedAt`: ISO timestamp of when the discovery ran.
+- `sources`: array of `{ path, status, hitCount }` for every source actually scanned (steps 1-5).
+- `candidates`: array of `{ stage, owner, source, reason }` covering every wave that will dispatch.
+- `selected`: for each wave, the chosen owner plus a one-line reason and at least one `rejected` alternative with its reason.
+- `gap`: a free-text field; if the discovery could not find a matching owner, this field contains the `capabilityGapPacket` describing the gap, and Execution is blocked until the gap is closed.
+
+### Hard rules
+
+- **Stage 0 is mandatory.** A `dispatchEnvelopePacket` without `capabilityInventory` is not a valid dispatch. Review must reject it.
+- **No hardcoded owner names.** The selected owner in step 6 must come from the inventory. A dispatcher that writes `meta-scout` without first proving `meta-scout` appears in the candidate set is a protocol violation.
+- **No silent general-purpose fallback.** If step 6 cannot find a matching owner, the run must return to Critical with `capabilityGapPacket` and surface the gap to the user. Silently falling back to `general-purpose` is forbidden, even for Wave 3 workers, unless the Wave-3 row of the Default Owner Assignments table is the explicit default for that role.
+- **Inventory must be auditable.** Every `sources[i].path` listed in the inventory must be a real file or directory the host can read; Review may grep any of them to confirm the inventory is not a fabrication.
+- **Skipping a source requires a reason.** If the dispatcher does not read `config/capability-index/provider-registry.json`, the inventory must record `sources[i].status: "skipped"` with `sources[i].reason` explaining why. An empty reason is a protocol violation.
+
+## 4-Stage Parallel Fan-out Protocol
+
+The canonical 8-stage spine (`Critical -> Fetch -> Thinking -> Execution -> Review -> Meta-Review -> Verification -> Evolution`) is the routing order. The **governance stages** (Critical, Fetch, Thinking, Review) have an internal DAG that allows safe parallelism when their evidence, decisions, and reviews are independent. The 4-Stage Parallel Fan-out Protocol wires them into four waves, each with explicit parallel lanes and a named merge owner. The dispatching convention is **Wave N: scope**, not **Stage N: pass/fail**.
+
+This protocol is referenced from `SKILL.md` § **Global-First Owner Discovery** and § **Parallelism Boundaries**; both are read together. The hooks `enforce-agent-dispatch.mjs` and `activate-meta-theory-spine.mjs` enforce the spine but never block the safe intra-wave fan-out described here.
+
+### Wave 1 — Critical + Fetch (intent lock + evidence fan-out)
+
+- **Critical** runs on the main thread. It locks the actual user intent, the success criteria, the non-goals, the permissions, the Architecture Type, and the boundaries. It is intentionally single-threaded because every later wave depends on a stable intent lock.
+- **Fetch** runs in parallel with Critical's evidence-need surface. Inside a single run, Fetch fans out the capability-discovery sources from `SKILL.md` § **Global-First Owner Discovery** (canonical assets, capability indexes, global runtime homes, package scripts, MCP configs, external discovery) across 1-6 parallel readers when the route is visibly complex.
+- **main-thread merge**: the main thread holds the intent lock and merges the Fetch fan-out into a single `fetchPacket` + `capabilityDiscovery.searchLog`. No subagent may write the intent lock.
+
+### Wave 2 — Thinking + Planning (owner match + dispatch envelope)
+
+- **Thinking** maps the needed capabilities to owner candidates, dependencies, runtimes, and OS support. It runs on the main thread or under `meta-conductor` orchestration.
+- **Plan** (the `dispatchEnvelopePacket`, `dispatchBoard`, and `workerTaskPackets`) is produced in parallel: candidate paths are explored in parallel, owner matching is parallel across the candidate shortlist, and dependency / runtime / OS eligibility checks run in parallel.
+- **mergeOwner**: the main thread. `meta-conductor` may co-orchestrate, but the dispatch envelope is closed by a single mergeOwner with full DAG and `parallelGroup` evidence.
+
+### Wave 3 — Execution (bounded fan-out)
+
+- **Execution** dispatches `workerTaskPackets` in parallel. Each packet must carry `shardKey`, `shardScope`, `workspaceIsolation`, `artifactNamespace`, `collisionPolicy`, shared `parallelGroup`, and one `mergeOwner`. Missing shard or merge evidence is fake parallelism.
+- **mergeOwner** is the single authority that resolves collisions and produces the final deliverable chain. The main thread may also be the mergeOwner, but only when it has not also held the worker role for the same packet.
+
+### Wave 4 — Review + Meta-Review (skeptic fan-out + Warden gate)
+
+- **Review** fans out across the `meta-prism` lenses (factual reviewer, senior engineer, security expert, consistency reviewer, redundancy checker) in parallel. Each lens produces a separate `reviewLensPacket`; the main `reviewPacket` is the merge.
+- **Meta-Review** is a single-point authority on `meta-warden`. The Warden gate cannot be parallelized; it inspects the Review standard itself, not the deliverables.
+- **Verification** and **Evolution** remain strict-serial after Meta-Review. The Warden gate and the Verification stage are the only authorities that can close a run.
+
+### Default Owner Assignments
+
+These assignments are the **default** for any run that triggers the Fan-out Trigger below. They are not optional defaults; deviating requires a recorded `no_branching_choice` or an explicit user override. A dispatch that uses a different subagent type than the one named here must record why in `dispatchEnvelopePacket`.
+
+| Wave | Stage / role | Default subagent type | Reason |
+|------|--------------|------------------------|--------|
+| 1 | Fetch — capability discovery across 1-6 readers | `meta-scout` | External + cross-runtime capability scanning is `meta-scout`'s stated boundary. |
+| 1 | Fetch — graph + memory navigation | `meta-librarian` | Memory + graph + continuity is `meta-librarian`'s boundary. |
+| 2 | Thinking — owner match + dispatch envelope | `meta-conductor` | Business-flow blueprint, stage sequencing, and dispatch envelope are `meta-conductor`'s boundary. |
+| 2 | Thinking — capability loadout (skills, MCP, commands) | `meta-artisan` | Skill / MCP / tool fit is `meta-artisan`'s boundary. |
+| 3 | Execution — worker task | `general-purpose` **or a specific topic owner** | Worker tasks are the only place `general-purpose` is allowed. Topic-specific work should go to a global or runtime specialist when one exists. |
+| 4 | Review — adversarial correctness | `meta-prism` (lens: correctness) | Quality review and drift detection are `meta-prism`'s boundary. |
+| 4 | Review — adversarial security | `meta-prism` (lens: security) | Same boundary; different lens. |
+| 4 | Review — adversarial completeness | `meta-prism` (lens: completeness) | Same boundary; different lens. |
+| 4 | Meta-Review — gate approval | `meta-warden` | Coordination, arbitration, final synthesis, and the public-ready gate are `meta-warden`'s boundary. |
+| 8 | Evolution — writeback coordination | `meta-chrysalis` | Evolution signal aggregation and writeback coordination through Warden's gate are `meta-chrysalis`'s boundary. |
+
+**History note** — early runs of this protocol (v2.8.62 and earlier) defaulted every Wave-3 worker to `general-purpose` because the owner table did not exist. Wave 4 review was also done by `general-purpose` instead of `meta-prism` three-lens fan-out, and Meta-Review was done by the main thread instead of `meta-warden`. From v2.8.63 onward the assignments above are the default. This is the structural fix for the protocol-vs-runtime gap surfaced in 2026-06-29 governance review.
+
+### Wave Hard Rules
+
+- The 8-stage ordering is preserved. Parallelism exists **inside** a wave, not **across** waves.
+- No wave may skip the main-thread intent lock. Critical, the Fetch merge, the Thinking merge, and the Review merge are single-point.
+- Meta-Review, Verification, and Evolution are strict-serial. Warden is the only Meta-Review authority; Verification produces fresh evidence; Evolution writeback requires Warden approval.
+- A Wave-3 fan-out that lacks `parallelGroup` + `mergeOwner` + `collisionPolicy` is fake parallelism and must be rejected by Review, not silently serialized.
+- The `agent-teams-playbook` skill is the recommended execution pattern for Wave 3; it is selected only when the DAG and collision policy prove safe.
+- **A dispatch that picks `general-purpose` for any role that the Default Owner Assignments table names a specific owner is a protocol violation.** Review must flag it.
+
+### Fan-out Trigger
+
+The protocol activates when any of these signals appear:
+
+- explicit `/meta-theory`, `critical and fetch thinking and review`, "并行", "多个 agent", "review + fix + verify"
+- 2+ independent files, runtimes, platforms, capability families, or verification lanes
+- cross-runtime behavior, release/update/sync, hook/security/sandbox, or repeated same-type failure work
+- user feedback that the current Meta_Kim route is slow, serial, missing agents, or repeatedly corrected
+
+A run that does not trigger fan-out still walks the 8-stage spine in order, just without intra-wave parallelism.
 
 ## Complexity Routing
 
@@ -132,6 +238,8 @@ Report triggers:
 - Route-changing discovery mid-execution: pause and inform before continuing.
 
 Each report is a compact notice (max 3 bullets). If a discovery changes scope, owner, or risk, upgrade to a Decision requiring user input. The user should never need to ask "what's happening?" during a non-trivial run.
+
+For governed runs that activate the 11-phase business workflow, user-visible status must include all phase states (`done`, `skipped`, `blocked`, `pending`), a plain reason for each state, and the current blocked or pending phase. The JSON artifact and validator pass are evidence layers; they do not prove the user saw the workflow state unless a localized conversation notice or readable report exposes it.
 
 ## Fetch And Thinking Boundary
 

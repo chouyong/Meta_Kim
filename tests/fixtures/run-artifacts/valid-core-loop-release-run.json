@@ -111,59 +111,6 @@
   "cardPlanPacket": {
     "dealerOwner": "meta-conductor",
     "dealerMode": "conductor-primary-warden-escalation",
-    "cards": [
-      {
-        "cardId": "card-clarify",
-        "cardType": "info",
-        "cardIntent": "clarify",
-        "cardDecision": "deal",
-        "cardAudience": "user",
-        "cardTiming": "immediate",
-        "cardShell": "conversation",
-        "cardPriority": 9,
-        "cardReason": "scope must be explicit before cross-file auth changes",
-        "cardSource": "meta-conductor",
-        "cardSuppressed": false,
-        "suppressionReason": "",
-        "deliveryShellId": "shell-structured-status",
-        "choiceSurface": "conversation_fallback",
-        "userLanguage": "en"
-      },
-      {
-        "cardId": "card-risk",
-        "cardType": "risk",
-        "cardIntent": "risk_surface",
-        "cardDecision": "deal",
-        "cardAudience": "governance",
-        "cardTiming": "on_risk",
-        "cardShell": "summary",
-        "cardPriority": 10,
-        "cardReason": "token refresh touches auth boundary",
-        "cardSource": "meta-sentinel",
-        "cardSuppressed": false,
-        "suppressionReason": "",
-        "deliveryShellId": "shell-review-delta",
-        "choiceSurface": "conversation_fallback",
-        "userLanguage": "en"
-      },
-      {
-        "cardId": "card-silence",
-        "cardType": "silence",
-        "cardIntent": "silence",
-        "cardDecision": "defer",
-        "cardAudience": "user",
-        "cardTiming": "after_dependency",
-        "cardShell": "silent_hold",
-        "cardPriority": 4,
-        "cardReason": "avoid pushing another intervention while verification is running",
-        "cardSource": "meta-conductor",
-        "cardSuppressed": true,
-        "suppressionReason": "verification_pending",
-        "deliveryShellId": "shell-quiet",
-        "choiceSurface": "conversation_fallback",
-        "userLanguage": "en"
-      }
-    ],
     "deliveryShells": [
       {
         "deliveryShellId": "shell-structured-status",
@@ -219,7 +166,157 @@
         "rejoinCondition": "security-sensitive auth diff has been reviewed"
       }
     ],
-    "defaultShellId": "shell-structured-status"
+    "defaultShellId": "shell-structured-status",
+    "dealStandard": {
+      "schemaVersion": "card-deal-standard-v0.1",
+      "passThreshold": 80,
+      "minimumScore": 100,
+      "averageScore": 100,
+      "coveragePass": true,
+      "rule": "Deck presence or hardcoded order is not enough evidence; each fixture card decision must retain measurable deal-standard coverage.",
+      "deepResearchAnalogy": "Like deep-research claim evidence cards, fixture card decisions need a visible standard rather than packet presence only.",
+      "eventCount": 2,
+      "activeTypeCount": 2,
+      "suppressedTypeCount": 1,
+      "interruptEventCount": 0
+    },
+    "cardEvents": [
+      {
+        "eventId": "card-clarify-event-1",
+        "eventIndex": 1,
+        "cardKey": "clarify",
+        "cardType": "info",
+        "label": "Clarify",
+        "cardIntent": "clarify",
+        "cardDecision": "deal",
+        "cardAudience": "user",
+        "cardTiming": "immediate",
+        "deliveryShellId": "shell-structured-status",
+        "cardShell": "conversation",
+        "owner": "meta-conductor",
+        "mapsToSpine": [],
+        "eventReason": "scope must be explicit before cross-file auth changes",
+        "repeatOrdinal": 1,
+        "repeatReason": "primary_route_signal",
+        "choiceSurfaceDelivery": "not_applicable",
+        "choiceSurfaceTriggerProof": "fixture card event; not native popup evidence"
+      },
+      {
+        "eventId": "card-risk-event-1",
+        "eventIndex": 2,
+        "cardKey": "risk",
+        "cardType": "risk",
+        "label": "Risk",
+        "cardIntent": "risk_surface",
+        "cardDecision": "deal",
+        "cardAudience": "governance",
+        "cardTiming": "on_risk",
+        "deliveryShellId": "shell-review-delta",
+        "cardShell": "summary",
+        "owner": "meta-sentinel",
+        "mapsToSpine": [],
+        "eventReason": "token refresh touches auth boundary",
+        "repeatOrdinal": 1,
+        "repeatReason": "primary_route_signal",
+        "choiceSurfaceDelivery": "not_applicable",
+        "choiceSurfaceTriggerProof": "fixture card event; not native popup evidence"
+      }
+    ],
+    "cardTypeCatalog": [
+      {
+        "cardKey": "clarify",
+        "label": "Clarify",
+        "cardType": "info",
+        "cardIntent": "clarify",
+        "reusable": true
+      },
+      {
+        "cardKey": "risk",
+        "label": "Risk",
+        "cardType": "risk",
+        "cardIntent": "risk_surface",
+        "reusable": true
+      },
+      {
+        "cardKey": "silence",
+        "label": "Silence",
+        "cardType": "silence",
+        "cardIntent": "silence",
+        "reusable": true
+      }
+    ],
+    "cardTypeDecisions": [
+      {
+        "cardId": "card-clarify",
+        "cardType": "info",
+        "cardIntent": "clarify",
+        "cardDecision": "deal",
+        "cardAudience": "user",
+        "cardTiming": "immediate",
+        "cardShell": "conversation",
+        "cardPriority": 9,
+        "cardReason": "scope must be explicit before cross-file auth changes",
+        "cardSource": "meta-conductor",
+        "cardSuppressed": false,
+        "suppressionReason": "",
+        "deliveryShellId": "shell-structured-status",
+        "choiceSurface": "conversation_fallback",
+        "userLanguage": "en",
+        "cardKey": "clarify",
+        "label": "Clarify",
+        "eventIndexes": [
+          1
+        ]
+      },
+      {
+        "cardId": "card-risk",
+        "cardType": "risk",
+        "cardIntent": "risk_surface",
+        "cardDecision": "deal",
+        "cardAudience": "governance",
+        "cardTiming": "on_risk",
+        "cardShell": "summary",
+        "cardPriority": 10,
+        "cardReason": "token refresh touches auth boundary",
+        "cardSource": "meta-sentinel",
+        "cardSuppressed": false,
+        "suppressionReason": "",
+        "deliveryShellId": "shell-review-delta",
+        "choiceSurface": "conversation_fallback",
+        "userLanguage": "en",
+        "cardKey": "risk",
+        "label": "Risk",
+        "eventIndexes": [
+          2
+        ]
+      },
+      {
+        "cardId": "card-silence",
+        "cardType": "silence",
+        "cardIntent": "silence",
+        "cardDecision": "defer",
+        "cardAudience": "user",
+        "cardTiming": "after_dependency",
+        "cardShell": "silent_hold",
+        "cardPriority": 4,
+        "cardReason": "avoid pushing another intervention while verification is running",
+        "cardSource": "meta-conductor",
+        "cardSuppressed": true,
+        "suppressionReason": "verification_pending",
+        "deliveryShellId": "shell-quiet",
+        "choiceSurface": "conversation_fallback",
+        "userLanguage": "en",
+        "cardKey": "silence",
+        "label": "Silence",
+        "eventIndexes": []
+      }
+    ],
+    "eventOrder": [
+      "clarify",
+      "risk"
+    ],
+    "cardTypeCatalogSource": "fixture",
+    "cardTypeCatalogSummary": "Fixture card types are reusable rhythm signals; cardEvents are the run result."
   },
   "dispatchEnvelopePacket": {
     "ownerAgent": "meta-conductor",
@@ -287,7 +384,7 @@
       "visualOrAssetPlan": "none",
       "dependsOn": [],
       "parallelGroup": "auth-core",
-      "mergeOwner": "meta-warden",
+      "mergeOwner": "meta-conductor",
       "verifySteps": [
         {
           "id": "task-001-verify-1",
@@ -552,7 +649,15 @@
       "publicReady": true,
       "blockedBy": []
     },
-    "writebackDecision": "none"
+    "writebackDecision": "none",
+    "authority": "local_continuity_only",
+    "sourceAuthority": "runtime_spine_state",
+    "sourceAuthorityDetail": {
+      "runtimeRunId": null,
+      "transcriptFallbackUsed": false,
+      "publicReadyClaimAllowed": false,
+      "note": "Fixture source authority is classified for compaction contract validation."
+    }
   },
   "evolutionWritebackPacket": {
     "ownerAssessment": "keep-existing",
@@ -1199,7 +1304,105 @@
         "candidate option viability",
         "risk severity",
         "owner selection confidence"
-      ]
+      ],
+      "decisionUse": [
+        "Choose owner, route, scope, risk boundary, and verification path before Execution."
+      ],
+      "keyInformationTargets": [
+        "Evidence that changes owner selection.",
+        "Evidence that changes route, scope, risk, or verification."
+      ],
+      "iterationPlan": [
+        "Iteration 1: inspect local source, graph, and capability-index evidence.",
+        "Iteration 2: map route-changing claims to evidence and counterevidence."
+      ],
+      "stopCondition": [
+        "Stop only after route-changing claims have evidence cards and unresolved gaps are explicit."
+      ],
+      "decisionUpdateRule": [
+        "Update decisionImpactMap whenever evidence changes owner, route, scope, risk, or verification."
+      ],
+      "deepReadTargets": [
+        "contentEvidencePacket.contentFindings[0]",
+        "contentEvidencePacket.capabilityEvidence[0]",
+        "contentEvidencePacket.decisionImpactMap[0]"
+      ],
+      "sourceQualityLadder": [
+        "canonical_source",
+        "contract",
+        "capability_index"
+      ],
+      "claimAttributionRules": [
+        "Every route-changing claim must point to artifact evidence."
+      ],
+      "crossCheckStrategy": [
+        "Compare content findings, capability evidence, assumptions, and contradictions before Thinking."
+      ],
+      "originalSynthesisRules": [
+        "Extract Meta_Kim-native invariants and avoid copying external prompt structures."
+      ],
+      "decisionQualityFrame": {
+        "intent": "Produce a decision-ready governed run artifact instead of a long unstructured report.",
+        "subject": "Meta_Kim maintainer, conductor, and verification owner.",
+        "path": "User request -> Fetch evidence -> competing routes -> minimum test -> Thinking handoff.",
+        "constraints": [
+          "Use source-backed evidence for route-changing claims.",
+          "Do not treat structural fixture evidence as live runtime proof."
+        ],
+        "evidenceUse": "Evidence must change or block owner, route, scope, risk, acceptance, or verification.",
+        "outputCommitment": "Return a concrete pass, blocked, or return-to-Fetch decision."
+      },
+      "competingHypotheses": [
+        {
+          "hypothesis": "The local governed artifact is enough for this fixture decision.",
+          "wouldExpect": "Required packet fields and evidence references resolve locally.",
+          "disconfirmingEvidence": "A missing packet, unresolved source ref, or external-current claim would refute this route.",
+          "currentStatus": "supported",
+          "decisionImpact": "Allows Thinking to proceed when the fixture stays local and validates."
+        },
+        {
+          "hypothesis": "External or cross-source research is required before route lock.",
+          "wouldExpect": "The task depends on current platform, API, policy, pricing, or market evidence.",
+          "disconfirmingEvidence": "All route-changing claims resolve to current local contract evidence.",
+          "currentStatus": "not_required_for_this_fixture",
+          "decisionImpact": "Blocks public-ready external claims until current evidence is attached."
+        }
+      ],
+      "minimumDecisionTest": {
+        "goal": "Decide whether Fetch evidence is strong enough to enter Thinking.",
+        "input": "contentEvidencePacket, claim evidence cards, contradictions, and validator policy.",
+        "action": "Validate the artifact and check whether the preferred route survives counterevidence.",
+        "output": "pass, blocked, or return_to_fetch decision.",
+        "passCondition": "Required packets validate and every route-changing claim has evidence and decision impact.",
+        "failSignal": "Missing field, unresolved evidence ref, stale claim, or unclosed key information target.",
+        "nextStep": "Enter Thinking when pass; otherwise return to Fetch and repair the evidence path.",
+        "doNotDo": "Do not write a longer report to hide unresolved evidence gaps."
+      },
+      "evidenceConfidencePolicy": {
+        "sourceStates": [
+          "confirmed",
+          "user_provided",
+          "inference",
+          "unconfirmed"
+        ],
+        "downgradeReasons": [
+          "single_source",
+          "stale",
+          "indirect",
+          "conflicted",
+          "unverified_origin"
+        ]
+      },
+      "decisionReadinessGate": {
+        "requiredSignals": [
+          "right_frame",
+          "real_alternatives",
+          "meaningful_data",
+          "tradeoffs_clear",
+          "logical_reasoning",
+          "action_commitment"
+        ]
+      }
     },
     "sourceCategoryCoverage": [
       "local-code",
@@ -1241,7 +1444,34 @@
       "auth_refresh_hardening",
       "verification_notes"
     ],
-    "capabilityGap": "none"
+    "capabilityGap": "none",
+    "iterationLog": [
+      {
+        "iteration": 1,
+        "trigger": "research_required_before_thinking",
+        "queryOrAction": "Inspect local source, capability index, and decision impact evidence.",
+        "observation": "Evidence identifies owner, route, risk, and verification changes before Thinking.",
+        "gapClosed": true,
+        "nextStepDecision": "Stop research and hand decision-ready evidence to Thinking.",
+        "stopCheck": "Key information targets, claim evidence card, and decisionImpactMap are present."
+      }
+    ],
+    "claimEvidenceCards": [
+      {
+        "claim": "Fetch evidence changes owner, route, scope, or verification before Execution.",
+        "sourceRefs": [
+          "contentEvidencePacket.contentFindings[0]",
+          "contentEvidencePacket.capabilityEvidence[0]"
+        ],
+        "evidenceAnchor": "contentEvidencePacket.contentFindings[0].summary",
+        "confidence": "high",
+        "counterevidence": [
+          "No contradiction in contradictionLog overrides the selected route."
+        ],
+        "decisionImpact": "Bind owner, route, scope, risk, and verification before Execution.",
+        "falsificationStatus": "tested_survived"
+      }
+    ]
   },
   "preDecisionOptionFrame": {
     "decisionTrigger": "non_trivial_executable_decision",
@@ -1523,5 +1753,126 @@
         "evidenceRef": "rollbackPlanPacket.rollbackSteps"
       }
     ]
+  },
+  "runtimeInvocationPlanPacket": {
+    "schemaVersion": "runtime-invocation-plan-v0.1",
+    "status": "pass",
+    "requiredFamilies": [
+      "skill",
+      "command_script"
+    ],
+    "invokedFamilies": [
+      "skill",
+      "command_script"
+    ],
+    "missingFamilies": [],
+    "requests": [
+      {
+        "family": "skill",
+        "state": "invoked_or_applied",
+        "passEligible": true
+      },
+      {
+        "family": "command_script",
+        "state": "invoked_or_applied",
+        "passEligible": true
+      }
+    ],
+    "evidence": [
+      {
+        "family": "skill",
+        "state": "applied",
+        "providerId": "meta-theory",
+        "hostSurface": "skill",
+        "evidenceKind": "skill_application",
+        "evidenceRef": "fixture:skill:trusted-invocation",
+        "passEligible": true
+      },
+      {
+        "family": "command_script",
+        "state": "invoked",
+        "providerId": "command_script-provider",
+        "hostSurface": "shell",
+        "evidenceKind": "command_output",
+        "evidenceRef": "fixture:command_script:trusted-invocation",
+        "passEligible": true
+      }
+    ]
+  },
+  "hostInvocationRequestPacket": {
+    "schemaVersion": "host-invocation-request-v0.1",
+    "status": "pass",
+    "requiredFamilies": [
+      "skill",
+      "command_script"
+    ],
+    "pendingFamilies": [],
+    "requests": [
+      {
+        "family": "skill",
+        "status": "satisfied",
+        "passEligible": true
+      },
+      {
+        "family": "command_script",
+        "status": "satisfied",
+        "passEligible": true
+      }
+    ]
+  },
+  "capabilityInvocationTruthPacket": {
+    "schemaVersion": "capability-invocation-truth-v0.3",
+    "status": "pass",
+    "realInvocationCoverage": {
+      "status": "pass",
+      "requiredFamilies": [
+        "skill",
+        "command_script"
+      ],
+      "invokedFamilies": [
+        "skill",
+        "command_script"
+      ],
+      "missingFamilies": [],
+      "hostEvidenceCount": 2,
+      "evidenceRef": "runtimeInvocationPlanPacket.evidence"
+    },
+    "rows": [
+      {
+        "family": "skill",
+        "state": "applied",
+        "selectedCount": 1,
+        "invokedCount": 0,
+        "appliedCount": 1,
+        "invocationEvidenceRefs": [
+          "fixture:skill:trusted-invocation"
+        ]
+      },
+      {
+        "family": "command_script",
+        "state": "invoked",
+        "selectedCount": 1,
+        "invokedCount": 1,
+        "appliedCount": 0,
+        "invocationEvidenceRefs": [
+          "fixture:command_script:trusted-invocation"
+        ]
+      }
+    ]
+  },
+  "productExperiencePacket": {
+    "schemaVersion": "product-experience-v0.1",
+    "status": "product_experience_pass",
+    "evidenceTier": "runtime_live_pass"
+  },
+  "publicReadyDecision": {
+    "publicReady": true,
+    "status": "pass",
+    "runtimeInvocationPlanStatus": "pass",
+    "hostInvocationRequestStatus": "pass",
+    "realInvocationCoverageStatus": "pass",
+    "productExperienceStatus": "product_experience_pass",
+    "selectedExecutableTruthGaps": [],
+    "blockedBy": []
   }
 }

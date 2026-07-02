@@ -26,7 +26,23 @@ try { INPUT = JSON.parse(RAW_STDIN || "{}"); } catch { INPUT = {}; }
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const HOOKS_ROOT = path.resolve(__dirname, "..");
-const PYTHON_HOOK = path.join(HOOKS_ROOT, "mcp_memory_global.py");
+const PYTHON_HOOK_CANDIDATES = [
+  path.join(HOOKS_ROOT, "mcp_memory_global.py"),
+  path.join(HOOKS_ROOT, "memory-hooks", "mcp_memory_global.py"),
+  path.join(__dirname, "mcp_memory_global.py"),
+];
+const HOOKPROMPT_BLOCK_START_PATTERNS = [
+  /MANDATORY_FORMAT_INSTRUCTION/,
+  /(?:^|\s)📝?\s*原始输入[:：]?/,
+  /(?:^|\s)🔄?\s*优化后的理解[:：]?/,
+  /(?:^|\s)✅?\s*优化后的完整提示词[:：]?/,
+  /#\s*提示词优化元提示词/,
+];
+const HOOKPROMPT_BLOCK_END_RE = /^\s*(?:---+|<\/MANDATORY_FORMAT_INSTRUCTION>)\s*$/;
+const HOOKPROMPT_INLINE_END_PATTERNS = [
+  /(?:\\r?\\n|\r?\n)\s*---+\s*(?:\\r?\\n|\r?\n|$)/,
+  /<\/MANDATORY_FORMAT_INSTRUCTION>/,
+];
 
 // ── Task extraction patterns ────────────────────────────────────────────────
 
@@ -40,8 +56,22 @@ const DONE_PATTERNS = [
 
 // Patterns that indicate a current/remaining task
 const REMAINING_PATTERNS = [
-  /\b(下一步|待做|还剩|还需要|还没做|remaining|pending|todo|接下来)[^\n]{3,80}/gi,
-  /\b(还没|还没完|未完成|进行中|in progress)[^\n]{3,80}/gi,
+  /(下一步|待做|还剩|还需要|还没做|remaining|pending|todo|接下来)[^\n]{3,80}/gi,
+  /(还没|还没完|未完成|进行中|in progress)[^\n]{3,80}/gi,
+  /(?:再|然后|接着|继续)\s*(?:Critical|Fetch|Thinking|Execution|Review|Meta-Review|Verification|Evolution|执行|推进|处理|做)[^\n]{0,80}/gi,
+];
+
+const VISIBLE_PROGRESS_HANDOFF_RE =
+  /(?:已|已经|刚才|本轮)[^\n。]{1,60}(?:完成|读完|查完|检查完|确认|验证)[^\n。]{0,60}(?:下一步|接下来|继续|还需要)/i;
+const TASK_BOOKKEEPING_HANDOFF_RE =
+  /(?:任务清单|任务列表|任务单|todo\s*list|task\s*list)[^\n。]{0,80}(?:再|然后|接着|继续|fetch|执行|推进|跑|做)/i;
+
+// Patterns that indicate an unfinished handoff after visible progress.
+// The assistant announced a continuation but the turn is ending — flag it for the next turn.
+const HANDOFF_PATTERNS = [
+  VISIBLE_PROGRESS_HANDOFF_RE,
+  /我先(?![^\n。]{0,40}(?:任务清单|任务列表|任务单|todo\s*list|task\s*list))[^\n。]{1,30}(?:再|然后|继续|接着)/i,
+  /(?:接下来|下一步|再|然后|接着|继续)\s*(?:fetch|执行|推进|跑|做)/i,
 ];
 
 // Patterns that describe what was just done
@@ -66,6 +96,81 @@ async function readTranscriptLines(transcriptPath, maxLines = 400) {
   } catch {
     return [];
   }
+}
+
+function stripHookPromptDisplayBlocks(text) {
+  if (!text) return "";
+  const kept = [];
+  let droppingHookPromptBlock = false;
+
+  for (const line of text.split(/\r?\n/)) {
+    const hookPromptStart = firstHookPromptStartIndex(line);
+    if (!droppingHookPromptBlock && hookPromptStart >= 0) {
+      if (
+        isStructuredTranscriptLine(line) ||
+        hasInlineHookPromptEnd(line, hookPromptStart) ||
+        hookPromptStart > 0
+      ) {
+        const stripped = stripHookPromptSegmentsFromLine(line);
+        if (stripped.trim().length > 0) kept.push(stripped);
+        continue;
+      }
+      droppingHookPromptBlock = true;
+      continue;
+    }
+
+    if (droppingHookPromptBlock) {
+      if (HOOKPROMPT_BLOCK_END_RE.test(line)) {
+        droppingHookPromptBlock = false;
+      }
+      continue;
+    }
+
+    kept.push(line);
+  }
+
+  return kept.join("\n");
+}
+
+function firstHookPromptStartIndex(line) {
+  let first = -1;
+  for (const pattern of HOOKPROMPT_BLOCK_START_PATTERNS) {
+    const index = line.search(pattern);
+    if (index >= 0 && (first === -1 || index < first)) first = index;
+  }
+  return first;
+}
+
+function isStructuredTranscriptLine(line) {
+  const trimmed = line.trimStart();
+  return trimmed.startsWith("{") || trimmed.startsWith("[") || line.includes("\\n");
+}
+
+function hasInlineHookPromptEnd(line, startIndex) {
+  return inlineHookPromptEndIndex(line, startIndex) < line.length;
+}
+
+function inlineHookPromptEndIndex(line, startIndex) {
+  const tail = line.slice(startIndex);
+  let best = null;
+  for (const pattern of HOOKPROMPT_INLINE_END_PATTERNS) {
+    const match = pattern.exec(tail);
+    if (!match) continue;
+    const end = startIndex + match.index + match[0].length;
+    if (best === null || end < best) best = end;
+  }
+  return best ?? line.length;
+}
+
+function stripHookPromptSegmentsFromLine(line) {
+  let output = line;
+  for (let guard = 0; guard < 10; guard += 1) {
+    const start = firstHookPromptStartIndex(output);
+    if (start < 0) break;
+    const end = inlineHookPromptEndIndex(output, start);
+    output = `${output.slice(0, start).trimEnd()} ${output.slice(end).trimStart()}`.trim();
+  }
+  return output;
 }
 
 function extractUniqueItems(lines, patterns, maxItems = 5) {
@@ -103,9 +208,24 @@ function extractCurrentTask(lines) {
   return "";
 }
 
+async function pathExists(candidate) {
+  return fs.stat(candidate).then(() => true).catch(() => false);
+}
+
+async function resolvePythonHook() {
+  for (const candidate of PYTHON_HOOK_CANDIDATES) {
+    if (await pathExists(candidate)) return candidate;
+  }
+  return null;
+}
+
 function runPythonSave(args) {
-  return new Promise((resolve) => {
-    const proc = spawn("python", [PYTHON_HOOK, ...args], {
+  return resolvePythonHook().then((pythonHook) => new Promise((resolve) => {
+    if (!pythonHook) {
+      resolve({ code: 0, stdout: "", stderr: "memory helper missing", skipped: true });
+      return;
+    }
+    const proc = spawn("python", [pythonHook, ...args], {
       cwd: process.cwd(),
       timeout: 8000,
     });
@@ -119,7 +239,24 @@ function runPythonSave(args) {
     proc.on("error", () => {
       resolve({ code: -1, stdout: "", stderr: "spawn error" });
     });
-  });
+  }));
+}
+
+async function isLikelyProjectRoot(projectRoot) {
+  const markers = [
+    ".git",
+    "AGENTS.md",
+    "CLAUDE.md",
+    "package.json",
+    ".codex",
+    ".cursor",
+    "openclaw",
+    ".meta-kim",
+  ];
+  for (const marker of markers) {
+    if (await pathExists(path.join(projectRoot, marker))) return true;
+  }
+  return false;
 }
 
 // ── Main ────────────────────────────────────────────────────────────────
@@ -140,7 +277,17 @@ async function main() {
     return;
   }
 
-  const text = lines.join("\n");
+  const rawText = lines.join("\n");
+  const text = stripHookPromptDisplayBlocks(rawText);
+  const effectiveLines = text.split(/\r?\n/).filter((line) => line.trim().length > 0);
+  if (effectiveLines.length < 5) {
+    process.exit(0);
+    return;
+  }
+  const taskBookkeepingOnlyHandoff =
+    TASK_BOOKKEEPING_HANDOFF_RE.test(text) && !VISIBLE_PROGRESS_HANDOFF_RE.test(text);
+  const handoffMatched =
+    !taskBookkeepingOnlyHandoff && HANDOFF_PATTERNS.some((re) => re.test(text));
 
   // Only save if there's meaningful work done
   const hasMeaningfulContent = (
@@ -149,7 +296,9 @@ async function main() {
     text.includes("写") || text.includes("改") ||
     text.includes("fix") || text.includes("add") ||
     text.includes("save-progress") ||
-    text.includes("进度")
+    text.includes("进度") ||
+    text.includes("继续") ||
+    handoffMatched
   );
 
   if (!hasMeaningfulContent) {
@@ -159,11 +308,14 @@ async function main() {
   }
 
   // Extract tasks
-  const completed = extractUniqueItems(lines, DONE_PATTERNS, 5);
-  const remaining = extractUniqueItems(lines, REMAINING_PATTERNS, 3);
-  const currentTask = extractCurrentTask(lines);
+  const completed = extractUniqueItems(effectiveLines, DONE_PATTERNS, 5);
+  const remaining = extractUniqueItems(effectiveLines, REMAINING_PATTERNS, 3);
+  const currentTask = extractCurrentTask(effectiveLines);
+  if (handoffMatched && remaining.length === 0) {
+    remaining.push(currentTask || "continuation handoff detected");
+  }
 
-  if (completed.length === 0 && remaining.length === 0) {
+  if (completed.length === 0 && remaining.length === 0 && !handoffMatched) {
     // Nothing extractable — skip silently
     process.exit(0);
     return;
@@ -174,15 +326,60 @@ async function main() {
   if (currentTask) args.push("--task", currentTask);
   for (const item of completed) args.push("--done", item);
   for (const item of remaining) args.push("--remaining", item);
-  args.push("--note", `auto-save from Stop hook, ${lines.length} transcript lines`);
+  args.push("--note", `auto-save from Stop hook, ${effectiveLines.length} transcript lines`);
 
   const result = await runPythonSave(args);
 
-  if (result.code === 0) {
+  if (result.skipped) {
+    console.error("stop-save-progress: memory helper missing, continuation check still ran");
+  } else if (result.code === 0) {
     // Success — result.stdout has the JSON
     console.error(`stop-save-progress: saved ${completed.length} done, ${remaining.length} remaining`);
   } else {
     console.error(`stop-save-progress: failed (${result.code}): ${result.stderr}`);
+  }
+
+  // ── Continuation handoff flag ────────────────────────────────────────
+  // If the assistant announced an unfinished handoff after visible progress
+  // and there are remaining tasks, write a continuationRequired flag into the
+  // project's .claude/project-task-state.json so the next turn can auto-resume.
+  // Scoped to cwd: when the hook runs outside a project, this is a no-op.
+  try {
+    if (handoffMatched && remaining.length > 0) {
+      const projectRoot = process.cwd();
+      const claudeDir = path.join(projectRoot, ".claude");
+      const statePath = path.join(claudeDir, "project-task-state.json");
+      if (await isLikelyProjectRoot(projectRoot)) {
+        await fs.mkdir(claudeDir, { recursive: true });
+        let prev = {};
+        try {
+          const raw = await fs.readFile(statePath, "utf8");
+          prev = JSON.parse(raw);
+        } catch {
+          prev = {};
+        }
+        prev.meta_kim = true;
+        prev.continuationRequired = true;
+        prev.continuationAuthority = "local_continuity_only";
+        prev.mustNotClaimActiveRun = true;
+        prev.continuationHandoff = {
+          matched: true,
+          ts: new Date().toISOString(),
+          source: "stop-save-progress",
+          remainingCount: remaining.length,
+          currentTask: currentTask || null,
+          authority: "local_continuity_only",
+          mustNotClaimActiveRun: true,
+        };
+        prev.updated_at = new Date().toISOString();
+        await fs.writeFile(statePath, JSON.stringify(prev, null, 2), "utf8");
+        console.error(
+          `stop-save-progress: continuationRequired=true (${remaining.length} remaining, cwd=${projectRoot})`
+        );
+      }
+    }
+  } catch (err) {
+    console.error(`stop-save-progress: continuation flag skipped: ${err.message}`);
   }
 
   process.exit(0);

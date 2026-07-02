@@ -45,6 +45,11 @@ describe("install platform config", () => {
     assert.match(rootsBody, /platformId === "openclaw"/);
     assert.match(rootsBody, /platformId === "codex"/);
     assert.match(rootsBody, /platformId === "cursor"/);
+    assert.match(
+      rootsBody,
+      /add\("canonical\/skills\/meta-theory", "\.agents\/skills\/meta-theory"\)/,
+    );
+    assert.doesNotMatch(rootsBody, /add\("\.codex\/skills"\)/);
     assert.equal(
       rootsBody.match(/add\("AGENTS\.md"\)/g)?.length,
       1,
@@ -84,9 +89,9 @@ describe("install platform config", () => {
   });
 
   test("planning-with-files is a project workflow hook, not a Meta_Kim governance hook", () => {
-    assert.deepEqual(planningWithFilesSkill.hookSubdirs, {
-      codex: [".codex/hooks"],
-      cursor: [".cursor/hooks"],
+    assert.deepEqual(planningWithFilesSkill.globalHookSubdirs, {
+      codex: ["~/.codex/hooks/meta-kim"],
+      cursor: ["~/.cursor/hooks/meta-kim"],
     });
     assert.equal(planningWithFilesSkill.platformSupport, undefined);
   });
