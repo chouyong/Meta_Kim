@@ -10,14 +10,29 @@ The changelog explains the user-facing problem or risk each release solved, what
 
 ### Solved Problem
 
-`agent-teams-playbook` is an external skill dependency, not a Meta_Kim runtime projection. Meta_Kim previously treated generic git skill installs as one repo tree copied to every runtime, so it could not consume upstream skill repos that publish native package directories such as `.claude/skills/<id>` for Claude Code and `.agents/skills/<id>` for Codex.
+_Reserved for the next release._
+
+## [2.8.66] - 2026-07-04
+
+### Solved Problem
+
+Open-source users running `meta-kim` had no way to know the runtime projection was actually healthy. `meta:check:runtimes` returned "工具端镜像已是最新" even when no runtime target was selected — `global_only` projects hit a silent skip, got no warning, and looked like sync worked when it had not. On a different lane, every `weapon-registry.json` owner was governance-layer (`meta-*`), but `select-execution-route.mjs` filter-stripped `layer === "meta"` from `candidateExecutionAgents`, so every weapon's `ownerCandidates` always missed the available set and all six routes were blocked — `fuzzy_strategy` tasks emitted `capabilityGapPacket` even though the right governance owners were sitting right there. A third class lived in tests written before v2.8.61's i18n extraction refactor moved all localized prompts into `config/i18n/setup-strings.mjs`: three setup tests (`i18n`, `mcp-memory-hooks`, `setup-update-default-flow`) still called `readFileSync("setup.mjs")` and asserted literal Chinese / Japanese / Korean phrases — the strings moved but the tests did not, so 28 setup tests reported stale i18n coverage that had been complete since the refactor.
 
 ### Changes
 
-- Added `runtimeSubdirs` to the skills manifest contract so dependencies can declare runtime-specific package subdirectories without changing their identity as external skill repos.
-- Updated the global skill installer so single-runtime install/update and compatibility-root repair use the subdir selected for the active runtime.
-- Updated multi-runtime dependency install to fall back to per-runtime installation when any selected skill declares runtime-specific package directories, avoiding a one-clone-fits-all deployment of the wrong package tree.
-- Configured `agent-teams-playbook` to install Claude Code from `.claude/skills/agent-teams-playbook` and Codex from `.agents/skills/agent-teams-playbook`, while leaving OpenClaw and Cursor on the previous root-repo fallback until their package directories are declared.
+- **`sync-runtimes.mjs` no longer lies when there is nothing to check.** The `check` branch now distinguishes "no runtime target selected because `global_only`" from "all selected runtimes up to date." With no `--targets` argument and `projectProjectionMode: global_only`, the script prints an explicit "未选定 runtime target — 未检查任何镜像" message and the suggested `--targets claude,codex` command instead of a green "最新" stamp that implies work was done.
+- **`select-execution-route.mjs` accepts governance owners for governance work without allowing them as implementation workers.** The `routeForWeapon` available set now unions `ownerDiscoveryPacket.candidateExistingExecutionOwners` with `governanceStageOwners` whenever the task shape is not `engineering_execution`. The `engineering_execution` arm keeps the existing execution-only filter, so the `meta-*` agents can satisfy `meta-kim-decision-patterns` / `runtime-capability-matrix` routing while still being blocked from becoming implementation workers.
+- **`build-capability-inventory.mjs` no longer collapses the global inventory to meta-only.** The `global-capabilities.json` cache now emits every agent the global plugin installs, not only `meta-*` ones; each record's `ownerCandidates` is the actual agent id (instead of a `["meta-artisan"]` fallback for non-meta agents). `selectExecutionOwner` was rewritten to fuzzy-match preference-group terms against the available owner ids, so "test" / "smoke" / "verify" style tasks in a global-only project land on `test-automator` / `e2e-runner` style real agents instead of an empty `available` set.
+- **Setup tests follow the i18n extraction.** `tests/setup/i18n.test.mjs`, `tests/setup/mcp-memory-hooks.test.mjs`, and `tests/setup/setup-update-default-flow.test.mjs` now read from `config/i18n/setup-strings.mjs` (or use `readRepoFile`) for any literal localized assertion. `setup.mjs` exports the i18n block via `buildI18N({ MIN_NODE_VERSION })`; tests stay aligned with the actual source-of-truth after the v2.8.61 refactor.
+- **`sync-runtimes.mjs` no longer writes a 1.7 MB full JSON dump to stdout.** The CLI entry now prints a one-line summary (`capability inventory written: N records (projectProjectionMode=...)`). Tests that `spawnSync` the script (e.g. `capability-inventory-bus.test.mjs`) no longer hit Node's default 1 MB `maxBuffer` ceiling and falsely report `result.status = null`.
+- **Stable spine-state projection for hook imports.** The single-`shared` strategy from earlier in this work stream was over-eager — multiple `claude/hooks/*.mjs` files (`stop-compaction`, `stop-spine-cleanup`, `enforce-agent-dispatch`, ...) `import "./spine-state.mjs"` relative to their own directory. `canonical/runtime-assets/claude/hooks/spine-state.mjs` and `shared/hooks/spine-state.mjs` are both kept in sync (verified identical bytes), `activate-meta-theory-spine.mjs` and `skip-reminder.mjs` likewise stay in both places. `PROJECT_CLAUDE_HOOK_FILES` keeps `spine-state` so the universal loop still emits the Claude-side copy; the codex projection now comes only from the codex-specific block. Hooks that `import "./spine-state.mjs"` continue to resolve.
+
+### Verification
+
+- `npm run meta:verify:all` → 1108 tests, 1103 pass, 0 fail, 5 skipped. All 8 steps green.
+- `npm run meta:check:runtimes -- --scope project --targets claude,codex` → "工具端镜像已是最新".
+- `npm install @inquirer/prompts` (env refresh) + `npm run meta:test:setup` → 502/0.
+- Manual `node scripts/select-execution-route.mjs --task "<fuzzy strategy>"` → produces `recommendedRoute` with `meta-kim-decision-patterns` worker selection.
 
 ## [2.8.65] - 2026-07-03
 

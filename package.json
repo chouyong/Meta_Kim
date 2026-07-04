@@ -1,6 +1,6 @@
 {
   "name": "meta-kim",
-  "version": "2.8.65",
+  "version": "2.8.66",
   "description": "Governance layer for AI coding: canonical meta agents, workflow contracts, default Claude/Codex projections, non-default OpenClaw/Cursor projections, and source-backed candidate probes.",
   "private": true,
   "type": "module",
@@ -179,7 +179,7 @@
     "node": ">=22.13.0"
   },
   "dependencies": {
-    "@inquirer/prompts": "^8.4.1",
+    "@inquirer/prompts": "^8.5.2",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "zod": "^4.4.3"
   },
