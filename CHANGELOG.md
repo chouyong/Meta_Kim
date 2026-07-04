@@ -12,6 +12,28 @@ The changelog explains the user-facing problem or risk each release solved, what
 
 _Reserved for the next release._
 
+## [2.8.70] - 2026-07-05
+
+### Solved Problem
+
+Users wanted Claude Code and Codex to both support a "fan-out / team" workflow — main agent spawns multiple sub-agents in parallel — but Meta_Kim's trigger and dispatch gates made the flow impossible to actually run. `activate-meta-theory-spine.mjs` only matched on `meta-theory` / `critical + fetch + thinking + review` / `元理论`, so a request like "开 3 个 agent 扫全量发布差距" never entered the multi-agent path. Once entered, `enforce-agent-dispatch.mjs` denied any `Agent` / `spawn_agent` call in execution / review / meta_review / verification / evolution unless `fetchRecord.capabilitySearchPerformed === true`, and that flag was never auto-set, so the main thread got stuck. `spine-state.mjs` also wrote the JSON state file directly, racing when fan-out forked multiple agents that each transitioned the same run. None of this had a documented hook for `team` / `fan-out` / `军团` / `并行` keywords, no agent eligibility tier, no atomic state transition, and no auto-progress from `critical` to `fetch` once a multi-agent run was actually requested.
+
+### Changes
+
+- **Multi-agent trigger keywords + auto capability search + stage pre-progression.** `canonical/runtime-assets/shared/hooks/activate-meta-theory-spine.mjs` (and its `claude` mirror) now matches `team` / `fan-out` / `multi-agent` / `agent teams` / `军团` / `分队` / `并行` / `并发` / `多 agent` / `开 N 个`. On hit it auto-runs a capability search that reads `config/capability-index/agent-eligibility.json` plus `canonical/agents/`, populates `fetchRecord.capabilitySearchPerformed = true` + `capabilityMatches`, pre-progresses `currentStage` from `critical` to `fetch`, and records `linkedCommands` / `linkedSkills` / `dispatchMode = "fan_out_ready"` so the main thread can fork immediately.
+- **Capability gate exemption for fan-out runs.** `canonical/runtime-assets/claude/hooks/enforce-agent-dispatch.mjs` (projected to `.codex/hooks/` and `.cursor/hooks/`) treats `stageRuntimeControl.dispatchMode ∈ {fan_out_ready, fan_out_in_progress}` as a discovery-equivalent stage for the capability gate, so an Agent / `spawn_agent` dispatch during a multi-agent run no longer denies on missing `capabilitySearchPerformed`.
+- **Three-tier agent eligibility registry.** `config/capability-index/agent-eligibility.json` enumerates `eligible` (the nine meta-* agents with role + owns[]), `conditional`, and `hard_reject` tiers with rejection-reason strings, mirroring `oh-my-openagent`'s `AGENT_ELIGIBILITY_REGISTRY` so capability search returns a single verdict per agent rather than free-form ownerCandidates.
+- **Atomic spine-state writes with file lock.** `canonical/runtime-assets/shared/hooks/spine-state-utils.mjs` provides `atomicWriteJson` (temp-file + rename) and `withFileLock` (`open` + `wx` + jittered retry). `spine-state.mjs` `writeSpineState` now wraps both, so concurrent fan-out agents cannot corrupt the run JSON.
+- **Command + skill auto-link on multi-agent trigger.** Triggered runs extract `/slash-command` names and `skill:xxx` references from the prompt into `stageRuntimeControl.linkedCommands` / `linkedSkills`, so the dispatch board can show what each lane should load.
+
+### Verification
+
+- `node --check` on all touched canonical sources → SYNTAX OK.
+- `npm run meta:validate` → 7/7 pass.
+- `node --test tests/setup/graphify-wiring-contract.test.mjs tests/setup/sync-runtimes-manifest.test.mjs` → 71/71 pass.
+- `npm run meta:check:runtimes` → runtime mirrors up to date across Claude Code + Codex + Cursor.
+- `npm run meta:sync` → 2 files updated in `.claude/hooks/`, then mirrored to `.codex/` + `.cursor/`.
+
 ## [2.8.69] - 2026-07-05
 
 ### Solved Problem

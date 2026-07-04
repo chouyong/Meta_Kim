@@ -1,5 +1,6 @@
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { join, dirname, resolve, relative, isAbsolute } from "node:path";
+import { atomicWriteJson, withFileLock } from "./spine-state-utils.mjs";
 
 const META_KIM_STATE_ROOT = ".meta-kim/state";
 const DEFAULT_SPINE_STATE_DIR = ".meta-kim/state/default/spine";
@@ -304,7 +305,12 @@ export async function readSpineStateIncludingInactive(cwd) {
 export async function writeSpineState(cwd, state) {
   const filePath = spineStatePath(cwd);
   await ensureDir(filePath);
-  await writeFile(filePath, JSON.stringify(state, null, 2), "utf-8");
+  // 多 agent fan-out 时多个进程可能并发写同一 spine state — 用 atomic temp+rename
+  // 加 file lock 兜底并发。lock 仅短暂持有，写完即释放。
+  const lockPath = `${filePath}.lock`;
+  await withFileLock(lockPath, async () => {
+    await atomicWriteJson(filePath, state);
+  });
   await writeMetaRunStatus(cwd, state);
 }
 
