@@ -26,9 +26,11 @@ const taskText = String(task ?? "").toLowerCase();
 const entryClassification = classifyMetaTheoryEntry(task);
 const choicePolicy = entryClassification.ambiguityPacket?.choicePolicy ?? "no_choice_needed";
 const subjectiveRouteChoice = entryClassification.triggerReason === "subjective_quality_ambiguous";
-const directParallelDispatchRequested =
+const autoFanoutDispatchRequested =
   entryClassification.fanoutEligible === true &&
-  entryClassification.subagentAuthorizationSource === "direct_parallel_agent_request";
+  ["direct_parallel_agent_request", "structured_governance_chain_request"].includes(
+    entryClassification.subagentAuthorizationSource,
+  );
 const nativeChoiceEvidenceRaw =
   argValue("--native-choice-evidence", null) ??
   process.env.META_KIM_NATIVE_CHOICE_EVIDENCE ??
@@ -1491,7 +1493,7 @@ function selectExecutionOwner() {
 function capabilityDiscoveryTaskRequested() {
   const discoveryVerb = /find|discover|search|match|route|寻找|找|发现|搜索|检索|匹配|路由/.test(taskText);
   const discoveryTarget = /agent|subagent|owner|skill|provider|capability|mcp|tool|智能体|代理|技能|能力|工具/.test(taskText);
-  return (discoveryVerb && discoveryTarget) || agentProviderReuseConcernRequested() || directParallelDispatchRequested;
+  return (discoveryVerb && discoveryTarget) || agentProviderReuseConcernRequested() || autoFanoutDispatchRequested;
 }
 
 // 9 类 owner 池（agent / skill / mcp / command / runtimeTool / hook / plugin / memory / dependency）。
@@ -1618,7 +1620,7 @@ function buildParallelExecutionLanes() {
   for (const [, segment] of laneSegments) {
     let provider = null;
     let capabilityProvider = null;
-    if (directParallelDispatchRequested) {
+    if (autoFanoutDispatchRequested) {
       provider = resolveProvider({ kind: "agent", terms: segment.terms });
       if (!provider) {
         const fallbackOwner = selectExecutionOwner();
@@ -1687,6 +1689,7 @@ function classifyOrchestratorKinds(lanes) {
 function executionCapabilityDiscoveryRoute() {
   const parallelExecutionLanes = buildParallelExecutionLanes();
   const explicitDiscoveryRoute = capabilityDiscoveryTaskRequested();
+  if (subjectiveRouteChoice) return null;
   if (taskShape !== "engineering_execution" && !explicitDiscoveryRoute) return null;
   const selectedOwner = selectExecutionOwner();
   const selectedAgentProvider = [

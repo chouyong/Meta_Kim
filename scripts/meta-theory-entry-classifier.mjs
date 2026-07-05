@@ -32,6 +32,9 @@ const PROJECT_UNDERSTANDING_RE =
 const PARALLEL_AGENT_RE =
   /\b(?:parallel|subagents?|agent team|multi-agent|fan[- ]?out|delegate|spawn|review\s*\+\s*fix\s*\+\s*verify)\b|(?:并行|子智能体|子agent|多个\s*agent|多智能体|编排|分工|派发|噼里啪啦)/iu;
 
+const STRUCTURED_GOVERNANCE_CHAIN_RE =
+  /critical(?:\s+thinking)?(?:\s*(?:->|=>|→|,|，|、|;|；|and)?\s+)fetch(?:\s*(?:->|=>|→|,|，|、|;|；|and)?\s+)(?:deep\s+)?thinking(?:\s*(?:->|=>|→|,|，|、|;|；|and)?\s+)review|critical\s+and\s+fetch\s+thinking\s+and\s+review/iu;
+
 const COMPLEXITY_COMPLAINT_RE =
   /\b(?:too slow|slow|serial|not using agents?|missing agents?|no agents?)\b|(?:太慢|慢|不用\s*agent|没用\s*agent|没有\s*agent|没看到.*agent|串行|不会判断.*复杂|做的.*差)/iu;
 
@@ -73,6 +76,9 @@ function estimateIndependentLaneCount(text, {
   if (PARALLEL_AGENT_RE.test(text)) {
     return Math.max(base, 2);
   }
+  if (STRUCTURED_GOVERNANCE_CHAIN_RE.test(text)) {
+    return Math.max(base, 2);
+  }
   if (explicitMetaTheory && (durableOutputIntent || fileOrMutationIntent || base >= 2)) {
     return Math.max(base, 2);
   }
@@ -82,7 +88,7 @@ function estimateIndependentLaneCount(text, {
 function buildFanoutSignals(text, context) {
   const signals = [];
   if (context.explicitMetaTheory) signals.push("explicit_meta_theory_trigger");
-  if (/critical\s+and\s+fetch\s+thinking\s+and\s+review/iu.test(text)) {
+  if (STRUCTURED_GOVERNANCE_CHAIN_RE.test(text)) {
     signals.push("critical_fetch_thinking_review_requested");
   }
   if (PARALLEL_AGENT_RE.test(text)) signals.push("parallel_agent_or_fanout_requested");
@@ -100,6 +106,7 @@ function buildFanoutSignals(text, context) {
 function buildFanoutMetadata(text, context) {
   const expectedIndependentLaneCount = estimateIndependentLaneCount(text, context);
   const directParallelAgentRequest = PARALLEL_AGENT_RE.test(text);
+  const structuredGovernanceChainRequest = STRUCTURED_GOVERNANCE_CHAIN_RE.test(text);
   const signals = buildFanoutSignals(text, {
     ...context,
     expectedIndependentLaneCount,
@@ -114,12 +121,14 @@ function buildFanoutMetadata(text, context) {
     fanoutSignals: fanoutEligible ? signals : signals.filter((signal) => signal !== "explicit_meta_theory_trigger"),
     expectedIndependentLaneCount,
     requiresSubagentAuthorization:
-      fanoutEligible && !directParallelAgentRequest,
+      fanoutEligible && !directParallelAgentRequest && !structuredGovernanceChainRequest,
     subagentAuthorizationSource: !fanoutEligible
       ? "not_required"
       : directParallelAgentRequest
           ? "direct_parallel_agent_request"
-          : "native_choice_surface_required",
+          : structuredGovernanceChainRequest
+            ? "structured_governance_chain_request"
+            : "native_choice_surface_required",
   };
 }
 
@@ -177,6 +186,7 @@ export function classifyMetaTheoryEntry(prompt) {
   const projectUnderstandingIntent = PROJECT_UNDERSTANDING_RE.test(text);
   const pureQuery = hasQuestionOnlyShape(text);
   const directParallelAgentRequest = PARALLEL_AGENT_RE.test(text);
+  const structuredGovernanceChainRequest = STRUCTURED_GOVERNANCE_CHAIN_RE.test(text);
   const serialAgentRouteComplaint = COMPLEXITY_COMPLAINT_RE.test(text);
   const fanoutContext = {
     explicitMetaTheory,
@@ -233,6 +243,18 @@ export function classifyMetaTheoryEntry(prompt) {
       triggerReason: "subjective_quality_ambiguous",
       choiceSurfaceState: "critical_clarification_allowed",
       shouldAskBeforeFetch: buildAmbiguityPacket(text, fanoutContext).choicePolicy === "must_ask",
+      confidence: 0.9,
+    }, text, fanoutContext);
+  }
+
+  if (structuredGovernanceChainRequest) {
+    return withFanoutMetadata({
+      governedEntry: true,
+      path: "standard_path",
+      taskClassification: "meta_theory_auto",
+      triggerReason: "critical_fetch_thinking_review_requested",
+      choiceSurfaceState: "not_allowed",
+      shouldAskBeforeFetch: false,
       confidence: 0.9,
     }, text, fanoutContext);
   }

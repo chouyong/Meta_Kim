@@ -481,6 +481,32 @@ test("routing fixtures recall internal patterns and platform/OS matrices", () =>
     "Multiple Codex agent lanes must select the agent teams fan-out adapter",
   );
 
+  const codexStructuredChainFanout = route(
+    "Critical Thinking → Fetch → Deep Thinking → Review 检查 meta-theory 规则、Codex runtime、测试缺口",
+    "codex",
+    "windows",
+  );
+  assert.equal(
+    codexStructuredChainFanout.entryClassification?.subagentAuthorizationSource,
+    "structured_governance_chain_request",
+    "Structured Critical/Fetch/Thinking/Review chains must authorize safe fan-out without extra dispatch wording",
+  );
+  assert.equal(
+    codexStructuredChainFanout.recommendedRoute?.id,
+    "execution-capability-discovery:codex:windows",
+    "Structured chain fan-out must route through execution capability discovery",
+  );
+  assert.ok(
+    codexStructuredChainFanout.workerTaskPacketDrafts.length >= 2,
+    "Structured chain fan-out with separable scopes must produce multiple worker task packets",
+  );
+  assert.ok(
+    codexStructuredChainFanout.workerTaskPacketDrafts.every(
+      (packet) => packet.ownerKind === "agent" && packet.codexSpawnBinding?.agent_type === packet.ownerAgent,
+    ),
+    "Structured chain fan-out worker lanes must bind reusable Codex agent owners",
+  );
+
   const hook = route("platform hook install");
   assert.ok(hook.candidateWeapons.includes("runtime-capability-matrix"));
 

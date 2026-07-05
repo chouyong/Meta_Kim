@@ -157,7 +157,7 @@ These assignments are the **default** for any run that triggers the Fan-out Trig
 
 The protocol activates when any of these signals appear:
 
-- explicit `/meta-theory`, `critical and fetch thinking and review`, "并行", "多个 agent", "review + fix + verify"
+- explicit `/meta-theory`, `critical and fetch thinking and review`, `Critical Thinking -> Fetch -> Deep Thinking -> Review`, "并行", "多个 agent", "review + fix + verify"
 - 2+ independent files, runtimes, platforms, capability families, or verification lanes
 - cross-runtime behavior, release/update/sync, hook/security/sandbox, or repeated same-type failure work
 - user feedback that the current Meta_Kim route is slow, serial, missing agents, or repeatedly corrected

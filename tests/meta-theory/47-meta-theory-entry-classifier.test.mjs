@@ -96,6 +96,23 @@ describe("47 - Meta-theory entry classifier", () => {
     assert.equal(result.path, "standard_path");
     assert.equal(result.taskClassification, "meta_theory_auto");
     assert.ok(result.fanoutSignals.includes("critical_fetch_thinking_review_requested"));
+    assert.equal(result.subagentAuthorizationSource, "structured_governance_chain_request");
+  });
+
+  test("arrow-form Critical Fetch Deep Thinking Review chain auto-authorizes safe fan-out", () => {
+    const result = classifyMetaTheoryEntry(
+      "Critical Thinking → Fetch → Deep Thinking → Review 检查治理规则、Codex runtime、测试缺口",
+    );
+
+    assert.equal(result.governedEntry, true);
+    assert.equal(result.path, "standard_path");
+    assert.equal(result.taskClassification, "meta_theory_auto");
+    assert.equal(result.triggerReason, "critical_fetch_thinking_review_requested");
+    assert.equal(result.fanoutEligible, true);
+    assert.ok(result.expectedIndependentLaneCount >= 2);
+    assert.equal(result.requiresSubagentAuthorization, false);
+    assert.equal(result.subagentAuthorizationSource, "structured_governance_chain_request");
+    assert.ok(result.fanoutSignals.includes("critical_fetch_thinking_review_requested"));
   });
 
   test("explicit meta-theory with serial-agent complaint requires a direct parallel-agent authorization source", () => {
