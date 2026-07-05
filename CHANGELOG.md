@@ -16,18 +16,18 @@ _Reserved for the next release._
 
 ### Solved Problem
 
-`2.8.74` fixed explicit "dispatch / parallel" corrections, but the design was still too narrow. A structured governance-chain request such as `Critical Thinking -> Fetch -> Deep Thinking -> Review` should itself authorize safe automatic fan-out when Thinking proves separable lanes. Users should not need to add another "dispatch" word after already choosing the Meta_Kim execution chain.
+`2.8.74` fixed explicit "dispatch / parallel" corrections, but the design was still too narrow. Meta_Kim / `meta-theory` activation itself should authorize safe automatic fan-out when Thinking proves separable lanes. Users should not need to add another "dispatch" word, a special structured chain, or a native choice panel after already entering governed execution.
 
 ### Changes
 
-- **Structured governance chains now authorize safe fan-out.** `Critical Thinking -> Fetch -> Deep Thinking -> Review`, arrow-form variants, and the existing `critical and fetch thinking and review` wording now produce `structured_governance_chain_request` instead of waiting for a native choice surface.
-- **Automatic fan-out still respects specific business routes.** Subjective UI requests keep the `subjective-ui-design-orchestration` route and its required native choices; the structured chain adds fan-out metadata without stealing the route.
-- **Codex route selection treats structured chains like auto fan-out.** When scopes are separable, route selection produces multiple agent-owned worker packets with typed Codex `spawn_agent` bindings and the agent-teams fan-out adapter.
-- **Canonical docs now distinguish plain `meta-theory` from structured chain requests.** A plain `meta-theory` trigger still means governed routing only; the structured chain means "run the governed pipeline and parallelize safe lanes automatically."
+- **Meta activation now authorizes safe fan-out.** Explicit `meta-theory`, `/meta-theory`, `元理论`, natural-language governed execution, and structured chain variants now produce `meta_theory_trigger_request` when scopes are separable, instead of waiting for a native choice surface.
+- **Automatic fan-out still respects specific business routes.** Subjective UI requests keep the `subjective-ui-design-orchestration` route and its required native choices; meta activation adds fan-out metadata without stealing the route.
+- **Codex route selection treats meta activation like auto fan-out.** When scopes are separable, route selection produces multiple agent-owned worker packets with typed Codex `spawn_agent` bindings and the agent-teams fan-out adapter.
+- **Canonical docs now remove the false "plain meta-theory is not authorization" rule.** Native choice remains required for branch-changing route, scope, risk, or acceptance decisions, but not just to permit safe parallelism after Meta_Kim activation.
 
 ### Verification
 
-- `node --test tests/meta-theory/47-meta-theory-entry-classifier.test.mjs tests/governance/capability-routing.test.mjs` -> 19 entry-classifier tests plus capability-routing fixtures pass.
+- `node --test tests/meta-theory/47-meta-theory-entry-classifier.test.mjs tests/governance/capability-routing.test.mjs` -> 20 entry-classifier tests plus capability-routing fixtures pass.
 - `npm run meta:route:validate` -> pass.
 - `npm run meta:sync` -> project runtime projection manifest refreshed.
 - `npm run meta:release:smoke` -> 1106 pass, 0 fail, 5 skipped; integration pass.

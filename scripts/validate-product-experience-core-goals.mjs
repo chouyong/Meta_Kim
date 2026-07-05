@@ -221,8 +221,8 @@ function assertCapabilityInvocationTruth(report) {
   for (const family of REQUIRED_INVOCATION_FAMILIES) {
     assert.ok(byFamily.has(family), `missing invocation family ${family}`);
   }
-  assert.equal(report.coreLoop.runtimeSubagentInvocationPacket.status, "not_authorized");
-  assert.equal(byFamily.get("agent_subagent").state, "not_authorized");
+  assert.equal(report.coreLoop.runtimeSubagentInvocationPacket.status, "unavailable");
+  assert.equal(byFamily.get("agent_subagent").state, "unavailable");
   assert.equal(byFamily.get("app_visible_subagent").state, "not_required");
   assert.equal(byFamily.get("worker_task").state, "invoked");
   assert.equal(byFamily.get("mcp").state, "invoked");

@@ -488,8 +488,8 @@ test("routing fixtures recall internal patterns and platform/OS matrices", () =>
   );
   assert.equal(
     codexStructuredChainFanout.entryClassification?.subagentAuthorizationSource,
-    "structured_governance_chain_request",
-    "Structured Critical/Fetch/Thinking/Review chains must authorize safe fan-out without extra dispatch wording",
+    "meta_theory_trigger_request",
+    "Structured Critical/Fetch/Thinking/Review chains are meta-theory activations that must authorize safe fan-out without extra dispatch wording",
   );
   assert.equal(
     codexStructuredChainFanout.recommendedRoute?.id,
@@ -505,6 +505,32 @@ test("routing fixtures recall internal patterns and platform/OS matrices", () =>
       (packet) => packet.ownerKind === "agent" && packet.codexSpawnBinding?.agent_type === packet.ownerAgent,
     ),
     "Structured chain fan-out worker lanes must bind reusable Codex agent owners",
+  );
+
+  const codexMetaTriggerFanout = route(
+    "meta-theory 检查 meta-theory 规则、Codex runtime、测试缺口",
+    "codex",
+    "windows",
+  );
+  assert.equal(
+    codexMetaTriggerFanout.entryClassification?.subagentAuthorizationSource,
+    "meta_theory_trigger_request",
+    "A meta-theory trigger itself must authorize safe fan-out once scopes are separable",
+  );
+  assert.equal(
+    codexMetaTriggerFanout.recommendedRoute?.id,
+    "execution-capability-discovery:codex:windows",
+    "Meta-theory fan-out must route through execution capability discovery when there are separable scopes",
+  );
+  assert.ok(
+    codexMetaTriggerFanout.workerTaskPacketDrafts.length >= 2,
+    "Meta-theory fan-out with separable scopes must produce multiple worker task packets",
+  );
+  assert.ok(
+    codexMetaTriggerFanout.workerTaskPacketDrafts.every(
+      (packet) => packet.ownerKind === "agent" && packet.codexSpawnBinding?.agent_type === packet.ownerAgent,
+    ),
+    "Meta-theory fan-out worker lanes must bind reusable Codex agent owners",
   );
 
   const hook = route("platform hook install");

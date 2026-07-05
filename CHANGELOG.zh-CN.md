@@ -16,18 +16,18 @@ _留给下个版本。_
 
 ### 解决的问题
 
-`2.8.74` 修的是用户明确说“派发 / 并行”时的纠偏，但设计仍然太窄。`Critical Thinking -> Fetch -> Deep Thinking -> Review` 这种结构化治理链路，本身就应该代表“进入 Meta_Kim 执行链路，并在 Thinking 证明可拆、安全时自动 fan-out”。用户不应该在已经选择这条链路后，还要再补一句“派发”。
+`2.8.74` 修的是用户明确说“派发 / 并行”时的纠偏，但设计仍然太窄。Meta_Kim / `meta-theory` 触发本身就应该代表“进入治理执行，并在 Thinking 证明可拆、安全时自动 fan-out”。用户不应该在已经进入治理执行后，还要再补一句“派发”、特定结构化链路，或再过一个 native choice panel。
 
 ### 改动
 
-- **结构化治理链路现在授权 safe fan-out。** `Critical Thinking -> Fetch -> Deep Thinking -> Review`、箭头写法，以及原有 `critical and fetch thinking and review`，都会产生 `structured_governance_chain_request`，不再等待 native choice surface 才能并行。
-- **自动 fan-out 不抢具体业务路由。** 主观 UI 请求仍走 `subjective-ui-design-orchestration` 并保留必要 native choice；结构化链路只附加 fan-out 元数据，不覆盖更具体的业务路线。
-- **Codex route selection 把结构化链路当自动 fan-out。** 当 scope 可拆时，route 会产出多个 agent-owned worker packets，并带 typed Codex `spawn_agent` 绑定和 agent-teams fan-out adapter。
-- **canonical 文档区分普通 `meta-theory` 和结构化链路。** 普通 `meta-theory` 仍只代表治理路由；结构化链路代表“运行治理链，并在安全可拆时自动并行”。
+- **Meta 触发现在授权 safe fan-out。** 显式 `meta-theory`、`/meta-theory`、`元理论`、自然语言治理执行入口，以及结构化链路变体，在 scope 可拆时都会产生 `meta_theory_trigger_request`，不再等待 native choice surface 才能并行。
+- **自动 fan-out 不抢具体业务路由。** 主观 UI 请求仍走 `subjective-ui-design-orchestration` 并保留必要 native choice；Meta 触发只附加 fan-out 元数据，不覆盖更具体的业务路线。
+- **Codex route selection 把 Meta 触发当自动 fan-out。** 当 scope 可拆时，route 会产出多个 agent-owned worker packets，并带 typed Codex `spawn_agent` 绑定和 agent-teams fan-out adapter。
+- **canonical 文档删掉“普通 meta-theory 不算授权”的错误规则。** Native choice 仍用于会改变路线、范围、风险或验收标准的决策，但不再作为 Meta_Kim 触发后允许安全并行的前置许可。
 
 ### 验证
 
-- `node --test tests/meta-theory/47-meta-theory-entry-classifier.test.mjs tests/governance/capability-routing.test.mjs` -> 19 个入口分类测试和 capability-routing fixtures 通过。
+- `node --test tests/meta-theory/47-meta-theory-entry-classifier.test.mjs tests/governance/capability-routing.test.mjs` -> 20 个入口分类测试和 capability-routing fixtures 通过。
 - `npm run meta:route:validate` -> 通过。
 - `npm run meta:sync` -> 项目 runtime 投影 manifest 已刷新。
 - `npm run meta:release:smoke` -> 1106 通过，0 失败，5 跳过；integration 通过。

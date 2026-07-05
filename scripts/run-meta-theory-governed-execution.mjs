@@ -4016,6 +4016,8 @@ function buildRuntimeSubagentInvocationPacket({
         : "not_required";
   const authorized =
     authorizationSource === "direct_parallel_agent_request" ||
+    authorizationSource === "meta_theory_trigger_request" ||
+    authorizationSource === "structured_governance_chain_request" ||
     authorizationSource === "native_choice_surface_completed";
   const status = externalAgentSpawned
     ? "invoked"
@@ -4040,7 +4042,7 @@ function buildRuntimeSubagentInvocationPacket({
       status === "unavailable"
         ? "The Node governed runner cannot call the active host Agent/Task or spawn_agent tool directly; host-layer evidence must be attached by the runtime adapter."
         : status === "not_authorized"
-          ? "Subagent dispatch needs direct subagent, delegation, or parallel-agent wording, or a completed native choice surface before Execution. A meta-theory trigger alone only authorizes governed routing."
+          ? "Subagent dispatch needs a governed meta-theory activation, direct subagent/delegation/parallel-agent wording, or a completed native choice surface before Execution."
           : null,
     requiredHostEvidence:
       status === "invoked"

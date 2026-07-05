@@ -88,6 +88,7 @@ function estimateIndependentLaneCount(text, {
 function buildFanoutSignals(text, context) {
   const signals = [];
   if (context.explicitMetaTheory) signals.push("explicit_meta_theory_trigger");
+  if (context.governedMetaTrigger) signals.push("governed_meta_theory_activation");
   if (STRUCTURED_GOVERNANCE_CHAIN_RE.test(text)) {
     signals.push("critical_fetch_thinking_review_requested");
   }
@@ -107,6 +108,10 @@ function buildFanoutMetadata(text, context) {
   const expectedIndependentLaneCount = estimateIndependentLaneCount(text, context);
   const directParallelAgentRequest = PARALLEL_AGENT_RE.test(text);
   const structuredGovernanceChainRequest = STRUCTURED_GOVERNANCE_CHAIN_RE.test(text);
+  const metaTheoryTriggerRequest =
+    context.governedMetaTrigger === true ||
+    context.explicitMetaTheory === true ||
+    structuredGovernanceChainRequest;
   const signals = buildFanoutSignals(text, {
     ...context,
     expectedIndependentLaneCount,
@@ -114,20 +119,20 @@ function buildFanoutMetadata(text, context) {
   const fanoutEligible = expectedIndependentLaneCount >= 2 && (
     signals.length >= 2 ||
     directParallelAgentRequest ||
-    (context.explicitMetaTheory && signals.length >= 1)
+    (metaTheoryTriggerRequest && signals.length >= 1)
   );
   return {
     fanoutEligible,
     fanoutSignals: fanoutEligible ? signals : signals.filter((signal) => signal !== "explicit_meta_theory_trigger"),
     expectedIndependentLaneCount,
     requiresSubagentAuthorization:
-      fanoutEligible && !directParallelAgentRequest && !structuredGovernanceChainRequest,
+      fanoutEligible && !directParallelAgentRequest && !metaTheoryTriggerRequest,
     subagentAuthorizationSource: !fanoutEligible
       ? "not_required"
       : directParallelAgentRequest
           ? "direct_parallel_agent_request"
-          : structuredGovernanceChainRequest
-            ? "structured_governance_chain_request"
+          : metaTheoryTriggerRequest
+            ? "meta_theory_trigger_request"
             : "native_choice_surface_required",
   };
 }
@@ -188,8 +193,17 @@ export function classifyMetaTheoryEntry(prompt) {
   const directParallelAgentRequest = PARALLEL_AGENT_RE.test(text);
   const structuredGovernanceChainRequest = STRUCTURED_GOVERNANCE_CHAIN_RE.test(text);
   const serialAgentRouteComplaint = COMPLEXITY_COMPLAINT_RE.test(text);
+  const governedMetaTrigger =
+    explicitMetaTheory ||
+    structuredGovernanceChainRequest ||
+    directParallelAgentRequest ||
+    serialAgentRouteComplaint ||
+    (subjectiveQuality && actionIntent) ||
+    (actionIntent && (durableOutputIntent || fileOrMutationIntent || productBuildIntent)) ||
+    projectUnderstandingIntent;
   const fanoutContext = {
     explicitMetaTheory,
+    governedMetaTrigger,
     productBuildIntent,
     durableOutputIntent,
     fileOrMutationIntent,

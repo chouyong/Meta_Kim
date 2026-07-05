@@ -28,7 +28,11 @@ const choicePolicy = entryClassification.ambiguityPacket?.choicePolicy ?? "no_ch
 const subjectiveRouteChoice = entryClassification.triggerReason === "subjective_quality_ambiguous";
 const autoFanoutDispatchRequested =
   entryClassification.fanoutEligible === true &&
-  ["direct_parallel_agent_request", "structured_governance_chain_request"].includes(
+  [
+    "direct_parallel_agent_request",
+    "meta_theory_trigger_request",
+    "structured_governance_chain_request",
+  ].includes(
     entryClassification.subagentAuthorizationSource,
   );
 const nativeChoiceEvidenceRaw =
@@ -1493,7 +1497,14 @@ function selectExecutionOwner() {
 function capabilityDiscoveryTaskRequested() {
   const discoveryVerb = /find|discover|search|match|route|寻找|找|发现|搜索|检索|匹配|路由/.test(taskText);
   const discoveryTarget = /agent|subagent|owner|skill|provider|capability|mcp|tool|智能体|代理|技能|能力|工具/.test(taskText);
-  return (discoveryVerb && discoveryTarget) || agentProviderReuseConcernRequested() || autoFanoutDispatchRequested;
+  const executionFanoutDiscovery =
+    autoFanoutDispatchRequested && (
+      taskShape === "engineering_execution" ||
+      entryClassification.subagentAuthorizationSource === "direct_parallel_agent_request" ||
+      entryClassification.triggerReason === "explicit_meta_theory" ||
+      entryClassification.triggerReason === "critical_fetch_thinking_review_requested"
+    );
+  return (discoveryVerb && discoveryTarget) || agentProviderReuseConcernRequested() || executionFanoutDiscovery;
 }
 
 // 9 类 owner 池（agent / skill / mcp / command / runtimeTool / hook / plugin / memory / dependency）。

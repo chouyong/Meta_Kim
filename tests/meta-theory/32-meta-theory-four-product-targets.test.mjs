@@ -124,8 +124,8 @@ describe("32 — Meta-theory three product goals and support gates", () => {
           row,
         ])
       );
-      assert.equal(report.defaultRuntimePath.runtimeSubagentInvocationPacket.status, "not_authorized");
-      assert.equal(invocationByFamily.get("agent_subagent").state, "not_authorized");
+      assert.equal(report.defaultRuntimePath.runtimeSubagentInvocationPacket.status, "unavailable");
+      assert.equal(invocationByFamily.get("agent_subagent").state, "unavailable");
       assert.equal(invocationByFamily.get("app_visible_subagent").state, "not_required");
       assert.equal(invocationByFamily.get("worker_task").state, "invoked");
       assert.equal(invocationByFamily.get("prompt_rule").state, "applied");
