@@ -322,7 +322,7 @@ function runEnforceHook(state, payload, options = {}) {
         join(hookDir, fileName),
       );
     }
-    for (const fileName of ["utils.mjs", "skip-reminder.mjs", "spine-state.mjs"]) {
+    for (const fileName of ["utils.mjs", "skip-reminder.mjs", "spine-state-utils.mjs", "spine-state.mjs"]) {
       copyFileSync(
         join(REPO_ROOT, "canonical/runtime-assets/shared/hooks", fileName),
         join(hookDir, fileName),
@@ -372,7 +372,7 @@ function runEnforceHookWithState(state, payload, options = {}) {
         join(hookDir, fileName),
       );
     }
-    for (const fileName of ["utils.mjs", "skip-reminder.mjs", "spine-state.mjs"]) {
+    for (const fileName of ["utils.mjs", "skip-reminder.mjs", "spine-state-utils.mjs", "spine-state.mjs"]) {
       copyFileSync(
         join(REPO_ROOT, "canonical/runtime-assets/shared/hooks", fileName),
         join(hookDir, fileName),
@@ -418,6 +418,12 @@ function runActivateHook(existingState, payload, options = {}) {
       copyFileSync(
         join(REPO_ROOT, sourceDir, fileName),
         join(hookDir, fileName),
+      );
+    }
+    if (runtime !== "claude") {
+      copyFileSync(
+        join(REPO_ROOT, "canonical/runtime-assets/shared/hooks/spine-state-utils.mjs"),
+        join(hookDir, "spine-state-utils.mjs"),
       );
     }
     const spineDir = join(cwd, ".meta-kim", "state", "test", "spine");
@@ -2123,7 +2129,7 @@ describe("Part F2: choice surface runtime gate", async () => {
           join(hookDir, fileName),
         );
       }
-      for (const fileName of ["utils.mjs", "skip-reminder.mjs", "spine-state.mjs"]) {
+      for (const fileName of ["utils.mjs", "skip-reminder.mjs", "spine-state-utils.mjs", "spine-state.mjs"]) {
         copyFileSync(
           join(REPO_ROOT, "canonical/runtime-assets/shared/hooks", fileName),
           join(hookDir, fileName),
@@ -2197,7 +2203,7 @@ describe("Part F2: choice surface runtime gate", async () => {
           join(hookDir, fileName),
         );
       }
-      for (const fileName of ["utils.mjs", "skip-reminder.mjs", "spine-state.mjs"]) {
+      for (const fileName of ["utils.mjs", "skip-reminder.mjs", "spine-state-utils.mjs", "spine-state.mjs"]) {
         copyFileSync(
           join(REPO_ROOT, "canonical/runtime-assets/shared/hooks", fileName),
           join(hookDir, fileName),
@@ -2271,7 +2277,7 @@ describe("Part F2: choice surface runtime gate", async () => {
           join(hookDir, fileName),
         );
       }
-      for (const fileName of ["utils.mjs", "skip-reminder.mjs", "spine-state.mjs"]) {
+      for (const fileName of ["utils.mjs", "skip-reminder.mjs", "spine-state-utils.mjs", "spine-state.mjs"]) {
         copyFileSync(
           join(REPO_ROOT, "canonical/runtime-assets/shared/hooks", fileName),
           join(hookDir, fileName),

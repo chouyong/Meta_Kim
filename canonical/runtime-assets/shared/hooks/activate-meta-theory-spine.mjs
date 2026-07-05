@@ -385,11 +385,9 @@ if (isMultiAgent) {
   }
   const linkedCommands = collectLinkedCommands(rawPromptText);
   const linkedSkills = collectLinkedSkills(rawPromptText);
-  if (linkedCommands.length || linkedSkills.length) {
-    state.stageRuntimeControl.linkedCommands = linkedCommands;
-    state.stageRuntimeControl.linkedSkills = linkedSkills;
-    state.stageRuntimeControl.dispatchMode = "fan_out_ready";
-  }
+  if (linkedCommands.length) state.stageRuntimeControl.linkedCommands = linkedCommands;
+  if (linkedSkills.length) state.stageRuntimeControl.linkedSkills = linkedSkills;
+  state.stageRuntimeControl.dispatchMode = "fan_out_ready";
 }
 
 await writeSpineState(cwd, state);

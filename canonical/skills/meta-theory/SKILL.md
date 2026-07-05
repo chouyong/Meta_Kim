@@ -70,7 +70,7 @@ Do not wait for the user to spell out agent names when the route is visibly comp
 - cross-runtime behavior, release/update/sync, hook/security/sandbox, PRD/contract/validator, or repeated same-type failure work
 - user feedback that the current Meta_Kim route is slow, serial, missing agents, missing dynamic workflow, or repeatedly corrected
 
-When fan-out eligible, Thinking must produce `workerTaskPackets` before Execution and attempt real runtime subagent dispatch when the host exposes `spawn_agent` / `Agent`. The default is not "main thread handles it"; the default is "delegate independent lanes, synthesize centrally." If a Codex run lacks direct subagent wording but has no explicit `/meta-theory`, present a native choice surface that names the parallel-agent route before Execution. If the host tool is unavailable, record degraded mode; do not silently serialize without a reason.
+When fan-out eligible, Thinking must produce `workerTaskPackets` before Execution. In `fan_out_ready` state the main thread MUST dispatch all independent `workerTaskPackets` that share a `parallelGroup` as concurrent Task/Agent tool calls in a single assistant message — one tool call per packet. Serial dispatch across multiple messages in `fan_out_ready` state is a gate violation (fake parallelism), not a fallback. The default is not "main thread handles it"; the default is "delegate independent lanes in one message, synthesize centrally." If a Codex run lacks direct subagent wording but has no explicit `/meta-theory`, present a native choice surface that names the parallel-agent route before Execution. If the host tool is unavailable, record degraded mode; do not silently serialize without a reason.
 
 ## Stage map
 

@@ -502,7 +502,11 @@ const repoCanonicalCapabilityProviders = [
 const projectRuntimeCapabilityProviders = [
   ...projectRuntimeSkillProviders,
   ...await projectCapabilityProviders(),
-];
+].sort((a, b) => {
+  const aPs = typeof a?.id === "string" && a.id.startsWith("package-script:") ? 0 : 1;
+  const bPs = typeof b?.id === "string" && b.id.startsWith("package-script:") ? 0 : 1;
+  return aPs - bPs;
+});
 const localGlobalCapabilityProvidersAll = ["skills", "commands", "hooks", "plugins", "mcpServers", "mcpTools", "rules", "prompts"].flatMap((type) =>
   capabilityEntries(globalCapabilityInventory, type)
     .map((entry) => compactCapabilityProvider(entry, `local_global_${type}_inventory`, type)),
@@ -1373,34 +1377,73 @@ function selectOwner(preferredOwners = []) {
 }
 
 function selectExecutionOwner() {
-  const available = new Set(ownerDiscoveryPacket.candidateExistingExecutionOwners);
-  const preferenceGroups = [
-    { terms: ["agent", "subagent", "owner", "search", "discover", "find", "智能体", "代理", "搜索", "寻找", "发现"], owners: ["codebase-search", "search-specialist", "analysis", "worker"] },
-    { terms: ["test", "smoke", "verify", "validation", "测试", "验证"], owners: ["test", "verify", "e2e-runner", "pr-test-analyzer", "worker"] },
-    { terms: ["doc", "docs", "readme", "文档"], owners: ["docs", "api-documenter", "worker"] },
-    { terms: ["frontend", "ui", "react", "前端"], owners: ["frontend", "worker"] },
-    { terms: ["backend", "api", "server", "后端"], owners: ["backend", "worker"] },
-    { terms: ["review", "审查"], owners: ["review", "code-reviewer", "worker"] },
-  ];
-  const findInAvailable = (prefs) => [...available].find((id) =>
-    prefs.some((pref) => typeof id === "string" && id.includes(pref)),
+  const candidates = [...new Set(candidateExistingExecutionOwners)].filter(
+    (id) =>
+      typeof id === "string" &&
+      !id.includes("general-purpose") &&
+      !/runtimeInstanceAlias|nickname/i.test(id),
   );
+  if (candidates.length === 0) return null;
+  const taskLower = String(taskText || "").toLowerCase();
+  const findInAvailable = (prefs) => {
+    for (const pref of prefs) {
+      const exact = candidates.find((id) => id === pref);
+      if (exact) return exact;
+      const partial = candidates.find((id) => id.includes(pref));
+      if (partial) return partial;
+    }
+    return null;
+  };
+  const preferenceGroups = [
+    {
+      terms: ["agent", "subagent", "owner", "search", "discover", "find", "智能体", "代理", "搜索", "寻找", "发现"],
+      owners: ["codebase-search", "search-specialist", "analysis", "worker", "backend"],
+    },
+    {
+      terms: ["test", "smoke", "verify", "validation", "qa", "测试", "验证"],
+      owners: ["test", "verify", "qa", "e2e-runner", "pr-test-analyzer", "build-error-resolver", "worker"],
+    },
+    {
+      terms: ["doc", "docs", "readme", "文档"],
+      owners: ["docs", "api-documenter", "content-specialist", "worker"],
+    },
+    {
+      terms: ["frontend", "ui", "react", "前端", "页面"],
+      owners: ["frontend", "ui", "react", "accessibility-specialist", "worker"],
+    },
+    {
+      terms: ["backend", "api", "server", "后端"],
+      owners: ["backend", "api", "server", "worker"],
+    },
+    {
+      terms: ["review", "审查", "reviewer"],
+      owners: ["code-reviewer", "architect-review", "review", "worker"],
+    },
+  ];
   for (const group of preferenceGroups) {
-    if (!group.terms.some((term) => taskText.includes(term))) continue;
+    if (!group.terms.some((term) => taskLower.includes(term))) continue;
     const owner = findInAvailable(group.owners);
     if (owner) return owner;
   }
-  return findInAvailable([
+  const genericOwner = findInAvailable([
     "worker",
-    "analysis",
     "backend",
-    "test",
-    "verify",
-    "codebase-search",
-    "search-specialist",
-    "docs-researcher",
-    "reviewer",
-  ]) ?? null;
+    "code-reviewer",
+    "build-error-resolver",
+    "api-documenter",
+    "architect-review",
+  ]);
+  if (genericOwner) return genericOwner;
+  const scored = candidates.map((id) => {
+    const idLower = id.toLowerCase();
+    let score = 0;
+    for (const part of idLower.split(/[-_./]/)) {
+      if (part && part.length >= 3 && taskLower.includes(part)) score += 1;
+    }
+    return { id, score };
+  });
+  scored.sort((a, b) => b.score - a.score);
+  return scored[0]?.score > 0 ? scored[0].id : null;
 }
 
 function capabilityDiscoveryTaskRequested() {

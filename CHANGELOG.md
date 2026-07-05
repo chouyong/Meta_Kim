@@ -12,6 +12,32 @@ The changelog explains the user-facing problem or risk each release solved, what
 
 _Reserved for the next release._
 
+## [2.8.71] - 2026-07-05
+
+### Solved Problem
+
+Windows installs and release checks could show Node's `[DEP0190]` warning because setup, global dependency installation, release verification, and OS probing still had child-process paths that combined argument arrays with shell execution. At the same time, the Codex fan-out path still had practical failure edges: execution routing could fall back to an arbitrary first agent, Codex `spawn_agent` fork mode could mix `fork_context: true` with `agent_type`, and the shared spine-state helper was not projected everywhere that imported it.
+
+### Changes
+
+- **Install and release commands no longer trigger DEP0190.** `setup.mjs`, `scripts/install-global-skills-all-runtimes.mjs`, `scripts/run-verify-all.mjs`, and `scripts/governance-lib.mjs` now avoid Node's `shell: true` + args warning path while preserving Windows `.cmd` compatibility through explicit `cmd.exe /d /s /c` handoff where needed.
+- **Execution owner selection avoids arbitrary fallback.** `scripts/select-execution-route.mjs` now evaluates the full existing execution-owner inventory with semantic preference groups for test, verification, provider, research, and implementation work, returning `null` instead of guessing when no fit exists.
+- **Codex fork rules are Codex-only.** The Codex command adapter and runtime reference now document that full-context forks use `fork_context: true` without `agent_type`, while typed spawns use `agent_type` without full-context fork. Structural coverage prevents this Codex-specific rule from leaking into shared, Claude, Cursor, or OpenClaw surfaces.
+- **Shared spine-state imports resolve across projected hook targets.** `spine-state-utils.mjs` is included in project and global Codex/Cursor hook copy paths and their sync/discovery tests, matching the shared `spine-state.mjs` import graph.
+
+### Verification
+
+- `node --trace-deprecation setup.mjs --check --silent` -> no DEP0190 warning.
+- `node --trace-deprecation scripts/install-global-skills-all-runtimes.mjs --dry-run --plugins-only --targets claude` -> no DEP0190 warning.
+- `NODE_OPTIONS=--trace-deprecation node scripts/run-verify-all.mjs` -> 8/8 stages pass, no DEP0190 warning.
+- `node scripts/probe-os-compatibility.mjs --check` -> pass.
+- `npm run meta:test:setup` -> 504/504 pass.
+- `npm run meta:test:meta-theory` -> 1104 pass, 0 fail, 5 skipped.
+- `npm run meta:route:validate` -> pass.
+- `node --test tests/meta-theory/01-structural.test.mjs` -> 63/63 pass.
+- `npm run meta:prompt:validate` -> pass.
+- `git diff --check` -> pass.
+
 ## [2.8.70] - 2026-07-05
 
 ### Solved Problem
@@ -22,7 +48,7 @@ Users wanted Claude Code and Codex to both support a "fan-out / team" workflow �
 
 - **Multi-agent trigger keywords + auto capability search + stage pre-progression.** `canonical/runtime-assets/shared/hooks/activate-meta-theory-spine.mjs` (and its `claude` mirror) now matches `team` / `fan-out` / `multi-agent` / `agent teams` / `军团` / `分队` / `并行` / `并发` / `多 agent` / `开 N 个`. On hit it auto-runs a capability search that reads `config/capability-index/agent-eligibility.json` plus `canonical/agents/`, populates `fetchRecord.capabilitySearchPerformed = true` + `capabilityMatches`, pre-progresses `currentStage` from `critical` to `fetch`, and records `linkedCommands` / `linkedSkills` / `dispatchMode = "fan_out_ready"` so the main thread can fork immediately.
 - **Capability gate exemption for fan-out runs.** `canonical/runtime-assets/claude/hooks/enforce-agent-dispatch.mjs` (projected to `.codex/hooks/` and `.cursor/hooks/`) treats `stageRuntimeControl.dispatchMode ∈ {fan_out_ready, fan_out_in_progress}` as a discovery-equivalent stage for the capability gate, so an Agent / `spawn_agent` dispatch during a multi-agent run no longer denies on missing `capabilitySearchPerformed`.
-- **Three-tier agent eligibility registry.** `config/capability-index/agent-eligibility.json` enumerates `eligible` (the nine meta-* agents with role + owns[]), `conditional`, and `hard_reject` tiers with rejection-reason strings, mirroring `oh-my-openagent`'s `AGENT_ELIGIBILITY_REGISTRY` so capability search returns a single verdict per agent rather than free-form ownerCandidates.
+- **Three-tier agent eligibility registry.** `config/capability-index/agent-eligibility.json` enumerates `eligible` (the nine meta-* agents with role + owns[]), `conditional`, and `hard_reject` tiers with rejection-reason strings, so capability search returns a single verdict per agent rather than free-form ownerCandidates.
 - **Atomic spine-state writes with file lock.** `canonical/runtime-assets/shared/hooks/spine-state-utils.mjs` provides `atomicWriteJson` (temp-file + rename) and `withFileLock` (`open` + `wx` + jittered retry). `spine-state.mjs` `writeSpineState` now wraps both, so concurrent fan-out agents cannot corrupt the run JSON.
 - **Command + skill auto-link on multi-agent trigger.** Triggered runs extract `/slash-command` names and `skill:xxx` references from the prompt into `stageRuntimeControl.linkedCommands` / `linkedSkills`, so the dispatch board can show what each lane should load.
 

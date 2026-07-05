@@ -34,6 +34,18 @@ If `spawn_agent` is available and the user explicitly authorized subagents:
 
 `agent-teams-playbook` is the Codex fan-out adapter after Thinking, not a substitute for Thinking. Select it when there are 2+ executable `workerTaskPackets` with proven DAG, collision, workspace-isolation, and external-write safety; record `not_required` for single-lane work and partial/degraded for unsafe fan-out. A selected playbook provider is `agent_teams_playbook=selected_not_invoked` until a live Skill/Agent Team/spawn_agent call is actually attached as host evidence. Meta_Kim must not set its own maximum lower than Codex host/config capacity.
 
+## Codex spawn_agent Fork Rules
+
+Codex `spawn_agent` has a hard parameter rule the dispatcher must follow:
+
+- **Full-context fork** (worker inherits main context): do NOT pass `agent_type`. The runner rejects typed agents in full-context fork with errors like "agent parameter invalid" or "fork full context requires no type".
+- **Typed spawn** (separate agent identity): pass `agent_type`, but the worker does NOT inherit full main context.
+- These two modes are mutually exclusive. Mixing them is the most common Codex fan-out failure.
+
+Recovery rule: if a `spawn_agent` call fails with a parameter/fork error, retry without `agent_type` (full-context mode) before declaring `subagentCapabilityStatus=unavailable`. Record the retry in `runtimeInvocationPlanPacket` so Meta-Review can see the runner was respected, not worked around.
+
+When `spawn_agent` is available and the user authorized fan-out, the Codex main thread MUST spawn all independent workers (same `parallelGroup`) in one assistant turn — not one per turn. Per-turn serial spawning in `fan_out_ready` state is fake parallelism.
+
 ## Codex Durable Agent Projection
 
 Codex project-retained agents use `.codex/agents/<agent>.toml` with a stable `name`, `description`, and `developer_instructions`. When `GapDecision.decision=create_agent` or the user asks to iterate an agent, Codex must produce or update a durable project-local agent candidate for this TOML surface after Warden/user approval. Temporary `spawn_agent` workers only execute the factory/review tasks; they do not satisfy the durable agent deliverable.

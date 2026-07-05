@@ -116,7 +116,7 @@ This protocol is referenced from `SKILL.md` § **Global-First Owner Discovery** 
 
 ### Wave 3 — Execution (bounded fan-out)
 
-- **Execution** dispatches `workerTaskPackets` in parallel. Each packet must carry `shardKey`, `shardScope`, `workspaceIsolation`, `artifactNamespace`, `collisionPolicy`, shared `parallelGroup`, and one `mergeOwner`. Missing shard or merge evidence is fake parallelism.
+- **Execution** dispatches `workerTaskPackets` in parallel. Each packet must carry `shardKey`, `shardScope`, `workspaceIsolation`, `artifactNamespace`, `collisionPolicy`, shared `parallelGroup`, and one `mergeOwner`. Missing shard or merge evidence is fake parallelism. All packets sharing a `parallelGroup` MUST be dispatched as concurrent Task/Agent tool calls in a single assistant message — splitting them across messages fails Meta-Review as fake parallelism.
 - **mergeOwner** is the single authority that resolves collisions and produces the final deliverable chain. The main thread may also be the mergeOwner, but only when it has not also held the worker role for the same packet.
 
 ### Wave 4 — Review + Meta-Review (skeptic fan-out + Warden gate)

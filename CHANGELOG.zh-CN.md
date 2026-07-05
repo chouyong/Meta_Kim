@@ -12,6 +12,54 @@
 
 _留给下个版本。_
 
+## [2.8.71] - 2026-07-05
+
+### 解决的问题
+
+Windows 本地安装和发布级校验时，可能会出现 Node 的 `[DEP0190]` 警告。原因是 setup、全局依赖安装、release verify runner 和 OS probe 里还有子进程路径把 args 数组和 shell 执行混在一起，Node 会把它判为有安全风险的调用方式。同时，Codex 多 agent fan-out 路径还有几个真实使用中的坑：执行路由可能退回到“第一个候选 agent”，Codex `spawn_agent` 可能把 `fork_context: true` 和 `agent_type` 混用，shared `spine-state.mjs` 引入的工具文件也没有投影到所有会用到它的 hook 目录。
+
+### 改动
+
+- **安装和发布命令不再触发 DEP0190。** `setup.mjs`、`scripts/install-global-skills-all-runtimes.mjs`、`scripts/run-verify-all.mjs` 和 `scripts/governance-lib.mjs` 避开 Node 的 `shell: true` + args warning 路径；需要兼容 Windows `.cmd` 的地方改为显式 `cmd.exe /d /s /c` handoff。
+- **执行 owner 选择不再随便兜底。** `scripts/select-execution-route.mjs` 现在基于完整 execution-owner 清单和语义偏好组选择 test、verify、provider、research、implementation 等任务 owner；没有合适匹配时返回 `null`，不再拿第一个候选硬顶。
+- **Codex fork 规则只留在 Codex 面。** Codex command adapter 和 Codex runtime reference 现在明确：完整上下文 fork 用 `fork_context: true` 且不传 `agent_type`；指定类型派发用 `agent_type` 且不启用完整上下文 fork。结构测试保证这条 Codex 专属规则不会污染 shared、Claude、Cursor 或 OpenClaw 表面。
+- **shared spine-state 依赖在投影 hook 中可解析。** `spine-state-utils.mjs` 进入 Codex/Cursor 项目与全局 hook copy 路径，并补上 sync/discovery 测试，和 shared `spine-state.mjs` 的 import 图保持一致。
+
+### 验证
+
+- `node --trace-deprecation setup.mjs --check --silent` -> 无 DEP0190 警告。
+- `node --trace-deprecation scripts/install-global-skills-all-runtimes.mjs --dry-run --plugins-only --targets claude` -> 无 DEP0190 警告。
+- `NODE_OPTIONS=--trace-deprecation node scripts/run-verify-all.mjs` -> 8/8 阶段通过，无 DEP0190 警告。
+- `node scripts/probe-os-compatibility.mjs --check` -> 通过。
+- `npm run meta:test:setup` -> 504/504 通过。
+- `npm run meta:test:meta-theory` -> 1104 通过，0 失败，5 跳过。
+- `npm run meta:route:validate` -> 通过。
+- `node --test tests/meta-theory/01-structural.test.mjs` -> 63/63 通过。
+- `npm run meta:prompt:validate` -> 通过。
+- `git diff --check` -> 通过。
+
+## [2.8.70] - 2026-07-05
+
+### 解决的问题
+
+用户希望 Claude Code 和 Codex 都支持"fan-out / 团队"工作流——主 agent 并行派出多个子 agent——但 Meta_Kim 的触发与派发门让这套流程实际跑不起来。`activate-meta-theory-spine.mjs` 只匹配 `meta-theory` / `critical + fetch + thinking + review` / `元理论`，所以像"开 3 个 agent 扫全量发布差距"这样的请求根本进不了多 agent 路径。进入之后，`enforce-agent-dispatch.mjs` 在 execution / review / meta_review / verification / evolution 阶段对任何 `Agent` / `spawn_agent` 调用都要求 `fetchRecord.capabilitySearchPerformed === true`，而这个 flag 从不自动置位，主线程卡死。`spine-state.mjs` 还直接写 JSON 状态文件，fan-out 多 agent 各自切换同一 run 时存在竞争。整套机制没有为 `team` / `fan-out` / `军团` / `并行` 关键词文档化触发，没有 agent 资格分级，没有原子状态切换，多 agent run 真正发起后也没法自动从 `critical` 推进到 `fetch`。
+
+### 改动
+
+- **多 agent 触发关键词 + 自动能力检索 + 阶段预推进。** `canonical/runtime-assets/shared/hooks/activate-meta-theory-spine.mjs`（及其 `claude` 镜像）现匹配 `team` / `fan-out` / `multi-agent` / `agent teams` / `军团` / `分队` / `并行` / `并发` / `多 agent` / `开 N 个`。命中后自动跑能力检索，读 `config/capability-index/agent-eligibility.json` + `canonical/agents/`，填 `fetchRecord.capabilitySearchPerformed = true` + `capabilityMatches`，把 `currentStage` 从 `critical` 预推进到 `fetch`，并记录 `linkedCommands` / `linkedSkills` / `dispatchMode = "fan_out_ready"`，主线程可立即 fork。
+- **fan-out run 的 capability gate 免检。** `canonical/runtime-assets/claude/hooks/enforce-agent-dispatch.mjs`（投影到 `.codex/hooks/` 和 `.cursor/hooks/`）把 `stageRuntimeControl.dispatchMode ∈ {fan_out_ready, fan_out_in_progress}` 当作 discovery 等价阶段，多 agent run 期间的 Agent / `spawn_agent` 派发不再因缺 `capabilitySearchPerformed` 被 deny。
+- **三层 agent 资格注册表。** `config/capability-index/agent-eligibility.json` 列出 `eligible`（九个 meta-* agent，含 role + owns[]）、`conditional`、`hard_reject` 三层，带拒绝原因串，能力检索对每个 agent 返回单一裁决而非自由形态 ownerCandidates。
+- **原子 spine-state 写入 + 文件锁。** `canonical/runtime-assets/shared/hooks/spine-state-utils.mjs` 提供 `atomicWriteJson`（临时文件 + rename）和 `withFileLock`（`open` + `wx` + 抖动重试）。`spine-state.mjs` 的 `writeSpineState` 套上两者，并发 fan-out agent 不会写坏 run JSON。
+- **多 agent 触发时自动 link command + skill。** 被触发的 run 从 prompt 提取 `/slash-command` 名和 `skill:xxx` 引用，填进 `stageRuntimeControl.linkedCommands` / `linkedSkills`，派发板能展示每条 lane 该加载什么。
+
+### 验证
+
+- 所有触及的 canonical 源跑 `node --check` → SYNTAX OK。
+- `npm run meta:validate` → 7/7 通过。
+- `node --test tests/setup/graphify-wiring-contract.test.mjs tests/setup/sync-runtimes-manifest.test.mjs` → 71/71 通过。
+- `npm run meta:check:runtimes` → Claude Code + Codex + Cursor 镜像一致。
+- `npm run meta:sync` → `.claude/hooks/` 更新 2 个文件，再镜像到 `.codex/` + `.cursor/`。
+
 ## [2.8.69] - 2026-07-05
 
 ### 解决的问题
