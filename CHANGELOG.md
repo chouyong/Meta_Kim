@@ -10,6 +10,12 @@ The changelog explains the user-facing problem or risk each release solved, what
 
 ### Solved Problem
 
+_Reserved for the next release._
+
+## [2.8.76] - 2026-07-06
+
+### Solved Problem
+
 Codex could still appear to "create agents" and, more importantly, collapse a governed fan-out request into too few worker lanes when the task used whitespace-separated capability anchors or Chinese sentence punctuation instead of commas. That made global agent reuse hard to trust from the visible run.
 
 ### Changes
