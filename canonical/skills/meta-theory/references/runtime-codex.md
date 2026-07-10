@@ -13,7 +13,7 @@ Codex Execution is capability-wide, not agent-only. When Thinking selects a capa
 - runtime tools such as `apply_patch`, browser, Playwright, data widgets, or other loaded tool surfaces
 - prompt/rule providers as `applied`, not as external tool calls
 
-`runtimeInvocationPlanPacket` records the selected executable families, the real invocation evidence, and missing families. `hostInvocationRequestPacket` is the adapter handoff: for each missing selected family it states the Codex action to run, the worker task refs if relevant, and the exact trusted evidence fields to return. The Node runner must not treat the request as proof; only the active Codex host or a trusted host adapter can execute `spawn_agent`, skill activation, MCP calls, slash commands, or runtime tools and then pass `hostInvocationEvidenceTrusted=true` with fresh evidence. `capabilityInvocationTruthPacket.realInvocationCoverage.status` must be `pass` for product-experience pass. `selected_not_invoked` is valid truth, but it is never completion evidence.
+`runtimeInvocationPlanPacket` records selected executable bindings, externally observed evidence, and missing bindings. `hostInvocationRequestPacket` is the adapter handoff for missing work. The Node runner must not treat a request, readiness probe, fixture, self-test, or caller-supplied trust flag as proof. Only an external Codex event observer may promote a binding after matching the host call, result, run/session/event ids, provider/task binding, timestamp, and observation artifact hash. `capabilityInvocationTruthPacket.realInvocationCoverage.status` must be `pass` for product-experience pass. `selected_not_invoked` is valid truth, but it is never completion evidence.
 
 ## Honest Subagent Contract
 
@@ -72,6 +72,12 @@ Durable Codex agent completion is a four-step lifecycle, not a file write:
 4. Invoke that durable agent through Codex and attach `durable_agent` evidence with `evidenceKind=durable_agent_live_invocation`.
 
 Until steps 3 and 4 are attached, `durableAgentLifecyclePacket.status` remains partial even if the file exists.
+
+## Live evidence boundary
+
+Codex highest-assurance `live-certified` acceptance must be observed outside the model process. Parse host JSONL/rollout events and require a `function_call` plus a successful matching `function_call_output`; `spawn_agent` additionally needs correlated child start and child completion events with a child thread id. Generic shell execution is runtime-tool evidence, not selected Command evidence. Join every event to the exact Thinking-selected provider/task binding after the host exits. Caller-supplied JSON, CLI trust flags, fixtures, hashes without private observer attestation, self-tests, local readiness probes, configured providers, and runner-generated worker plans cannot promote a binding to invoked. Codex CLI and Codex Desktop are separate targets; a clean CLI result never proves Desktop behavior. This external attestation boundary governs the optional `live-certified` label; it is not a prerequisite for a standard release whose `meta:verify:all` run passed.
+
+Codex CLI also discovers the OS-user global `~/.agents/skills` root independently of the isolated project and `CODEX_HOME`. If that real-user root exists and the current CLI exposes no supported switch to disable it, a same-user clean-room harness must block before host invocation; changing `HOME`, `USERPROFILE`, `CODEX_HOME`, `CODEX_SKILLS_DIR`, or `--ignore-user-config` is not sufficient evidence of isolation. Use an OS-level disposable user/container or a future host-supported disable switch. Do not transfer this CLI limitation to Codex Desktop without a separate Desktop observation.
 
 Other formal tool projections follow `config/sync.json` and `config/runtime-compatibility-catalog.json`; keep `needs_probe`, `partial`, or `reference_only` statuses as evidence instead of promoting them by wording.
 

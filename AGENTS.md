@@ -349,7 +349,7 @@ After changing canonical behavior, contracts, hooks, or runtime-facing docs:
 2. `npm run discover:global`
 3. `npm run meta:check`
 4. `npm run meta:check:global`
-5. `npm run meta:release:smoke` before routine patch/minor release; use `npm run meta:verify:all` only for larger, risky, runtime, install, hook, dependency, or explicitly release-grade changes
+5. `npm run meta:release:smoke` before routine low-risk patch/minor releases; use `npm run meta:verify:all` for the standard full release gate on larger, risky, runtime, install, hook, dependency, package, or security changes; add `npm run meta:verify:live-certified` only when the optional highest-assurance external live certification is requested
 
 Use these supporting commands as needed:
 
@@ -372,7 +372,7 @@ Use these supporting commands as needed:
 - `npm run meta:sync:global`
 - `npm run prompt:next-iteration`
 
-`npm run meta:release:smoke` is the default maintainer release check for low-risk prompt/doc/governance iterations. It runs projection sync, default capability-discovery smoke, and meta-theory tests. `npm run meta:verify:all` remains the full release-grade suite: runtime sync checks, project validation, graphify health, global sync checks, smoke-level runtime acceptance, setup tests, and meta-theory tests.
+`npm run meta:release:smoke` is the default maintainer release check for low-risk prompt/doc/governance iterations. It runs projection sync, default capability-discovery smoke, and meta-theory tests. `npm run meta:verify:all` is the standard full release suite: runtime sync checks, project validation, graphify health, global sync checks, smoke-level runtime acceptance, setup tests, and meta-theory tests. A complete passing run may be used to commit, tag, push, publish, and describe the release as standard release-verified. `npm run meta:verify:live-certified` runs that same standard suite and then appends the separate external-signature exact-binding clean-room gate.
 
 ## Release Modes
 
@@ -385,15 +385,17 @@ Routine patch/minor releases should stay fast. If the change is prompt text, doc
 
 This can be run directly as `npm run meta:release:smoke`, followed by `git diff --check`.
 
-Upgrade to full release-grade verification only when the task changes install/update behavior, global sync, hooks, runtime matrix, provider registry, dependency compatibility, runtime probes, package contents, security-sensitive behavior, or when the user explicitly asks for full/live/release-grade evidence.
+Upgrade from smoke to the standard full release gate, `npm run meta:verify:all`, when the task changes install/update behavior, global sync, hooks, runtime matrix, provider registry, dependency compatibility, runtime probes, package contents, security-sensitive behavior, or when the user explicitly asks for full release verification.
 
-Release-grade work is stricter than a local green check. In that mode, before commit, push, tag, changelog/release-note update, or publication, the run must have current evidence for:
+Standard full-release work is stricter than a local green check. Before commit, push, tag, changelog/release-note update, or publication, the run must have current evidence for:
 
 - all declared runtime install/update targets; if machine-local defaults select only one runtime, use explicit all-runtime target selection
 - project sync, global sync, and global hooks when hooks are in scope
 - runtime matrix, provider registry, dependency compatibility, and runtime probe
 - a real execution-demand route that naturally selects owner, creation providers, skill, MCP provider, command/runtime tool, and verification owner/path
-- live Claude, Codex, and OpenClaw evidence when those live targets are declared
+- runtime evaluation/probe results for the targets declared by the standard release
+
+The optional highest-assurance mode is `npm run meta:verify:live-certified`. It appends a private-attested external observer gate that must join successful host request/result events to every exact Thinking-selected binding in a clean-room run. Missing or failed external attestation means only `liveCertified=false`: do not claim `live-certified`, exact-binding live coverage, or externally signed runtime proof. It does **not** invalidate a separately complete `meta:verify:all` run and does not block an ordinary standard release.
 
 Do not treat structural smoke, systemMessage/UI warning output, auth-present checks, skipped/needsAuth states, or config-only proof as live pass evidence. Those are valid diagnostics, not live completion. Validators and gates protect against empty or dangerous routes; they are not the primary mechanism that makes the default path correct.
 

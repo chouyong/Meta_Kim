@@ -8,6 +8,36 @@
 
 ## Unreleased
 
+## [2.8.78] - 2026-07-11
+
+### 解决的问题
+
+治理 runner 仍可能把编排说得比宿主证据更完整：已配置 provider、可调用探针、fixture、普通 shell 调用或 runner 自己生成的结果，都可能被错误升级成真实调用；号称干净的测试也仍可能读到真实用户 Skill、同级依赖仓库或临时状态残留。
+
+### 修复
+
+- **真实编排不能再由测试自己给自己发合格证。** readiness probe、MCP `--self-test`、已配置 provider、命中的 Hook、fixture 字符串、公开 CLI 信任开关，以及 runner 内部生成的 worker 计划，都不再算真实调用证据。
+- **调用覆盖改为逐个 binding 验收。** 每个已选中的能力类型、provider 和任务 binding 都必须对应到外部观察到的宿主事件；一条能力类型级证据不能覆盖其他 lane 或 provider。
+- **新增 Codex CLI 与 Claude Code 的干净环境宿主观察入口。** 测试使用正式打包快照、隔离的用户目录、运行时目录和临时目录，不读取全局库存或 sibling 仓库；输入是不泄露能力名称和并发暗示的普通业务任务。观察器只能报告实际发生了什么，不能自己把报告升级成可选的最高等级 `live-certified`；只有该认证才要求独立的私有签名与逐 binding 对账器。
+- **MCP 新增真实传输层验收。** 新探针会实际完成 `initialize`、`tools/list` 和 `tools/call`；只列工具的 self-test 仍只算 readiness 证据。
+- **固定版本依赖的 Windows 归档回退可用。** 干净安装通过 Git commit，或 GitHub 归档的 commit 前缀 + 精确 Skill 哈希验证 agent-teams-playbook v4.8.0；Windows tar 无法处理中文文件名时，改用防路径穿越/链接逃逸的 Python 解包。
+- **归档和认证材料处理改为失败关闭。** 依赖归档在解压前限制下载体积，并检查成员路径、类型、数量和展开大小；解压使用隔离 staging。复制的 Codex 认证会先销毁再决定是否保留诊断目录，Windows CLI 提示词也不再经过 `cmd.exe` 展开。
+- **发布验证明确拆成不同保障等级。** `meta:verify:all` 是标准完整发布门，完整通过即可进行普通发布；`meta:verify:live-certified` 会重新执行标准链，再追加固定 Ed25519 公钥的外部观察门。只续跑最后一步不能冒充 `live-certified`，调用者不能替换信任公钥，readiness probe 也不再影响逐 binding 的真实调用覆盖。
+- **fan-out 提示不再伪造 Fetch 证据。** 普通自然语言中的多范围信号只会标记“可能适合拆分”；必须真实完成能力发现，并由 Thinking 证明 lane 独立，才允许进入执行派发。
+- **历史示例不再重复发布个人绝对路径。** 面向读者的更新记录和规划路径 fixture 改用可移植占位符，不再携带具体用户目录和项目目录。
+
+### 验证
+
+- `node --test tests/governance/live-evidence-boundary.test.mjs`
+- `node scripts/validate-product-experience-core-goals.mjs`
+- `node scripts/live-acceptance/probe-mcp-transport.mjs`
+- `node scripts/live-acceptance/run-clean-room-live-acceptance.mjs --preflight`
+- 最终聚焦回归：发布/证据 `16/16`、setup/归档 `28/28`、核心编排 `191/191` 全部通过。
+- 最终源码上的标准完整 `meta:verify:all`：第 1-8 阶段通过，已满足普通发布门。单独可选的 `meta:verify:live-certified` 因 `private_attested_exact_binding_report_missing` 尚不可用；因此这个候选版本不能宣称 `live-certified`，但缺少外部签名不阻止标准打标签和发布。
+- 去掉并发暗示后的本机诊断对照组：纯只读对照没有调用 Agent、Skill、MCP 或已选项目 Command，因此今后不再拿该对照组冒充 fan-out 验收。这只是诊断观察，不是 `live-certified` 签名证据。
+- 本机治理运行诊断观察到 Claude Code 使用了 Agent、Skill、Hook 和 runtime tool。MCP 可调用但本次路线未选择，普通 shell 也没有再冒充项目 Command；在独立观察器逐个签名所选 binding 前，这些事件不能支持可选的 `live-certified` 声明，但它们不是标准发布等级的必需条件。
+- 当真实用户的 `~/.agents/skills` 存在时，Codex CLI 干净环境会在宿主启动前直接阻断；当前 CLI 即使隔离 HOME/CODEX_HOME 仍会读取该目录。CLI 证据继续与 Codex Desktop 分开。
+
 ## [2.8.77] - 2026-07-10
 
 ### 解决的问题
@@ -800,7 +830,7 @@ Graphify 的提示仍可能把 agent 引向大范围读取 `GRAPH_REPORT.md` 或
 
 ### 变更
 
-- **Dynamic Workflow 证据闭环** - 复测 `C:/Users/Kim/AppData/Local/Temp/meta-kim-host-full-db9a8dd9aa5c43418aba89f7b210bd57/artifacts/goalpro-codex-host-full-proof.json`，确认其中包含 `fetchPacket`、`capabilityInventory`、`capabilityRoute`、`dynamicWorkflowRuntimePacket`、`langGraphRunPacket`、`workerTaskPackets`、`workerResultPackets` 与 `verificationPacket`。
+- **Dynamic Workflow 证据闭环** - 复测 `<temp>/meta-kim-host-full/artifacts/goalpro-codex-host-full-proof.json`，确认其中包含 `fetchPacket`、`capabilityInventory`、`capabilityRoute`、`dynamicWorkflowRuntimePacket`、`langGraphRunPacket`、`workerTaskPackets`、`workerResultPackets` 与 `verificationPacket`。
 - **Host Invocation Truth** - 确认真实 Codex host 证据覆盖 `spawn_agent_result`、`agent_team_result` 与 `skill_application`，并有 MCP、command/script、runtime-tool 三类 fresh local probes；artifact 中 `realInvocationCoverage.missingFamilies` 为空。
 - **Hook 自锁修复** - Fetch 阶段 dispatch gate 现在可以受限修复自己的 `fetchRecord` 状态，同时在能力发现和 execution clearance 前仍然阻止业务文件写入。
 - **开源 Source 边界** - 从公开 source 树移除私有 manual 文档，并让 README 引用保持在受支持的公开文档面上。
@@ -808,7 +838,7 @@ Graphify 的提示仍可能把 agent 引向大范围读取 `GRAPH_REPORT.md` 或
 
 ### 验证
 
-- `npm run meta:validate:run -- C:/Users/Kim/AppData/Local/Temp/meta-kim-host-full-db9a8dd9aa5c43418aba89f7b210bd57/artifacts/goalpro-codex-host-full-proof.json`
+- `npm run meta:validate:run -- <temp>/meta-kim-host-full/artifacts/goalpro-codex-host-full-proof.json`
 - `npm run meta:test:meta-theory`
 - `npm run meta:release:smoke`
 - `git diff --check`
@@ -936,8 +966,8 @@ Graphify 的提示仍可能把 agent 引向大范围读取 `GRAPH_REPORT.md` 或
 - `npm run meta:sync`
 - `npm run meta:sync:global -- --with-global-hooks`
 - `npm run discover:global`
-- 在 `D:/KimProject/游戏策划案` 中执行 Claude Code 全局 `UserPromptSubmit` 实机 smoke
-- 在 `D:/KimProject/Meta_Kim` 中执行 Codex 项目 `UserPromptSubmit` 实机 smoke
+- 在 `<project-root>/game-design` 中执行 Claude Code 全局 `UserPromptSubmit` 实机 smoke
+- 在 `<project-root>/Meta_Kim` 中执行 Codex 项目 `UserPromptSubmit` 实机 smoke
 
 ## [2.8.39] - 2026-06-16
 
@@ -1541,8 +1571,8 @@ Graphify 的提示仍可能把 agent 引向大范围读取 `GRAPH_REPORT.md` 或
 
 ### 验证
 
-- `node --check .claude/hooks/user-prompt-submit.js; node --check .codex/hooks/user-prompt-submit.js; node --check test-hook.js`（在 `D:/KimProject/HookPrompt`）
-- `node test-hook.js`（在 `D:/KimProject/HookPrompt`）
+- `node --check .claude/hooks/user-prompt-submit.js; node --check .codex/hooks/user-prompt-submit.js; node --check test-hook.js`（在 `<project-root>/HookPrompt`）
+- `node test-hook.js`（在 `<project-root>/HookPrompt`）
 - `node scripts/install-global-skills-all-runtimes.mjs --dry-run --update --skills ecc,superpowers --targets claude,codex,cursor --lang zh-CN`
 - `node --test tests/setup/install-plugin-bundles.test.mjs tests/setup/graphify-wiring-contract.test.mjs tests/setup/install-cross-platform.test.mjs`
 - `npm run meta:test:setup`
@@ -1592,10 +1622,10 @@ Graphify 的提示仍可能把 agent 引向大范围读取 `GRAPH_REPORT.md` 或
 
 ### 验证
 
-- `node test-hook.js`（在 `D:/KimProject/HookPrompt`）
+- `node test-hook.js`（在 `<project-root>/HookPrompt`）
 - `node --test tests/setup/sync-runtimes-manifest.test.mjs tests/setup/mcp-memory-hooks.test.mjs`
 - `node scripts/install-global-skills-all-runtimes.mjs --update --skills hookprompt --targets codex`
-- `codex exec --dangerously-bypass-hook-trust --skip-git-repo-check --sandbox read-only --cd D:/KimProject/课程素材 "帮我做个小红书营销自动发布器，先别改文件，先说你理解到什么"`
+- `codex exec --dangerously-bypass-hook-trust --skip-git-repo-check --sandbox read-only --cd <project-root>/course-materials "帮我做个小红书营销自动发布器，先别改文件，先说你理解到什么"`
 - `npm run meta:release:smoke`
 - `git diff --check`
 
