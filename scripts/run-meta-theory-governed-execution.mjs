@@ -3563,42 +3563,59 @@ function parseEnvList(value) {
     .filter(Boolean);
 }
 
-function agentTeamsCandidateSkillPaths() {
+function agentTeamsCandidateSkillPaths(runtimeName) {
   const rootParent = path.dirname(REPO_ROOT);
   const codexSkillsRoot =
     process.env.CODEX_SKILLS_DIR ||
     (homeDir() ? path.join(homeDir(), ".codex", "skills") : null);
+  const claudeSkillsRoot =
+    process.env.CLAUDE_SKILLS_DIR ||
+    (homeDir() ? path.join(homeDir(), ".claude", "skills") : null);
   const envRoots = parseEnvList(process.env.META_KIM_DEP_ROOTS);
+  const projectRuntimeCandidates = runtimeName === "claude_code"
+    ? [{
+        source: "project_claude_skill",
+        pathRef: ".claude/skills/agent-teams-playbook/SKILL.md",
+        filePath: path.join(REPO_ROOT, ".claude", "skills", AGENT_TEAMS_PLAYBOOK_ID, "SKILL.md"),
+      }]
+    : [{
+        source: "project_codex_skill",
+        pathRef: ".agents/skills/agent-teams-playbook/SKILL.md",
+        filePath: path.join(REPO_ROOT, ".agents", "skills", AGENT_TEAMS_PLAYBOOK_ID, "SKILL.md"),
+      }];
+  const runtimeGlobalCandidates = runtimeName === "claude_code"
+    ? (claudeSkillsRoot
+        ? [{
+            source: "claude_global_skill",
+            pathRef: "~/.claude/skills/agent-teams-playbook/SKILL.md",
+            filePath: path.join(claudeSkillsRoot, AGENT_TEAMS_PLAYBOOK_ID, "SKILL.md"),
+          }]
+        : [])
+    : (codexSkillsRoot
+        ? [{
+            source: "codex_global_skill",
+            pathRef: "~/.codex/skills/agent-teams-playbook/SKILL.md",
+            filePath: path.join(codexSkillsRoot, AGENT_TEAMS_PLAYBOOK_ID, "SKILL.md"),
+          }]
+        : []);
   return [
-    {
-      source: "project_codex_skill",
-      pathRef: ".agents/skills/agent-teams-playbook/SKILL.md",
-      filePath: path.join(REPO_ROOT, ".agents", "skills", AGENT_TEAMS_PLAYBOOK_ID, "SKILL.md"),
-    },
+    ...projectRuntimeCandidates,
     {
       source: "canonical_skill",
       pathRef: "canonical/skills/agent-teams-playbook/SKILL.md",
       filePath: path.join(REPO_ROOT, "canonical", "skills", AGENT_TEAMS_PLAYBOOK_ID, "SKILL.md"),
-    },
-    ...(codexSkillsRoot
-      ? [
-          {
-            source: "codex_global_skill",
-            pathRef: "~/.codex/skills/agent-teams-playbook/SKILL.md",
-            filePath: path.join(codexSkillsRoot, AGENT_TEAMS_PLAYBOOK_ID, "SKILL.md"),
-          },
-        ]
-      : []),
-    {
-      source: "sibling_dependency_checkout",
-      pathRef: "../agent-teams-playbook/SKILL.md",
-      filePath: path.join(rootParent, AGENT_TEAMS_PLAYBOOK_ID, "SKILL.md"),
     },
     ...envRoots.map((root, index) => ({
       source: `env_dependency_root_${index + 1}`,
       pathRef: `META_KIM_DEP_ROOTS[${index}]/agent-teams-playbook/SKILL.md`,
       filePath: path.join(root, AGENT_TEAMS_PLAYBOOK_ID, "SKILL.md"),
     })),
+    {
+      source: "sibling_dependency_checkout",
+      pathRef: "../agent-teams-playbook/SKILL.md",
+      filePath: path.join(rootParent, AGENT_TEAMS_PLAYBOOK_ID, "SKILL.md"),
+    },
+    ...runtimeGlobalCandidates,
   ];
 }
 
@@ -3837,7 +3854,7 @@ function buildAgentTeamsWaves(workerTaskPackets, parallelBudget = null, fanoutSa
   return waves;
 }
 
-async function resolveAgentTeamsPlaybookProvider() {
+async function resolveAgentTeamsPlaybookProvider(runtimeName) {
   const skillConfig = await readJsonIfExists(path.join(REPO_ROOT, "config", "skills.json"));
   const dependencyRegistry = await readJsonIfExists(
     path.join(REPO_ROOT, "config", "capability-index", "dependency-project-registry.json")
@@ -3858,7 +3875,7 @@ async function resolveAgentTeamsPlaybookProvider() {
       provider?.providerId === "external-skill-agent-teams-playbook"
   );
   const candidates = [];
-  for (const candidate of agentTeamsCandidateSkillPaths()) {
+  for (const candidate of agentTeamsCandidateSkillPaths(runtimeName)) {
     const skillText = await readTextIfExists(candidate.filePath);
     candidates.push({
       source: candidate.source,
@@ -3871,6 +3888,7 @@ async function resolveAgentTeamsPlaybookProvider() {
   return {
     schemaVersion: "agent-teams-playbook-provider-resolution-v0.1",
     providerId: AGENT_TEAMS_PLAYBOOK_ID,
+    runtime: runtimeName,
     configuredInSkills: Boolean(configuredSkill),
     configTargetRuntimes: configuredSkill?.targets ?? [],
     dependencyRegistryState: dependencyProject?.source?.inspectionStatus ?? "missing",
@@ -3897,11 +3915,7 @@ function buildAgentTeamsPlaybookPacket({
   const executableTasks = workerTaskPackets.filter(taskIsExecutableWorker);
   const fanoutSafetyPacket = buildFanoutSafetyPacket(executableTasks);
   const triggered = executableTasks.length >= 2;
-  const providerAvailable = (
-    providerResolution?.found === true ||
-    providerResolution?.configuredInSkills === true ||
-    providerResolution?.providerRegistryState === "registered"
-  );
+  const providerAvailable = providerResolution?.found === true;
   const parallelBudget = resolveAgentTeamsParallelBudget(executableTasks.length);
   const waves = buildAgentTeamsWaves(workerTaskPackets, parallelBudget, fanoutSafetyPacket);
   const hasParallelWave = waves.some((wave) => wave.parallelCount >= 2);
@@ -8756,7 +8770,7 @@ export async function runMetaTheoryGovernedExecution({
   });
   const panelContractDefinition = await readJson(RUN_REPORT_PANEL_CONTRACT_PATH);
   const aiReadableStandards = await readJson(AI_READABLE_PRODUCT_STANDARDS_PATH);
-  const agentTeamsPlaybookProvider = await resolveAgentTeamsPlaybookProvider();
+  const agentTeamsPlaybookProvider = await resolveAgentTeamsPlaybookProvider(routeRuntime);
   let artifactStatus =
     orchestrationReport.status === "pass" &&
     runtimeEvidence.status === "pass" &&

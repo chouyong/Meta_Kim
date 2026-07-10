@@ -39,6 +39,8 @@ In Claude Code, governed Execution is real only when the main thread invokes act
 
 Claude Code fan-out uses Claude Code's native dispatch capacity, the task DAG, collision boundaries, workspace isolation, permission model, and context budget. Meta_Kim must not impose a fixed maximum number of Claude Code subagents. If the host can safely run more independent Task/Agent lanes, use that host capacity; if the host or task cannot, record the concrete capacity or safety reason.
 
+`agent-teams-playbook` uses stop-on-match capability resolution in Claude Code. Once a qualified Agent, Skill, Tool, Command, or MCP provider is found, bind it and stop searching. `find-skills` is only for a proven capability gap. A successful native Agent/Task dispatch after an optional Skill search found no install is still the normal route, not fallback or degraded execution. Do not apply Codex `task_name`, `message`, or `fork_turns` parameters to Claude Code.
+
 Before the first mutation, Thinking must produce a dispatch plan that binds each execution lane to:
 
 - `ownerAgent`: the selected agent or provider owner

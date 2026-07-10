@@ -8,19 +8,30 @@
 
 ## Unreleased
 
+## [2.8.77] - 2026-07-10
+
 ### 解决的问题
 
-像“他好像还是一直在自己创建”这种很短的中文追问，如果没有显式写 Codex、agent、全局复用，仍可能被当成低信号聊天。这样即使 typed-spawn 复用链路本身是对的，下一步路由也会不稳定。
+当前 Codex 宿主已经提供顶层原生 `spawn_agent(task_name, fork_turns, message)`。但未发布路线仍在输出已经移除的 typed/namespaced 参数形态，导致本来正确的 owner 复用计划仍可能调用失败或显示成错误的宿主路线。迁移时还必须证明：删除 Codex 专属旧字段不会削弱 Claude Code 独立的原生 Agent/Task 路线。
 
 ### 改动
 
-- **上下文里的“反复自己创建”抱怨现在进入 owner 复用诊断。** “他/它一直在自己创建”这类表达会走 Codex execution capability discovery，不再掉到 dependency fallback。
-- **路线仍然坚持复用优先。** 这类抱怨保持 `capabilityGapDetected=false`，并让 `codexSpawnBinding.agent_type` 绑定已选中的现有 owner，不进入 `create_agent`。
+- **Codex 现在只输出新版原生任务计划。** 路由使用顶层 `spawn_agent`，携带清洗后的 `task_name`、受边界约束的 worker `message` 和最小 `fork_turns`，不再输出 typed/namespaced 回退参数。
+- **继续复用 owner，但不再假装宿主加载了某个 agent type。** `ownerAgent`、owner 来源、能力装载、lane、合并负责人和可见绑定仍保留在 worker packet/message 中；运行时任务名只表示本次任务实例。
+- **阶段链触发和 Hook 状态已经统一，但不会跳过 Thinking。** 结构化 Critical/Fetch/Thinking/Review 入口无需用户再补“并行 Agent”关键词，会先标记为 `fanout_eligible`；只有 Thinking 真正产出 2 个以上互不依赖、同属一个并行组、具备合并负责人和冲突边界的 worker packet 后，才进入 `fan_out_ready`。
+- **Claude Code 独立支持保持不变。** Claude Code 继续使用自己的原生 Agent/Task 和 SubagentStart；矩阵回归测试会保护 agent、subagent、custom agent 的 native 声明。
+- **`agent-teams-playbook` 不再强制表演回退链。** 已有 Agent/Skill/Tool/Command/MCP provider 一旦匹配就停止搜索；只有真实能力缺口才做外部 Skill 搜索，原生 Agent 成功派发不会因为可选 Skill 未安装而被错标成 fallback。
+- **依赖 checkout 解析现在区分运行时。** 本地开发优先使用 sibling 上游仓库，避免旧全局包抢先；Claude Code 扫描 `.claude`/`~/.claude`，Codex 扫描 `.agents`/`~/.codex`。
 
 ### 验证
 
-- `node --test tests/meta-theory/47-meta-theory-entry-classifier.test.mjs tests/meta-theory/50-parallel-execution-lanes.test.mjs tests/meta-theory/51-orchestrator-kind-bucketing.test.mjs`
+- `node --test tests/meta-theory/01-structural.test.mjs tests/meta-theory/11-eight-stage-spine.test.mjs tests/meta-theory/47-meta-theory-entry-classifier.test.mjs tests/meta-theory/50-parallel-execution-lanes.test.mjs`
+- `node --test tests/governance/capability-routing.test.mjs tests/governance/fanout-completion-gate.test.mjs tests/governance/runtime-capability-matrix.test.mjs`
 - `npm run meta:route:validate`
+- `npm run meta:verify:governance`
+- `npm run meta:release:smoke`
+- `npm run meta:check:global:release`
+- `git diff --check`
 
 ## [2.8.76] - 2026-07-06
 

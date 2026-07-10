@@ -8,19 +8,30 @@ The changelog explains the user-facing problem or risk each release solved, what
 
 ## Unreleased
 
+## [2.8.77] - 2026-07-10
+
 ### Solved Problem
 
-Short Chinese follow-up complaints such as "it still seems to keep creating by itself" could still be treated as low-signal chat unless they explicitly mentioned Codex, agent, or global reuse. That made the next route less stable even though the typed-spawn owner reuse path itself was correct.
+The current Codex host now exposes a top-level native `spawn_agent(task_name, fork_turns, message)` surface. The unreleased route still emitted the removed typed/namespaced parameter shape, so a correct owner-reuse plan could fail or render through the wrong host path. The migration also needed to prove that removing Codex-only legacy fields would not weaken Claude Code's independent native Agent/Task route.
 
 ### Changes
 
-- **Contextual repeated-creation complaints now enter governed owner-reuse diagnosis.** Phrases like "it/he keeps creating by itself" are routed to Codex execution capability discovery instead of dependency fallback.
-- **The route remains reuse-first.** These complaints now keep `capabilityGapDetected=false` and bind `codexSpawnBinding.agent_type` to the selected existing owner rather than entering `create_agent`.
+- **Codex now emits only the native task plan.** The route uses top-level `spawn_agent` with a sanitized `task_name`, bounded worker `message`, and minimal `fork_turns`; it no longer emits typed/namespaced fallback parameters.
+- **Owner reuse remains explicit without pretending the host loaded an agent type.** `ownerAgent`, owner source, capability loadout, lane, merge owner, and visible binding stay in the worker packet/message while the runtime task name remains only a run-scoped identifier.
+- **Stage-chain activation and Hook state now agree without skipping Thinking.** Structured Critical/Fetch/Thinking/Review activation sets `fanout_eligible` without requiring another parallel-agent keyword; only a Thinking result with 2+ independent worker packets, one parallel group, merge ownership, and collision boundaries can set `fan_out_ready`.
+- **Claude Code support is preserved independently.** Claude Code continues to use its native Agent/Task and SubagentStart surfaces, with a matrix regression test protecting agent, subagent, and custom-agent native declarations.
+- **`agent-teams-playbook` resolution no longer forces a fallback ritual.** Existing Agent/Skill/Tool/Command/MCP providers stop discovery immediately; external Skill search runs only for a proven gap, and successful native Agent dispatch is never relabeled as fallback merely because an optional Skill was not installed.
+- **Dependency checkout resolution is runtime-aware.** Local development prefers the sibling upstream checkout before stale global packages, while Claude Code scans `.claude`/`~/.claude` skill roots and Codex scans `.agents`/`~/.codex` roots.
 
 ### Verification
 
-- `node --test tests/meta-theory/47-meta-theory-entry-classifier.test.mjs tests/meta-theory/50-parallel-execution-lanes.test.mjs tests/meta-theory/51-orchestrator-kind-bucketing.test.mjs`
+- `node --test tests/meta-theory/01-structural.test.mjs tests/meta-theory/11-eight-stage-spine.test.mjs tests/meta-theory/47-meta-theory-entry-classifier.test.mjs tests/meta-theory/50-parallel-execution-lanes.test.mjs`
+- `node --test tests/governance/capability-routing.test.mjs tests/governance/fanout-completion-gate.test.mjs tests/governance/runtime-capability-matrix.test.mjs`
 - `npm run meta:route:validate`
+- `npm run meta:verify:governance`
+- `npm run meta:release:smoke`
+- `npm run meta:check:global:release`
+- `git diff --check`
 
 ## [2.8.76] - 2026-07-06
 

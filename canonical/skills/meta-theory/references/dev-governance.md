@@ -135,14 +135,14 @@ These assignments are the **default** for any run that triggers the Fan-out Trig
 | 1 | Fetch — graph + memory navigation | `meta-librarian` | Memory + graph + continuity is `meta-librarian`'s boundary. |
 | 2 | Thinking — owner match + dispatch envelope | `meta-conductor` | Business-flow blueprint, stage sequencing, and dispatch envelope are `meta-conductor`'s boundary. |
 | 2 | Thinking — capability loadout (skills, MCP, commands) | `meta-artisan` | Skill / MCP / tool fit is `meta-artisan`'s boundary. |
-| 3 | Execution — worker task | `general-purpose` **or a specific topic owner** | Worker tasks are the only place `general-purpose` is allowed. Topic-specific work should go to a global or runtime specialist when one exists. |
+| 3 | Execution — worker task | runtime-discovered professional owner | Bind each run-scoped worker packet to an existing global/project execution owner whose capability contract fits the lane. A runtime worker instance is not permission to invent a `general-purpose` owner. |
 | 4 | Review — adversarial correctness | `meta-prism` (lens: correctness) | Quality review and drift detection are `meta-prism`'s boundary. |
 | 4 | Review — adversarial security | `meta-prism` (lens: security) | Same boundary; different lens. |
 | 4 | Review — adversarial completeness | `meta-prism` (lens: completeness) | Same boundary; different lens. |
 | 4 | Meta-Review — gate approval | `meta-warden` | Coordination, arbitration, final synthesis, and the public-ready gate are `meta-warden`'s boundary. |
 | 8 | Evolution — writeback coordination | `meta-chrysalis` | Evolution signal aggregation and writeback coordination through Warden's gate are `meta-chrysalis`'s boundary. |
 
-**History note** — early runs of this protocol (v2.8.62 and earlier) defaulted every Wave-3 worker to `general-purpose` because the owner table did not exist. Wave 4 review was also done by `general-purpose` instead of `meta-prism` three-lens fan-out, and Meta-Review was done by the main thread instead of `meta-warden`. From v2.8.63 onward the assignments above are the default. This is the structural fix for the protocol-vs-runtime gap surfaced in 2026-06-29 governance review.
+**History note** — early runs of this protocol (v2.8.62 and earlier) defaulted every Wave-3 worker to `general-purpose` because the owner table did not exist. Wave 4 review was also done by `general-purpose` instead of `meta-prism` three-lens fan-out, and Meta-Review was done by the main thread instead of `meta-warden`. From v2.8.63 onward named governance roles became the default; the current contract also requires Wave-3 packets to bind a runtime-discovered professional owner instead of reviving the old generic fallback.
 
 ### Wave Hard Rules
 
@@ -151,7 +151,7 @@ These assignments are the **default** for any run that triggers the Fan-out Trig
 - Meta-Review, Verification, and Evolution are strict-serial. Warden is the only Meta-Review authority; Verification produces fresh evidence; Evolution writeback requires Warden approval.
 - A Wave-3 fan-out that lacks `parallelGroup` + `mergeOwner` + `collisionPolicy` is fake parallelism and must be rejected by Review, not silently serialized.
 - The `agent-teams-playbook` skill is the recommended execution pattern for Wave 3; it is selected only when the DAG and collision policy prove safe.
-- **A dispatch that picks `general-purpose` for any role that the Default Owner Assignments table names a specific owner is a protocol violation.** Review must flag it.
+- **A dispatch that picks `general-purpose` as an execution owner is a protocol violation.** Review must return to Thinking and bind a runtime-discovered professional owner or emit a real capability gap.
 
 ### Fan-out Trigger
 

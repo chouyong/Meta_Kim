@@ -29,7 +29,9 @@ If `spawn_agent` is available and meta-theory / governed Meta_Kim activation aut
 - treat explicit `meta-theory`, `/meta-theory`, `元理论`, and natural-language governed execution entries as fan-out authorization when the task has separable safe lanes
 - treat direct "dispatch / parallel / multiple agents" corrections as explicit fan-out authorization; enter owner discovery and build multiple agent-owned worker packets when the task has separable scopes
 - treat structured governance-chain requests such as `Critical Thinking -> Fetch -> Deep Thinking -> Review` as meta-theory activation examples; they do not need an extra "dispatch" word before Thinking can select parallel lanes
-- bind explicit fan-out worker lanes to reusable Codex global or project `agent_type` owners first; skills, commands, MCP tools, and runtime tools are loadout/dependency bindings, not replacements for the lane owner
+- bind explicit fan-out worker lanes to reusable Codex global or project owners first; skills, commands, MCP tools, and runtime tools are loadout/dependency bindings, not replacements for the lane owner
+- before the live call, show or record `ownerAgent` + owner source + capability/loadout + the native `spawn_agent` task plan; the run-scoped task is an invocation of that owner contract, while `task_name` remains only a lane identifier
+- do not use "created N agents", "派 agent", or host nickname lists as the complete user-visible explanation; if Codex UI shows a temporary nickname, map it back to `runtimeInstanceAlias` and the selected `ownerAgent` in the next dispatch/status notice
 - keep each worker's write scope disjoint when it edits files
 - size fan-out from Codex host/config capacity such as `[agents].max_threads`, current runtime capacity, task DAG, and collision boundaries instead of a fixed Meta_Kim cap
 - show the dispatch board before or alongside dispatch
@@ -38,19 +40,19 @@ If `spawn_agent` is available and meta-theory / governed Meta_Kim activation aut
 
 `agent-teams-playbook` is the Codex fan-out adapter after Thinking, not a substitute for Thinking. Select it when there are 2+ executable `workerTaskPackets` with proven DAG, collision, workspace-isolation, and external-write safety; record `not_required` for single-lane work and partial/degraded for unsafe fan-out. A selected playbook provider is `agent_teams_playbook=selected_not_invoked` until a live Skill/Agent Team/spawn_agent call is actually attached as host evidence. Meta_Kim must not set its own maximum lower than Codex host/config capacity.
 
-## Codex spawn_agent Fork Rules
+Capability resolution stops when a qualified existing provider is found. Missing an exact Skill or declining an optional external Skill install does not make the route degraded when an existing owner plus native `spawn_agent` can execute the lane. External discovery runs only for a proven local multi-provider gap; fallback/degraded labels require an actual host-surface, permission, or owner failure.
 
-Codex `spawn_agent` has a hard parameter rule the dispatcher must follow:
+## Codex Native spawn_agent Contract
 
-- **Full-context fork** (worker inherits main context): do NOT pass `agent_type`. The runner rejects typed agents in full-context fork with errors like "agent parameter invalid" or "fork full context requires no type".
-- **Typed spawn** (separate agent identity): pass `agent_type`, but the worker does NOT inherit full main context.
-- These two modes are mutually exclusive. Mixing them is the most common Codex fan-out failure.
+Current Codex native fan-out uses the top-level `spawn_agent` surface with exactly three routing inputs:
 
-If Fetch/Thinking selected an existing Codex global or project owner, that owner is a typed-spawn binding: call `multi_agent_v1.spawn_agent` with `agent_type=<selected owner>` and pass only the bounded context in the worker packet. A full-context fork is not the normal way to reuse a global agent; it is for same-context continuation or for the retry after a typed-spawn parameter/fork error.
+- `task_name`: a lowercase letters/digits/underscores lane identifier derived from `roleInstanceId` or `taskPacketId`; it is not the durable `ownerAgent`
+- `message`: the bounded worker work order, including `taskPacketId`, `ownerAgent`, owner source, capability/loadout, scope, output contract, collision boundary, and merge owner
+- `fork_turns`: the smallest sufficient context window; default to `none` when the bounded message is complete, and use `all` or a positive integer string only when the lane genuinely requires parent-turn context
 
-Recovery rule: if a `spawn_agent` call fails with a parameter/fork error, retry without `agent_type` (full-context mode) before declaring `subagentCapabilityStatus=unavailable`. Record the retry in `runtimeInvocationPlanPacket` so Meta-Review can see the runner was respected, not worked around.
+Do not pass `agent_type` or `fork_context`, and do not discover or fall back to a legacy namespaced spawn API. The professional owner remains governance metadata in the worker packet and bounded message; Codex's runtime task name or incidental nickname must never be presented as proof that a durable custom agent type was loaded. If the top-level native `spawn_agent` surface is unavailable or rejects its current schema, record `subagentCapabilityStatus=unavailable` with the exact tool/schema evidence and block or declare degraded mode instead of silently serializing.
 
-When `spawn_agent` is available and the run is fan-out authorized through meta-theory / governed Meta_Kim activation, direct subagent/delegation/parallel-agent wording, or a completed native choice surface, the Codex main thread MUST spawn all independent workers (same `parallelGroup`) in one assistant turn — not one per turn. Per-turn serial spawning in authorized `fan_out_ready` state is fake parallelism. If the route is fan-out eligible but runtime authorization or the callable host surface is missing, stop before live subagent dispatch and record the degraded/blocked state instead of silently serializing.
+When native `spawn_agent` is available and the run is fan-out authorized through meta-theory / governed Meta_Kim activation, direct subagent/delegation/parallel-agent wording, a structured governance-chain request, or a completed native choice surface, the Codex main thread MUST spawn all independent workers (same `parallelGroup`) in one assistant turn — not one per turn. Per-turn serial spawning in authorized `fan_out_ready` state is fake parallelism. If the route is fan-out eligible but runtime authorization or the callable host surface is missing, stop before live subagent dispatch and record the degraded/blocked state instead of silently serializing.
 
 ## Codex Durable Agent Projection
 

@@ -328,18 +328,21 @@ if (continuationBoundary) {
   state.continuationBoundary = continuationBoundary;
 }
 
-// 多 agent 触发命中时：自动跑 capability search 填 fetchRecord，预推进 stage
-// 到 fetch，联动 slash command + skill，避免 enforce-agent-dispatch 在 execution
-// 阶段因 capabilitySearchPerformed=false 而 deny 主线程 fork。
-const isMultiAgent = MULTI_AGENT_TRIGGER_RE.test(rawPromptText);
-if (isMultiAgent) {
+// 命中可并行的入口信号时，只标记为 fanout_eligible 并补齐 Fetch 证据。
+// 真正的 fan_out_ready 必须由 Thinking 在形成 2+ 个安全、独立且有合并边界的
+// workerTaskPacket 后再写入，入口 Hook 不能提前替 Thinking 作出派发结论。
+const isFanoutActivation =
+  MULTI_AGENT_TRIGGER_RE.test(rawPromptText) ||
+  CRITICAL_FETCH_THINKING_RE.test(rawPromptText) ||
+  EXPLICIT_META_THEORY_RE.test(rawPromptText);
+if (isFanoutActivation) {
   const matches = runAutoCapabilitySearch(packageRoot);
   state.fetchRecord = {
     capabilitySearchPerformed: true,
     capabilityMatches: matches,
     evidence: matches.map((m) => `auto-cap-search:${m.id}`),
     sources: ["canonical/agents", "config/capability-index/agent-eligibility.json"],
-    searchReason: "multi_agent_trigger_auto_fill",
+    searchReason: "fanout_activation_auto_fill",
     completedAt: new Date().toISOString(),
   };
   if (state.currentStage === "critical") {
@@ -354,7 +357,13 @@ if (isMultiAgent) {
   const linkedSkills = collectLinkedSkills(rawPromptText);
   if (linkedCommands.length) state.stageRuntimeControl.linkedCommands = linkedCommands;
   if (linkedSkills.length) state.stageRuntimeControl.linkedSkills = linkedSkills;
-  state.stageRuntimeControl.dispatchMode = "fan_out_ready";
+  state.stageRuntimeControl.dispatchMode = "fanout_eligible";
+  state.stageRuntimeControl.fanoutActivationSource =
+    MULTI_AGENT_TRIGGER_RE.test(rawPromptText)
+      ? "direct_parallel_agent_request"
+      : CRITICAL_FETCH_THINKING_RE.test(rawPromptText)
+        ? "structured_governance_chain_request"
+        : "meta_theory_trigger_request";
 }
 
 await writeSpineState(cwd, state);

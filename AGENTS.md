@@ -160,7 +160,7 @@ That means:
 - Review checks whether Critical, Fetch, and Thinking were good enough before judging final output polish
 - Execution work is dispatched to agents, skills, commands, MCP capabilities, runtime tools, or workers selected by Thinking instead of collapsing into the main thread
 
-For Codex, meta-theory activation is user-visible permission to enter governed routing, but live subagent fan-out still requires direct subagent/delegation/parallel-agent wording or a completed native choice surface that names the parallel-agent route. When Thinking finds multiple independent worker lanes and proves DAG/collision/workspace/external-write safety, the main thread scopes, delegates, reviews, and synthesizes; it does not become the all-purpose executor for complex work. Without direct subagent/parallel-agent wording, Codex can still reach the same route by presenting a native choice surface before Execution.
+For Codex, meta-theory / governed Meta_Kim activation is user-visible authorization for safe native fan-out when Thinking proves multiple independent worker lanes and DAG/collision/workspace/external-write safety. Direct subagent/delegation/parallel-agent wording and structured governance-chain requests such as `Critical Thinking -> Fetch -> Deep Thinking -> Review` are strong activation examples, not exclusive gates. The main thread scopes, delegates, reviews, and synthesizes; it does not become the all-purpose executor for complex work. Native choice remains required only when route, scope, risk, or acceptance materially branches. Live delegation still requires the current Codex host to expose the top-level native `spawn_agent` surface; if it is absent, block or declare degraded mode instead of falling back to a legacy namespaced spawn API or silently serializing.
 
 ### Production Correctness Before Execution
 
@@ -202,7 +202,7 @@ Hard rules before Execution:
 - Multi-lens judgment uses dynamic lens discovery; user-mentioned books, people, or theories are seeds/fallbacks, not a fixed list.
 - Execution requires owner + weapon + verification owner.
 - Dependency projects require input/output contracts before use.
-- Codex subagents require a user-visible authorization source: direct subagent/delegation/parallel-agent wording or a completed native choice surface for a route that names parallel-agent fan-out. A `meta-theory` trigger alone authorizes governed routing, not live subagent dispatch. Hooks require trust review.
+- Codex native subagents require governed Meta_Kim activation or another user-visible authorization source, separable safe lanes proven by Thinking, and the current host's top-level `spawn_agent` surface. A `meta-theory` trigger or structured governance-chain request may authorize safe fan-out; native choice is reserved for branch-changing decisions. Legacy namespaced spawn APIs are not a fallback. Hooks require trust review.
 - OpenClaw skills require third-party risk and sandbox review.
 - Cursor capabilities remain unknown/partial until verified; do not mark them native from projection files alone.
 - Public-ready requires verification plus intent acceptance; workflow completion alone is not user-goal completion.

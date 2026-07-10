@@ -770,7 +770,7 @@ async function allowObservedModeExecution(state) {
 }
 
 function isAgentDispatchTool(name) {
-  return name === "Agent" || name === "spawn_agent";
+  return name === "Agent" || name === "Task" || name === "spawn_agent";
 }
 
 function dispatchIntentText(input) {
@@ -778,6 +778,7 @@ function dispatchIntentText(input) {
     input?.description,
     input?.prompt,
     input?.message,
+    input?.task_name,
     input?.agent_type,
     input?.subagent_type,
     JSON.stringify(input?.items || []),
@@ -1186,11 +1187,12 @@ if (isAgentDispatchTool(toolName)) {
     toolInput?.description ||
     toolInput?.message?.substring(0, 80) ||
     toolInput?.prompt?.substring(0, 80) ||
+    toolInput?.task_name ||
     toolInput?.agent_type ||
     "unknown";
   const metaName = extractMetaAgentName(
     toolInput?.description,
-    [toolInput?.prompt, toolInput?.message, toolInput?.agent_type]
+    [toolInput?.prompt, toolInput?.message, toolInput?.task_name, toolInput?.agent_type]
       .filter(Boolean)
       .join(" "),
   );
@@ -1321,7 +1323,9 @@ if (isAgentDispatchTool(toolName)) {
         toolInput?.prompt,
         toolInput?.description,
         toolInput?.message,
+        toolInput?.task_name,
         toolInput?.agent_type,
+        toolInput?.subagent_type,
         JSON.stringify(toolInput?.items || []),
       ]
         .filter(Boolean)

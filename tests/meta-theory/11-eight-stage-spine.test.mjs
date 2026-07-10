@@ -1302,6 +1302,9 @@ describe("Part F2: choice surface runtime gate", async () => {
     assert.equal(nextState.stageRuntimeControl?.userLanguage, "zh-CN");
     assert.ok(nextState.stageRuntimeControl?.promptFingerprint);
     assert.equal(nextState.stageRuntimeControl?.factGatePolicy, "managed_gate_required_for_public_ready");
+    assert.equal(nextState.stageRuntimeControl?.dispatchMode, "fanout_eligible");
+    assert.equal(nextState.fetchRecord?.capabilitySearchPerformed, true);
+    assert.equal(nextState.fetchRecord?.searchReason, "fanout_activation_auto_fill");
   });
 
   test("auto prompt activation does not create command-class publish approvals", () => {
@@ -3008,7 +3011,8 @@ describe("Part F2: choice surface runtime gate", async () => {
     const result = runEnforceHook(state, {
       tool_name: "spawn_agent",
       tool_input: {
-        agent_type: "meta-conductor",
+        task_name: "backend_1",
+        fork_turns: "none",
         message: "Run task-backend-001 for role backend#1",
       },
     });
@@ -3037,7 +3041,8 @@ describe("Part F2: choice surface runtime gate", async () => {
     const result = runEnforceHook(state, {
       tool_name: "spawn_agent",
       tool_input: {
-        agent_type: "backend",
+        task_name: "backend_1",
+        fork_turns: "none",
         message: "Implement backend task task-backend-001",
       },
     });
@@ -3064,7 +3069,8 @@ describe("Part F2: choice surface runtime gate", async () => {
     const result = runEnforceHook(state, {
       tool_name: "spawn_agent",
       tool_input: {
-        agent_type: "meta-prism",
+        task_name: "thinking_review",
+        fork_turns: "none",
         message: "Review Thinking packet quality as meta-prism",
       },
     });

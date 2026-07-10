@@ -607,6 +607,17 @@ describe("32 — Meta-theory three product goals and support gates", () => {
       assert.match(capabilityTeamBlueprint.inspiration, /agent-teams-playbook/);
       assert.equal(capabilityTeamBlueprint.rows.length, lanes.length);
       assert.equal(capabilityTeamBlueprint.rows.every((row) => row.capabilitySlot && row.providerBindingPolicy === "capability_need_runtime_match"), true);
+      assert.equal(capabilityTeamBlueprint.capabilityResolutionPolicy.mode, "stop_on_first_qualified_provider");
+      assert.equal(
+        capabilityTeamBlueprint.capabilityResolutionPolicy.externalDiscoveryTrigger,
+        "only_after_local_multi_provider_gap_is_proven",
+      );
+      assert.ok(
+        capabilityTeamBlueprint.capabilityResolutionPolicy.forbidden.includes(
+          "label_successful_native_agent_dispatch_as_fallback",
+        ),
+      );
+      assert.equal(Object.hasOwn(capabilityTeamBlueprint, "fallbackChain"), false);
       assert.ok(
         lanes.every(
           (packet) =>
