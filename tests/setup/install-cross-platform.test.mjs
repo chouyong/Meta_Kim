@@ -25,7 +25,7 @@ const superpowersSkill = skillsManifest.skills.find(
 const eccSkill = skillsManifest.skills.find((skill) => skill.id === "ecc");
 
 describe("install platform config", () => {
-  test("quick deploy copies root runtime guide files", () => {
+  test("project deploy roots exclude instruction files and delegate them to the instruction policy", () => {
     const source = readFileSync(path.join(repoRoot, "setup.mjs"), "utf8");
     const deployMatch = source.match(
       /function deployPlatformFiles\(platformId, targetDir\) \{[\s\S]*?\n\}/,
@@ -39,8 +39,12 @@ describe("install platform config", () => {
     const rootsBody = rootsMatch[0];
 
     assert.match(deployBody, /projectDeployRootsForPlatform\(platformId\)/);
-    assert.match(rootsBody, /add\("CLAUDE\.md"\)/);
-    assert.match(rootsBody, /add\("AGENTS\.md"\)/);
+    // Instruction files (AGENTS.md / CLAUDE.md) are NO LONGER deploy roots: the
+    // Meta_Kim source maintainer guide must never be force-projected into an
+    // ordinary project. They are governed by the project instruction policy.
+    assert.doesNotMatch(rootsBody, /add\("CLAUDE\.md"\)/);
+    assert.doesNotMatch(rootsBody, /add\("AGENTS\.md"\)/);
+    // Runtime projection roots stay.
     assert.match(rootsBody, /platformId === "claude" \|\| platformId === "all"/);
     assert.match(rootsBody, /platformId === "openclaw"/);
     assert.match(rootsBody, /platformId === "codex"/);
@@ -50,10 +54,12 @@ describe("install platform config", () => {
       /add\("canonical\/skills\/meta-theory", "\.agents\/skills\/meta-theory"\)/,
     );
     assert.doesNotMatch(rootsBody, /add\("\.codex\/skills"\)/);
-    assert.equal(
-      rootsBody.match(/add\("AGENTS\.md"\)/g)?.length,
-      1,
-    );
+    // deployPlatformFiles delegates instruction files to the policy path.
+    assert.match(deployBody, /applyProjectInstructionsForPlatform/);
+    // Policy plumbing exists and defaults to the safe "preserve".
+    assert.match(source, /const DEFAULT_PROJECT_INSTRUCTION_POLICY = "preserve"/);
+    assert.match(source, /function resolveProjectInstructionPolicy\(\)/);
+    assert.match(source, /function collectProjectInstructionPlans\(/);
   });
 
   test("findskill uses windows subdir on Windows", () => {

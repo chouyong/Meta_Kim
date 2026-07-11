@@ -960,6 +960,93 @@ const PROJECT_BOOTSTRAP_MERGED_CONFIG_PATHS = new Set([
   ...DEPLOY_SKIP_CONFIG_PATHS,
 ]);
 
+// ── Project instruction policy ───────────────────────────────────────────────
+// Governs how (or whether) Meta_Kim touches a target project's AGENTS.md /
+// CLAUDE.md. The default is the safe "preserve": never modify a project's
+// tracked instruction files, and self-heal by stripping any Meta_Kim managed
+// block a previous (buggy) sync appended. Ordinary projects therefore never
+// inherit the Meta_Kim source-repo maintainer guide.
+//   - preserve : never add a managed block; strip an existing one (restore user text)
+//   - portable : inject the short, portable, path-free instruction template only
+//   - managed  : inject the full Meta_Kim maintainer guide (explicit opt-in only)
+const PROJECT_INSTRUCTION_POLICIES = new Set(["preserve", "portable", "managed"]);
+const DEFAULT_PROJECT_INSTRUCTION_POLICY = "preserve";
+
+// Portable, path-free templates (NOT the source maintainer guide). One per
+// instruction file, read from the installed Meta_Kim package root at deploy time.
+const PORTABLE_INSTRUCTION_TEMPLATE_REL = {
+  "CLAUDE.md":
+    "canonical/runtime-assets/shared/project-instructions/CLAUDE.portable.md",
+  "AGENTS.md":
+    "canonical/runtime-assets/shared/project-instructions/AGENTS.portable.md",
+};
+
+function parseProjectInstructionPolicyArg(argv) {
+  for (let i = 0; i < argv.length; i += 1) {
+    const token = argv[i];
+    if (token === "--preserve-instructions") return "preserve";
+    if (token === "--portable-instructions") return "portable";
+    if (token === "--managed-instructions") return "managed";
+    if (token === "--project-instructions") return argv[i + 1];
+    if (token.startsWith("--project-instructions=")) {
+      return token.slice("--project-instructions=".length);
+    }
+  }
+  return null;
+}
+
+function readProjectInstructionPolicyFromConfig() {
+  try {
+    const sync = JSON.parse(
+      readFileSync(join(PROJECT_DIR, "config", "sync.json"), "utf8"),
+    );
+    return typeof sync.projectInstructions === "string"
+      ? sync.projectInstructions
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+let _cachedProjectInstructionPolicy;
+function resolveProjectInstructionPolicy() {
+  if (_cachedProjectInstructionPolicy) return _cachedProjectInstructionPolicy;
+  const candidate =
+    parseProjectInstructionPolicyArg(args) ||
+    process.env.META_KIM_PROJECT_INSTRUCTIONS ||
+    readProjectInstructionPolicyFromConfig() ||
+    DEFAULT_PROJECT_INSTRUCTION_POLICY;
+  const normalized = String(candidate).trim().toLowerCase();
+  // Fail safe: an unknown policy value must never silently widen behavior.
+  _cachedProjectInstructionPolicy = PROJECT_INSTRUCTION_POLICIES.has(normalized)
+    ? normalized
+    : DEFAULT_PROJECT_INSTRUCTION_POLICY;
+  return _cachedProjectInstructionPolicy;
+}
+
+// Which instruction file(s) a given platform target maps to.
+function instructionRelsForPlatform(platformId) {
+  const rels = [];
+  if (platformId === "claude" || platformId === "all") rels.push("CLAUDE.md");
+  if (
+    platformId === "codex" ||
+    platformId === "cursor" ||
+    platformId === "openclaw" ||
+    platformId === "all"
+  ) {
+    rels.push("AGENTS.md");
+  }
+  return rels;
+}
+
+function instructionRelsForTargets(activeTargets) {
+  const rels = new Set();
+  for (const platformId of activeTargets) {
+    for (const rel of instructionRelsForPlatform(platformId)) rels.add(rel);
+  }
+  return [...rels];
+}
+
 const GLOBAL_HOOK_PACKAGE_FILES_LIST = [
   "activate-meta-theory-spine.mjs",
   "bash-readonly-whitelist.mjs",
@@ -1627,18 +1714,58 @@ function stripManagedTextBlock(raw, relPath) {
   return String(raw ?? "").replace(blockRe, "").trim();
 }
 
+function textHasManagedBlock(raw, relPath) {
+  const { begin, end } = managedTextBlockMarkers(relPath);
+  const escapedBegin = begin.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const escapedEnd = end.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`${escapedBegin}[\\s\\S]*?${escapedEnd}`).test(
+    String(raw ?? ""),
+  );
+}
+
+// Byte-clean removal of a Meta_Kim managed block that preserves the user's own
+// text before AND after it. Unlike stripManagedTextBlock (used only for
+// equivalence checks, which hard-trims the whole document), this is the on-disk
+// migration path: it also consumes the blank-line separator Meta_Kim inserted
+// around the block, collapses the resulting gap to at most one blank line, and
+// normalizes to exactly one trailing newline. Restoring a file whose block was
+// appended therefore yields byte-for-byte the pre-append content. Interior user
+// text is never touched. Returns "" only when nothing but the block (and
+// surrounding whitespace) existed.
+function stripManagedTextBlockPreserveUserText(raw, relPath) {
+  const { begin, end } = managedTextBlockMarkers(relPath);
+  const escapedBegin = begin.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const escapedEnd = end.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const blockRe = new RegExp(
+    `(?:\\r?\\n)*${escapedBegin}[\\s\\S]*?${escapedEnd}(?:\\r?\\n)*`,
+    "g",
+  );
+  let out = String(raw ?? "").replace(blockRe, "\n\n");
+  out = out
+    .replace(/^(?:\r?\n)+/, "")
+    .replace(/(?:\r?\n){3,}/g, "\n\n")
+    .replace(/[ \t\r\n]+$/g, "");
+  return out.length ? `${out}\n` : "";
+}
+
 function equivalentText(left, right) {
   return String(left ?? "").replace(/\r\n/g, "\n").trimEnd() ===
     String(right ?? "").replace(/\r\n/g, "\n").trimEnd();
 }
 
+// Placeholder-only rewriting. The prior implementation ALSO globally replaced
+// Meta_Kim's own source absolute path (PROJECT_DIR, both slash forms) with the
+// target directory. That global replace is the root cause of cross-project path
+// pollution: maintainer-guide text like `<meta_kim_source>/canonical/...` was
+// rewritten into nonexistent target paths such as `<target>/canonical/...` when
+// a document was projected into an unrelated project. Portable/managed project
+// instructions must not carry any source-machine absolute path, so the safe
+// contract is: substitute ONLY the explicit, opt-in `__REPO_ROOT__` token.
+// The only files that legitimately use `__REPO_ROOT__` are canonical runtime
+// configs (mcp.json / hooks.json / spine hook), never prose docs.
 function rewriteProjectDirRefs(raw, targetDir) {
-  const sourceForward = PROJECT_DIR.replace(/\\/g, "/");
   const targetForward = targetDir.replace(/\\/g, "/");
-  return String(raw)
-    .replaceAll("__REPO_ROOT__", targetForward)
-    .replaceAll(sourceForward, targetForward)
-    .replaceAll(PROJECT_DIR, targetDir);
+  return String(raw).replaceAll("__REPO_ROOT__", targetForward);
 }
 
 function cloneJson(value) {
@@ -1865,6 +1992,142 @@ function plannedProtectedProjectDeployText(srcPath, destPath, relPath, targetDir
   return mergeManagedTextBlockPreserveBase(base, generated, rel);
 }
 
+// ── Project instruction policy: plan + apply ─────────────────────────────────
+
+// Portable, path-free instruction template body (portable policy). Returns null
+// when no template exists for the given rel. Run through the placeholder-only
+// rewrite for uniformity even though portable templates carry no paths.
+function readPortableInstructionTemplate(rel, targetDir) {
+  const templateRel = PORTABLE_INSTRUCTION_TEMPLATE_REL[rel];
+  if (!templateRel) return null;
+  const srcPath = join(PROJECT_DIR, templateRel);
+  if (!existsSync(srcPath)) return null;
+  return rewriteProjectDirRefs(readFileSync(srcPath, "utf8"), targetDir);
+}
+
+// Full Meta_Kim source maintainer guide body (managed policy, explicit opt-in
+// only). Read from the Meta_Kim source root; null when absent.
+function readManagedInstructionGuide(rel, targetDir) {
+  const srcPath = join(PROJECT_DIR, rel);
+  if (!existsSync(srcPath)) return null;
+  return rewriteProjectDirRefs(readFileSync(srcPath, "utf8"), targetDir);
+}
+
+// Pure: compute the target instruction file content under a policy. Never writes.
+// Returns { rel, exists, hasBlock, planned, changed }; planned === null means
+// "leave the file exactly as-is (or do not create it)".
+function planProjectInstruction(rel, targetDir, policy) {
+  const destPath = join(targetDir, rel);
+  const exists = existsSync(destPath);
+  const current = exists ? readFileSync(destPath, "utf8") : null;
+  const hasBlock = exists ? textHasManagedBlock(current, rel) : false;
+
+  let planned = null;
+  if (policy === "preserve") {
+    // Never create. Self-heal a previously appended managed block by restoring
+    // the user's original text. A file that is ONLY a Meta_Kim block (no user
+    // text) is left untouched here — that pure-projection case belongs to the
+    // dedicated --cleanup-projects path, not to preserve's protect-user-text job.
+    if (hasBlock) {
+      const restored = stripManagedTextBlockPreserveUserText(current, rel);
+      planned = restored === "" ? null : restored;
+    }
+  } else if (policy === "portable") {
+    const template = readPortableInstructionTemplate(rel, targetDir);
+    if (template) {
+      planned = mergeManagedTextBlockPreserveBase(current ?? "", template, rel);
+    }
+  } else if (policy === "managed") {
+    const guide = readManagedInstructionGuide(rel, targetDir);
+    if (guide) {
+      planned = mergeManagedTextBlockPreserveBase(current ?? "", guide, rel);
+    }
+  }
+
+  const changed = planned !== null && planned !== (current ?? "");
+  return { rel, exists, hasBlock, planned, changed };
+}
+
+function projectInstructionMergePolicy(policy) {
+  // managed reuses the original protected-text merge-policy label so opt-in
+  // managed behavior stays byte-compatible with the pre-fix managed block path.
+  return policy === "preserve"
+    ? "preserve_strip_managed_block"
+    : policy === "portable"
+      ? "portable_managed_block_preserve_user_text"
+      : "managed_block_preserve_user_text";
+}
+
+// Plan entries for the instruction files across the active targets, shaped to
+// flow through the existing bootstrap plan/backup/manifest machinery. Emits an
+// entry only when there is something to write OR the file already exists (so the
+// dry-run surfaces it as unchanged). Under the default preserve policy on a
+// project with no managed block, no entry is produced and the file is untouched.
+// Following the existing protected-text convention, any pending instruction
+// write is reported as "merge" (a managed block is merged into the base, or a
+// stale block is stripped from it) rather than a raw create/replace.
+function collectProjectInstructionPlans(activeTargets, targetDir, policy) {
+  const plans = [];
+  for (const rel of instructionRelsForTargets(activeTargets)) {
+    const info = planProjectInstruction(rel, targetDir, policy);
+    const willWrite = info.changed && info.planned !== null;
+    if (!willWrite && !info.exists) continue;
+    const effectiveAction = willWrite ? "merge" : "unchanged";
+    plans.push({
+      relPath: rel,
+      source: `project-instructions:${policy}`,
+      exists: info.exists,
+      contentStatus: willWrite ? "different" : "same",
+      ownership: "shared_config_merge",
+      action: "merge",
+      effectiveAction,
+      mergePolicy: projectInstructionMergePolicy(policy),
+      instructionPolicy: policy,
+    });
+  }
+  return plans;
+}
+
+// Fail-safe backup of a tracked instruction file into the TARGET project's local
+// Meta_Kim state (gitignored) before an in-place instruction rewrite/strip.
+function backupProjectInstructionFile(targetDir, rel) {
+  const from = join(targetDir, rel);
+  if (!existsSync(from)) return null;
+  try {
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+    const to = join(
+      targetDir,
+      ".meta-kim",
+      "backups",
+      "project-instructions",
+      stamp,
+      rel,
+    );
+    mkdirSync(dirname(to), { recursive: true });
+    cpSync(from, to);
+    return to;
+  } catch {
+    return null;
+  }
+}
+
+// Apply the instruction policy for one platform target. Returns the number of
+// instruction files written. Preserve strips an appended block; portable/managed
+// inject their respective block; no-ops leave the file byte-identical.
+function applyProjectInstructionsForPlatform(platformId, targetDir, policy) {
+  let count = 0;
+  for (const rel of instructionRelsForPlatform(platformId)) {
+    const { planned, changed } = planProjectInstruction(rel, targetDir, policy);
+    if (!changed || planned === null) continue;
+    const destPath = join(targetDir, rel);
+    backupProjectInstructionFile(targetDir, rel);
+    mkdirSync(dirname(destPath), { recursive: true });
+    writeFileSync(destPath, planned, "utf8");
+    count += 1;
+  }
+  return count;
+}
+
 function copyProjectDeployFile(srcPath, destPath, relPath, targetDir) {
   const rel = normalizeDeployRelPath(relPath);
   if (shouldSkipProjectDeployPath(rel)) return 0;
@@ -1904,17 +2167,15 @@ function copyDirRecursive(src, dest, context = {}) {
 function projectDeployRootsForPlatform(platformId) {
   const roots = [];
   const add = (srcRel, destRel = srcRel) => roots.push({ srcRel, destRel });
-  if (platformId === "claude" || platformId === "all") {
-    add("CLAUDE.md");
-  }
-  if (
-    platformId === "openclaw" ||
-    platformId === "codex" ||
-    platformId === "cursor" ||
-    platformId === "all"
-  ) {
-    add("AGENTS.md");
-  }
+  // Project instruction files (CLAUDE.md / AGENTS.md) are deliberately NOT
+  // deployed as roots here. Previously this function added the Meta_Kim source
+  // maintainer guide (root CLAUDE.md / AGENTS.md) as a deploy root, which forced
+  // every target project to receive Meta_Kim's own source-repo maintainer guide
+  // as a managed block. Instruction files are now governed by the project
+  // instruction policy (preserve | portable | managed) through
+  // collectProjectInstructionPlans() and applyProjectInstructionsForPlatform().
+  // The default policy is "preserve": ordinary projects keep their own
+  // AGENTS.md / CLAUDE.md untouched. See resolveProjectInstructionPolicy().
 
   // Replace whole-directory roots (.claude/.codex/.cursor/openclaw) with
   // explicit subpath roots so deploy only touches known runtime projection
@@ -2137,6 +2398,17 @@ function collectProjectDeployPlan(activeTargets, targetDir) {
       seen.add(plan.relPath);
       plans.push(plan);
     }
+  }
+  // Project instruction files (CLAUDE.md / AGENTS.md) are governed by the
+  // instruction policy, not by the deploy roots, so they are planned once here.
+  for (const plan of collectProjectInstructionPlans(
+    activeTargets,
+    targetDir,
+    resolveProjectInstructionPolicy(),
+  )) {
+    if (seen.has(plan.relPath)) continue;
+    seen.add(plan.relPath);
+    plans.push(plan);
   }
   return plans.sort((left, right) => left.relPath.localeCompare(right.relPath));
 }
@@ -3126,7 +3398,8 @@ function buildProjectBootstrapPlan(activeTargets, targetDir) {
     decisions: {
       defaultTargets:
         "config/sync.json defaultTargets are Claude Code + Codex; effective activeTargets may also come from an explicit --targets value or saved .meta-kim/local.overrides.json activeTargets.",
-      protectedMerge: "JSON configs use additive preserve-user-state merge; AGENTS.md/CLAUDE.md use managed text blocks; .codex/config.toml is skipped because Codex native controls belong to global host config.",
+      protectedMerge: "JSON configs use additive preserve-user-state merge; AGENTS.md/CLAUDE.md follow the project instruction policy (default preserve: not modified, and any previously appended Meta_Kim managed block is stripped to restore user text; portable/managed inject a block only on explicit opt-in); .codex/config.toml is skipped because Codex native controls belong to global host config.",
+      projectInstructions: `Project instruction policy for AGENTS.md/CLAUDE.md is "${resolveProjectInstructionPolicy()}" (default preserve). Override with --project-instructions=<preserve|portable|managed>, META_KIM_PROJECT_INSTRUCTIONS, or config/sync.json projectInstructions.`,
       firstTriggerFlow:
         "Global skill runs dry-run first, asks through the runtime native choice surface, then runs --apply only after user confirmation or trusted-auto policy.",
     },
@@ -3477,6 +3750,16 @@ function deployPlatformFiles(platformId, targetDir) {
     copyIfExists(root.srcRel, root.destRel);
   }
   fileCount += writeProjectGeneratedHooks(platformId, targetDir);
+  // Instruction files are governed by the project instruction policy, never by
+  // blind copy. Skip when the target IS the Meta_Kim source repo (its own
+  // AGENTS.md / CLAUDE.md are the maintainer guide source, not a projection).
+  if (!targetIsRepo) {
+    fileCount += applyProjectInstructionsForPlatform(
+      platformId,
+      targetDir,
+      resolveProjectInstructionPolicy(),
+    );
+  }
   return fileCount;
 }
 

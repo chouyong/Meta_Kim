@@ -16,6 +16,7 @@
     "claude",
     "codex"
   ],
+  "projectInstructions": "preserve",
   "canonicalRoots": {
     "agents": "canonical/agents",
     "skills": "canonical/skills",

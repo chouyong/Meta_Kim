@@ -39,6 +39,14 @@ function runBin(args, options = {}) {
   });
 }
 
+// This suite is the regression coverage for the *managed* instruction-block
+// projection (backup, replace-in-place, target-conditional boundaries, manifest,
+// retargeting). Since the default project-instruction policy is now the safe
+// "preserve" (which does NOT project the maintainer guide), these helpers pin
+// the explicit "managed" opt-in so the managed mechanics stay covered here. The
+// preserve/portable defaults are covered by project-instruction-policy.test.mjs.
+const INSTRUCTION_POLICY_ARG = "--project-instructions=managed";
+
 function runBootstrap(projectDir, extraArgs = []) {
   const result = runSetup([
     "--project-bootstrap",
@@ -47,6 +55,7 @@ function runBootstrap(projectDir, extraArgs = []) {
     "--project-dir",
     projectDir,
     "--json",
+    INSTRUCTION_POLICY_ARG,
     ...extraArgs,
   ]);
   assert.equal(result.status, 0, result.stderr || result.stdout);
@@ -61,6 +70,7 @@ function runBootstrapForTargets(projectDir, targets, extraArgs = []) {
     "--project-dir",
     projectDir,
     "--json",
+    INSTRUCTION_POLICY_ARG,
     ...extraArgs,
   ]);
   assert.equal(result.status, 0, result.stderr || result.stdout);
@@ -1028,6 +1038,9 @@ test("lazy project bootstrap does not report success for a read-only project tar
     writeFileSync(agentsPath, "# User Project\n\nRead-only local note.\n");
     chmodSync(agentsPath, 0o444);
 
+    // Force the managed policy so apply actually attempts to write the read-only
+    // AGENTS.md (the default preserve policy would leave it untouched, and this
+    // test's purpose is to prove a read-only write target fails loudly).
     const result = runSetup([
       "--project-bootstrap",
       "--targets",
@@ -1035,6 +1048,7 @@ test("lazy project bootstrap does not report success for a read-only project tar
       "--project-dir",
       projectDir,
       "--json",
+      "--project-instructions=managed",
       "--apply",
     ]);
     assert.notEqual(result.status, 0, "read-only target must not be reported as apply success");

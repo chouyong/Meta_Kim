@@ -154,6 +154,12 @@ function inspectProjectCase(baseDir, entry) {
     "--project-dir",
     projectDir,
     "--json",
+    // This matrix verifies the FULL formal projection boundary, which includes
+    // the AGENTS.md/CLAUDE.md instruction surface. The default project
+    // instruction policy is now the safe "preserve" (which does not project the
+    // maintainer guide), so exercise the explicit "managed" opt-in here to keep
+    // proving the instruction-file projection boundaries per target.
+    "--project-instructions=managed",
   ];
   const dryResult = runNode([...commonArgs, "--dry-run"]);
   const dryParsed = parseSetupJson(dryResult);

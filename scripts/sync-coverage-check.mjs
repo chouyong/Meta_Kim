@@ -101,6 +101,15 @@ const KNOWN_INTENTIONAL_EXCLUSIONS = [
     reason:
       "Hook candidates intentionally not projected; design parking area",
   },
+  // Portable project-instruction templates read directly by setup.mjs at deploy
+  // time when the project instruction policy is "portable". They are source
+  // templates for a target project's AGENTS.md/CLAUDE.md managed block, not
+  // runtime mirror files, so they are never projected into .claude/.codex/etc.
+  {
+    prefix: "shared/project-instructions/",
+    reason:
+      "Portable AGENTS.md/CLAUDE.md instruction templates consumed in-place by setup.mjs project instruction policy (portable); not a runtime mirror projection",
+  },
 ];
 
 // ── Helpers ───────────────────────────────────────────────────────────
