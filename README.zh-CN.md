@@ -1003,7 +1003,9 @@ Meta_Kim 本身采用 Apache License 2.0。以下可选技能仓库通过 `node 
 | [OthmanAdi/planning-with-files](https://github.com/OthmanAdi/planning-with-files) | MIT |
 | [HKUDS/CLI-Anything](https://github.com/HKUDS/CLI-Anything) | Apache 2.0 |
 | [garrytan/gstack](https://github.com/garrytan/gstack) | MIT |
-| [anthropics/skills](https://github.com/anthropics/skills) | 未声明许可证（© Anthropic, PBC） |
+| [KimYx0207/meta-skill-creator](https://github.com/KimYx0207/meta-skill-creator) | MIT |
+
+`meta-skill-creator` 只安装到当前明确支持的平台：Claude Code 使用 `~/.claude/skills/meta-skill-creator`；Codex 使用 `~/.agents/skills/meta-skill-creator`，并同步一份兼容副本到 `~/.codex/skills/meta-skill-creator`。Cursor 和 OpenClaw 当前不安装此 Skill。
 
 ### 可选 pip 包
 

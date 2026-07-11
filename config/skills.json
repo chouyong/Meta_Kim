@@ -179,15 +179,26 @@
       ]
     },
     {
-      "id": "skill-creator",
-      "repo": "anthropics/skills",
+      "id": "meta-skill-creator",
+      "repo": "${skillOwner}/meta-skill-creator",
       "installMethod": "subdirExtraction",
-      "subdir": "skills/skill-creator",
+      "subdir": "skills/meta-skill-creator",
+      "capabilities": [
+        "skill-agent-tool-creation"
+      ],
+      "platformSupport": {
+        "claude": {
+          "status": "native",
+          "adapter": "claude-global-skill"
+        },
+        "codex": {
+          "status": "native",
+          "adapter": "codex-global-skill"
+        }
+      },
       "targets": [
         "claude",
-        "codex",
-        "openclaw",
-        "cursor"
+        "codex"
       ]
     }
   ],

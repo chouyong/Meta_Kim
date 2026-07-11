@@ -1882,13 +1882,13 @@ function executionCapabilityDiscoveryRoute() {
   const wantsDiscovery = explicitDiscoveryRoute || /find|discover|search|寻找|发现/.test(taskText);
   const wantsCreation = /create|scaffold|generate|创建|生成/.test(taskText);
   const selectedSkillDiscovery = selectProvider("skills", ["findskill", "skill-scout", "skill-stocktake"]);
-  const selectedSkillCreation = selectProvider("skills", ["skill-creator", "create-agent", "agent-teams-playbook"]);
+  const selectedSkillCreation = selectProvider("skills", ["meta-skill-creator", "create-agent", "agent-teams-playbook"]);
   const selectedSkill = wantsDiscovery
     ? selectedSkillDiscovery ?? selectedSkillCreation
     : wantsCreation
       ? selectedSkillCreation ?? selectedSkillDiscovery
       : selectProvider("skills", ["tdd-workflow", "verification-loop", "meta-theory"]);
-  const selectedAgentCreation = selectProvider("skills", ["create-agent", "agent-teams-playbook", "skill-creator"]);
+  const selectedAgentCreation = selectProvider("skills", ["create-agent", "agent-teams-playbook", "meta-skill-creator"]);
   const selectedMcpServer = selectProvider("mcpServers", ["meta-kim-runtime", "repo-mcp", "codex-config-mcp"]);
   const selectedMcpTool = selectProvider("mcpTools", ["get_meta_runtime_capabilities", "list_meta_agents", "get_meta_agent"]);
   const selectedCommand = selectProvider("commands", ["meta-theory", "save-progress"]);

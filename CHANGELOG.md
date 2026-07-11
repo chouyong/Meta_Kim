@@ -8,6 +8,27 @@ The changelog explains the user-facing problem or risk each release solved, what
 
 ## Unreleased
 
+## [2.8.80] - 2026-07-11
+
+### Solved Problem
+
+Meta_Kim still installed and routed the external official `skill-creator` even though the project now has an owner-maintained `meta-skill-creator`. Changing only the repository entry was not enough: Claude Code and Codex use different user skill roots, Codex also needs a compatibility copy, empty dependency selections must remain empty, existing `skill-creator` trees must stay user-owned, and a failed multi-root update must not leave only part of the replacement installed.
+
+### Fixed
+
+- **Meta Skill Creator is now the formal skill-creation provider.** Dependency manifests, capability registries, routing, foundational validation, and evolution guidance select `KimYx0207/meta-skill-creator` for Claude Code and Codex instead of the external official package.
+- **Each runtime receives the skill through its actual discovery roots.** Claude Code installs to `~/.claude/skills`; Codex installs to `~/.agents/skills` and receives a synchronized `~/.codex/skills` compatibility copy, including when `CODEX_HOME` is customized.
+- **Install and update are transactional across all three targets.** Source validation and staging finish before live replacement; commit failures roll every target back, incomplete recovery reports retained backup paths, and symlink/Junction escapes fail closed.
+- **Existing `skill-creator` installations remain untouched.** Meta_Kim changes provider selection without deleting, migrating, or renaming user, compatibility, or Codex-bundled skill trees.
+- **Dependency selection and CLI queries are safe.** An explicit empty `--skills` selection installs nothing, while help and unknown arguments remain zero-write.
+
+### Verification
+
+- Installer transaction suite: `10/10` passed; focused routing, provider, and foundational suites: `10/10` passed.
+- Upstream commit `ace057d771c1baaa58811a00a2cbbdcad30d8e72` passed package and closed-loop validation; installed copies shared the exact `SKILL.md` SHA-256 `1528407a46fb3f47c035a831e91a8965f8a711f0ad6df458a7f7ef563d46d682`.
+- Fresh Claude Code and Codex read-only sessions discovered and read the installed `meta-skill-creator`; legacy user, compatibility, and Codex-bundled `skill-creator` tree hashes remained unchanged.
+- Standard full release gate: `npm run meta:verify:all` passed all `11/11` stages before the release metadata update; final release checks rerun the required version, package, and diff assertions.
+
 ## [2.8.79] - 2026-07-11
 
 ### Solved Problem

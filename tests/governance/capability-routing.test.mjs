@@ -391,7 +391,7 @@ test("routing fixtures recall internal patterns and platform/OS matrices", () =>
   assert.equal(smoke.recommendedRoute?.id, "execution-capability-discovery:codex:windows");
   assert.ok(!/^meta-/.test(smoke.recommendedRoute?.owner ?? ""), "Engineering smoke route must use an execution owner");
   assert.equal(smoke.recommendedRoute?.selectedCapabilityProviders?.skillDiscovery?.id, "findskill");
-  assert.equal(smoke.recommendedRoute?.selectedCapabilityProviders?.skillCreation?.id, "skill-creator");
+  assert.equal(smoke.recommendedRoute?.selectedCapabilityProviders?.skillCreation?.id, "meta-skill-creator");
   assert.equal(
     smoke.recommendedRoute?.selectedCapabilityProviders?.skillDiscovery?.platformId,
     "codex",
@@ -400,7 +400,7 @@ test("routing fixtures recall internal patterns and platform/OS matrices", () =>
   assert.equal(
     smoke.recommendedRoute?.selectedCapabilityProviders?.skillCreation?.platformId,
     "codex",
-    "Codex smoke route must prefer the Codex-installed skill-creator provider over same-name Claude Code skills",
+    "Codex smoke route must prefer the Codex-installed meta-skill-creator provider over same-name Claude Code skills",
   );
   assert.ok(smoke.recommendedRoute?.selectedCapabilityProviders?.agent, "Engineering smoke route must bind an execution agent provider");
   assert.notEqual(
@@ -416,6 +416,22 @@ test("routing fixtures recall internal patterns and platform/OS matrices", () =>
   );
   assert.ok(smoke.recommendedRoute?.selectedCapabilityProviders?.command || smoke.recommendedRoute?.selectedCapabilityProviders?.runtimeTool);
   assert.equal(smoke.routeExecutionGate?.canEnterExecution, true);
+
+  const claudeSmoke = route(
+    "Create a provider smoke test that discovers an execution agent, finds a skill provider, finds an MCP provider, and emits a verification command",
+    "claude_code",
+    "windows",
+  );
+  assert.equal(
+    claudeSmoke.recommendedRoute?.selectedCapabilityProviders?.skillCreation?.id,
+    "meta-skill-creator",
+    "Claude Code smoke route must select the replacement meta-skill-creator provider",
+  );
+  assert.equal(
+    claudeSmoke.recommendedRoute?.selectedCapabilityProviders?.skillCreation?.platformId,
+    "claudeCode",
+    "Claude Code smoke route must prefer the Claude Code-installed meta-skill-creator provider",
+  );
 
   const claudeAgentSearch = route(
     "在 Claude Code 里运行 agent 搜索不对 critical and fetch thinking and review",

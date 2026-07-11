@@ -1014,7 +1014,9 @@ Meta_Kim itself is licensed under Apache License 2.0. The following optional ski
 | [OthmanAdi/planning-with-files](https://github.com/OthmanAdi/planning-with-files) | MIT |
 | [HKUDS/CLI-Anything](https://github.com/HKUDS/CLI-Anything) | Apache 2.0 |
 | [garrytan/gstack](https://github.com/garrytan/gstack) | MIT |
-| [anthropics/skills](https://github.com/anthropics/skills) | No license declared (© Anthropic, PBC) |
+| [KimYx0207/meta-skill-creator](https://github.com/KimYx0207/meta-skill-creator) | MIT |
+
+`meta-skill-creator` is installed only for its currently declared targets: Claude Code at `~/.claude/skills/meta-skill-creator`, and Codex at `~/.agents/skills/meta-skill-creator` with a synchronized compatibility copy at `~/.codex/skills/meta-skill-creator`. Cursor and OpenClaw are not current installation targets for this skill.
 
 ### Optional pip Packages
 

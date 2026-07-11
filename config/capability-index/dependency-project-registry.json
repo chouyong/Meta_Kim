@@ -917,68 +917,87 @@
       }
     },
     {
-      "id": "skill-creator",
-      "name": "skill-creator",
+      "id": "meta-skill-creator",
+      "name": "meta-skill-creator",
       "source": {
         "type": "github",
-        "uri": "anthropics/skills",
+        "uri": "https://github.com/KimYx0207/meta-skill-creator",
         "localPath": null,
-        "inspectionStatus": "external_reference",
-        "lastInspectedAt": null
+        "inspectionStatus": "inspected_reference",
+        "lastInspectedAt": "2026-07-11",
+        "revision": "ace057d771c1baaa58811a00a2cbbdcad30d8e72",
+        "subdir": "skills/meta-skill-creator"
       },
       "capabilityCard": {
-        "oneLine": "Dependency capability for skill-creator.",
+        "oneLine": "Design, refactor, review, and validate reusable Agent Skill packages with evidence-backed release gates.",
         "canDo": [
-          "external_capability"
+          "skill_package_design",
+          "skill_package_refactor",
+          "skill_package_review",
+          "skill_package_validation"
         ],
         "canNotDo": [
-          "automatic execution without trust review"
+          "turn one-off prompts into durable skills without gap proof",
+          "claim runtime or release proof from structural validation alone"
         ],
         "inputContract": {
           "requires": [
-            "matched task shape",
-            "trust review when third-party"
+            "repeatable workflow or existing skill package",
+            "target runtime and desired delivery boundary",
+            "evidence and acceptance criteria"
           ]
         },
         "outputContract": {
           "produces": [
-            "skill-specific artifact or reference evidence"
+            "reviewable Agent Skill package",
+            "validation evidence",
+            "release readiness and writeback decision"
           ]
         },
         "triggerConditions": [
-          "skill-creator"
+          "meta-skill-creator",
+          "create, refactor, review, or validate a reusable skill package"
         ],
         "verificationMethod": "npm run meta:deps:compat",
         "risk": [
-          "third_party_skill_requires_trust_review"
+          "external skill content requires trust review before execution",
+          "upstream main can change after the inspected revision"
         ],
-        "routeEligibility": "external_reference",
+        "routeEligibility": "installed_skill_candidate",
         "notFor": [
-          "automatic execution without trust review"
+          "one-off prompt rewriting",
+          "automatic durable writeback without review"
         ],
         "taskShapes": [
-          "external_capability"
+          "skill_creation",
+          "skill_refactor",
+          "skill_review",
+          "skill_release_preparation"
         ],
-        "writebackKey": "dependency:skill-creator",
+        "writebackKey": "dependency:meta-skill-creator",
         "verificationMethods": [
-          "npm run meta:deps:compat"
+          "npm run meta:deps:compat",
+          "python scripts/check_meta_skill_package.py .",
+          "python scripts/check_closed_loop.py ."
         ]
       },
       "interface": {
-        "invokeAs": "reference",
-        "invocationPath": null,
-        "preferredWeaponId": "skill-creator-skill",
-        "requiredFiles": [],
+        "invokeAs": "skill",
+        "invocationPath": "runtime-discovered meta-skill-creator skill root",
+        "preferredWeaponId": "meta-skill-creator-skill",
+        "requiredFiles": [
+          "SKILL.md",
+          "scripts/check_meta_skill_package.py",
+          "scripts/check_closed_loop.py"
+        ],
         "requiredEnv": [],
         "requiredRuntime": [
           "claude_code",
-          "codex",
-          "cursor",
-          "openclaw"
+          "codex"
         ]
       },
       "scoring": {
-        "overall": 62
+        "overall": 88
       },
       "reusePolicy": {
         "reuseWhenScoreAbove": 80,
@@ -991,13 +1010,16 @@
         "successCount": 0,
         "failureCount": 0,
         "lastFailureReason": null,
-        "nextRunHints": []
+        "nextRunHints": [
+          "Prefer meta-skill-creator for skill package creation routes.",
+          "Keep structural checks separate from runtime and human acceptance evidence."
+        ]
       },
       "runtimeSupport": {
         "claude_code": "partial",
         "codex": "partial",
-        "cursor": "partial",
-        "openclaw": "partial"
+        "cursor": "unknown",
+        "openclaw": "unknown"
       },
       "osSupport": {
         "macos": "partial",
@@ -1006,10 +1028,15 @@
         "wsl2": "partial"
       },
       "supportEvidence": {
-        "source": "repo_claim",
-        "confidence": "repo_claim",
+        "source": "github_source_inspection_and_local_runtime_home_presence",
+        "confidence": "inspected_source_and_local_presence",
         "verificationCommand": "npm run meta:deps:compat",
-        "lastVerifiedAt": null
+        "lastVerifiedAt": "2026-07-11",
+        "evidence": [
+          "GitHub HEAD ace057d771c1baaa58811a00a2cbbdcad30d8e72 contains skills/meta-skill-creator/SKILL.md and its package validators.",
+          "Upstream README documents global Claude Code and Codex installation paths.",
+          "No upstream Cursor or OpenClaw installation contract was found, so those runtimes remain unknown."
+        ]
       }
     }
   ]

@@ -43,7 +43,7 @@ const REQUIRED_SKILL_IDS = [
   "planning-with-files",
   "cli-anything",
   "gstack",
-  "skill-creator",
+  "meta-skill-creator",
 ];
 
 const REQUIRED_RUNTIME_CAPABILITIES = [

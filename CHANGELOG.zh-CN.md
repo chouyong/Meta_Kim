@@ -8,6 +8,27 @@
 
 ## Unreleased
 
+## [2.8.80] - 2026-07-11
+
+### 解决的问题
+
+Meta_Kim 仍在安装和路由外部官方 `skill-creator`，但项目现在已经有维护边界更清楚、验收能力更完整的 `meta-skill-creator`。只替换仓库地址并不够：Claude Code 与 Codex 使用不同的用户 Skill 根目录，Codex 还需要兼容副本；空依赖选择必须保持为空；已有 `skill-creator` 必须继续归用户所有；多目录更新失败时也不能只安装成功一部分。
+
+### 修复
+
+- **Meta Skill Creator 成为正式的 Skill 创建 provider。** 依赖清单、能力索引、路由、基础能力校验和演化指引统一选择 `KimYx0207/meta-skill-creator`，不再把外部官方包作为 Claude Code/Codex 的默认创建能力。
+- **按照宿主真实发现目录安装。** Claude Code 安装到 `~/.claude/skills`；Codex 安装到 `~/.agents/skills`，并同步 `~/.codex/skills` 兼容副本；自定义 `CODEX_HOME` 时正式用户目录仍保持正确。
+- **三个目标目录使用同一个安装/更新事务。** 新包先完成验证与 staging，再替换 live 目录；中途失败会回滚全部目标，恢复不完整时明确保留备份路径，符号链接/Junction 越界会失败关闭。
+- **已有 `skill-creator` 完全不处理。** Meta_Kim 只改变 provider 选择，不删除、迁移或重命名用户副本、兼容副本或 Codex 系统内置 Skill。
+- **依赖筛选与 CLI 查询保持安全。** 显式空 `--skills` 不安装任何依赖；帮助和未知参数继续保证零写入。
+
+### 验证
+
+- 安装事务专项测试 `10/10` 通过；路由、provider 和基础能力聚焦套件 `10/10` 通过。
+- 上游 commit `ace057d771c1baaa58811a00a2cbbdcad30d8e72` 通过包结构与闭环校验；三份安装副本的 `SKILL.md` SHA-256 均为 `1528407a46fb3f47c035a831e91a8965f8a711f0ad6df458a7f7ef563d46d682`。
+- Claude Code 与 Codex 全新只读会话均发现并读取了已安装的 `meta-skill-creator`；用户、兼容和 Codex 系统内置的旧 `skill-creator` 整树哈希保持不变。
+- 标准完整发布门 `npm run meta:verify:all` 在更新发布元数据前通过全部 `11/11` 阶段；最终发布检查会重跑版本、包内容和 diff 断言。
+
 ## [2.8.79] - 2026-07-11
 
 ### 解决的问题
