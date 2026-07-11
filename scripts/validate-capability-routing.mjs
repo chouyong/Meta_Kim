@@ -2,6 +2,7 @@
 import { spawnSync } from "node:child_process";
 import process from "node:process";
 import { assert } from "./governance-lib.mjs";
+import { evaluateGlobalPluginCoverage } from "./plugin-coverage-contract.mjs";
 
 function route(task, runtime = "auto", os = "auto") {
   const result = spawnSync(process.execPath, ["scripts/select-execution-route.mjs", "--task", task, "--runtime", runtime, "--os", os, "--json"], {
@@ -61,7 +62,11 @@ assert(
   fuzzy.ownerDiscoveryPacket.projectRuntimeCapabilityProviders.some((provider) => provider.id?.startsWith("package-script:") && provider.sourceRef?.startsWith("package.json#scripts.")),
   "Route output must expose package.json scripts as real command providers",
 );
-assert(fuzzy.ownerDiscoveryPacket?.capabilityProviderCoverage?.localGlobalCached?.plugins >= 1, "Route output must expose cached global plugin provider coverage");
+const pluginCoverageResult = evaluateGlobalPluginCoverage(
+  fuzzy.ownerDiscoveryPacket?.capabilityProviderCoverage?.localGlobalCached,
+  fuzzy.ownerDiscoveryPacket?.globalInventoryFreshness,
+);
+assert(pluginCoverageResult.ok, pluginCoverageResult.message ?? "Route output must expose cached global plugin provider coverage");
 assert(fuzzy.ownerDiscoveryPacket?.runtimeToolProviders?.some((provider) => provider.type === "runtimeTools"), "Route output must expose runtime tool providers");
 assert(fuzzy.ownerDiscoveryPacket?.capabilityProviderCoverage?.projectRuntimeLightScan?.runtimeTools >= 1, "Route output must count runtime tool providers");
 assert(fuzzy.ownerDiscoveryPacket?.globalInventoryFreshness?.mode === "cached_global_inventory_plus_project_light_scan", "Route output must expose cached+light-scan freshness policy");

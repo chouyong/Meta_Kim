@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import process from "node:process";
 import test from "node:test";
+import { evaluateGlobalPluginCoverage, GLOBAL_PLUGIN_COVERAGE_REFRESH_COMMAND } from "../../scripts/plugin-coverage-contract.mjs";
 
 function route(task, runtime = "auto", os = "auto", extraArgs = []) {
   const result = spawnSync(process.execPath, ["scripts/select-execution-route.mjs", "--task", task, "--runtime", runtime, "--os", os, "--json", ...extraArgs], { encoding: "utf8" });
@@ -100,9 +101,13 @@ test("routing fixtures recall internal patterns and platform/OS matrices", () =>
       "global_only route validation must rely on cached global hook providers",
     );
   }
+  const realPluginCoverage = evaluateGlobalPluginCoverage(
+    fuzzy.ownerDiscoveryPacket?.capabilityProviderCoverage?.localGlobalCached,
+    fuzzy.ownerDiscoveryPacket?.globalInventoryFreshness,
+  );
   assert.ok(
-    fuzzy.ownerDiscoveryPacket?.capabilityProviderCoverage?.localGlobalCached?.plugins >= 1,
-    "cached global plugin providers must be counted without per-run full scan",
+    realPluginCoverage.ok,
+    `cached global plugin coverage contract must hold on the real route output: ${realPluginCoverage.message ?? ""}`,
   );
   assert.ok(
     fuzzy.ownerDiscoveryPacket?.runtimeToolProviders?.some((provider) => provider.type === "runtimeTools"),
@@ -637,4 +642,67 @@ test("provider budget keeps runtime config + rules + package-script inside the 8
     ),
     "at least one package-script provider must stay visible inside the 80-slot budget",
   );
+});
+
+test("global plugin coverage contract: deterministic matrix independent of local plugin install", () => {
+  // These cases exercise the shared contract directly with synthetic inputs, so
+  // they do NOT depend on whether this machine actually has global plugins
+  // installed. The real-route assertion inside the first test covers the
+  // integration path; this test pins the contract's exact pass/fail boundaries.
+  const fresh = { stale: false, generatedAt: "2026-07-11T17:21:03.527Z" };
+  const missing = { stale: true, generatedAt: null };
+  const staleOld = { stale: true, generatedAt: "2020-01-01T00:00:00.000Z" };
+  const freshFlagButNoGeneratedAt = { stale: false, generatedAt: null };
+
+  // (2) plugins >= 1 + fresh cache -> pass
+  const present = evaluateGlobalPluginCoverage({ plugins: 3 }, fresh);
+  assert.equal(present.ok, true);
+  assert.equal(present.reason, "plugin_coverage_present");
+
+  // (2) plugins >= 1 must pass regardless of freshness (freshness-agnostic)
+  const presentEvenIfStale = evaluateGlobalPluginCoverage({ plugins: 2 }, missing);
+  assert.equal(presentEvenIfStale.ok, true, "plugins >= 1 must pass even when the inventory is stale/missing");
+
+  // (3) plugins === 0 + stale:false + generatedAt present -> legitimate zero, pass
+  const legitimateZero = evaluateGlobalPluginCoverage({ plugins: 0 }, fresh);
+  assert.equal(legitimateZero.ok, true);
+  assert.equal(legitimateZero.reason, "plugin_coverage_legitimate_zero_fresh_inventory");
+  assert.equal(legitimateZero.message, null);
+
+  // (4) plugins === 0 + cache missing -> fail, and must point to discover:global
+  const zeroMissing = evaluateGlobalPluginCoverage({ plugins: 0 }, missing);
+  assert.equal(zeroMissing.ok, false);
+  assert.equal(zeroMissing.reason, "plugin_coverage_zero_with_stale_or_missing_inventory");
+  assert.match(zeroMissing.message, /discover:global/);
+
+  // (4) plugins === 0 + cache stale (old generatedAt, stale:true) -> fail
+  const zeroStale = evaluateGlobalPluginCoverage({ plugins: 0 }, staleOld);
+  assert.equal(zeroStale.ok, false);
+  assert.match(zeroStale.message, /discover:global/);
+
+  // (4) plugins === 0 + stale:false but generatedAt null -> fail (generatedAt required)
+  const zeroNoGeneratedAt = evaluateGlobalPluginCoverage({ plugins: 0 }, freshFlagButNoGeneratedAt);
+  assert.equal(zeroNoGeneratedAt.ok, false);
+  assert.match(zeroNoGeneratedAt.message, /discover:global/);
+
+  // (1)/(5) structural anomalies must fail and never be treated as a legitimate zero
+  for (const badCoverage of [
+    {},                                     // plugins field missing
+    { plugins: "3" },                      // wrong type (string)
+    { plugins: -1 },                       // negative
+    { plugins: Number.NaN },               // NaN
+    { plugins: Number.POSITIVE_INFINITY }, // Infinity
+    null,                                   // localGlobalCached missing entirely
+  ]) {
+    const structural = evaluateGlobalPluginCoverage(badCoverage, fresh);
+    assert.equal(structural.ok, false, `structural anomaly must fail: ${JSON.stringify(badCoverage)}`);
+    assert.equal(structural.reason, "plugin_coverage_structural_invalid");
+  }
+
+  // legitimate passes must NOT emit the refresh hint (avoid false alarms)
+  assert.equal(/discover:global/.test(present.message ?? ""), false);
+  assert.equal(/discover:global/.test(legitimateZero.message ?? ""), false);
+
+  // single refresh directive, reused everywhere
+  assert.equal(GLOBAL_PLUGIN_COVERAGE_REFRESH_COMMAND, "npm run discover:global");
 });
