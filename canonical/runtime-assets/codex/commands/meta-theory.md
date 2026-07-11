@@ -33,12 +33,14 @@ Then relay the compact stdout notice and the returned report path in chat. Use `
 
 Codex execution rule:
 
-**DISPATCH IS MANDATORY.** The main thread is the dispatcher, never the executor. Before producing >3 sentences of execution-layer analysis yourself, STOP and dispatch via `spawn_agent` instead.
+**HOST-NATIVE FAN-OUT PREFERRED.** The main thread is the dispatcher, never the executor. Use Codex's native `spawn_agent` directly to fan out independent worker lanes — the governed runner only records evidence, discovers capabilities, and suggests lanes; it does not enforce dispatch.
 
-- This `/meta-theory` invocation is explicit user authorization to use Codex sub-agent delegation and parallel agent work.
+- This `/meta-theory` invocation authorizes safe native fan-out when Thinking proves 2+ independent lanes and collision/workspace/external-write safety. Direct parallel-agent wording and structured governance-chain requests are strong activation examples, not exclusive gates; native choice remains reserved for branch-changing decisions.
+- Use the active Codex host's top-level native `spawn_agent` with `task_name`, `message`, and `fork_turns`. Derive `task_name` from the worker `roleInstanceId`/`taskPacketId`, normalized to lowercase letters, digits, and underscores. Put the selected `ownerAgent`, owner source, capability/loadout, bounded scope, output contract, and merge owner in `message`.
+- Default `fork_turns` to `none` when the bounded worker message is complete. Use `all` or a positive integer string only when the worker genuinely needs parent-turn context. Do not pass `agent_type` or `fork_context`.
 - Use `agent-teams-playbook` after Thinking and before Execution when the plan has 2+ executable worker lanes whose DAG dependencies, collision boundaries, workspace isolation, and external-write policy prove safe fan-out; record `not_required` for fewer lanes and partial/degraded for unsafe fan-out. Resolve it from the first available skill root (`~/.codex/skills/agent-teams-playbook/SKILL.md`, `.agents/skills/agent-teams-playbook/SKILL.md`, or a configured dependency root). Treat it as a selected fan-out adapter unless a live Skill/Agent Team/spawn_agent tool call is attached.
-- Then use the active Codex host's real subagent tool with capability-matched Meta_Kim agents. If no plain `spawn_agent` tool is visible, call tool discovery for `spawn_agent subagent multi-agent` and use the exposed callable tool name, for example `multi_agent_v1.spawn_agent`. Record the exact tool name and returned agent id in host invocation evidence. The main thread clarifies, routes, verifies, and synthesizes; it must not do multi-agent execution work by itself.
-- If no callable subagent tool is available after discovery, record the checked tool names and blocked reason; do not silently continue as main-thread execution.
+- When authorization exists, use the active Codex host's real top-level `spawn_agent` tool and record the exact tool name, task name, returned agent/task id, and worker mapping in host invocation evidence. Do not discover or fall back to a legacy namespaced spawn API. The main thread clarifies, routes, verifies, and synthesizes; it must not do multi-agent execution work by itself.
+- If authorization or a callable subagent tool is missing after discovery, record the checked tool names and blocked/degraded reason; do not silently continue as main-thread execution or claim live fan-out.
 
 ## Prompt Acceptance
 
@@ -48,7 +50,7 @@ This command adapter binds `governance-orchestration`, `capability-discovery-and
 
 - User request from `$ARGUMENTS`.
 - The project `meta-theory` skill from a configured skill root.
-- Codex agent delegation capability or an explicit blocked reason when unavailable.
+- Codex agent delegation authorization and capability, or an explicit blocked/degraded reason when unavailable.
 - Rendered installed Meta_Kim package root, or source-checkout `package.json` with `meta:theory:run:notice` for auditable artifact generation.
 
 ## Pass

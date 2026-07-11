@@ -6,6 +6,317 @@
 
 更新说明先解释本次解决的用户痛点或风险，再说明为了解决它改了什么、为什么重要。过细的内部任务编号、低价值 backlog id 和实现流水账不放在这里；需要精确证据时，请看 Git 历史、测试、生成报告和 PRD 产物。
 
+## Unreleased
+
+## [2.8.78] - 2026-07-11
+
+### 解决的问题
+
+治理 runner 仍可能把编排说得比宿主证据更完整：已配置 provider、可调用探针、fixture、普通 shell 调用或 runner 自己生成的结果，都可能被错误升级成真实调用；号称干净的测试也仍可能读到真实用户 Skill、同级依赖仓库或临时状态残留。
+
+### 修复
+
+- **真实编排不能再由测试自己给自己发合格证。** readiness probe、MCP `--self-test`、已配置 provider、命中的 Hook、fixture 字符串、公开 CLI 信任开关，以及 runner 内部生成的 worker 计划，都不再算真实调用证据。
+- **调用覆盖改为逐个 binding 验收。** 每个已选中的能力类型、provider 和任务 binding 都必须对应到外部观察到的宿主事件；一条能力类型级证据不能覆盖其他 lane 或 provider。
+- **新增 Codex CLI 与 Claude Code 的干净环境宿主观察入口。** 测试使用正式打包快照、隔离的用户目录、运行时目录和临时目录，不读取全局库存或 sibling 仓库；输入是不泄露能力名称和并发暗示的普通业务任务。观察器只能报告实际发生了什么，不能自己把报告升级成可选的最高等级 `live-certified`；只有该认证才要求独立的私有签名与逐 binding 对账器。
+- **MCP 新增真实传输层验收。** 新探针会实际完成 `initialize`、`tools/list` 和 `tools/call`；只列工具的 self-test 仍只算 readiness 证据。
+- **固定版本依赖的 Windows 归档回退可用。** 干净安装通过 Git commit，或 GitHub 归档的 commit 前缀 + 精确 Skill 哈希验证 agent-teams-playbook v4.8.0；Windows tar 无法处理中文文件名时，改用防路径穿越/链接逃逸的 Python 解包。
+- **归档和认证材料处理改为失败关闭。** 依赖归档在解压前限制下载体积，并检查成员路径、类型、数量和展开大小；解压使用隔离 staging。复制的 Codex 认证会先销毁再决定是否保留诊断目录，Windows CLI 提示词也不再经过 `cmd.exe` 展开。
+- **发布验证明确拆成不同保障等级。** `meta:verify:all` 是标准完整发布门，完整通过即可进行普通发布；`meta:verify:live-certified` 会重新执行标准链，再追加固定 Ed25519 公钥的外部观察门。只续跑最后一步不能冒充 `live-certified`，调用者不能替换信任公钥，readiness probe 也不再影响逐 binding 的真实调用覆盖。
+- **fan-out 提示不再伪造 Fetch 证据。** 普通自然语言中的多范围信号只会标记“可能适合拆分”；必须真实完成能力发现，并由 Thinking 证明 lane 独立，才允许进入执行派发。
+- **历史示例不再重复发布个人绝对路径。** 面向读者的更新记录和规划路径 fixture 改用可移植占位符，不再携带具体用户目录和项目目录。
+
+### 验证
+
+- `node --test tests/governance/live-evidence-boundary.test.mjs`
+- `node scripts/validate-product-experience-core-goals.mjs`
+- `node scripts/live-acceptance/probe-mcp-transport.mjs`
+- `node scripts/live-acceptance/run-clean-room-live-acceptance.mjs --preflight`
+- 最终聚焦回归：发布/证据 `16/16`、setup/归档 `28/28`、核心编排 `191/191` 全部通过。
+- 最终源码上的标准完整 `meta:verify:all`：第 1-8 阶段通过，已满足普通发布门。单独可选的 `meta:verify:live-certified` 因 `private_attested_exact_binding_report_missing` 尚不可用；因此这个候选版本不能宣称 `live-certified`，但缺少外部签名不阻止标准打标签和发布。
+- 去掉并发暗示后的本机诊断对照组：纯只读对照没有调用 Agent、Skill、MCP 或已选项目 Command，因此今后不再拿该对照组冒充 fan-out 验收。这只是诊断观察，不是 `live-certified` 签名证据。
+- 本机治理运行诊断观察到 Claude Code 使用了 Agent、Skill、Hook 和 runtime tool。MCP 可调用但本次路线未选择，普通 shell 也没有再冒充项目 Command；在独立观察器逐个签名所选 binding 前，这些事件不能支持可选的 `live-certified` 声明，但它们不是标准发布等级的必需条件。
+- 当真实用户的 `~/.agents/skills` 存在时，Codex CLI 干净环境会在宿主启动前直接阻断；当前 CLI 即使隔离 HOME/CODEX_HOME 仍会读取该目录。CLI 证据继续与 Codex Desktop 分开。
+
+## [2.8.77] - 2026-07-10
+
+### 解决的问题
+
+当前 Codex 宿主已经提供顶层原生 `spawn_agent(task_name, fork_turns, message)`。但未发布路线仍在输出已经移除的 typed/namespaced 参数形态，导致本来正确的 owner 复用计划仍可能调用失败或显示成错误的宿主路线。迁移时还必须证明：删除 Codex 专属旧字段不会削弱 Claude Code 独立的原生 Agent/Task 路线。
+
+### 改动
+
+- **Codex 现在只输出新版原生任务计划。** 路由使用顶层 `spawn_agent`，携带清洗后的 `task_name`、受边界约束的 worker `message` 和最小 `fork_turns`，不再输出 typed/namespaced 回退参数。
+- **继续复用 owner，但不再假装宿主加载了某个 agent type。** `ownerAgent`、owner 来源、能力装载、lane、合并负责人和可见绑定仍保留在 worker packet/message 中；运行时任务名只表示本次任务实例。
+- **阶段链触发和 Hook 状态已经统一，但不会跳过 Thinking。** 结构化 Critical/Fetch/Thinking/Review 入口无需用户再补“并行 Agent”关键词，会先标记为 `fanout_eligible`；只有 Thinking 真正产出 2 个以上互不依赖、同属一个并行组、具备合并负责人和冲突边界的 worker packet 后，才进入 `fan_out_ready`。
+- **Claude Code 独立支持保持不变。** Claude Code 继续使用自己的原生 Agent/Task 和 SubagentStart；矩阵回归测试会保护 agent、subagent、custom agent 的 native 声明。
+- **`agent-teams-playbook` 不再强制表演回退链。** 已有 Agent/Skill/Tool/Command/MCP provider 一旦匹配就停止搜索；只有真实能力缺口才做外部 Skill 搜索，原生 Agent 成功派发不会因为可选 Skill 未安装而被错标成 fallback。
+- **依赖 checkout 解析现在区分运行时。** 本地开发优先使用 sibling 上游仓库，避免旧全局包抢先；Claude Code 扫描 `.claude`/`~/.claude`，Codex 扫描 `.agents`/`~/.codex`。
+
+### 验证
+
+- `node --test tests/meta-theory/01-structural.test.mjs tests/meta-theory/11-eight-stage-spine.test.mjs tests/meta-theory/47-meta-theory-entry-classifier.test.mjs tests/meta-theory/50-parallel-execution-lanes.test.mjs`
+- `node --test tests/governance/capability-routing.test.mjs tests/governance/fanout-completion-gate.test.mjs tests/governance/runtime-capability-matrix.test.mjs`
+- `npm run meta:route:validate`
+- `npm run meta:verify:governance`
+- `npm run meta:release:smoke`
+- `npm run meta:check:global:release`
+- `git diff --check`
+
+## [2.8.76] - 2026-07-06
+
+### 解决的问题
+
+Codex 里仍然会看起来像是在“创建智能体”，更关键的是：当治理 fan-out 请求使用空格串联的能力锚点，或使用中文句号/换行而不是逗号时，路由仍可能塌成过少的 worker lane。这样从可见运行结果上很难相信它真的在复用全局 agent。
+
+### 改动
+
+- **空格串联的能力锚点现在会拆成复用全局 agent 的 lane。** Meta-governed Codex 任务里，平台 adapter、能力账本、路由、上传证据等工作会产出多个 worker packet，不再只落到一个宽泛 worker。
+- **自然句子边界也算 lane 边界。** 换行、中英文句号/问号/感叹号都会进入 lane 提取；如果自然分段已经覆盖了某个能力，锚点补拆不会再重复生成额外 lane。
+- **回归测试检查 typed 全局 owner 复用。** 新测试断言 Codex fan-out worker 通过 `typed_spawn` 绑定已有发现到的 agent owner，而不是发明临时 owner 或创建持久投影 agent。
+
+### 验证
+
+- `node --test tests/meta-theory/50-parallel-execution-lanes.test.mjs tests/governance/capability-routing.test.mjs`
+- `node --test tests/meta-theory/26-core-mvp-acceptance.test.mjs tests/meta-theory/30-capability-gap-complete-product.test.mjs tests/meta-theory/32-meta-theory-four-product-targets.test.mjs`
+- `npm run meta:route:validate`
+- `npm run meta:release:smoke`
+
+## [2.8.75] - 2026-07-06
+
+### 解决的问题
+
+`2.8.74` 修的是用户明确说“派发 / 并行”时的纠偏，但设计仍然太窄。Meta_Kim / `meta-theory` 触发本身就应该代表“进入治理执行，并在 Thinking 证明可拆、安全时自动 fan-out”。用户不应该在已经进入治理执行后，还要再补一句“派发”、特定结构化链路，或再过一个 native choice panel。
+
+### 改动
+
+- **Meta 触发现在授权 safe fan-out。** 显式 `meta-theory`、`/meta-theory`、`元理论`、自然语言治理执行入口，以及结构化链路变体，在 scope 可拆时都会产生 `meta_theory_trigger_request`，不再等待 native choice surface 才能并行。
+- **自动 fan-out 不抢具体业务路由。** 主观 UI 请求仍走 `subjective-ui-design-orchestration` 并保留必要 native choice；Meta 触发只附加 fan-out 元数据，不覆盖更具体的业务路线。
+- **Codex route selection 把 Meta 触发当自动 fan-out。** 当 scope 可拆时，route 会产出多个 agent-owned worker packets，并带 typed Codex `spawn_agent` 绑定和 agent-teams fan-out adapter。
+- **canonical 文档删掉“普通 meta-theory 不算授权”的错误规则。** Native choice 仍用于会改变路线、范围、风险或验收标准的决策，但不再作为 Meta_Kim 触发后允许安全并行的前置许可。
+
+### 验证
+
+- `node --test tests/meta-theory/47-meta-theory-entry-classifier.test.mjs tests/governance/capability-routing.test.mjs` -> 20 个入口分类测试和 capability-routing fixtures 通过。
+- `npm run meta:route:validate` -> 通过。
+- `npm run meta:sync` -> 项目 runtime 投影 manifest 已刷新。
+- `npm run meta:release:smoke` -> 1106 通过，0 失败，5 跳过；integration 通过。
+
+## [2.8.74] - 2026-07-06
+
+### 解决的问题
+
+`2.8.73` 把治理路由和 live subagent 授权分开后，Codex 里仍有一个实际 fan-out 缺陷：用户直接纠正“我要的是派发 / 并行”时，入口分类器虽然识别到了 fan-out 信号，却仍可能把它留在 `fast_path`。即使进入路由，中文里的“规则、runtime、测试缺口”这类可拆范围也可能合并成一个 worker，或者把 lane 绑定到 skill，而不是可复用的 Codex agent owner，结果用户看到的还是协议解释，不是真并行派发。
+
+### 改动
+
+- **直接“派发/并行”现在就是治理执行入口。** “派发”“并行”等中文纠偏会进入标准治理路径，成为 fan-out eligible，并作为 Codex subagent 的直接授权来源。
+- **显式 fan-out 优先绑定 agent owner。** 用户要求 agent fan-out 时，每个 worker lane 先绑定可复用的 Codex 全局/项目 agent owner；skill、command、MCP tool、runtime tool 只作为 loadout 或依赖，不替代 lane owner。
+- **中文范围能正确拆并行 lane。** route selection 现在把中文逗号、顿号、分号、冒号也当成 lane 分隔符，所以“规则、runtime、测试缺口”能产出多个 worker packets。
+- **测试锁住真实派发形状。** 回归测试要求直接并行派发必须产出多个 agent-owned worker packets，且每个 Codex worker 都带 typed `spawn_agent` 绑定，并选择 agent-teams fan-out adapter。
+
+### 验证
+
+- `node --test tests/meta-theory/47-meta-theory-entry-classifier.test.mjs tests/governance/capability-routing.test.mjs` -> 18 个入口分类测试和 capability-routing fixtures 通过。
+- `npm run meta:route:validate` -> 通过。
+- `npm run meta:sync` -> 项目 runtime 投影 manifest 已刷新。
+- `npm run meta:release:smoke` -> 1105 通过，0 失败，5 跳过；integration 通过。
+
+## [2.8.73] - 2026-07-05
+
+### 解决的问题
+
+`meta-theory` 能进入治理 run，也能产出并行 worker lanes，但 Codex 里仍可能由主线程串行执行，因为文档和测试把 `meta-theory` 触发误当成了 live `spawn_agent` 授权。真实 Codex 会话里，这会让“多 agent 编排”只出现在协议文本里，实际没有任何宿主 subagent 调用。
+
+### 改动
+
+- **治理路由和 live subagent 授权分开。** `meta-theory` 只代表进入治理路由和可并行候选；Codex live subagent fan-out 现在必须有明确 subagent / delegation / parallel-agent 措辞，或已经完成命名 parallel-agent route 的 native choice。
+- **静默串行兜底会被 gate 抓住。** Codex 已选 `spawn_agent` lane 但 0 个实际 dispatch 时，除非有有效 degraded state，否则 fan-out completion gate 会触发。
+- **调用真值新增 `not_authorized` 状态。** capability truth packets、contracts、reports 和产品目标校验现在区分“未授权”“宿主工具不可用”和“被阻断”。
+- **Codex command/runtime 文档不再过度承诺 `/meta-theory`。** command adapter 现在明确：`/meta-theory` 授权的是治理路由；live delegation 仍取决于明确授权和可调用宿主工具。
+
+### 验证
+
+- `node --test tests/meta-theory/32-meta-theory-four-product-targets.test.mjs tests/meta-theory/34-run-deliverables.test.mjs tests/governance/fanout-completion-gate.test.mjs tests/meta-theory/47-meta-theory-entry-classifier.test.mjs` -> 48/48 通过。
+- `node scripts/validate-product-experience-core-goals.mjs` -> 通过；默认 run 显示 `not_authorized`，trusted self-test 达到 product-experience pass。
+- `node scripts/validate-runtime-matrix.mjs` -> 通过。
+- `npm run meta:sync -- --targets claude,codex,cursor,openclaw` -> 项目运行时镜像已更新。
+- `npm run meta:sync:global:release` 和 `npm run meta:check:global:release` -> Claude Code 和 Codex 全局 skills、hooks、commands 已同步并检查通过。
+- `npm run meta:check` -> 通过。
+- `npm run meta:release:smoke` -> 1104 通过，0 失败，5 跳过；integration 通过。
+- `npm run meta:graphify:check` -> graph matches HEAD。
+- `git diff --check` -> 通过。
+
+## [2.8.72] - 2026-07-05
+
+### 解决的问题
+
+Codex 执行派发仍然像是在不断新建 agent，而不是先从全局/项目 agent 清单里找可复用 owner。同时，Meta_Kim 的 observed hook 模式也不该再承担第二套“高风险关键词拦截”：用户明确要求的 Git、删除、GitHub API、安装、发布、release 命令，不应该因为 Meta_Kim 自己的流程 hook 又被挡一次。通用 keyword 风险拦截属于宿主/运行时安全层，Meta_Kim 只应该管自己的流程闸门。
+
+### 改动
+
+- **Codex 派发改为 global-first，并区分 typed spawn。** Codex `/meta-theory` 路由和 runtime reference 现在优先复用已发现的全局/项目 owner；指定类型派发用 `agent_type`，完整上下文 fork 才用 `fork_context`，两者不再混用。
+- **执行 owner 兜底更严格。** 能力路由不再拿第一个候选硬顶，而是为 implementation、verification、research、provider、test 等 lane 记录匹配证据后再选 owner。
+- **observed hook 不再重复 keyword 安全拦截。** `enforce-agent-dispatch.mjs` 删除 observed 模式下的命令黑名单，也删除 GitHub Git Data API 发布特批支路。observed 模式下，Meta_Kim 不再按命令类别拦截；release 是否真实、rollback 证据是否够、策略是否遵守、公示是否达标，交给 Review 和 Verification 判断。
+- **Meta_Kim 流程 gate 仍保留。** managed 阶段 readiness、choice/capability/owner evidence、meta-agent 直接改业务文件、`queryBypass` 写入、已知 unsupported runtime/OS 等仍会拦，因为它们是 Meta_Kim 流程设计本身的问题。
+
+### 验证
+
+- `npm run meta:setup:update` -> 全局更新完成；全局 skills、依赖、MCP memory hooks、能力索引已刷新。
+- `npm run meta:sync:global:release` -> Claude Code 和 Codex 全局 skills、commands、hooks 已同步。
+- `git fetch --tags origin` -> 全局 hook 同步后成功，确认 Git 不再被 Meta_Kim observed hook 策略阻拦。
+- `node --test tests/governance/capability-routing.test.mjs tests/meta-theory/01-structural.test.mjs tests/meta-theory/11-eight-stage-spine.test.mjs` -> 199/199 通过。
+- `node scripts/validate-stage-runtime-control.mjs` -> 通过。
+- `npm run meta:route:validate` -> 通过。
+- `npm run meta:release:smoke` -> 1103 通过，0 失败，5 跳过；integration 通过。
+- `npm run meta:graphify:check` -> graph matches HEAD。
+- `git diff --check` -> 通过。
+
+## [2.8.71] - 2026-07-05
+
+### 解决的问题
+
+Windows 本地安装和发布级校验时，可能会出现 Node 的 `[DEP0190]` 警告。原因是 setup、全局依赖安装、release verify runner 和 OS probe 里还有子进程路径把 args 数组和 shell 执行混在一起，Node 会把它判为有安全风险的调用方式。同时，Codex 多 agent fan-out 路径还有几个真实使用中的坑：执行路由可能退回到“第一个候选 agent”，Codex `spawn_agent` 可能把 `fork_context: true` 和 `agent_type` 混用，shared `spine-state.mjs` 引入的工具文件也没有投影到所有会用到它的 hook 目录。
+
+### 改动
+
+- **安装和发布命令不再触发 DEP0190。** `setup.mjs`、`scripts/install-global-skills-all-runtimes.mjs`、`scripts/run-verify-all.mjs` 和 `scripts/governance-lib.mjs` 避开 Node 的 `shell: true` + args warning 路径；需要兼容 Windows `.cmd` 的地方改为显式 `cmd.exe /d /s /c` handoff。
+- **执行 owner 选择不再随便兜底。** `scripts/select-execution-route.mjs` 现在基于完整 execution-owner 清单和语义偏好组选择 test、verify、provider、research、implementation 等任务 owner；没有合适匹配时返回 `null`，不再拿第一个候选硬顶。
+- **Codex fork 规则只留在 Codex 面。** Codex command adapter 和 Codex runtime reference 现在明确：完整上下文 fork 用 `fork_context: true` 且不传 `agent_type`；指定类型派发用 `agent_type` 且不启用完整上下文 fork。结构测试保证这条 Codex 专属规则不会污染 shared、Claude、Cursor 或 OpenClaw 表面。
+- **shared spine-state 依赖在投影 hook 中可解析。** `spine-state-utils.mjs` 进入 Codex/Cursor 项目与全局 hook copy 路径，并补上 sync/discovery 测试，和 shared `spine-state.mjs` 的 import 图保持一致。
+
+### 验证
+
+- `node --trace-deprecation setup.mjs --check --silent` -> 无 DEP0190 警告。
+- `node --trace-deprecation scripts/install-global-skills-all-runtimes.mjs --dry-run --plugins-only --targets claude` -> 无 DEP0190 警告。
+- `NODE_OPTIONS=--trace-deprecation node scripts/run-verify-all.mjs` -> 8/8 阶段通过，无 DEP0190 警告。
+- `node scripts/probe-os-compatibility.mjs --check` -> 通过。
+- `npm run meta:test:setup` -> 504/504 通过。
+- `npm run meta:test:meta-theory` -> 1104 通过，0 失败，5 跳过。
+- `npm run meta:route:validate` -> 通过。
+- `node --test tests/meta-theory/01-structural.test.mjs` -> 63/63 通过。
+- `npm run meta:prompt:validate` -> 通过。
+- `git diff --check` -> 通过。
+
+## [2.8.70] - 2026-07-05
+
+### 解决的问题
+
+用户希望 Claude Code 和 Codex 都支持"fan-out / 团队"工作流——主 agent 并行派出多个子 agent——但 Meta_Kim 的触发与派发门让这套流程实际跑不起来。`activate-meta-theory-spine.mjs` 只匹配 `meta-theory` / `critical + fetch + thinking + review` / `元理论`，所以像"开 3 个 agent 扫全量发布差距"这样的请求根本进不了多 agent 路径。进入之后，`enforce-agent-dispatch.mjs` 在 execution / review / meta_review / verification / evolution 阶段对任何 `Agent` / `spawn_agent` 调用都要求 `fetchRecord.capabilitySearchPerformed === true`，而这个 flag 从不自动置位，主线程卡死。`spine-state.mjs` 还直接写 JSON 状态文件，fan-out 多 agent 各自切换同一 run 时存在竞争。整套机制没有为 `team` / `fan-out` / `军团` / `并行` 关键词文档化触发，没有 agent 资格分级，没有原子状态切换，多 agent run 真正发起后也没法自动从 `critical` 推进到 `fetch`。
+
+### 改动
+
+- **多 agent 触发关键词 + 自动能力检索 + 阶段预推进。** `canonical/runtime-assets/shared/hooks/activate-meta-theory-spine.mjs`（及其 `claude` 镜像）现匹配 `team` / `fan-out` / `multi-agent` / `agent teams` / `军团` / `分队` / `并行` / `并发` / `多 agent` / `开 N 个`。命中后自动跑能力检索，读 `config/capability-index/agent-eligibility.json` + `canonical/agents/`，填 `fetchRecord.capabilitySearchPerformed = true` + `capabilityMatches`，把 `currentStage` 从 `critical` 预推进到 `fetch`，并记录 `linkedCommands` / `linkedSkills` / `dispatchMode = "fan_out_ready"`，主线程可立即 fork。
+- **fan-out run 的 capability gate 免检。** `canonical/runtime-assets/claude/hooks/enforce-agent-dispatch.mjs`（投影到 `.codex/hooks/` 和 `.cursor/hooks/`）把 `stageRuntimeControl.dispatchMode ∈ {fan_out_ready, fan_out_in_progress}` 当作 discovery 等价阶段，多 agent run 期间的 Agent / `spawn_agent` 派发不再因缺 `capabilitySearchPerformed` 被 deny。
+- **三层 agent 资格注册表。** `config/capability-index/agent-eligibility.json` 列出 `eligible`（九个 meta-* agent，含 role + owns[]）、`conditional`、`hard_reject` 三层，带拒绝原因串，能力检索对每个 agent 返回单一裁决而非自由形态 ownerCandidates。
+- **原子 spine-state 写入 + 文件锁。** `canonical/runtime-assets/shared/hooks/spine-state-utils.mjs` 提供 `atomicWriteJson`（临时文件 + rename）和 `withFileLock`（`open` + `wx` + 抖动重试）。`spine-state.mjs` 的 `writeSpineState` 套上两者，并发 fan-out agent 不会写坏 run JSON。
+- **多 agent 触发时自动 link command + skill。** 被触发的 run 从 prompt 提取 `/slash-command` 名和 `skill:xxx` 引用，填进 `stageRuntimeControl.linkedCommands` / `linkedSkills`，派发板能展示每条 lane 该加载什么。
+
+### 验证
+
+- 所有触及的 canonical 源跑 `node --check` → SYNTAX OK。
+- `npm run meta:validate` → 7/7 通过。
+- `node --test tests/setup/graphify-wiring-contract.test.mjs tests/setup/sync-runtimes-manifest.test.mjs` → 71/71 通过。
+- `npm run meta:check:runtimes` → Claude Code + Codex + Cursor 镜像一致。
+- `npm run meta:sync` → `.claude/hooks/` 更新 2 个文件，再镜像到 `.codex/` + `.cursor/`。
+
+## [2.8.69] - 2026-07-05
+
+### 解决的问题
+
+开源用户装好 Meta_Kim 后，去别的项目或别的机器跑 spine hook 时会撞上一条写死的死路径。`setup.mjs` 和 `sync-runtimes.mjs` 在安装时把 canonical 模板里的 `__REPO_ROOT__` 占位符渲染成绝对路径，所以全局和项目 hook 注册里的 `--package-root <绝对路径>` 在用户自己机器上根本不存在。spine 激活脚本又把这个对不上静默吞掉（EXIT=0），`startPostCopyAutoInit` 永远找不到 `scripts/project-post-copy-init.mjs`，全局 post-copy 初始化对除原作者以外的所有人都不可达。
+
+### 改动
+
+- **spine 激活脚本改为运行时解析 package root，不再盲目信任写死的路径。** `canonical/runtime-assets/claude/hooks/activate-meta-theory-spine.mjs` 与 `canonical/runtime-assets/shared/hooks/activate-meta-theory-spine.mjs` 新增 `resolvePackageRoot(candidate)`：若 `--package-root` 参数或 `META_KIM_PACKAGE_ROOT` 环境变量指向的目录确实存在，照用；否则从脚本自身位置（`import.meta.url`）逐层往上找，直到命中含 `scripts/project-post-copy-init.mjs` 的目录；找不到任何 Meta_Kim 根时才回退到 `null`。`.claude/hooks`、`.codex/hooks`、`.cursor/hooks` 镜像和全局 `~/.claude/hooks/meta-kim`、`~/.codex/hooks/meta-kim` 副本现在都带同一个解析器。
+
+### 验证
+
+- 两个 canonical 源 `node --check` → 语法 OK。
+- `npm run meta:validate` → 7/7 通过。
+- `node --test tests/setup/graphify-wiring-contract.test.mjs tests/setup/sync-runtimes-manifest.test.mjs` → 71/71 通过。
+- `npm run meta:check:runtimes` → 工具端镜像已是最新。
+- `npm run meta:sync:global:release` → Claude Code 和 Codex 的全局 hook/skill/command 已同步；`~/.claude/hooks/meta-kim/activate-meta-theory-spine.mjs` 与 `~/.codex/hooks/meta-kim/activate-meta-theory-spine.mjs` 均含 `resolvePackageRoot`。
+
+## [2.8.68] - 2026-07-04
+
+### 解决的问题
+
+用户在 Codex 里输入 `/meta` 时，可能会看到好几个看起来都像 Meta_Kim / Meta Theory 的入口。根因不是用户装错了，而是历史版本留下的全局 skill 别名没有被同步器收走：`meta_kim`、旧 report/verify source command、agent-calling-gap 记录，以及 `critical/fetch/thinking/review` 这类路线别名可能同时留在 `~/.agents`、`~/.codex`、`~/.claude`。这样开源用户升级后也会和维护者一样困惑，不知道应该选哪个入口。另一个发布阻塞点是 Graphify：源码改动后 `npm run meta:graphify:rebuild` 可能因为“新图节点数更少”被 Graphify 拒绝覆盖，导致 `meta:graphify:check` 一直报旧 HEAD。
+
+### 改动
+
+- **全局同步器会安全清理旧 Meta_Kim skill 别名。** `scripts/sync-global-meta-theory.mjs` 现在按内容签名识别历史别名，先备份到 `.meta-kim/backups/stale-skill-aliases`，再删除确认属于 Meta_Kim 管理的旧入口；用户自己创建的同名 skill 会保留。
+- **Codex 的共享 skill 根目录也纳入清理。** 选择 Codex 目标时，同步器会检查旧的 `~/.agents/skills`，并在 canonical `~/.codex/skills/meta-theory` 存在时清掉共享目录里的旧 `meta-theory` 重复镜像。
+- **Graphify rebuild 能从 smaller-graph guard 自动恢复。** `scripts/graphify-cli.mjs rebuild` 现在识别 Graphify 特定的 `Refusing to overwrite` 保护，自动用 `--force` 重跑并把图谱 stamp 到当前 HEAD；同时支持 `META_KIM_GRAPHIFY_BIN` 和 `META_KIM_GRAPHIFY_BIN_ARGS`，方便测试和诊断固定使用哪个 Graphify 可执行入口。
+- **能力发现脚本支持短语言参数。** `discover-global-capabilities.mjs` 现在识别 `--zh`、`--en`、`--ja`、`--ko`，和已有测试及 CLI 预期对齐。
+
+### 验证
+
+- `npm run meta:graphify:rebuild` 从 smaller graph guard 自动恢复，并 stamp 到当前 HEAD。
+- `npm run meta:graphify:check` → rebuild 后图谱匹配当前 HEAD。
+- `node --test tests/setup/graphify-wiring-contract.test.mjs tests/setup/sync-global-hooks-policy.test.mjs` → 41/41 pass。
+- `npm run meta:release:smoke` → 1108 tests，1103 pass，0 fail，5 skipped；integration 6/6 pass。
+- `git diff --check` → pass。
+
+## [2.8.67] - 2026-07-04
+
+### 解决的问题
+
+`npm run meta:check` 对 `projectProjectionMode: global_only` 的项目会在第一步静默放过——`meta:check:runtimes` 默认什么 target 都不传,直接拿到一个"工具端镜像已是最新"的绿灯,其实啥也没对比。这条路径上的项目看上去是健康的,但实际从未走过 `claude` / `codex` 项目投影的对照检查。
+
+### 改动
+
+- **`meta:check:runtimes` 默认显式选 target。** `package.json` 里这条 script 现在固定传 `--scope project --targets claude,codex`。对 global_only 项目,跑 `npm run meta:check` 会真的去对比两边镜像,silent skip 不再发生。
+
+### 验证
+
+- `npm run meta:check` 退出码 0,7/7 通过
+- `npm run meta:graphify:check` 报 `graphify graph matches HEAD a6dc5734`(rebuild 后)
+- `npm run meta:doctor:governance` 报 `run index ready`(rebuild 后)
+
+## [2.8.66] - 2026-07-04
+
+### 解决的问题
+
+开源用户跑 `meta-kim` 时没法判断运行时投影其实是否健康。`meta:check:runtimes` 即便没选 runtime target 也返回"工具端镜像已是最新"——`global_only` 项目静默跳过、没警告,看起来像同步过实际没动。另一条线,每个 `weapon-registry.json` owner 都是 governance 层(`meta-*`),但 `select-execution-route.mjs` 从 `candidateExecutionAgents` 显式过滤掉 `layer === "meta"` 的 owner,导致每个武器的 `ownerCandidates` 都落空、所有 6 条 route 都被 block——`fuzzy_strategy` 任务明明对着正确的 governance owner,却吐出 `capabilityGapPacket`。第三类更隐蔽:v2.8.61 的 i18n 抽离重构把所有本地化字符串搬进了 `config/i18n/setup-strings.mjs`,而三个 setup 测试(`i18n` / `mcp-memory-hooks` / `setup-update-default-flow`)还在用 `readFileSync("setup.mjs")` 断言中/日/韩字面量——字符串搬走了,测试没跟,28 条 setup 测试一直报"i18n 覆盖 stale",但从 v2.8.61 重构起就一直是齐的。
+
+### 改动
+
+- **`sync-runtimes.mjs` 不再在没东西查的时候撒谎。** `check` 分支现在能区分两种情况:一是 `global_only` 没选 runtime target,二是选了 target 且都已最新。无 `--targets` 且 `projectProjectionMode: global_only` 时,脚本显式打"未选定 runtime target — 未检查任何镜像",并提示用 `--targets claude,codex`,不再发绿色的"最新"让人误以为真做了事。
+- **`select-execution-route.mjs` 让 governance owner 接 governance 武器,但不让它当实现工人。** `routeForWeapon` 的 available 集合在 taskShape 不是 `engineering_execution` 时,把 `ownerDiscoveryPacket.candidateExistingExecutionOwners` 与 `governanceStageOwners` 取并集。`engineering_execution` 分支保持原来的执行层过滤不变,所以 `meta-*` agent 能满足 `meta-kim-decision-patterns` / `runtime-capability-matrix` 这类武器的 routing,但仍然被拦着不当 implementation worker。
+- **`build-capability-inventory.mjs` 不再把全局 inventory 压缩成只发 meta。** `global-capabilities.json` 缓存现在会把全局插件装的所有 agent 都发出来,不只是 `meta-*`;每条记录的 `ownerCandidates` 是该 agent 真正的 id(不再对非 meta fallback 成 `["meta-artisan"]`)。`selectExecutionOwner` 改成对 available owner id 做关键词模糊匹配,所以 global_only 项目里 "test" / "smoke" / "verify" 这种任务能落到 `test-automator` / `e2e-runner` 这种真实 agent 上,不再落到空的 available 集上。
+- **setup 测试跟上 i18n 抽离。** `tests/setup/i18n.test.mjs`、`tests/setup/mcp-memory-hooks.test.mjs`、`tests/setup/setup-update-default-flow.test.mjs` 凡是断言本地化字面量,改成从 `config/i18n/setup-strings.mjs`(或 `readRepoFile`)读。`setup.mjs` 通过 `buildI18N({ MIN_NODE_VERSION })` 导出 i18n 块;测试和 v2.8.61 重构后的真实源对齐。
+- **`sync-runtimes.mjs` 不再往 stdout 灌 1.7 MB 全量 JSON。** CLI 入口改成输出一行摘要(`capability inventory written: N records (projectProjectionMode=...)`)。用 `spawnSync` 跑脚本的测试(如 `capability-inventory-bus.test.mjs`)不再踩 Node 默认 1 MB `maxBuffer` 的天花板、误报 `result.status = null`。
+- **稳定 spine-state 投影,让 hook import 不会断。** 这条工作流早期"统一到 shared"做得太激进——多个 `claude/hooks/*.mjs`(`stop-compaction`、`stop-spine-cleanup`、`enforce-agent-dispatch` 等)`import "./spine-state.mjs"` 是相对路径。`canonical/runtime-assets/claude/hooks/spine-state.mjs` 与 `shared/hooks/spine-state.mjs` 两边都保留(字节级一致),`activate-meta-theory-spine.mjs` 与 `skip-reminder.mjs` 同理。`PROJECT_CLAUDE_HOOK_FILES` 保留 `spine-state`,通用循环仍会写出 Claude 端副本;codex 端副本只走 codex 专属块。`import "./spine-state.mjs"` 的 hook 都能 resolve。
+
+### 验证
+
+- `npm run meta:verify:all` → 1108 测试,1103 pass,0 fail,5 skipped。8 步全绿。
+- `npm run meta:check:runtimes -- --scope project --targets claude,codex` → "工具端镜像已是最新"。
+- `npm install @inquirer/prompts`(env 刷新)+ `npm run meta:test:setup` → 502/0。
+- 手动 `node scripts/select-execution-route.mjs --task "<fuzzy strategy>"` → 出 `recommendedRoute`,worker 选到 `meta-kim-decision-patterns`。
+
+## [2.8.65] - 2026-07-03
+
+### 解决的问题
+
+`enforce-agent-dispatch` 的 fan-out 关卡想强制主线程在改文件前先派 Claude Code `Agent`，但关卡跑在 Node hook 里，而真正的派发必须由 host 完成。runner 还一边声明"live subagent 声明必须由 host 外部 spawn"，一边又从不把 worker lane 写进 spine state，结果关卡从不触发，主线程继续自干。每次之前的补丁都是再加一层软约束；根因是这套设计和 host 原生的 fan-out 能力打架。
+
+### 改动
+
+- **从 `enforce-agent-dispatch.mjs` 移除 fan-out 关卡**——host 原生 `Agent` / `spawn_agent` 现在是编排者；hook 不再因为"没派 Agent"而 deny 主线程 mutation。
+- **降级声明护栏保留为独立检查**——声明 `degradedMode: true` 的 run 仍需 `fetchRecord.capabilitySearchPerformed` 且至少 3 个 `capabilityMatches`，否则 hook deny。
+- **软化 runner 的 `runtimeInvocationBoundary`**——Node runner 只记录证据、建议 lane，不再声称强制 host 派发。
+- **Claude / Codex 命令 adapter 从 `DISPATCH IS MANDATORY` 改为 `HOST-NATIVE FAN-OUT PREFERRED`**；Codex adapter 新增建议：worker lane 需要自己的 agent 类型时优先用 named subagent，不用 fork。
+- **`validateDegradedDeclaration` 现在从 `shared/hooks/spine-state.mjs` 导出**（之前只在 Claude 副本里），修复了 `runEnforceHook` 下 hook import 失败导致的 44 个测试回归。
+- **新增 `tests/governance/degraded-declaration-guard.test.mjs`**（11 个 case），并更新 `tests/meta-theory/01-structural.test.mjs` 匹配新命令措辞。
+
+### 验证
+
+- `npm run meta:release:smoke` → 1108 tests，1103 pass，0 fail，5 skipped。
+- `npm run meta:test:governance` → 87/87 pass。
+
 ## [2.8.64] - 2026-07-02
 
 ### 解决的问题
@@ -519,7 +830,7 @@ Graphify 的提示仍可能把 agent 引向大范围读取 `GRAPH_REPORT.md` 或
 
 ### 变更
 
-- **Dynamic Workflow 证据闭环** - 复测 `C:/Users/Kim/AppData/Local/Temp/meta-kim-host-full-db9a8dd9aa5c43418aba89f7b210bd57/artifacts/goalpro-codex-host-full-proof.json`，确认其中包含 `fetchPacket`、`capabilityInventory`、`capabilityRoute`、`dynamicWorkflowRuntimePacket`、`langGraphRunPacket`、`workerTaskPackets`、`workerResultPackets` 与 `verificationPacket`。
+- **Dynamic Workflow 证据闭环** - 复测 `<temp>/meta-kim-host-full/artifacts/goalpro-codex-host-full-proof.json`，确认其中包含 `fetchPacket`、`capabilityInventory`、`capabilityRoute`、`dynamicWorkflowRuntimePacket`、`langGraphRunPacket`、`workerTaskPackets`、`workerResultPackets` 与 `verificationPacket`。
 - **Host Invocation Truth** - 确认真实 Codex host 证据覆盖 `spawn_agent_result`、`agent_team_result` 与 `skill_application`，并有 MCP、command/script、runtime-tool 三类 fresh local probes；artifact 中 `realInvocationCoverage.missingFamilies` 为空。
 - **Hook 自锁修复** - Fetch 阶段 dispatch gate 现在可以受限修复自己的 `fetchRecord` 状态，同时在能力发现和 execution clearance 前仍然阻止业务文件写入。
 - **开源 Source 边界** - 从公开 source 树移除私有 manual 文档，并让 README 引用保持在受支持的公开文档面上。
@@ -527,7 +838,7 @@ Graphify 的提示仍可能把 agent 引向大范围读取 `GRAPH_REPORT.md` 或
 
 ### 验证
 
-- `npm run meta:validate:run -- C:/Users/Kim/AppData/Local/Temp/meta-kim-host-full-db9a8dd9aa5c43418aba89f7b210bd57/artifacts/goalpro-codex-host-full-proof.json`
+- `npm run meta:validate:run -- <temp>/meta-kim-host-full/artifacts/goalpro-codex-host-full-proof.json`
 - `npm run meta:test:meta-theory`
 - `npm run meta:release:smoke`
 - `git diff --check`
@@ -655,8 +966,8 @@ Graphify 的提示仍可能把 agent 引向大范围读取 `GRAPH_REPORT.md` 或
 - `npm run meta:sync`
 - `npm run meta:sync:global -- --with-global-hooks`
 - `npm run discover:global`
-- 在 `D:/KimProject/游戏策划案` 中执行 Claude Code 全局 `UserPromptSubmit` 实机 smoke
-- 在 `D:/KimProject/Meta_Kim` 中执行 Codex 项目 `UserPromptSubmit` 实机 smoke
+- 在 `<project-root>/game-design` 中执行 Claude Code 全局 `UserPromptSubmit` 实机 smoke
+- 在 `<project-root>/Meta_Kim` 中执行 Codex 项目 `UserPromptSubmit` 实机 smoke
 
 ## [2.8.39] - 2026-06-16
 
@@ -1260,8 +1571,8 @@ Graphify 的提示仍可能把 agent 引向大范围读取 `GRAPH_REPORT.md` 或
 
 ### 验证
 
-- `node --check .claude/hooks/user-prompt-submit.js; node --check .codex/hooks/user-prompt-submit.js; node --check test-hook.js`（在 `D:/KimProject/HookPrompt`）
-- `node test-hook.js`（在 `D:/KimProject/HookPrompt`）
+- `node --check .claude/hooks/user-prompt-submit.js; node --check .codex/hooks/user-prompt-submit.js; node --check test-hook.js`（在 `<project-root>/HookPrompt`）
+- `node test-hook.js`（在 `<project-root>/HookPrompt`）
 - `node scripts/install-global-skills-all-runtimes.mjs --dry-run --update --skills ecc,superpowers --targets claude,codex,cursor --lang zh-CN`
 - `node --test tests/setup/install-plugin-bundles.test.mjs tests/setup/graphify-wiring-contract.test.mjs tests/setup/install-cross-platform.test.mjs`
 - `npm run meta:test:setup`
@@ -1311,10 +1622,10 @@ Graphify 的提示仍可能把 agent 引向大范围读取 `GRAPH_REPORT.md` 或
 
 ### 验证
 
-- `node test-hook.js`（在 `D:/KimProject/HookPrompt`）
+- `node test-hook.js`（在 `<project-root>/HookPrompt`）
 - `node --test tests/setup/sync-runtimes-manifest.test.mjs tests/setup/mcp-memory-hooks.test.mjs`
 - `node scripts/install-global-skills-all-runtimes.mjs --update --skills hookprompt --targets codex`
-- `codex exec --dangerously-bypass-hook-trust --skip-git-repo-check --sandbox read-only --cd D:/KimProject/课程素材 "帮我做个小红书营销自动发布器，先别改文件，先说你理解到什么"`
+- `codex exec --dangerously-bypass-hook-trust --skip-git-repo-check --sandbox read-only --cd <project-root>/course-materials "帮我做个小红书营销自动发布器，先别改文件，先说你理解到什么"`
 - `npm run meta:release:smoke`
 - `git diff --check`
 

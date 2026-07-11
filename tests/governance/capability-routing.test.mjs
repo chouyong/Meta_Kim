@@ -9,6 +9,32 @@ function route(task, runtime = "auto", os = "auto", extraArgs = []) {
   return JSON.parse(result.stdout);
 }
 
+function assertNativeCodexSpawn(binding, ownerAgent, packet = null) {
+  assert.equal(binding?.hostSurface, "spawn_agent");
+  assert.equal(binding?.spawnMode, "native_task");
+  assert.equal(binding?.ownerAgent, ownerAgent);
+  assert.match(binding?.task_name ?? "", /^[a-z0-9_]+$/);
+  assert.ok((binding?.task_name ?? "").length <= 64);
+  assert.equal(binding?.fork_turns, "none");
+  assert.equal(typeof binding?.message, "string");
+  const message = JSON.parse(binding.message);
+  assert.equal(message.ownerAgent, ownerAgent);
+  assert.equal(message.ownerKind, "agent");
+  assert.equal(message.outputContract.verificationOwner, packet?.verificationOwner ?? "meta-prism");
+  if (packet) {
+    assert.equal(message.taskPacketId, packet.taskPacketId);
+    assert.equal(message.roleInstanceId, packet.roleInstanceId);
+    assert.equal(message.coordination.parallelGroup, packet.parallelGroup);
+    assert.equal(message.coordination.mergeOwner, packet.mergeOwner);
+    assert.equal(message.scope.purpose, packet.purpose);
+  }
+  assert.equal(binding?.hostSurfaceProbeRequired, true);
+  assert.equal(binding?.invocationReadiness, "requires_current_host_spawn_agent_surface");
+  assert.equal(Object.hasOwn(binding ?? {}, "agent_type"), false);
+  assert.equal(Object.hasOwn(binding ?? {}, "fork_context"), false);
+  assert.equal(Object.hasOwn(binding ?? {}, "messageRef"), false);
+}
+
 test("routing fixtures recall internal patterns and platform/OS matrices", () => {
   const fuzzy = route("fuzzy strategy task");
   assert.ok(fuzzy.candidateWeapons.includes("meta-kim-decision-patterns"));
@@ -410,6 +436,151 @@ test("routing fixtures recall internal patterns and platform/OS matrices", () =>
     !String(claudeAgentSearch.recommendedRoute?.selectedCapabilityProviders?.agent?.sourceRef ?? "").startsWith(".codex/agents/"),
     "Claude Code agent search must not select .codex/agents adapters as callable Claude agents",
   );
+
+  const codexAgentReuseComplaint = route(
+    "Critical Thinking Fetch Deep Thinking Review 为什么 Codex 一直创建 agent 而不是找全局 agent",
+    "codex",
+    "windows",
+  );
+  assert.equal(
+    codexAgentReuseComplaint.recommendedRoute?.id,
+    "execution-capability-discovery:codex:windows",
+    "Codex agent-creation complaints must route to execution capability discovery before dependency/project registry",
+  );
+  assert.equal(
+    codexAgentReuseComplaint.recommendedRoute?.selectedCapabilityProviders?.agent?.platformId,
+    "codex",
+    "Codex owner discovery must bind a Codex-callable global/project agent provider",
+  );
+  assertNativeCodexSpawn(
+    codexAgentReuseComplaint.recommendedRoute?.codexSpawnBinding,
+    codexAgentReuseComplaint.recommendedRoute?.owner,
+  );
+  assertNativeCodexSpawn(
+    codexAgentReuseComplaint.workerTaskPacketDrafts?.[0]?.codexSpawnBinding,
+    codexAgentReuseComplaint.recommendedRoute?.owner,
+    codexAgentReuseComplaint.workerTaskPacketDrafts?.[0],
+  );
+  assert.equal(
+    codexAgentReuseComplaint.capabilityGapDetected,
+    false,
+    "A complaint about repeated agent creation must not be misread as a create-agent capability gap request",
+  );
+
+  const codexContextualCreationComplaint = route(
+    "我看他好像还是一直在自己创建",
+    "codex",
+    "windows",
+  );
+  assert.equal(
+    codexContextualCreationComplaint.recommendedRoute?.id,
+    "execution-capability-discovery:codex:windows",
+    "Contextual Chinese repeated-creation complaints must inspect Codex owner reuse instead of falling to a low-signal route",
+  );
+  assert.equal(
+    codexContextualCreationComplaint.capabilityGapDetected,
+    false,
+    "Contextual repeated-creation complaints must not become create_agent capability gaps",
+  );
+  assertNativeCodexSpawn(
+    codexContextualCreationComplaint.recommendedRoute?.codexSpawnBinding,
+    codexContextualCreationComplaint.recommendedRoute?.owner,
+  );
+
+  const codexExplicitParallelDispatch = route(
+    "我要的是派发啊 并行啊：检查 meta-theory 规则、Codex runtime、测试缺口",
+    "codex",
+    "windows",
+  );
+  assert.equal(
+    codexExplicitParallelDispatch.recommendedRoute?.id,
+    "execution-capability-discovery:codex:windows",
+    "Direct parallel dispatch requests must route to execution capability discovery",
+  );
+  assert.ok(
+    codexExplicitParallelDispatch.workerTaskPacketDrafts.length >= 2,
+    "Direct parallel dispatch requests with separable scopes must produce multiple worker task packets",
+  );
+  assert.ok(
+    codexExplicitParallelDispatch.workerTaskPacketDrafts.every((packet) => packet.ownerKind === "agent"),
+    "Direct parallel dispatch worker lanes must bind reusable agent owners instead of replacing owners with skills",
+  );
+  for (const packet of codexExplicitParallelDispatch.workerTaskPacketDrafts) {
+    assertNativeCodexSpawn(packet.codexSpawnBinding, packet.ownerAgent, packet);
+  }
+  assert.equal(codexExplicitParallelDispatch.dispatchBoardDraft?.dispatchMode, "fan_out_ready");
+  assert.equal(codexExplicitParallelDispatch.dispatchBoardDraft?.fanoutReadiness?.thinkingApproved, true);
+  assert.equal(
+    new Set(codexExplicitParallelDispatch.workerTaskPacketDrafts.map((packet) => packet.codexSpawnBinding.task_name)).size,
+    codexExplicitParallelDispatch.workerTaskPacketDrafts.length,
+    "Native Codex task names must remain unique after normalization",
+  );
+  assert.ok(
+    codexExplicitParallelDispatch.dispatchBoardDraft?.orchestratorKinds?.includes("agentTeamsPlaybook"),
+    "Multiple Codex agent lanes must select the agent teams fan-out adapter",
+  );
+
+  const codexStructuredChainFanout = route(
+    "Critical Thinking → Fetch → Deep Thinking → Review 检查 meta-theory 规则、Codex runtime、测试缺口",
+    "codex",
+    "windows",
+  );
+  assert.equal(
+    codexStructuredChainFanout.entryClassification?.subagentAuthorizationSource,
+    "meta_theory_trigger_request",
+    "Structured Critical/Fetch/Thinking/Review chains are meta-theory activations that must authorize safe fan-out without extra dispatch wording",
+  );
+  assert.equal(
+    codexStructuredChainFanout.recommendedRoute?.id,
+    "execution-capability-discovery:codex:windows",
+    "Structured chain fan-out must route through execution capability discovery",
+  );
+  assert.ok(
+    codexStructuredChainFanout.workerTaskPacketDrafts.length >= 2,
+    "Structured chain fan-out with separable scopes must produce multiple worker task packets",
+  );
+  for (const packet of codexStructuredChainFanout.workerTaskPacketDrafts) {
+    assert.equal(packet.ownerKind, "agent");
+    assertNativeCodexSpawn(packet.codexSpawnBinding, packet.ownerAgent, packet);
+  }
+
+  const codexMetaTriggerFanout = route(
+    "meta-theory 检查 meta-theory 规则、Codex runtime、测试缺口",
+    "codex",
+    "windows",
+  );
+  assert.equal(
+    codexMetaTriggerFanout.entryClassification?.subagentAuthorizationSource,
+    "meta_theory_trigger_request",
+    "A meta-theory trigger itself must authorize safe fan-out once scopes are separable",
+  );
+  assert.equal(
+    codexMetaTriggerFanout.recommendedRoute?.id,
+    "execution-capability-discovery:codex:windows",
+    "Meta-theory fan-out must route through execution capability discovery when there are separable scopes",
+  );
+  assert.ok(
+    codexMetaTriggerFanout.workerTaskPacketDrafts.length >= 2,
+    "Meta-theory fan-out with separable scopes must produce multiple worker task packets",
+  );
+  for (const packet of codexMetaTriggerFanout.workerTaskPacketDrafts) {
+    assert.equal(packet.ownerKind, "agent");
+    assertNativeCodexSpawn(packet.codexSpawnBinding, packet.ownerAgent, packet);
+  }
+
+  const codexWhitespaceFanout = route(
+    "Critical Thinking → Fetch → Deep Thinking → Review 检查平台 key adapter 注册 能力账本 第二批平台路由 上传证据",
+    "codex",
+    "windows",
+  );
+  assert.ok(
+    codexWhitespaceFanout.workerTaskPacketDrafts.length >= 2,
+    "Structured fan-out must split whitespace-separated capability anchors instead of collapsing to one worker",
+  );
+  for (const packet of codexWhitespaceFanout.workerTaskPacketDrafts) {
+    assert.equal(packet.ownerKind, "agent");
+    assertNativeCodexSpawn(packet.codexSpawnBinding, packet.ownerAgent, packet);
+  }
 
   const hook = route("platform hook install");
   assert.ok(hook.candidateWeapons.includes("runtime-capability-matrix"));

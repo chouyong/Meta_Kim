@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { evaluateFanoutGate } from "../../canonical/runtime-assets/claude/hooks/spine-state.mjs";
+import { evaluateFanoutGate } from "../../canonical/runtime-assets/shared/hooks/spine-state.mjs";
 
 // Fan-out gate root-cause fix for "/meta-theory triggers but main thread
 // self-executes without dispatching any Agent". The trigger condition is a pure
@@ -23,6 +23,41 @@ test("evaluateFanoutGate: triggered for execution + 0 dispatches + >=2 worker la
   assert.ok(r.reason && r.reason.includes("0 recorded Agent dispatches"));
 });
 
+test("evaluateFanoutGate: Codex selected spawn lanes cannot silently serialize without valid degraded evidence", () => {
+  const r = evaluateFanoutGate({
+    currentStage: "execution",
+    runtime: "codex",
+    dispatchedAgents: [],
+    workerTaskPackets: [
+      {
+        id: "w1",
+        codexSpawnBinding: {
+          hostSurface: "spawn_agent",
+          spawnMode: "native_task",
+        },
+      },
+      {
+        id: "w2",
+        codexSpawnBinding: {
+          hostSurface: "spawn_agent",
+          spawnMode: "native_task",
+        },
+      },
+    ],
+    runtimeSubagentInvocationPacket: {
+      status: "not_authorized",
+      fanoutEligible: true,
+      authorizationSource: "native_choice_surface_required",
+    },
+  });
+
+  assert.equal(r.triggered, true);
+  assert.equal(r.dispatched, 0);
+  assert.equal(r.workerCount, 2);
+  assert.equal(r.degraded, false);
+  assert.ok(r.reason && r.reason.includes("0 recorded Agent dispatches"));
+});
+
 test("evaluateFanoutGate: not triggered once an Agent dispatch is recorded", () => {
   const r = evaluateFanoutGate({
     currentStage: "execution",
@@ -34,12 +69,20 @@ test("evaluateFanoutGate: not triggered once an Agent dispatch is recorded", () 
   assert.equal(r.reason, null);
 });
 
-test("evaluateFanoutGate: not triggered when degraded is declared (auditable exit stays open)", () => {
+test("evaluateFanoutGate: not triggered when degraded is declared with valid evidence (auditable exit stays open)", () => {
   const r = evaluateFanoutGate({
     currentStage: "execution",
     dispatchedAgents: [],
     workerTaskPackets: [{ id: "w1" }, { id: "w2" }],
     degradedMode: true,
+    fetchRecord: {
+      capabilitySearchPerformed: true,
+      capabilityMatches: [
+        { agent: "a" },
+        { agent: "b" },
+        { agent: "c" },
+      ],
+    },
   });
   assert.equal(r.triggered, false);
   assert.equal(r.degraded, true);

@@ -486,18 +486,19 @@
       "workerResultPackets"
     ],
     "capabilityInvocationTruthRequirements": [
-      "stateTaxonomy includes invoked, applied, host_visible_observed, selected_not_invoked, discovered_not_selected, unavailable, blocked, not_required",
-      "agent/subagent live invocation is invoked only with external agent spawn evidence; otherwise use unavailable, blocked, not_required, or selected_not_invoked according to host-tool availability and authorization evidence",
+      "stateTaxonomy includes invoked, applied, host_visible_observed, selected_not_invoked, discovered_not_selected, unavailable, not_authorized, blocked, not_required",
+      "agent/subagent live invocation is invoked only with external agent spawn evidence; otherwise use unavailable, not_authorized, blocked, not_required, or selected_not_invoked according to host-tool availability and authorization evidence",
       "app-visible host UI subagents are recorded separately from runner Agent/spawn_agent tool invocation",
       "agent-teams-playbook is selected for 2+ executable parallel lanes but is not relabeled as a live Skill/Agent Team/spawn_agent call",
-      "MCP binding is not relabeled as MCP tool call without invocation evidence",
+      "MCP binding or --self-test catalog output is not relabeled as an MCP tool call; live proof requires an externally observed tools/call result",
       "hook match or file is not relabeled as triggered hook",
       "command selection is not relabeled as command execution without fresh command output",
-      "run-scoped worker execution is not relabeled as live subagent invocation",
-      "realInvocationCoverage.status must be pass for product-experience pass when selected executable families include agent/subagent, skill, MCP, command/script, runtime-tool, or agent-teams-playbook",
+      "runner-generated worker plans are planned_not_executed and never synthesize executed, verified, or exitCode 0 evidence",
+      "realInvocationCoverage is binding-level, so every selected family+provider+task binding must have matching externally observed evidence",
+      "realInvocationCoverage.status must be pass for product-experience pass when selected executable bindings include agent/subagent, skill, MCP, hook, command/script, runtime-tool, or agent-teams-playbook",
       "hostInvocationRequestPacket must list every selected executable family that still needs a Claude Code/Codex host adapter call and the exact trusted evidence required",
       "selected_not_invoked is never execution pass for a selected executable family",
-      "product-experience pass requires capabilityInvocationProbePacket fresh local probes for callable MCP, command/script, and runtime-tool families when they are selected"
+      "capabilityInvocationProbePacket proves readiness/callability only and never contributes to realInvocationCoverage or product-experience live evidence"
     ],
     "userPerceptionRequirements": [
       "what_to_do",
@@ -555,12 +556,13 @@
       "P-109": [
         "capabilityInvocationTruthPacket.rows covers agent/subagent, app-visible host subagent, worker task, skill, MCP, hook, prompt/rule, command/script, and runtime tool families",
         "capabilityInvocationTruthPacket.rows also records agent_teams_playbook when fan-out orchestration is selected",
-        "each family records invoked, applied, host_visible_observed, selected_not_invoked, discovered_not_selected, unavailable, blocked, or not_required",
+        "each family records invoked, applied, host_visible_observed, selected_not_invoked, discovered_not_selected, unavailable, not_authorized, blocked, or not_required",
         "selected, discovered, configured, or matched capabilities cannot be displayed as invoked without attached invocation evidence",
         "run-scoped worker execution and app-visible host subagent UI evidence cannot be displayed as live runner Agent/spawn_agent invocation",
         "MCP config/binding and hook file/match cannot be displayed as MCP call or hook trigger",
-        "callableInvocationCoverage.status must be pass for product-experience pass, with fresh probes for selected MCP, command/script, and runtime-tool families",
-        "realInvocationCoverage.status must be pass for product-experience pass when any selected executable family needs host, skill, MCP, command, runtime-tool, or agent-team evidence",
+        "callableInvocationCoverage reports readiness probes separately from live invocation truth",
+        "realInvocationCoverage.status must be pass at binding level for product-experience pass when any selected executable binding needs host, skill, MCP, hook, command, runtime-tool, or agent-team evidence",
+        "live evidence must come from a hash-verified external runtime observation artifact with matching runId, sessionId, eventId, providerId, bindingRef, timestamp, and successful result",
         "hostInvocationRequestPacket.status must expose pending_host_invocation instead of hiding missing host calls inside reports"
       ],
       "P-110": [

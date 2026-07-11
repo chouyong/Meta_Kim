@@ -235,7 +235,7 @@ describe("SKILL.md structural integrity", async () => {
       assert.doesNotMatch(command, /For any non-trivial task,\s*first apply `agent-teams-playbook`/i);
     });
 
-    test("Codex /meta-theory command surfaces governed run output and discovers namespaced subagent tools", async () => {
+    test("Codex /meta-theory command surfaces governed run output and requires the top-level native spawn tool", async () => {
       const command = await readFile("canonical/runtime-assets/codex/commands/meta-theory.md");
       const pkg = await readJson("package.json");
       assert.match(command, /__META_KIM_PACKAGE_ROOT__\/scripts\/run-meta-theory-governed-execution\.mjs/);
@@ -244,23 +244,75 @@ describe("SKILL.md structural integrity", async () => {
       assert.match(command, /relay the compact stdout notice/i);
       assert.match(command, /Windows\/npm paths strip forwarded flags/i);
       assert.match(pkg.scripts["meta:theory:run:notice"], /--emit-conversation-notice/);
-      assert.match(command, /tool discovery/i);
-      assert.match(command, /multi_agent_v1\.spawn_agent/);
-      assert.match(command, /Record the exact tool name and returned agent id/i);
+      assert.match(command, /top-level native `spawn_agent`/i);
+      assert.match(command, /`task_name`, `message`, and `fork_turns`/);
+      assert.match(command, /bounded worker message/i);
+      assert.match(command, /Do not pass `agent_type` or `fork_context`/);
+      assert.match(command, /Do not discover or fall back to a legacy namespaced spawn API/);
+      assert.doesNotMatch(command, /multi_agent_v1\.spawn_agent/);
+    });
+
+    test("Codex runtime reference uses the top-level native spawn task contract", async () => {
+      const reference = await readFile("canonical/skills/meta-theory/references/runtime-codex.md");
+      assert.match(reference, /Codex global or project owners?/);
+      assert.match(reference, /top-level `spawn_agent`/);
+      assert.match(reference, /`task_name`/);
+      assert.match(reference, /`message`/);
+      assert.match(reference, /`fork_turns`/);
+      assert.match(reference, /Do not pass `agent_type` or `fork_context`/);
+      assert.doesNotMatch(reference, /multi_agent_v1\.spawn_agent/);
     });
 
     test("Claude Code /meta-theory command passes Claude runtime and requires live Agent Task dispatch", async () => {
       const command = await readFile("canonical/runtime-assets/claude/commands/meta-theory.md");
+      const settings = await readJson("canonical/runtime-assets/claude/settings.json");
       assert.match(command, /__META_KIM_PACKAGE_ROOT__\/scripts\/run-meta-theory-governed-execution\.mjs/);
       assert.match(command, /--runtime claude_code/);
       assert.match(command, /meta:theory:run:notice -- --runtime claude_code "\$ARGUMENTS"/);
-      assert.match(command, /DISPATCH IS MANDATORY/i);
+      assert.match(command, /HOST-NATIVE FAN-OUT PREFERRED/i);
       assert.match(command, /hostInvocationRequestPacket/);
       assert.match(command, /agent-teams-playbook/);
       assert.ok(command.includes("real `Agent` / Task surface"));
       assert.ok(command.includes("workerTaskPackets[].taskPacketId"));
       assert.match(command, /tool-call id/i);
       assert.match(command, /do not silently continue as main-thread execution/i);
+      const preToolMatchers = (settings.hooks?.PreToolUse ?? []).map((entry) => entry.matcher ?? "");
+      assert.ok(preToolMatchers.some((matcher) => /(?:^|\|)Agent(?:\||$)/.test(matcher)));
+      assert.ok(preToolMatchers.some((matcher) => /(?:^|\|)Task(?:\||$)/.test(matcher)));
+    });
+
+    test("agent-teams-playbook provider discovery is runtime-specific and prefers the local dependency checkout over stale global installs", async () => {
+      const runner = await readFile("scripts/run-meta-theory-governed-execution.mjs");
+      assert.match(runner, /source: "project_claude_skill"/);
+      assert.match(runner, /source: "claude_global_skill"/);
+      assert.match(runner, /source: "project_codex_skill"/);
+      assert.match(runner, /source: "codex_global_skill"/);
+      assert.match(runner, /resolveAgentTeamsPlaybookProvider\(routeRuntime\)/);
+      assert.match(
+        runner,
+        /source: "sibling_dependency_checkout"[\s\S]{0,400}\.\.\.runtimeGlobalCandidates/,
+        "sibling dependency checkout must win over stale runtime-global installs during local development",
+      );
+      assert.equal(
+        /providerResolution\?\.configuredInSkills === true[\s\S]{0,120}providerAvailable/.test(runner),
+        false,
+        "configured/registered metadata alone must not make the playbook callable",
+      );
+    });
+
+    test("Codex fork_context parameter stays out of shared and non-Codex runtime surfaces", async () => {
+      const nonCodexSurfaces = [
+        "canonical/skills/meta-theory/SKILL.md",
+        "canonical/skills/meta-theory/references/dev-governance.md",
+        "canonical/runtime-assets/claude/commands/meta-theory.md",
+        "canonical/runtime-assets/cursor/rules/meta-theory-dispatch.mdc",
+        "canonical/runtime-assets/openclaw/DECLARED_GAP.md",
+      ];
+      for (const rel of nonCodexSurfaces) {
+        const text = await readFile(rel);
+        assert.doesNotMatch(text, /fork_context/);
+        assert.doesNotMatch(text, /Never pass `fork_context: true` together with `agent_type`/);
+      }
     });
 
     test("governed runner routes through the requested runtime instead of hardcoding Codex", async () => {

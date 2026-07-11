@@ -256,6 +256,45 @@ assert(
   "Claude Code agent search must not select .codex/agents adapters as callable Claude agents",
 );
 
+const codexAgentReuseComplaint = route("Critical Thinking Fetch Deep Thinking Review 为什么 Codex 一直创建 agent 而不是找全局 agent", "codex", "windows");
+assert(
+  codexAgentReuseComplaint.recommendedRoute?.id === "execution-capability-discovery:codex:windows",
+  "Codex agent-creation complaints must route to execution capability discovery before dependency/project registry",
+);
+assert(
+  codexAgentReuseComplaint.recommendedRoute?.selectedCapabilityProviders?.agent?.platformId === "codex",
+  "Codex agent-creation complaints must bind a Codex-callable global/project agent provider",
+);
+assert(
+  codexAgentReuseComplaint.recommendedRoute?.codexSpawnBinding?.hostSurface === "spawn_agent" &&
+    codexAgentReuseComplaint.recommendedRoute?.codexSpawnBinding?.spawnMode === "native_task" &&
+    codexAgentReuseComplaint.recommendedRoute?.codexSpawnBinding?.ownerAgent === codexAgentReuseComplaint.recommendedRoute?.owner &&
+    codexAgentReuseComplaint.recommendedRoute?.codexSpawnBinding?.fork_turns === "none" &&
+    !Object.hasOwn(codexAgentReuseComplaint.recommendedRoute?.codexSpawnBinding ?? {}, "agent_type") &&
+    !Object.hasOwn(codexAgentReuseComplaint.recommendedRoute?.codexSpawnBinding ?? {}, "fork_context"),
+  "Codex global agent reuse must emit an owner-bound native spawn_agent task plan",
+);
+assert(
+  /^[a-z0-9_]+$/.test(codexAgentReuseComplaint.workerTaskPacketDrafts?.[0]?.codexSpawnBinding?.task_name ?? "") &&
+    codexAgentReuseComplaint.workerTaskPacketDrafts?.[0]?.codexSpawnBinding?.ownerAgent === codexAgentReuseComplaint.recommendedRoute?.owner,
+  "Worker task packets must carry a valid native Codex task name and the selected owner metadata",
+);
+assert(
+  codexAgentReuseComplaint.workerTaskPacketDrafts?.[0]?.codexSpawnBinding?.visibleBindingRequired === true &&
+    codexAgentReuseComplaint.workerTaskPacketDrafts?.[0]?.codexSpawnBinding?.runtimeInstanceAlias === null,
+  "Codex worker packets must require visible owner binding and reserve runtimeInstanceAlias for host nicknames",
+);
+assert(
+  codexAgentReuseComplaint.workerTaskPacketDrafts?.[0]?.ownerAgent === codexAgentReuseComplaint.recommendedRoute?.owner &&
+    codexAgentReuseComplaint.workerTaskPacketDrafts?.[0]?.roleDisplayName &&
+    !String(codexAgentReuseComplaint.workerTaskPacketDrafts?.[0]?.roleDisplayName).startsWith("agent-"),
+  "Codex reuse complaints must produce owner-first worker packets, not runtime-created agent identities",
+);
+assert(
+  codexAgentReuseComplaint.capabilityGapDetected === false,
+  "Agent reuse complaints must not be misread as create-agent capability-gap requests",
+);
+
 const createAgentGap = route("create agent for long-term test coverage strategy owner");
 assert(createAgentGap.capabilityGapDetected === true, "Explicit create agent request must trigger capability-gap detection");
 assert(createAgentGap.capabilityGapDecision?.decision === "create_agent", "Long-term coverage owner gap must route to create_agent");

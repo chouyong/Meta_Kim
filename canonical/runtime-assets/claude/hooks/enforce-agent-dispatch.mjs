@@ -106,6 +106,7 @@ import {
   recordSkippedHook,
   getGovernanceFlow,
   evaluateFanoutGate,
+  validateDegradedDeclaration,
 } from "./spine-state.mjs";
 import {
   getSkipRule,
@@ -475,6 +476,14 @@ function hasFetchEvidenceForTaskBookkeeping(state) {
 
 function shouldDelayTaskBookkeeping(state) {
   const stage = String(state?.currentStage || "").toLowerCase();
+  const dispatchMode = state?.stageRuntimeControl?.dispatchMode;
+  const dispatched = Array.isArray(state?.dispatchedAgents)
+    ? state.dispatchedAgents.length
+    : 0;
+  if (
+    ["fanout_eligible", "fan_out_ready", "fan_out_in_progress"].includes(dispatchMode) &&
+    dispatched === 0
+  ) return true;
   if (stage === "critical") return true;
   if (stage === "fetch" && !hasFetchEvidenceForTaskBookkeeping(state)) return true;
   return false;
@@ -483,7 +492,10 @@ function shouldDelayTaskBookkeeping(state) {
 function formatTaskBookkeepingDelayDeny(toolName, state) {
   const stage = state?.currentStage || "current design stage";
   return (
-    `Task/todo bookkeeping via "${toolName}" is delayed during ${stage} until Fetch evidence exists. ` +
+    `Task/todo bookkeeping via "${toolName}" is delayed during ${stage}. ` +
+    "For fan-out-eligible governed work, TaskCreate/TaskUpdate/TodoWrite cannot replace native Agent dispatch; " +
+    "dispatch at least one selected worker through Agent/Task before opening a bookkeeping board. " +
+    "Otherwise continue until Fetch evidence and Thinking owner bindings exist. " +
     "Continue Fetch with read/search/capability discovery and a brief visible chat status; " +
     "write spine-state or planning files only when needed. Do not start by creating or updating " +
     "a task list before evidence is collected."
@@ -740,183 +752,15 @@ function observedModeNotice(state) {
   if (isZh(state)) {
     return (
       "[Meta_Kim] 提醒：当前是自动触发的观察态。Hook 不会把自己当阶段驱动器反复拦截普通本地修改；" +
-      "发布、公示或严格验收仍需要 managed runner 写入 Fetch、Thinking、fileChangeFactCard 和 executionLease。"
+      "删除、Git、GitHub API、安装或发布由运行时/用户意图处理；公示和严格验收仍看 managed runner 的 Fetch、Thinking、fileChangeFactCard 和 executionLease。"
     );
   }
   return (
     "[Meta_Kim] Notice: auto-triggered observed mode is active. The hook will not act as the " +
-    "stage driver or repeatedly hard-block ordinary local edits; release/public-ready claims " +
-    "still require the managed runner to record Fetch, Thinking, fileChangeFactCard, and executionLease."
+    "stage driver or hard-block commands by class; delete, Git, GitHub API, install, and publish " +
+    "commands remain runtime/user-intent concerns, while release/public-ready claims still require " +
+    "the managed runner to record Fetch, Thinking, fileChangeFactCard, and executionLease."
   );
-}
-
-function observedModeHighRiskReason(state, command = "") {
-  if (isZh(state)) {
-    return (
-      "当前是自动触发的观察态，但该操作像高风险或外部副作用命令。先进入 managed stage driver，" +
-      "写入 owner/loadout、fileChangeFactCard、permission/rollback 和 executionLease 后再执行。" +
-      (command ? ` Command: ${command}` : "")
-    );
-  }
-  return (
-    "Auto-triggered observed mode cannot approve high-risk or external side-effect commands. " +
-    "Enter a managed stage driver first, then record owner/loadout, fileChangeFactCard, " +
-    "permission/rollback, and executionLease before retrying." +
-    (command ? ` Command: ${command}` : "")
-  );
-}
-
-function observedModeAuthorizedReleaseNotice(state) {
-  if (isZh(state)) {
-    return (
-      "[Meta_Kim] 已识别到本轮用户明确要求提交/推送/发布；观察态只放行 git push 和 GitHub Release，" +
-      "不放行 npm publish、强推、安装或破坏性命令。"
-    );
-  }
-  return (
-    "[Meta_Kim] Explicit user release intent detected for this run; observed mode only allows " +
-    "git push and GitHub Release commands, not npm publish, force push, installs, or destructive commands."
-  );
-}
-
-function stripQuotedShellText(value) {
-  const raw = String(value || "")
-    .replace(/@'[\s\S]*?'@/g, " @''@ ")
-    .replace(/@"[\s\S]*?"@/g, ' @""@ ');
-  let result = "";
-  let quote = null;
-  let escaped = false;
-
-  for (const ch of raw) {
-    if (escaped) {
-      if (!quote) result += ch;
-      escaped = false;
-      continue;
-    }
-    if (ch === "\\") {
-      if (!quote) result += ch;
-      escaped = true;
-      continue;
-    }
-    if (quote) {
-      if (ch === quote) quote = null;
-      continue;
-    }
-    if (ch === "'" || ch === '"') {
-      quote = ch;
-      result += " ";
-      continue;
-    }
-    result += ch;
-  }
-
-  return result;
-}
-
-function isQuotedInspectionSegment(segment) {
-  const stripped = stripQuotedShellText(segment).trim().toLowerCase();
-  if (!stripped) return true;
-  return /^(?:graphify\s+query|rg\b|grep\b|egrep\b|fgrep\b|select-string\b|sls\b|find\b|git\s+grep\b|npm\s+search\b|npm\s+view\b)/i.test(
-    stripped,
-  );
-}
-
-function isHighRiskObservedSegment(segment) {
-  if (isReadOnlyBash(segment)) return false;
-  const lower = stripQuotedShellText(segment).trim().toLowerCase();
-  if (!lower) return false;
-  const highRiskCommandPattern =
-    /^(?:(?:bash|sh|zsh|pwsh|powershell)(?:\.exe)?\s+(?:-c|-lc|-command|\/c)\b|(?:node|node\.exe)\s+(?:-e|--eval)\b|python(?:3|\.exe)?\s+-c\b|npm\s+(?:install|i|publish)|pnpm\s+(?:install|i|add)|yarn\s+(?:install|add)|cargo\s+(?:install|publish|run)|pip\s+(?:install|uninstall)|git\s+(?:push|pull|fetch|reset|checkout|restore|clean|rebase|merge|rm|mv)\b|gh\s+(?:release|pr\s+merge)|curl\b|wget\b|invoke-webrequest\b|invoke-restmethod\b|invoke-expression\b|iwr\b|irm\b|iex\b|remove-item\b|rm\s+-|del\b|rmdir\b|setx\b|set-item\s+env)\b/i;
-  return highRiskCommandPattern.test(lower);
-}
-
-function isSafeAfterRemovingQuotedText(segment) {
-  const stripped = stripQuotedShellText(segment).trim();
-  if (!stripped) return true;
-  return !isHighRiskObservedSegment(stripped) || isQuotedInspectionSegment(segment);
-}
-
-function isHighRiskObservedBash(command) {
-  const normalized = String(command || "").trim();
-  if (!normalized) return false;
-  const segments = bashReadonlyInternals
-    .splitSegments(normalized)
-    .map((segment) => segment.trim())
-    .filter(Boolean);
-  if (segments.some(isHighRiskObservedSegment)) return true;
-  const classification = classifyBashCommand(normalized);
-  if (classification.readOnly) return false;
-  if (!/^dangerous pattern:/i.test(classification.reason || "")) return false;
-  if (segments.every(isSafeAfterRemovingQuotedText)) return false;
-  return /install|publish|push|merge|rebase|reset|delete|remove|credential|token|secret|http|curl|wget|invoke-webrequest|invoke-restmethod|invoke-expression|iex/i.test(
-    classification.reason,
-  );
-}
-
-function getObservedExternalPublishIntent(state) {
-  const control = state?.stageRuntimeControl || {};
-  const intent = control.externalPublishIntent || state?.externalPublishIntent || null;
-  if (!intent || intent.status !== "user_explicit") return null;
-
-  const createdAt = Date.parse(intent.createdAt || control.createdAt || state?.triggeredAt || "");
-  const ttlMinutes = Number(intent.expiresAfterMinutes ?? 240);
-  if (
-    Number.isFinite(createdAt) &&
-    Number.isFinite(ttlMinutes) &&
-    ttlMinutes > 0 &&
-    Date.now() - createdAt > ttlMinutes * 60 * 1000
-  ) {
-    return null;
-  }
-  return intent;
-}
-
-function isAuthorizedObservedReleaseSegment(segment) {
-  const lower = stripQuotedShellText(segment).trim().toLowerCase();
-  if (!lower) return true;
-  if (isReadOnlyBash(lower)) return true;
-  if (/^git\s+push\b/.test(lower)) {
-    return !/(?:^|\s)(?:--force|-f|--mirror|--delete)\b/.test(lower);
-  }
-  return /^gh\s+release\s+(?:view|create|edit|upload)\b/.test(lower);
-}
-
-function isAuthorizedObservedExternalPublish(state, toolName, toolInput) {
-  if (toolName !== "Bash") return false;
-  if (!getObservedExternalPublishIntent(state)) return false;
-  const segments = bashReadonlyInternals
-    .splitSegments(String(toolInput?.command || ""))
-    .map((segment) => segment.trim())
-    .filter(Boolean);
-  return segments.length > 0 && segments.every(isAuthorizedObservedReleaseSegment);
-}
-
-function isHighRiskObservedExecution(toolName, toolInput) {
-  if (toolName !== "Bash") return false;
-  return isHighRiskObservedBash(toolInput?.command || "");
-}
-
-async function allowObservedExternalPublishExecution(state) {
-  const control = state?.stageRuntimeControl || {};
-  const now = new Date().toISOString();
-  const nextState = {
-    ...state,
-    stageRuntimeControl: {
-      ...control,
-      observedNoticeEmittedAt: control.observedNoticeEmittedAt || now,
-      observedNoticePolicy: "emit_once_per_active_state",
-      externalPublishIntent: {
-        ...(control.externalPublishIntent || state?.externalPublishIntent || {}),
-        lastUsedAt: now,
-      },
-    },
-  };
-  await writeSpineState(cwd, nextState);
-  if (!control.observedNoticeEmittedAt) {
-    process.stderr.write(`${observedModeNotice(state)}\n`);
-  }
-  process.stderr.write(`${observedModeAuthorizedReleaseNotice(state)}\n`);
-  process.exit(0);
 }
 
 async function allowObservedModeExecution(state) {
@@ -937,7 +781,7 @@ async function allowObservedModeExecution(state) {
 }
 
 function isAgentDispatchTool(name) {
-  return name === "Agent" || name === "spawn_agent";
+  return name === "Agent" || name === "Task" || name === "spawn_agent";
 }
 
 function dispatchIntentText(input) {
@@ -945,6 +789,7 @@ function dispatchIntentText(input) {
     input?.description,
     input?.prompt,
     input?.message,
+    input?.task_name,
     input?.agent_type,
     input?.subagent_type,
     JSON.stringify(input?.items || []),
@@ -975,6 +820,65 @@ function isExecutionDispatchIntent(input, metaName) {
   return /\b(implement|write|create|build|test|fix|debug|execute|run|generate|produce|code)\b/i.test(
     text,
   );
+}
+
+function checkThinkingIndependentLanes(state) {
+  const packets = Array.isArray(state?.workerTaskPackets)
+    ? state.workerTaskPackets
+    : [];
+  const dispatchMode = state?.stageRuntimeControl?.dispatchMode;
+  const fanoutClaimed = ["fan_out_ready", "fan_out_in_progress"].includes(dispatchMode);
+  if (!fanoutClaimed && packets.length < 2) return { met: true, missing: [] };
+
+  const missing = [];
+  if (state?.fetchRecord?.capabilitySearchPerformed !== true) {
+    missing.push("real Fetch capability discovery");
+  }
+  const thinkingStatus = state?.stages?.thinking?.status;
+  const stageIndex = [
+    "critical", "fetch", "thinking", "execution", "review",
+    "meta_review", "verification", "evolution",
+  ].indexOf(String(state?.currentStage || "").toLowerCase());
+  if (thinkingStatus !== "completed" && stageIndex < 3) {
+    missing.push("Thinking completed");
+  }
+  if (packets.length < 2) missing.push("at least two workerTaskPackets");
+
+  const groups = new Map();
+  for (const packet of packets) {
+    for (const field of [
+      "taskPacketId", "ownerAgent", "roleInstanceId", "parallelGroup", "mergeOwner",
+    ]) {
+      if (!packet?.[field]) missing.push(`${field} on every fan-out workerTaskPacket`);
+    }
+    if (!Array.isArray(packet?.shardScope) || packet.shardScope.length === 0) {
+      missing.push("non-empty shardScope on every fan-out workerTaskPacket");
+    }
+    const group = groups.get(packet?.parallelGroup) ?? [];
+    group.push(packet);
+    groups.set(packet?.parallelGroup, group);
+  }
+  const independentGroup = [...groups.values()].some((group) => {
+    if (group.length < 2) return false;
+    const taskIds = new Set(group.map((packet) => packet.taskPacketId));
+    const scopes = new Set();
+    return group.every((packet) => {
+      const dependencies = Array.isArray(packet.dependsOn) ? packet.dependsOn : [];
+      if (dependencies.some((dependency) => taskIds.has(
+        typeof dependency === "string" ? dependency : dependency?.taskPacketId,
+      ))) return false;
+      for (const scope of packet.shardScope ?? []) {
+        const normalizedScope = String(scope).toLowerCase().replaceAll("\\", "/");
+        if (scopes.has(normalizedScope)) return false;
+        scopes.add(normalizedScope);
+      }
+      return true;
+    });
+  });
+  if (!independentGroup) {
+    missing.push("two collision-free dependency-independent lanes in one parallelGroup");
+  }
+  return { met: missing.length === 0, missing: [...new Set(missing)] };
 }
 
 /**
@@ -1353,11 +1257,12 @@ if (isAgentDispatchTool(toolName)) {
     toolInput?.description ||
     toolInput?.message?.substring(0, 80) ||
     toolInput?.prompt?.substring(0, 80) ||
+    toolInput?.task_name ||
     toolInput?.agent_type ||
     "unknown";
   const metaName = extractMetaAgentName(
     toolInput?.description,
-    [toolInput?.prompt, toolInput?.message, toolInput?.agent_type]
+    [toolInput?.prompt, toolInput?.message, toolInput?.task_name, toolInput?.agent_type]
       .filter(Boolean)
       .join(" "),
   );
@@ -1382,6 +1287,13 @@ if (isAgentDispatchTool(toolName)) {
     ["critical", "fetch", "thinking"].includes(state.currentStage) &&
     isExecutionDispatchIntent(toolInput, metaName)
   ) {
+    const independentLaneGate = checkThinkingIndependentLanes(state);
+    if (!independentLaneGate.met) {
+      exitAfterDeny(
+        `Thinking fan-out readiness violation: Agent execution dispatch requires real Fetch evidence and proven independent lanes. ` +
+          `Missing: ${independentLaneGate.missing.join(", ")}.`,
+      );
+    }
     const readinessGate = checkPreExecutionReadiness(state);
     if (!readinessGate.met) {
       exitAfterDeny(
@@ -1423,7 +1335,16 @@ if (isAgentDispatchTool(toolName)) {
       .toLowerCase()
       .trim();
 
-    if (capabilityGateModeRaw !== "off" && !discoveryStages.has(stage)) {
+    const gateExempt = discoveryStages.has(stage);
+
+    if (capabilityGateModeRaw !== "off" && !gateExempt) {
+      const independentLaneGate = checkThinkingIndependentLanes(state);
+      if (!independentLaneGate.met) {
+        exitAfterDeny(
+          `Thinking fan-out readiness violation: Agent execution dispatch requires proven independent lanes. ` +
+            `Missing: ${independentLaneGate.missing.join(", ")}.`,
+        );
+      }
       const performed = state?.fetchRecord?.capabilitySearchPerformed === true;
       if (!performed) {
         // Resolve the effective mode. For "warn" / "block" this is a passthrough;
@@ -1480,7 +1401,9 @@ if (isAgentDispatchTool(toolName)) {
         toolInput?.prompt,
         toolInput?.description,
         toolInput?.message,
+        toolInput?.task_name,
         toolInput?.agent_type,
+        toolInput?.subagent_type,
         JSON.stringify(toolInput?.items || []),
       ]
         .filter(Boolean)
@@ -1623,14 +1546,6 @@ if (isExecutionTool(toolName)) {
   }
 
   if (isHookObservedState(state)) {
-    if (isHighRiskObservedExecution(toolName, toolInput)) {
-      if (isAuthorizedObservedExternalPublish(state, toolName, toolInput)) {
-        await allowObservedExternalPublishExecution(state);
-      }
-      exitAfterDeny(
-        observedModeHighRiskReason(state, String(toolInput?.command || "")),
-      );
-    }
     await allowObservedModeExecution(state);
   }
 
@@ -1709,39 +1624,36 @@ if (isExecutionTool(toolName)) {
     );
   }
 
-  // Execution-stage fan-out gate (META_KIM_FANOUT_GATE, default progressive).
-  // Root-cause fix for "/meta-theory triggers but main thread self-executes
-  // without dispatching any Agent": the legacy code only stderr-warned here and
-  // allowed the self-execution to continue. The trigger condition lives in the
-  // pure evaluateFanoutGate() in spine-state.mjs, shared across runtime hooks
-  // and unit-tested directly. Single-lane work (workerTaskPackets < 2) is
-  // unaffected, so Codex/Cursor/OpenClaw hook-coverage differences no longer
-  // force a blanket warn-only path. =block opts into hard enforcement; =off
-  // restores legacy warn-only. The degraded exit (write spine state
-  // degradedMode=true) stays open because spine-state writes are exempt above
-  // (isSpineStateWrite), so a blocked run is never deadlocked.
-  const fanoutGate = evaluateFanoutGate(state);
-  if (fanoutGate.triggered) {
-    const fanoutModeRaw = (process.env.META_KIM_FANOUT_GATE || "progressive")
-      .trim()
-      .toLowerCase();
-    const fanoutOff =
-      fanoutModeRaw === "off" || fanoutModeRaw === "0" || fanoutModeRaw === "false";
-    const effective = fanoutOff
-      ? "off"
-      : resolveGracedMode(
-          fanoutModeRaw,
-          "META_KIM_FANOUT_GATE_GRACE_DAYS",
-          7,
-          state,
+  // Degraded declaration guard (Phase 3, native-handoff refactor).
+  // Fan-out gate removed: host-native Agent/spawn_agent is the orchestrator
+  // (see docs/goals/meta-kim-native-handoff.md). The boundary check against
+  // unsupported degraded claims stays independent so a run cannot silently
+  // claim degraded without capability-search evidence.
+  if (state?.degradedMode === true) {
+    const degradationCheck = validateDegradedDeclaration(state);
+    if (!degradationCheck.valid) {
+      const guardModeRaw = (process.env.META_KIM_FANOUT_GATE || "progressive")
+        .trim()
+        .toLowerCase();
+      const guardOff =
+        guardModeRaw === "off" ||
+        guardModeRaw === "0" ||
+        guardModeRaw === "false";
+      const guardEffective = guardOff
+        ? "off"
+        : resolveGracedMode(
+            guardModeRaw,
+            "META_KIM_FANOUT_GATE_GRACE_DAYS",
+            7,
+            state,
+          );
+      if (guardEffective !== "off") {
+        exitAfterDeny(
+          `[Meta_Kim degraded-guard] ${degradationCheck.reason} ` +
+            `mode: "${guardEffective}".`,
         );
-    const reason =
-      `${fanoutGate.reason} META_KIM_FANOUT_GATE effective mode: ` +
-      `"${effective}" (raw: "${fanoutModeRaw || "progressive"}").`;
-    if (effective === "block") {
-      exitAfterDeny(reason);
+      }
     }
-    process.stderr.write(`\n⚠️  [Meta_Kim fanout-gate:${effective}] ${reason}\n`);
   }
 
   // Post-execution stages: require correct meta-agent
