@@ -9,11 +9,23 @@
  *   node scripts/doctor-hooks.mjs --fix        # remove zombies + write back (auto backup)
  *   node scripts/doctor-hooks.mjs --all        # also scan <repo>/.claude/settings.json
  *   node scripts/doctor-hooks.mjs --project    # scan ONLY <repo>/.claude/settings.json
+ *   node scripts/doctor-hooks.mjs --project-root <dir>
+ *                                              # scan ONLY <dir>/.claude/settings.json, resolving
+ *                                              # relative hook paths against <dir>. Pair with
+ *                                              # --silent as a fail-closed Claude-project gate any
+ *                                              # CLAUDE-projected consumer repo can run. Scope is
+ *                                              # Claude <dir>/.claude/settings.json ONLY; codex/
+ *                                              # cursor/openclaw hook configs are out of scope. It
+ *                                              # fails closed on dangling, directory-as-file, and
+ *                                              # unverifiable commands, and also checks Medusa-
+ *                                              # specific transitive hook deps (siblings a referenced
+ *                                              # hook spawns, e.g. medusa-worker.mjs ->
+ *                                              # medusa_batch_scan.py), failing on any missing one.
  *   node scripts/doctor-hooks.mjs --lang zh    # force language (en/zh/ja/ko); default: auto
  *   node scripts/doctor-hooks.mjs --silent     # CI mode, exit code = zombie count (capped at 1)
  */
 
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync, statSync } from "node:fs";
 import { homedir, platform } from "node:os";
 import path from "node:path";
 import process from "node:process";
@@ -282,7 +294,100 @@ export function extractCommandPath(command) {
   return null;
 }
 
-function scanSettingsFile(settingsPath) {
+// Resolve a hook target path for existence checking. Absolute paths are used
+// as-is. Relative paths (e.g. ".claude/hooks/foo.mjs") resolve against rootDir
+// when provided (so a settings.json belonging to any project can be scanned
+// correctly), else fall back to the process cwd — the pre-existing behavior.
+export function resolveHookTarget(target, rootDir = null) {
+  if (!target) return target;
+  if (path.isAbsolute(target)) return target;
+  if (rootDir) return path.resolve(rootDir, target);
+  return target;
+}
+
+// A hook/dependency target counts as present only if it resolves to a REGULAR
+// FILE (symlinks followed). A directory or a stat error must never be treated as
+// a runnable hook/helper, otherwise the gate is fail-open on directory
+// look-alikes. (Codex R2 Blocking 2.)
+export function isRegularFile(p) {
+  if (!p) return false;
+  try {
+    return statSync(p).isFile();
+  } catch {
+    return false;
+  }
+}
+
+// Basename key for the transitive-dep table. Windows resolves paths
+// case-insensitively, so a settings.json referencing MEDUSA-WORKER.MJS still
+// runs the real lowercase file — normalize the lookup key to lowercase there so
+// the dependency table cannot be bypassed by case variants. (Codex R2 Blocking 3.)
+function transitiveDepKey(hookAbs) {
+  const base = customBasename(hookAbs);
+  return platform() === "win32" ? base.toLowerCase() : base;
+}
+
+// Transitive hook dependencies: files that settings.json does NOT reference
+// directly, but that a referenced hook spawns at runtime as a SIBLING in the
+// same hooks directory. If one is missing, the referencing hook throws
+// ENOENT / MODULE_NOT_FOUND at runtime even though settings.json has no
+// dangling reference — the exact gap that let a consumer repo ship
+// medusa-postscan-enqueue.mjs + medusa-worker.mjs but miss the Python helper.
+// Edges mirror the real spawn sites (canonical/runtime-assets):
+//   medusa-postscan-enqueue.mjs spawns ./medusa-worker.mjs
+//       (claude/hooks/medusa-postscan-enqueue.mjs L300 path.join(HOOK_DIR,...) / L313 spawn)
+//   medusa-findings-surface.mjs spawns ./medusa-worker.mjs
+//       (shared/hooks/medusa-findings-surface.mjs L273 path.join(HOOK_DIR,...) / L280 spawn)
+//   medusa-worker.mjs           spawns ./medusa_batch_scan.py
+//       (shared/scripts/medusa-worker.mjs L190 path.join(here,...) / L200 spawn)
+export const HOOK_TRANSITIVE_DEPS = {
+  "medusa-postscan-enqueue.mjs": ["medusa-worker.mjs"],
+  "medusa-findings-surface.mjs": ["medusa-worker.mjs"],
+  "medusa-worker.mjs": ["medusa_batch_scan.py"],
+};
+
+// Walk the transitive-dependency closure of the LIVE (existing, referenced)
+// hooks and return every spawned-sibling file that is missing on disk, each
+// with the full call chain from settings.json down to the missing file. Each
+// dependency is resolved as a sibling of the file that spawns it — exactly how
+// the hooks resolve each other via path.join(<own dir>, <child>). Missing files
+// and already-walked files are de-duplicated so a hook referenced by several
+// events (e.g. findings-surface on session-start/user-prompt/stop) reports each
+// gap once.
+export function collectMissingTransitiveDeps(liveEntries, rootDir = null) {
+  const missing = [];
+  const walkedOk = new Set(); // hook abs paths already recursed into
+  const reportedMissing = new Set(); // missing dep abs paths already reported
+
+  const walk = (hookAbs, chain) => {
+    const deps = HOOK_TRANSITIVE_DEPS[transitiveDepKey(hookAbs)];
+    if (!deps) return;
+    const dir = path.dirname(hookAbs);
+    for (const dep of deps) {
+      const depAbs = path.join(dir, dep);
+      const depChain = [...chain, dep];
+      if (!isRegularFile(depAbs)) {
+        if (!reportedMissing.has(depAbs)) {
+          reportedMissing.add(depAbs);
+          missing.push({ dep, path: depAbs, chain: depChain });
+        }
+        continue; // missing, or a directory masquerading as the helper file
+      }
+      if (walkedOk.has(depAbs)) continue;
+      walkedOk.add(depAbs);
+      walk(depAbs, depChain);
+    }
+  };
+
+  for (const entry of liveEntries || []) {
+    const abs = resolveHookTarget(entry.path, rootDir);
+    if (!abs || !HOOK_TRANSITIVE_DEPS[transitiveDepKey(abs)]) continue;
+    walk(abs, ["settings.json", customBasename(abs)]);
+  }
+  return missing;
+}
+
+export function scanSettingsFile(settingsPath, rootDir = null) {
   if (!existsSync(settingsPath)) {
     return { ok: false, reason: "missing" };
   }
@@ -301,25 +406,33 @@ function scanSettingsFile(settingsPath) {
   const hooks = parsed.hooks || {};
   const zombies = [];
   const live = [];
+  const unverifiable = [];
   for (const [event, blocks] of Object.entries(hooks)) {
     for (const block of blocks || []) {
       for (const hook of block.hooks || []) {
         const target = extractCommandPath(hook.command || "");
-        const exists = target ? existsSync(target) : true;
         const entry = {
           event,
           matcher: block.matcher,
           path: target,
           command: hook.command,
         };
-        (exists ? live : zombies).push(entry);
+        if (!target) {
+          // No statically-extractable script path → cannot be verified on disk.
+          unverifiable.push(entry);
+        } else if (isRegularFile(resolveHookTarget(target, rootDir))) {
+          live.push(entry);
+        } else {
+          zombies.push(entry);
+        }
       }
     }
   }
-  return { ok: true, settings: parsed, zombies, live };
+  const missingDeps = collectMissingTransitiveDeps(live, rootDir);
+  return { ok: true, settings: parsed, zombies, live, unverifiable, missingDeps };
 }
 
-function removeZombies(settings) {
+function removeZombies(settings, rootDir = null) {
   const hooks = settings.hooks || {};
   const next = {};
   let removed = 0;
@@ -329,7 +442,7 @@ function removeZombies(settings) {
         const keptHooks = (block.hooks || []).filter((hook) => {
           const target = extractCommandPath(hook.command || "");
           if (!target) return true;
-          if (existsSync(target)) return true;
+          if (isRegularFile(resolveHookTarget(target, rootDir))) return true;
           removed += 1;
           return false;
         });
@@ -366,15 +479,62 @@ async function main() {
   const silent = args.includes("--silent");
   const langIdx = args.indexOf("--lang");
   const langArg = langIdx >= 0 ? args[langIdx + 1] : null;
+  const projectRootIdx = args.indexOf("--project-root");
+  const projectRootArg = projectRootIdx >= 0 ? args[projectRootIdx + 1] : null;
   const lang = resolveLang(langArg);
   const t = MESSAGES[lang] || MESSAGES.en;
+
+  // --project-root is the fail-closed gate mode; its value must be a real
+  // directory, not a missing arg or the next flag. Without this check,
+  // "--project-root --silent" would treat "--silent" as the project root and
+  // then silently pass because that directory has no .claude/settings.json.
+  if (
+    projectRootIdx >= 0 &&
+    (projectRootArg == null ||
+      projectRootArg.trim() === "" ||
+      projectRootArg.startsWith("--"))
+  ) {
+    console.error(
+      `${C.red}doctor-hooks: --project-root requires a non-empty directory value${C.reset}`,
+    );
+    process.exit(2);
+  }
+  const gateMode = projectRootIdx >= 0;
 
   const userSettings = path.join(homedir(), ".claude", "settings.json");
   const projectSettings = findProjectSettings();
   const targets = [];
-  if (!projectOnly) targets.push({ path: userSettings, label: "user" });
-  if ((allMode || projectOnly) && projectSettings) {
-    targets.push({ path: projectSettings, label: "project" });
+  if (gateMode) {
+    // Explicit project root: scan ONLY that project's .claude/settings.json and
+    // resolve its relative hook paths against it. This is the fail-closed
+    // Claude-project gate any CLAUDE-projected consumer repo can run to catch
+    // dangling / directory / unverifiable / missing-sibling hook references.
+    // Branch on the flag's presence (gateMode), NOT on truthiness, so an empty
+    // value can never silently fall back to the user-settings scan. (Codex R2 B1.)
+    const root = path.resolve(projectRootArg);
+    let rootIsDir = false;
+    try {
+      rootIsDir = statSync(root).isDirectory();
+    } catch {
+      rootIsDir = false;
+    }
+    if (!rootIsDir) {
+      console.error(
+        `${C.red}doctor-hooks: --project-root is not an existing directory: ${root}${C.reset}`,
+      );
+      process.exit(2);
+    }
+    targets.push({
+      path: path.join(root, ".claude", "settings.json"),
+      label: "project",
+      rootDir: root,
+    });
+  } else {
+    if (!projectOnly)
+      targets.push({ path: userSettings, label: "user", rootDir: null });
+    if ((allMode || projectOnly) && projectSettings) {
+      targets.push({ path: projectSettings, label: "project", rootDir: null });
+    }
   }
 
   if (!silent) {
@@ -385,15 +545,22 @@ async function main() {
   }
 
   let totalZombies = 0;
+  let gateFailure = false;
   for (const target of targets) {
     if (!silent) {
       console.log(`\n${C.bold}${t.scanning(target.path)}${C.reset}`);
     }
-    const result = scanSettingsFile(target.path);
+    const result = scanSettingsFile(target.path, target.rootDir);
     if (!result.ok) {
       if (result.reason === "missing") {
-        if (!silent)
+        // In gate mode a missing settings.json means the gate cannot verify the
+        // project's hook references — fail closed instead of silently passing.
+        if (gateMode) {
+          console.error(`${C.red}  ${t.notFound(target.path)}${C.reset}`);
+          gateFailure = true;
+        } else if (!silent) {
           console.log(`${C.dim}  ${t.notFound(target.path)}${C.reset}`);
+        }
         continue;
       }
       if (result.reason === "parse-failed") {
@@ -401,11 +568,58 @@ async function main() {
           `${C.red}  ${t.parseFailed(target.path, result.error?.message ?? "")}${C.reset}`,
         );
         process.exitCode = 1;
+        if (gateMode) gateFailure = true;
         continue;
+      }
+      // read-failed or any other non-ok result: a real error under the gate.
+      if (gateMode) {
+        console.error(
+          `${C.red}  doctor-hooks: cannot read ${target.path}${C.reset}`,
+        );
+        process.exitCode = 1;
+        gateFailure = true;
       }
       continue;
     }
-    const { zombies, live, settings } = result;
+    const { zombies, live, settings, unverifiable } = result;
+
+    // Unverifiable commands (no statically-extractable script path) cannot be
+    // gate-verified; in gate mode that is fail-closed, not silently live.
+    if (gateMode && (unverifiable?.length ?? 0) > 0) {
+      for (const u of unverifiable) {
+        console.error(
+          `${C.red}  doctor-hooks: unverifiable hook command (no extractable script path): ${u.command}${C.reset}`,
+        );
+      }
+      gateFailure = true;
+    }
+
+    // Transitive-dependency gate: a hook that settings.json references may spawn
+    // sibling files at runtime (e.g. medusa-worker.mjs -> medusa_batch_scan.py).
+    // Those never appear as settings.json references, so the zombie scan above
+    // cannot see them. Only enforce this in --project-root gate mode, where the
+    // hooks directory is a concrete, fully-projected consumer repo; the default
+    // ~/.claude scan uses cwd-relative template paths and must not be disturbed.
+    // This is an explicit fail-closed branch (non-zero exit), not an assertion,
+    // so it cannot be silently stripped or bypassed.
+    const missingDeps = gateMode ? result.missingDeps || [] : [];
+    if (missingDeps.length > 0) {
+      for (const d of missingDeps) {
+        console.error(
+          `${C.red}  doctor-hooks: missing transitive hook dependency (spawned, not in settings.json)${C.reset}`,
+        );
+        console.error(
+          `${C.red}    chain: ${d.chain.join(" -> ")}${C.reset}`,
+        );
+        console.error(`${C.red}    missing file: ${d.path}${C.reset}`);
+        console.error(
+          `${C.dim}    fix: re-run \`node setup.mjs\` / \`npm run meta:sync\` to reproject Meta_Kim hooks, ` +
+            `or restore it from canonical/runtime-assets/shared/scripts/${d.dep}${C.reset}`,
+        );
+      }
+      gateFailure = true;
+    }
+
     if (zombies.length === 0 && live.length === 0) {
       if (!silent) console.log(`${C.dim}  ${t.noHooks(target.path)}${C.reset}`);
       continue;
@@ -448,7 +662,7 @@ async function main() {
     if (!silent)
       console.log(`${C.green}  ${t.backupWritten(backup)}${C.reset}`);
 
-    const { settings: cleaned, removed } = removeZombies(settings);
+    const { settings: cleaned, removed } = removeZombies(settings, target.rootDir);
     writeFileSync(target.path, `${JSON.stringify(cleaned, null, 2)}\n`);
     if (!silent) {
       console.log(`${C.green}  ${t.removedCount(removed)}${C.reset}`);
@@ -461,8 +675,12 @@ async function main() {
     }
   }
 
+  // gateFailure (missing / unreadable / unparseable settings under --project-root)
+  // must produce a non-zero exit even when there were zero dangling references,
+  // and must not be clobbered by the silent-mode exit below.
+  if (gateFailure) process.exitCode = 1;
   if (silent) {
-    process.exit(totalZombies > 0 ? 1 : 0);
+    process.exit(totalZombies > 0 || gateFailure ? 1 : 0);
   }
 }
 

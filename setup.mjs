@@ -35,6 +35,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { join, dirname, resolve, isAbsolute, relative } from "node:path";
+import { fileURLToPath } from "node:url";
 import { homedir, platform, tmpdir } from "node:os";
 import { createInterface } from "node:readline";
 import {
@@ -981,6 +982,16 @@ const GLOBAL_HOOK_PACKAGE_FILES_LIST = [
   "utils.mjs",
 ];
 
+// medusa 项目 hook:被 canonical settings.json / capability-index 引用,但不在
+// GLOBAL_HOOK_PACKAGE_FILES_LIST 内,且分散在 claude/hooks、shared/hooks、shared/scripts。
+// 消费仓项目投影必须四件全拷,否则 .claude/hooks 满足不了 settings 引用 → MODULE_NOT_FOUND。
+const MEDUSA_PROJECT_HOOK_FILES = [
+  "medusa-findings-surface.mjs", // shared/hooks
+  "medusa-postscan-enqueue.mjs", // claude/hooks
+  "medusa-worker.mjs", // shared/scripts(被前两者 spawn)
+  "medusa_batch_scan.py", // shared/scripts
+];
+
 const PROJECT_LOCAL_CAPABILITY_PREFIXES = [
   ".claude/agents/",
   ".claude/skills/",
@@ -1035,6 +1046,7 @@ const PROJECT_HOOK_SOURCE_CANDIDATES = {
   claude: [
     ...GLOBAL_HOOK_PACKAGE_FILES_LIST,
     "spine-state.mjs",
+    ...MEDUSA_PROJECT_HOOK_FILES,
   ],
   codex: [
     "activate-meta-theory-spine.mjs",
@@ -1092,6 +1104,9 @@ function readProjectHookSource(platformId, hookName) {
   }
   candidates.push(
     join(PROJECT_DIR, "canonical", "runtime-assets", "shared", "hooks", hookName),
+  );
+  candidates.push(
+    join(PROJECT_DIR, "canonical", "runtime-assets", "shared", "scripts", hookName),
   );
   candidates.push(
     join(PROJECT_DIR, "canonical", "runtime-assets", "claude", "hooks", hookName),
@@ -1427,6 +1442,16 @@ function buildOpenClawWorkspacePlans(targetDir) {
 }
 
 function projectHookGeneratedPlans(platformId, targetDir) {
+  // "all" is a public quick-install choice but has no entry in
+  // PROJECT_HOOK_REL_DIRS_BY_PLATFORM / PROJECT_HOOK_SOURCE_CANDIDATES, so it
+  // must expand to each concrete platform (mirroring projectDeployRootsForPlatform
+  // which already handles "all"). Passing "all" straight through would silently
+  // generate zero hooks and leave settings.json referencing missing medusa files.
+  if (platformId === "all") {
+    return ["claude", "codex", "cursor", "openclaw"].flatMap((p) =>
+      projectHookGeneratedPlans(p, targetDir),
+    );
+  }
   const plans = [];
   const relDir = PROJECT_HOOK_REL_DIRS_BY_PLATFORM[platformId];
   const hookNames = PROJECT_HOOK_SOURCE_CANDIDATES[platformId] ?? [];
@@ -1513,7 +1538,11 @@ function isMetaKimManagedHookRelPath(rel) {
   }
   if (!basename) return false;
   const fileName = basename.split("/").pop();
-  if (!fileName || !fileName.endsWith(".mjs")) return false;
+  if (!fileName) return false;
+  // medusa 项目 hook 含非 .mjs 的 medusa_batch_scan.py,且不在 GLOBAL 清单内;
+  // 需显式认作 Meta_Kim 托管,否则 bootstrap/更新会误判为用户文件而冲突中止。
+  if (MEDUSA_PROJECT_HOOK_FILES.includes(fileName)) return true;
+  if (!fileName.endsWith(".mjs")) return false;
   return (
     GLOBAL_HOOK_PACKAGE_FILES_LIST.includes(fileName) ||
     fileName === "spine-state.mjs" // legacy ghost file from older Meta_Kim installs
@@ -6802,16 +6831,33 @@ async function runCheck() {
   );
 }
 
-main().catch((err) => {
-  const msg = err?.message || String(err);
-  const interrupted =
-    msg.includes("SIGINT") ||
-    msg.includes("force closed") ||
-    err?.name === "ExitPromptError";
-  if (interrupted) {
-    console.error(`\n${C.dim}  ${t.setupInterrupted}${C.reset}\n`);
-    process.exit(130);
-  }
-  console.error(`\n${C.red}  ${t.setupError} ${msg}${C.reset}\n`);
-  process.exit(1);
-});
+// Exposed for tests (project deploy + hook-source resolution). Importing this
+// module must NOT run the interactive installer — the isMain guard below ensures
+// main() runs only when setup.mjs is executed as the entry (bin/meta-kim.mjs
+// spawns it as a child, so argv[1] is this file).
+export {
+  MEDUSA_PROJECT_HOOK_FILES,
+  deployPlatformFiles,
+  readProjectHookSource,
+  isMetaKimManagedHookRelPath,
+};
+
+const isSetupMain =
+  process.argv[1] &&
+  resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url));
+
+if (isSetupMain) {
+  main().catch((err) => {
+    const msg = err?.message || String(err);
+    const interrupted =
+      msg.includes("SIGINT") ||
+      msg.includes("force closed") ||
+      err?.name === "ExitPromptError";
+    if (interrupted) {
+      console.error(`\n${C.dim}  ${t.setupInterrupted}${C.reset}\n`);
+      process.exit(130);
+    }
+    console.error(`\n${C.red}  ${t.setupError} ${msg}${C.reset}\n`);
+    process.exit(1);
+  });
+}

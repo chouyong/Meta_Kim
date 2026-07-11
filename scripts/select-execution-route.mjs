@@ -5,6 +5,7 @@ import path from "node:path";
 import { GOVERNANCE_OWNERS, OS_TARGETS, RUNTIMES, classifyTaskShape, exists, readJson, repoPath, scoreRoute, stateDir, supportScore, toPosix } from "./governance-lib.mjs";
 import { CAPABILITY_GAP_DECISION_CONTRACT, decideCapabilityGap } from "./capability-gap-mvp.mjs";
 import { classifyMetaTheoryEntry } from "./meta-theory-entry-classifier.mjs";
+import { selectReportProviderBudget } from "./report-provider-budget.mjs";
 
 function argValue(name, fallback = null) {
   const index = process.argv.indexOf(name);
@@ -534,10 +535,20 @@ const projectRuntimeCapabilityProviders = [
   ...projectRuntimeSkillProviders,
   ...await projectCapabilityProviders(),
 ].sort((a, b) => {
+  // Package-script providers sort first. This is the PRE-EXISTING execution
+  // tie-break order: this shared master array is spread into the resolveProvider
+  // pools (mcp/command/hook/memory/dependency), where an equal-score tie keeps
+  // the first provider in array order. It must NOT be reordered to surface
+  // report-only providers (Codex R2 Blocking 4) — the 80-slot report budget is
+  // derived separately below.
   const aPs = typeof a?.id === "string" && a.id.startsWith("package-script:") ? 0 : 1;
   const bPs = typeof b?.id === "string" && b.id.startsWith("package-script:") ? 0 : 1;
   return aPs - bPs;
 });
+
+// selectReportProviderBudget is imported from ./report-provider-budget.mjs — kept
+// in a side-effect-free module so the bounded-quota / no-family-starvation
+// invariants (Codex R2 Blocking 4/5) can be unit-tested directly.
 const localGlobalCapabilityProvidersAll = ["skills", "commands", "hooks", "plugins", "mcpServers", "mcpTools", "rules", "prompts"].flatMap((type) =>
   capabilityEntries(globalCapabilityInventory, type)
     .map((entry) => compactCapabilityProvider(entry, `local_global_${type}_inventory`, type)),
@@ -769,7 +780,7 @@ const ownerDiscoveryPacket = {
   projectRuntimeSkillProviders: projectRuntimeSkillProviders.slice(0, 40),
   localGlobalSkillProviders,
   repoCanonicalCapabilityProviders: repoCanonicalCapabilityProviders.slice(0, 60),
-  projectRuntimeCapabilityProviders: projectRuntimeCapabilityProviders.slice(0, 80),
+  projectRuntimeCapabilityProviders: selectReportProviderBudget(projectRuntimeCapabilityProviders, 80),
   localGlobalCapabilityProviders,
   runtimeToolProviders: runtimeToolProviders.slice(0, 40),
   capabilityProviderCoverage,

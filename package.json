@@ -36,6 +36,7 @@
     "meta:doctor:governance": "node scripts/doctor-governance.mjs",
     "meta:doctor:hooks": "node scripts/doctor-hooks.mjs",
     "meta:doctor:hooks:fix": "node scripts/doctor-hooks.mjs --fix",
+    "meta:doctor:hooks:project": "node scripts/doctor-hooks.mjs --project-root . --silent",
     "meta:status": "node scripts/footprint.mjs",
     "meta:status:json": "node scripts/footprint.mjs --json",
     "meta:status:diff": "node scripts/footprint.mjs --diff",

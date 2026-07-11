@@ -605,3 +605,36 @@ test("routing fixtures recall internal patterns and platform/OS matrices", () =>
     "capability-gap routing must link type classification to the blocking decision",
   );
 });
+
+test("provider budget keeps runtime config + rules + package-script inside the 80-slot cap (§6 regression)", () => {
+  // Regression: package-script providers (>140) once monopolized the
+  // slice(0, 80) provider budget, evicting the runtime hook-config providers
+  // (validate-capability-routing) and the rules provider (hooks/rules
+  // visibility here). The budget sort must keep all three kinds in-slice.
+  const fuzzy = route("fuzzy strategy task");
+  const providers = fuzzy.ownerDiscoveryPacket?.projectRuntimeCapabilityProviders ?? [];
+  assert.ok(providers.length > 0, "sliced provider budget must not be empty");
+  assert.ok(providers.length <= 80, "provider budget cap must stay at 80");
+  const ids = new Set(providers.map((p) => p.id));
+  for (const configId of [
+    "codex-hooks-json",
+    "claude-settings-json",
+    "cursor-hooks-json",
+    "openclaw-template-json",
+  ]) {
+    assert.ok(
+      ids.has(configId),
+      `runtime config provider ${configId} must survive the 80-slot budget`,
+    );
+  }
+  assert.ok(
+    providers.some((p) => p.type === "rules"),
+    "a rules-type provider must stay visible inside the 80-slot budget",
+  );
+  assert.ok(
+    providers.some(
+      (p) => typeof p.id === "string" && p.id.startsWith("package-script:"),
+    ),
+    "at least one package-script provider must stay visible inside the 80-slot budget",
+  );
+});
