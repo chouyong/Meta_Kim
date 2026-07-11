@@ -10,12 +10,13 @@ import {
   decideCapabilityGap,
 } from "./capability-gap-mvp.mjs";
 import { buildAgentProjectionTargets } from "./runtime-tool-profiles.mjs";
+import { getProfilePaths } from "./meta-kim-local-state.mjs";
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(scriptDir, "..");
-const DEFAULT_OUTPUT_PATH = path.resolve(
-  REPO_ROOT,
-  ".meta-kim/state/default/capability-gap-orchestration.json"
+const DEFAULT_OUTPUT_PATH = path.join(
+  getProfilePaths({ repoPath: REPO_ROOT }).profileDir,
+  "capability-gap-orchestration.json",
 );
 
 const ROLE_BY_DECISION = {

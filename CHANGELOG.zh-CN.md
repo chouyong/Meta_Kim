@@ -8,6 +8,29 @@
 
 ## Unreleased
 
+## [2.8.79] - 2026-07-11
+
+### 解决的问题
+
+安装、运行状态、Hook、能力发现和发布链长期存在重复实现与危险边界。大规模清理即使通过聚焦测试，仍可能出现 profile 状态分裂、全局同步穿透 Windows Junction、把用户自有同名 Hook 当成 Meta_Kim 文件、`--help` 发生真实写入、恢复的设计测试没有进入标准测试链，以及发布验证无法证明最终包内容等问题。
+
+### 修复
+
+- **运行状态统一为一套防碰撞 profile 契约。** 应用层和 Hook 层复用同一清洗实现；路径穿越、Unicode、同名碰撞和超长输入都会得到稳定隔离的身份，正常 profile 保持兼容。即使使用自定义状态目录或并发写入，spine、active-run 和 run-status 也会解析到同一 profile。
+- **全局同步在文件系统和所有权边界上失败关闭。** 帮助和未知参数保证零写入；runtime home 写入拒绝符号链接/Junction 越界；退休 Hook 只有在证明属于 Meta_Kim 后才会先备份再删除，并且只清理对应的受管 settings 项。用户自有同名文件和 settings 不受影响。
+- **Hook 只有一个 canonical 实现，同时保留运行时差异。** Claude 兼容适配器投影共享实现；能力索引同时记录 canonical 与 adapter 路径；真正独立的 Claude/OpenClaw 同名 Hook 使用不同 namespace，不再按文件名错误合并。
+- **CLI 与 Setup 在任意目录下保持一致。** 包 CLI 从自身安装位置解析脚本；Setup 对 `--参数 值` 和 `--参数=值` 使用同一消费路径；空值和未知参数会在安装动作前失败。
+- **数据与报告辅助层完成模块化和事务化。** 项目库存、报告上下文、Memory endpoint、SQLite 事务、Setup policy 和 governed fan-out 共用模块替代重复临时代码，同时保留用户数据和回滚边界。
+- **设计 PoC 的保留与退役边界明确。** 四个配置驱动设计模块、合同和 59 个测试继续打包并进入标准测试；无调用的 validator 草稿和过期 RESULTS 报告继续退役。守卫只拦真实可执行消费，不误伤文档和包清单否定断言。
+- **标准发布链覆盖所有测试和包边界。** 测试库存明确覆盖 unit、setup、integration、meta-theory 和 design-gate；离线 `npm pack --dry-run` 断言证明必需文件进入包、退役文件不进入包。
+
+### 验证
+
+- correctness、security、completeness 三视角反证审查，覆盖路径穿越、名称碰撞、用户同名 Hook、settings 所有权和 Windows Junction。
+- 更新发布元数据前的合并修复聚焦测试：`130/130` 通过。
+- `npm run meta:test:inventory`、`npm run meta:test:unit` 与离线包清单断言。
+- 发布提交前必须完成四运行时同步、Graphify 重建、`npm run meta:verify:all` 和最终 package/diff 检查。
+
 ## [2.8.78] - 2026-07-11
 
 ### 解决的问题

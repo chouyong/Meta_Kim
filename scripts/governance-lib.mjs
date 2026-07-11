@@ -4,10 +4,11 @@ import os from "node:os";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
+import { getProfilePaths } from "./meta-kim-local-state.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export const repoRoot = path.resolve(__dirname, "..");
-export const stateDir = path.join(repoRoot, ".meta-kim", "state", "default");
+export const stateDir = getProfilePaths().profileDir;
 export const GOVERNANCE_ACTIONS = [
   "clarify_intent",
   "fetch_platform_capability",

@@ -27,6 +27,7 @@ const taskText = String(task ?? "").toLowerCase();
 const entryClassification = classifyMetaTheoryEntry(task);
 const choicePolicy = entryClassification.ambiguityPacket?.choicePolicy ?? "no_choice_needed";
 const subjectiveRouteChoice = entryClassification.triggerReason === "subjective_quality_ambiguous";
+const stateDirRef = toPosix(path.relative(repoPath("."), stateDir));
 const GOVERNANCE_CHAIN_PREFIX_RE =
   /^critical(?:\s+thinking)?(?:\s*(?:->|=>|→|,|，|、|;|；|and)?\s+)fetch(?:\s*(?:->|=>|→|,|，|、|;|；|and)?\s+)(?:deep\s+)?thinking(?:\s*(?:->|=>|→|,|，|、|;|；|and)?\s+)review\s*/iu;
 const autoFanoutDispatchRequested =
@@ -783,7 +784,7 @@ const ownerDiscoveryPacket = {
     { source: "codex_project_inventory", checked: true, sourceRef: ".codex/agents; .agents/skills; .codex/commands; .codex/hooks; .codex/hooks.json; .codex/config.toml; .mcp.json; package.json scripts" },
     { source: "cursor_project_inventory", checked: true, sourceRef: ".cursor/agents; .cursor/skills; .cursor/rules; .cursor/prompts; .cursor/hooks; .cursor/hooks.json; .cursor/mcp.json" },
     { source: "openclaw_project_inventory", checked: true, sourceRef: "openclaw/workspaces; openclaw/skills; openclaw/hooks; openclaw/openclaw.template.json" },
-    { source: "local_global_inventory_cache", checked: true, sourceRef: ".meta-kim/state/default/capability-index/global-capabilities.json" },
+    { source: "local_global_inventory_cache", checked: true, sourceRef: `${stateDirRef}/capability-index/global-capabilities.json` },
     { source: "claude_global_inventory", checked: true, sourceRef: "~/.claude/agents; ~/.claude/skills; ~/.claude/commands; ~/.claude/hooks; ~/.claude/settings.json" },
     { source: "codex_global_inventory", checked: true, sourceRef: "~/.codex/agents; ~/.codex/skills; ~/.codex/commands; ~/.codex/hooks; ~/.codex/hooks.json; ~/.codex/config.toml; ~/.agents/skills" },
     { source: "codex_global_skill_filesystem_light_scan", checked: true, sourceRef: "~/.codex/skills; ~/.codex/plugins/cache" },
@@ -825,7 +826,7 @@ const ownerDiscoveryPacket = {
     "openclaw/workspaces",
     "openclaw/openclaw.template.json",
     "config/runtime-capability-matrix.json",
-    ".meta-kim/state/default/capability-inventory.json",
+    `${stateDirRef}/capability-inventory.json`,
     ".mcp.json",
     "package.json",
     "scripts",
@@ -852,7 +853,7 @@ const ownerDiscoveryPacket = {
     "~/.openclaw/workspace-*",
     "~/.openclaw/skills",
     "~/.openclaw/hooks",
-    ".meta-kim/state/default/capability-index/global-capabilities.json",
+    `${stateDirRef}/capability-index/global-capabilities.json`,
     "config/contracts/workflow-contract.json",
   ],
 };

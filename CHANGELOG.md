@@ -8,6 +8,29 @@ The changelog explains the user-facing problem or risk each release solved, what
 
 ## Unreleased
 
+## [2.8.79] - 2026-07-11
+
+### Solved Problem
+
+The install, runtime-state, Hook, capability-discovery, and release paths had accumulated duplicated implementations and unsafe edge cases. Large cleanup diffs could pass focused tests while profile state split across directories, global sync followed Windows junctions or treated a user's same-name Hook as Meta_Kim-owned, CLI help performed writes, restored design tests stayed outside the standard test chain, and package contents were not asserted by the release suite.
+
+### Fixed
+
+- **Runtime state now has one collision-resistant profile contract.** Application and Hook code share the same sanitizer; traversal-like, Unicode, colliding, and overlong inputs keep deterministic isolated identities, while normal profile names remain compatible. Spine, active-run, and run-status files resolve one profile even with custom state directories and concurrent writes.
+- **Global sync fails closed at filesystem and ownership boundaries.** Help and unknown options are zero-write, runtime-home writes reject symlink/junction escapes, and retired Hook cleanup requires Meta_Kim ownership evidence, creates a backup, and removes only the matching managed settings entry. User-owned same-name files and settings remain untouched.
+- **Hook implementations have one canonical source without erasing runtime variants.** Claude compatibility adapters project the shared implementation, capability discovery records canonical and adapter paths, and independent Claude/OpenClaw same-name Hooks retain separate namespaces instead of being collapsed by basename.
+- **CLI and setup behavior is consistent from any directory.** The package CLI resolves its own scripts, setup accepts equivalent separated and equals-form value options, and empty or unknown values fail before installation work begins.
+- **Data and reporting helpers are modular and transactional.** Shared project inventory, report context, memory endpoint, SQLite transaction, setup policy, and governed fan-out helpers replace repeated ad-hoc logic while preserving user-owned state and rollback boundaries.
+- **Design PoC retirement is explicit and testable.** Four configuration-driven design-gate modules, their contract, and 59 tests remain packaged and covered; the unused draft validator and stale results report stay retired. The guard blocks real executable consumption without rejecting documentation or negative package assertions.
+- **The standard release chain covers every test and package boundary.** Inventory classification includes unit, setup, integration, meta-theory, and design-gate suites; offline `npm pack --dry-run` assertions prove required files are included and retired files are absent.
+
+### Verification
+
+- Adversarial correctness, security, and completeness reviews with traversal, collision, same-name user Hook, settings ownership, and Windows junction cases.
+- Focused merged repair suite: `130/130` passed before release metadata update.
+- `npm run meta:test:inventory`, `npm run meta:test:unit`, and offline package-manifest assertions.
+- Full four-runtime sync, Graphify rebuild, `npm run meta:verify:all`, and final package/diff checks are required on the release commit.
+
 ## [2.8.78] - 2026-07-11
 
 ### Solved Problem

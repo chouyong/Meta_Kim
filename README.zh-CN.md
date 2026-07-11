@@ -87,7 +87,7 @@ npm install
 node setup.mjs
 ```
 
-> 💡 **安装之后**：`setup.mjs` 结尾会打印产物位置。任何时候想再看一眼（或对比上次安装），在安装目录里跑 `npm run meta:status` 即可。
+> 💡 **安装之后**：`setup.mjs` 结尾会打印产物位置。全局安装可在任意目录运行 `meta-kim status`；npx 安装可重新运行 `npx --yes github:KimYx0207/Meta_Kim meta-kim status`。仓库维护者也可继续使用 `npm run meta:status`。
 
 刚 clone 下来时，先按这三层看，避免把“主源”“生成物”和“本地状态”混在一起：
 
@@ -826,7 +826,7 @@ flowchart TB
 | 命令 | 作用 |
 | --- | --- |
 | `npm run meta:sync` | 从 canonical 同步到四端 |
-| `npm run meta:check:runtimes` | 检查四端是否同步 |
+| `npm run meta:check:runtimes` | 检查默认正式项目投影（Claude Code + Codex）；更广检查需显式指定 runtime targets |
 | `npm run meta:validate` | 项目完整性校验 |
 | `npm run meta:install-scope:verify` | 校验全局/项目安装边界 |
 | `npm run meta:project-cache:verify` | 校验全局 hook 能生成项目本地缓存 |
@@ -904,7 +904,7 @@ Meta_Kim 把产物写到 3 个地方：
 2. **用户 home** — `~/.claude/skills/meta-theory/`（以及 `.codex / .cursor / .openclaw`）跨项目共享的全局 skill
 3. **清单** — `~/.meta-kim/install-manifest.json` 记录所有改动，支持安全卸载
 
-在你跑 `npx` 的那个目录下运行 `npm run meta:status`（或 `node setup.mjs --check`）查看完整足迹。想回滚就跑 `npm run meta:uninstall`。
+全局安装后，在任意目录运行 `meta-kim status` 即可查看完整足迹。使用 npx 时，重新运行 `npx --yes github:KimYx0207/Meta_Kim meta-kim status`，并可将 `status` 替换为 `check`、`doctor`、`update` 或 `uninstall`。这些命令从安装包解析脚本，不依赖当前目录存在 `package.json`；仓库维护者可继续使用对应的 `npm run meta:*` 命令。
 
 ### Q：Meta_Kim 和普通的 AI 编码助手有什么区别？
 
