@@ -13,10 +13,12 @@
  *   --plugins-only    only run `claude plugin install` (no git clones)
  *   --skip-plugins    skip `claude plugin install` even if defaults apply
  *   --skills=id,...   install only these manifest skill ids (omit = all)
+ *   --prefer-local-dependencies
+ *                     prefer local sibling dependency checkouts for testing
  *
  * Env (optional): META_KIM_CLAUDE_HOME, CLAUDE_HOME, META_KIM_CODEX_HOME,
  * CODEX_HOME, META_KIM_OPENCLAW_HOME, OPENCLAW_HOME, META_KIM_QODER_HOME,
- * QODER_HOME, META_KIM_SKILL_IDS
+ * QODER_HOME, META_KIM_SKILL_IDS, META_KIM_LOCAL_DEPENDENCY_ROOT
  */
 
 import { execFileSync, execSync, spawnSync, spawn } from "node:child_process";
@@ -195,6 +197,7 @@ const INSTALLER_BOOLEAN_FLAGS = new Set([
   "--skip-plugins",
   "--no-plugins",
   "--skip-inventory-refresh",
+  "--prefer-local-dependencies",
 ]);
 const INSTALLER_VALUE_FLAGS = new Set([
   "--targets",
@@ -216,6 +219,7 @@ function installerHelpText() {
     "  --plugins-only              install native plugin bundles only",
     "  --skip-plugins, --no-plugins",
     "  --skip-inventory-refresh",
+    "  --prefer-local-dependencies  use local sibling dependency checkouts when present",
     "  --proxy <url>",
     "  --log-file <path>",
     "  -h, --help                  show this help without writing",
@@ -256,6 +260,34 @@ if (directInvocation) {
     process.exit(0);
   }
   validateInstallerArgs(cliArgs);
+}
+
+const preferLocalDependencies = cliArgs.includes("--prefer-local-dependencies");
+
+function localDependencyRoots() {
+  const roots = [];
+  if (process.env.META_KIM_LOCAL_DEPENDENCY_ROOT) {
+    roots.push(process.env.META_KIM_LOCAL_DEPENDENCY_ROOT);
+  }
+  roots.push(path.dirname(repoRoot));
+  return [...new Set(roots.map((root) => path.resolve(root)))];
+}
+
+function repoNameFromFullName(repoFullName) {
+  return String(repoFullName ?? "").split("/").filter(Boolean).at(-1) ?? null;
+}
+
+function resolveLocalDependencyRepo(repoFullName) {
+  if (!preferLocalDependencies) return null;
+  const repoName = repoNameFromFullName(repoFullName);
+  if (!repoName) return null;
+  for (const root of localDependencyRoots()) {
+    const candidate = path.join(root, repoName);
+    if (existsSync(path.join(candidate, ".git"))) {
+      return candidate;
+    }
+  }
+  return null;
 }
 
 const updateMode = process.argv.includes("--update");
@@ -496,12 +528,14 @@ function loadSkillsManifest() {
     for (const skill of manifest.skills) {
       const repo = skill.repo.replace("${skillOwner}", skillOwner);
       const fullUrl = `https://github.com/${repo}.git`;
+      const localRepoPath = resolveLocalDependencyRepo(repo);
 
       const subdir = resolveManifestSkillSubdir(skill, os.platform());
 
       skillRepos.push({
         id: skill.id,
         repo: fullUrl,
+        ...(localRepoPath ? { localRepoPath } : {}),
         ...(subdir ? { subdir } : {}),
         targets: skill.targets || ["claude", "codex", "openclaw"],
         ...(skill.claudePlugin ? { claudePlugin: skill.claudePlugin } : {}),
@@ -3654,6 +3688,46 @@ async function stageSkillClone(
   }
 }
 
+async function stageSkillFromLocalRepo(
+  skillId,
+  stagedPath,
+  localRepoPath,
+  subdirPath = null,
+  preExistingPath,
+  skipIfExisting,
+) {
+  if (
+    skipIfExisting &&
+    preExistingPath &&
+    (await pathExists(preExistingPath)) &&
+    !(await isEmptyDir(preExistingPath))
+  ) {
+    return true;
+  }
+
+  if ((await pathExists(stagedPath)) && !(await isEmptyDir(stagedPath))) {
+    return true;
+  }
+
+  const sourcePath = subdirPath
+    ? path.join(localRepoPath, ...subdirPath.split("/").filter(Boolean))
+    : localRepoPath;
+
+  if (dryRun) {
+    console.log(
+      t.dryRun(`stage local ${sourcePath} -> ${stagedPath}`),
+    );
+    return true;
+  }
+
+  if (!(await pathExists(sourcePath))) {
+    throw new Error(`Local dependency source missing for ${skillId}: ${sourcePath}`);
+  }
+  await fs.mkdir(path.dirname(stagedPath), { recursive: true });
+  await fs.cp(sourcePath, stagedPath, { recursive: true, force: true });
+  return true;
+}
+
 /**
  * Stage a skill from a repo subdir (sparse checkout) to staging.
  * Skips download if preExistingPath already contains the skill.
@@ -3864,7 +3938,16 @@ async function installSkillsToMultipleRuntimes(
           await fs.cp(fixtureSource, stagedPath, { recursive: true, force: true });
           return { id: spec.id, success: true, stagedPath };
         }
-        const success = spec.subdir
+        const success = spec.localRepoPath
+          ? await stageSkillFromLocalRepo(
+              spec.id,
+              stagedPath,
+              spec.localRepoPath,
+              spec.subdir,
+              preExistingPath,
+              !updateMode,
+            )
+          : spec.subdir
           ? await stageSkillFromSubdir(
               spec.id,
               stagedPath,

@@ -149,6 +149,9 @@ export function classifyTaskShape(task) {
   if (/hook|runtime|codex|claude|cursor|openclaw|windows|mac|wsl|钩子|运行时|平台|安装|更新|配置|沙盒|权限|审批/.test(text)) {
     return "platform_governance";
   }
+  if (/goal\s*prompt|loop\s*prompt|goalpro|goal\s*contract|intent amplification|目标契约|目标合同|意图放大|循环提示词/.test(text)) {
+    return "goal_contract";
+  }
   if (/strategy|growth|moneti[sz]e|pricing|business|product|pmf|conversion|策略|增长|商业化|变现|定价|产品|转化|留存|分发|用户路径/.test(text)) {
     return "strategy_product_decision";
   }

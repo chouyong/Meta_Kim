@@ -130,6 +130,18 @@ test("routing fixtures recall internal patterns and platform/OS matrices", () =>
     assert.equal(fuzzy.rankedRoutes.some((route) => route.dependencyProject === "kim-decision" && route.scoreBand === "execute"), false);
   }
 
+  const goalContract = route("帮我把这个模糊目标整理成 Goal Prompt 和 Loop Prompt，先不要执行", "codex", "windows");
+  assert.equal(goalContract.taskShape, "goal_contract");
+  assert.equal(goalContract.recommendedRoute?.weapon, "goalpro");
+  assert.equal(goalContract.recommendedRoute?.dependencyProject, "goalpro");
+  assert.equal(goalContract.recommendedRoute?.boundary?.executionMode, "prompt_only");
+  assert.equal(goalContract.recommendedRoute?.boundary?.notExecutor, true);
+  assert.equal(goalContract.rankedRoutes.some((candidate) => candidate.dependencyProject === "kim-decision" && candidate.scoreBand === "execute"), false);
+
+  const codeRefactor = route("帮我重构这个前端模块并运行测试", "codex", "windows");
+  assert.equal(codeRefactor.taskShape, "engineering_execution");
+  assert.equal(codeRefactor.rankedRoutes.some((candidate) => candidate.dependencyProject === "kim-decision" && candidate.scoreBand === "execute"), false);
+
   const product = route("product monetization task");
   assert.ok(product.internalDecisionPatterns.includes("thinking-minimum-test"));
 

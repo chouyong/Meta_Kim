@@ -228,6 +228,7 @@ function explicitCapabilityGapRequested() {
 }
 
 function taskTerms() {
+  if (taskShape === "goal_contract") return ["goal prompt", "loop prompt", "goal contract", "intent amplification", "goalpro", "目标契约", "目标合同", "意图放大"];
   if (taskShape === "strategy_product_decision") return ["strategy", "product", "decision", "monetization", "策略", "产品", "商业化", "变现"];
   if (taskShape === "platform_governance") return ["runtime", "platform", "hook", "os", "codex", "cursor", "openclaw", "claude", "平台", "钩子"];
   if (taskShape === "engineering_execution") return ["code", "test", "refactor", "engineering", "代码", "测试", "重构"];
@@ -893,9 +894,32 @@ const candidateFoundationalCapabilities = (capabilityInventory.capabilities ?? [
   .slice(0, 20)
   .map((cap) => cap.id);
 
-function routeForWeapon(weapon) {
+function dependencyTaskFitScore(dep) {
+  const terms = taskTerms();
+  const depText = JSON.stringify(dep).toLowerCase();
+  let score = dep.reuseScore ?? 50;
+  if (terms.some((term) => depText.includes(term))) score += 25;
+  if (taskShape === "goal_contract" && dep.id === "goalpro") score += 50;
+  if (taskShape === "strategy_product_decision" && dep.id === "kim-decision") score += 20;
+  if (dependencyExecutable(dep)) score += 30;
+  else score -= 120;
+  return score;
+}
+
+function selectDependencyForWeapon(weapon) {
   const dependencyIds = weapon.dependencyProjects ?? [];
-  const dep = dependencyIds.length ? candidateDependencies.find((candidate) => dependencyIds.includes(candidate.id)) ?? null : null;
+  if (!dependencyIds.length) return null;
+  const matches = candidateDependencies.filter((candidate) =>
+    dependencyIds.includes(candidate.id),
+  );
+  const executableMatches = matches.filter(dependencyExecutable);
+  const pool = executableMatches.length ? executableMatches : [];
+  return pool
+    .sort((a, b) => dependencyTaskFitScore(b) - dependencyTaskFitScore(a))[0] ?? null;
+}
+
+function routeForWeapon(weapon) {
+  const dep = selectDependencyForWeapon(weapon);
   const runtimeValue = weapon.runtimeSupport?.[runtime] ?? "unknown";
   const osValue = weapon.osSupport?.[osTarget] ?? "unknown";
   const available = new Set([
@@ -1954,6 +1978,64 @@ function executionCapabilityDiscoveryRoute() {
   };
 }
 
+function goalProContractRoute() {
+  if (taskShape !== "goal_contract") return null;
+  const selectedSkill = selectProvider("skills", ["goalpro"]);
+  const dependency = dependencyRecords.find((dep) => dep.id === "goalpro") ?? null;
+  const blockedReasons = [];
+  if (!selectedSkill) blockedReasons.push("goalpro skill provider missing");
+  if (!dependency) blockedReasons.push("goalpro dependency project missing");
+  if (dependency && !dependencyExecutable(dependency)) blockedReasons.push("goalpro dependency not executable");
+  const score = blockedReasons.length ? 49 : 92;
+  return {
+    id: `goalpro-contract:${runtime}:${osTarget}`,
+    owner: "meta-conductor",
+    weapon: "goalpro",
+    dependency: selectedSkill?.id ?? "goalpro",
+    dependencyProject: "goalpro",
+    runtime,
+    os: osTarget,
+    verificationOwner: "meta-prism",
+    verificationMethod: "npm run meta:deps:compat",
+    verification: {
+      command: "npm run meta:deps:compat",
+      artifact: "config/skills.json; config/capability-index/dependency-project-registry.json",
+      passCondition: "GoalPro is registered as a prompt-only dependency skill for Goal Prompt / Loop Prompt / intent-amplification work.",
+    },
+    score,
+    scoreBand: score >= 85 ? "execute" : "blocked",
+    routeScoreBreakdown: {
+      intentFitWeight: 20,
+      ownerFitWeight: 15,
+      weaponFitWeight: 15,
+      dependencyFitWeight: 15,
+      runtimeSupportWeight: 10,
+      osSupportWeight: 10,
+      verificationStrengthWeight: 10,
+      riskRollbackClarityWeight: 5,
+      runtimeSupport: "native",
+      osSupport: "supported",
+      dependencyFit: dependency ? 95 : 0,
+    },
+    ownerBinding: {
+      selectedOwner: "meta-conductor",
+      source: "goal_contract_task_shape",
+      existingOwnerMatched: true,
+      bindingStage: "Thinking",
+      providerEvidenceRef: "candidateDependencyProjects.goalpro",
+      ownerDiscoveryRef: "ownerDiscoveryPacket",
+    },
+    selectedCapabilityProviders: selectedSkill ? [selectedSkill] : [],
+    boundary: {
+      invokeAs: "skill",
+      executionMode: "prompt_only",
+      notExecutor: true,
+      notAutomationScheduler: true,
+    },
+    blockedReasons,
+  };
+}
+
 function subjectiveUiDesignRoute() {
   if (!subjectiveRouteChoice) return null;
   const selectedProviders = {
@@ -2408,6 +2490,7 @@ function productBuildOrchestrationRoute() {
 }
 
 const syntheticRoutes = [
+  goalProContractRoute(),
   productBuildOrchestrationRoute(),
   subjectiveUiDesignRoute(),
   executionCapabilityDiscoveryRoute(),
