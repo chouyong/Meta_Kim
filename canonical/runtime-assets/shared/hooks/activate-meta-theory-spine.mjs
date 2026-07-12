@@ -41,6 +41,51 @@ const rawPackageRoot =
     : process.env.META_KIM_PACKAGE_ROOT || null;
 const packageRoot = resolvePackageRoot(rawPackageRoot);
 
+// P1 fix: never bootstrap/project spine + post-copy state into an arbitrary
+// cwd (e.g. a temp dir a stray hook invocation happens to run in). Resolve a
+// legitimate project root first; if none is found, the caller skips all
+// projection. Resolution order:
+//   1. explicit workspace declarations the runtime gave us (CLAUDE_PROJECT_DIR
+//      or a payload workspace-root field) — trusted when they point at a real
+//      existing directory;
+//   2. otherwise walk up from cwd for a strong project marker (.git or the
+//      meta-kim project-bootstrap manifest);
+//   3. otherwise null. process.cwd() itself is deliberately NOT a trusted
+//      marker — trusting a bare cwd is exactly the P1 defect.
+function resolveProjectRoot() {
+  const declared = [
+    process.env.CLAUDE_PROJECT_DIR,
+    payload?.workspace_root,
+    payload?.workspaceRoot,
+    payload?.project_dir,
+    payload?.projectDir,
+    payload?.project_root,
+    payload?.projectRoot,
+  ];
+  for (const candidate of declared) {
+    if (typeof candidate !== "string" || !candidate.trim()) continue;
+    try {
+      const resolved = resolve(candidate.trim());
+      if (existsSync(resolved) && statSync(resolved).isDirectory()) return resolved;
+    } catch {
+      // Unusable declaration; fall through to the project-marker walk-up.
+    }
+  }
+  let dir = resolve(cwd);
+  for (let i = 0; i < 40; i++) {
+    if (
+      existsSync(join(dir, ".git")) ||
+      existsSync(join(dir, ".meta-kim", "state", "default", "project-bootstrap.json"))
+    ) {
+      return dir;
+    }
+    const parent = dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return null;
+}
+
 // 多 agent / 军团 / fan-out 触发词只说明任务可能适合拆分。它不能证明
 // capability discovery 已执行，也不能替 Critical/Fetch/Thinking 推进阶段。
 const MULTI_AGENT_TRIGGER_RE =
@@ -264,7 +309,7 @@ function buildContinuationBoundary(previousState, promptText) {
   };
 }
 
-function startPostCopyAutoInit() {
+function startPostCopyAutoInit(root) {
   if (process.env.META_KIM_POST_COPY_AUTO === "off") return;
 
   const globalScriptPath = packageRoot
@@ -273,14 +318,14 @@ function startPostCopyAutoInit() {
   const scriptPath =
     globalScriptPath && existsSync(globalScriptPath)
       ? globalScriptPath
-      : existsSync(join(cwd, ".meta-kim", "meta-kim-post-copy.mjs"))
-        ? join(cwd, ".meta-kim", "meta-kim-post-copy.mjs")
-        : join(cwd, "meta-kim-post-copy.mjs");
+      : existsSync(join(root, ".meta-kim", "meta-kim-post-copy.mjs"))
+        ? join(root, ".meta-kim", "meta-kim-post-copy.mjs")
+        : join(root, "meta-kim-post-copy.mjs");
   if (!existsSync(scriptPath)) return;
 
   try {
     spawnSync(process.execPath, [scriptPath, "--auto"], {
-      cwd,
+      cwd: root,
       stdio: "ignore",
       timeout: 4000,
       windowsHide: true,
@@ -300,12 +345,20 @@ if (!activation.triggered) {
   process.exit(0);
 }
 
-startPostCopyAutoInit();
+const projectRoot = resolveProjectRoot();
+if (!projectRoot) {
+  // P1 fix: no legitimate project root (e.g. hook invoked from a temp dir with
+  // no .git / project-bootstrap manifest and no CLAUDE_PROJECT_DIR). Never
+  // bootstrap an arbitrary cwd — skip spine-state + post-copy projection.
+  process.exit(0);
+}
+
+startPostCopyAutoInit(projectRoot);
 
 const rawPromptText = getRawPromptText();
 const promptFingerprint = fingerprintPrompt(rawPromptText);
-const rawExisting = await readSpineStateIncludingInactive(cwd);
-const existing = rawExisting?.active === false ? null : rawExisting || (await readSpineState(cwd));
+const rawExisting = await readSpineStateIncludingInactive(projectRoot);
+const existing = rawExisting?.active === false ? null : rawExisting || (await readSpineState(projectRoot));
 if (existing && existing.active && !shouldReplaceActiveState(existing, promptFingerprint)) {
   process.exit(0);
 }
@@ -364,7 +417,7 @@ if (isFanoutActivation) {
         : "meta_theory_trigger_request";
 }
 
-await writeSpineState(cwd, state);
+await writeSpineState(projectRoot, state);
 
 // ── multi-agent helpers ───────────────────────────────────────────────────────
 // 1) runAutoCapabilitySearch：扫 canonical/agents/ + agent-eligibility.json，

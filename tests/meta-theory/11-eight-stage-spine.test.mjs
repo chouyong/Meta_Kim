@@ -410,6 +410,10 @@ function runActivateHook(existingState, payload, options = {}) {
   try {
     const hookDir = join(cwd, "hooks");
     mkdirSync(hookDir, { recursive: true });
+    // A real project session runs this hook from a project root. Mark the temp
+    // dir as a legit project (.git) so the P1 project-root gate activates the
+    // spine here instead of correctly skipping an unmarked temp dir.
+    mkdirSync(join(cwd, ".git"), { recursive: true });
     const sourceDir =
       runtime === "claude"
         ? "canonical/runtime-assets/claude/hooks"

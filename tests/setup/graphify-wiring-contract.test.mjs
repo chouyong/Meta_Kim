@@ -383,7 +383,7 @@ console.log("forced rebuild ok");
       "utf8",
     );
 
-    assert.match(body, /const rootDir = process\.cwd\(\)/);
+    assert.match(body, /const rootDir = resolveProjectRoot\(\)/);
     assert.match(body, /\["-m", "pip", "show", "graphifyy"\]/);
     assert.match(body, /\["-m", "pip", "install", "graphifyy"\]/);
     assert.match(body, /\["-m", "graphify", "hook", "install"\]/);
@@ -433,6 +433,9 @@ console.log("forced rebuild ok");
     const tempDir = mkdtempSync(path.join(os.tmpdir(), "meta-kim-post-copy-auto-"));
     const packageRoot = mkdtempSync(path.join(os.tmpdir(), "meta-kim-package-root-"));
     try {
+      // P1: a real session runs the hook from a project root; mark tempDir so
+      // the project-root gate activates here instead of skipping a bare temp dir.
+      mkdirSync(path.join(tempDir, ".git"), { recursive: true });
       const globalScript = path.join(packageRoot, "scripts", "project-post-copy-init.mjs");
       mkdirSync(path.dirname(globalScript), { recursive: true });
       writeFileSync(
@@ -475,6 +478,9 @@ console.log("forced rebuild ok");
   test("meta-theory activation hook starts spine without project bootstrap automation", () => {
     const tempDir = mkdtempSync(path.join(os.tmpdir(), "meta-kim-activation-no-write-"));
     try {
+      // P1: mark tempDir a project root so the spine activates here (this test
+      // asserts spine-state is written but no project-bootstrap.json).
+      mkdirSync(path.join(tempDir, ".git"), { recursive: true });
       const hookPath = path.join(
         root,
         "canonical/runtime-assets/shared/hooks/activate-meta-theory-spine.mjs",
@@ -514,6 +520,9 @@ console.log("forced rebuild ok");
     const tempDir = mkdtempSync(path.join(os.tmpdir(), "meta-kim-probe-off-spine-"));
     const globalStateDir = mkdtempSync(path.join(os.tmpdir(), "meta-kim-probe-off-state-"));
     try {
+      // P1: mark tempDir a project root so prompt-entry spine activation writes
+      // spine-state here (probe-off must not suppress legitimate activation).
+      mkdirSync(path.join(tempDir, ".git"), { recursive: true });
       const hookPath = path.join(
         root,
         "canonical/runtime-assets/shared/hooks/activate-meta-theory-spine.mjs",

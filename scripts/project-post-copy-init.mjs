@@ -1,12 +1,40 @@
 #!/usr/bin/env node
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 import { detectPython310, formatPythonLauncher, runPythonModule } from "./graphify-runtime.mjs";
 
-const rootDir = process.cwd();
+// P1 fix: resolve a legitimate project root before any graphify / post-copy
+// bootstrap. Never treat an arbitrary cwd (e.g. a temp dir) as a project —
+// that projects .meta-kim state / graphify-out into random directories.
+// Walk up from cwd for a strong project marker (.git or the meta-kim
+// project-bootstrap manifest); a bare process.cwd() is deliberately not
+// trusted. The spine hook resolves the runtime project directory (from the
+// runtime's declared project-dir env) and spawns this script with cwd set.
+function resolveProjectRoot() {
+  let dir = resolve(process.cwd());
+  for (let i = 0; i < 40; i++) {
+    if (
+      existsSync(join(dir, ".git")) ||
+      existsSync(join(dir, ".meta-kim", "state", "default", "project-bootstrap.json"))
+    ) {
+      return dir;
+    }
+    const parent = dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return null;
+}
+
+const rootDir = resolveProjectRoot();
+if (!rootDir) {
+  // No legitimate project root — do not bootstrap graphify into an arbitrary
+  // cwd. This path is opportunistic/auto; a silent no-op is the correct result.
+  process.exit(0);
+}
 const scriptPath = fileURLToPath(import.meta.url);
 const autoMode = process.argv.includes("--auto");
 const autoWorkerMode = process.argv.includes("--auto-worker");

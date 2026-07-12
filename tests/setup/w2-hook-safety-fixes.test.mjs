@@ -153,7 +153,7 @@ describe("W2: activate-meta-theory-spine.mjs EXECUTION_DELTA boundary", () => {
       "shouldReplaceActiveState must be defined before EXECUTION_DELTA",
     );
     // writeSpineState call must come after EXECUTION_DELTA marker
-    const writeIdx = src.indexOf("writeSpineState(cwd, state);");
+    const writeIdx = src.indexOf("writeSpineState(projectRoot, state);");
     assert.ok(
       writeIdx > markerIdx,
       "top-level writeSpineState must live below the EXECUTION_DELTA marker",
