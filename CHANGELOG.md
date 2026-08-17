@@ -6,6 +6,19 @@ This file is the reader-facing release history for Meta_Kim.
 
 The changelog explains the user-facing problem or risk each release solved, what changed to solve it, and why the change matters. It intentionally avoids long internal task ledgers, low-signal backlog ids, and implementation trivia. When exact evidence is needed, use the repository history, tests, generated reports, and PRD artifacts.
 
+## [3.0.1] - 2026-08-17
+
+### Changed
+
+- **Project instructions preserve existing user files by default.** The setup flow keeps user-authored `AGENTS.md` and `CLAUDE.md` files intact while supporting explicit `portable` and `managed` strategies.
+- **Fork-specific runtime coverage is retained across the upstream 3.0 architecture.** Claude Code and Codex projections keep the Medusa integration, plugin coverage contract, report-provider budget, and shared project-root/spine behavior.
+- **Upstream 3.0 maintenance fixes are included.** The release carries the latest memory-root, curated-session, documentation-link, and cross-runtime governance updates from `upstream/main`.
+
+### Fixed
+
+- **Windows npm executable scripts use stable LF shebangs.** Repository attributes prevent checkout line-ending conversion from breaking the packaged `bin/*.mjs` entrypoints.
+- **Global Claude Code and Codex projections remain package-bound and reproducible.** The synchronized runtime assets continue to use the stable projection package and preserve user-owned configuration.
+
 ## [3.0.0] - 2026-08-12
 
 ### Added

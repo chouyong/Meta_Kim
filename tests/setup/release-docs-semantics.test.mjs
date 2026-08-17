@@ -205,7 +205,7 @@ describe("release documentation semantics", () => {
       assert.match(raw, /alt="Candidate compatibility probes"/, file);
       assert.match(
         raw,
-        /default-Claude%20Code%20%7C%20Codex%20%2B%20compat-OpenClaw%20%7C%20Cursor/,
+        /default-Claude%20Code%20%7C%20Codex%20%2B%20compat--OpenClaw%20%7C%20Cursor/,
         file,
       );
       assert.match(raw, /Qoder%20%7C%20Trae%20%7C%20Kiro%20%7C%20Cascade%20%7C%20Cline%20%7C%20Roo%20%7C%20Continue/, file);
