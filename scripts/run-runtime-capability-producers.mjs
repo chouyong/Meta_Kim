@@ -19,8 +19,8 @@ function printHelp() {
     `  --profile <name>        Acceptance profile (default: META_KIM_PROFILE/default)\n` +
     `  --status                Read fresh accepted production evidence; never invoke a runtime\n` +
     `  --require-fresh         Exit nonzero when any requested claim is missing/stale\n` +
-    `  --source <kind>         live_controlled|codex_desktop_agent_subagent|codex_desktop_engineering\n` +
-    `  --codex-thread-id <id>  Use one explicit Codex Desktop parent session\n` +
+    `  --source <kind>         live_controlled|codex_desktop_agent_subagent|codex_tui_agent_subagent|codex_desktop_engineering\n` +
+    `  --codex-thread-id <id>  Use one explicit Codex parent session\n` +
     `  --codex-child-session-id <id>  Bind the exact spawned child session\n` +
     `  --codex-marker <token>   Exact child-final capability marker\n` +
     `  --since <ISO time>       Reject Desktop evidence older than this time\n` +
@@ -106,6 +106,7 @@ try {
     if (requireFresh && missing.length) process.exitCode = 1;
   } else {
     if (source === "codex_desktop_agent_subagent" && (!threadId || !childSessionId || !marker || !Number.isFinite(sinceMs))) failCli("desktop agent source requires thread, child session, marker, and since");
+    if (source === "codex_tui_agent_subagent" && (!threadId || !childSessionId || !marker || !Number.isFinite(sinceMs))) failCli("tui agent source requires thread, child session, marker, and since");
     if (source === "codex_desktop_engineering" && (!threadId || !marker || !workspacePath || !Number.isFinite(sinceMs))) failCli("desktop engineering source requires thread, marker, workspace, and since");
     const producedResults = [];
     for (const runtime of runtimes) {

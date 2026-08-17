@@ -627,6 +627,203 @@ export async function readCodexDesktopSessionEvidence({
   };
 }
 
+function tuiActivityPayload(record) {
+  const payload = record?.value?.payload;
+  if (
+    record?.value?.type !== "event_msg" ||
+    payload?.type !== "item_completed" ||
+    payload?.item?.type !== "SubAgentActivity"
+  ) return null;
+  return {
+    ...payload.item,
+    event_id: payload.item.id,
+    agent_thread_id: payload.item.agent_thread_id ?? payload.item.child_thread_id,
+    agent_path: payload.item.agent_path ?? payload.item.task_path ?? payload.item.path,
+  };
+}
+
+function tuiAgentMessageText(item) {
+  if (typeof item?.text === "string") return item.text;
+  return (item?.content ?? [])
+    .filter((entry) => ["input_text", "output_text", "text"].includes(String(entry?.type ?? "").toLowerCase()) && typeof entry.text === "string")
+    .map((entry) => entry.text)
+    .join("");
+}
+
+async function readCodexTuiParentEventSlice({ parent, threadId, childSessionId, marker, sinceMs }) {
+  const snapshotSize = parent.stats.size;
+  const stream = createReadStream(parent.filePath, {
+    encoding: "utf8",
+    start: 0,
+    end: Math.max(0, snapshotSize - 1),
+  });
+  const lines = readline.createInterface({ input: stream, crlfDelay: Infinity });
+  const spawnCalls = new Map();
+  const callOutputs = new Map();
+  const activities = [];
+  const finalMessages = [];
+  let sessionMeta = null;
+  let lineNumber = 0;
+  for await (const line of lines) {
+    lineNumber += 1;
+    let record;
+    try { record = JSON.parse(line); } catch { continue; }
+    if (record?.type === "session_meta" && record?.payload?.id === threadId) {
+      sessionMeta = { line, lineNumber, record };
+      continue;
+    }
+    const timestampMs = Date.parse(record?.timestamp ?? "");
+    if (!Number.isFinite(timestampMs) || timestampMs < sinceMs) continue;
+    const payload = record?.payload ?? {};
+    if (
+      record?.type === "response_item" &&
+      payload?.type === "function_call" &&
+      payload?.name === "spawn_agent" &&
+      payload?.namespace === "collaboration" &&
+      payload?.call_id
+    ) spawnCalls.set(payload.call_id, { line, lineNumber, record });
+    if (record?.type === "response_item" && payload?.type === "function_call_output" && payload?.call_id) {
+      callOutputs.set(payload.call_id, { line, lineNumber, record });
+    }
+    const activity = tuiActivityPayload({ value: record });
+    if (
+      activity?.kind === "started" &&
+      activity?.id &&
+      activity?.agent_thread_id === childSessionId &&
+      activity?.event_id
+    ) activities.push({ line, lineNumber, record, activity });
+    if (record?.type === "response_item" && payload?.type === "agent_message") {
+      const text = (payload.content ?? [])
+        .filter((entry) => entry?.type === "input_text" && typeof entry.text === "string")
+        .map((entry) => entry.text)
+        .join("");
+      if (text.includes(marker)) finalMessages.push({ line, lineNumber, record, text });
+    }
+  }
+  if (!sessionMeta) fail("codex_tui_parent_meta_missing");
+  if (activities.length !== 1) fail("codex_tui_spawn_lifecycle_not_unique");
+  const activity = activities[0];
+  const eventId = activity.activity.event_id;
+  const spawn = spawnCalls.get(eventId);
+  const output = callOutputs.get(eventId);
+  if (!spawn || !output) fail("codex_tui_spawn_call_binding_missing");
+  const childAgentPath = activity.activity.agent_path;
+  if (typeof childAgentPath !== "string" || !childAgentPath.startsWith("/root/")) fail("codex_tui_child_agent_path_invalid");
+  const parentAgentPath = childAgentPath.slice(0, childAgentPath.lastIndexOf("/"));
+  const exactFinals = finalMessages.filter(({ record, text }) => {
+    const payload = record.payload;
+    return payload?.author === childAgentPath && payload?.recipient === parentAgentPath && text.trimEnd().endsWith(marker);
+  });
+  if (exactFinals.length !== 1) fail("codex_tui_parent_child_final_not_unique");
+  const selected = [sessionMeta, spawn, activity, output, exactFinals[0]]
+    .sort((left, right) => left.lineNumber - right.lineNumber);
+  const parentSessionText = `${selected.map((entry) => entry.line).join("\n")}\n`;
+  return {
+    parentSessionText,
+    parentSnapshotSize: snapshotSize,
+    parentFragmentDigest: sha256(parentSessionText),
+    parentSourceLines: selected.map((entry) => ({ lineNumber: entry.lineNumber, sha256: sha256(`${entry.line}\n`) })),
+    eventId,
+    childAgentPath,
+    parentAgentPath,
+  };
+}
+
+export async function readCodexTuiSessionEvidence({
+  codexHome,
+  threadId,
+  childSessionId,
+  marker,
+  sinceMs,
+  maxBytes = DEFAULT_MAX_BYTES,
+}) {
+  if (!THREAD_ID_PATTERN.test(String(threadId ?? "")) || !THREAD_ID_PATTERN.test(String(childSessionId ?? ""))) fail("codex_tui_session_id_invalid");
+  if (!Number.isFinite(sinceMs) || sinceMs <= 0) fail("codex_session_since_invalid");
+  if (!/^META_KIM_CAPABILITY_AGENT_SUBAGENT_[0-9a-f-]{36}$/u.test(String(marker ?? ""))) fail("codex_tui_marker_invalid");
+  if (!Number.isSafeInteger(maxBytes) || maxBytes <= 0) fail("codex_session_max_bytes_invalid");
+  const configuredHome = codexHome ?? process.env.CODEX_HOME ?? path.join(os.homedir(), ".codex");
+  if (!path.isAbsolute(configuredHome)) fail("codex_home_must_be_absolute");
+  const absoluteHome = path.resolve(configuredHome);
+  const realHome = await assertPlainDirectory(absoluteHome, "codex_home_invalid", "codex_home_symlink_rejected");
+  if (realHome !== absoluteHome) fail("codex_home_symlink_rejected");
+  const sessionsPath = path.resolve(realHome, "sessions");
+  const sessionsRoot = await assertPlainDirectory(sessionsPath, "codex_sessions_invalid", "codex_sessions_symlink_rejected");
+  if (!isInside(realHome, sessionsRoot) || sessionsRoot !== sessionsPath) fail("codex_sessions_symlink_rejected");
+  const files = await listSessionFiles(sessionsRoot);
+  const parentMatches = files.filter((file) => path.basename(file.filePath).endsWith(`-${threadId}.jsonl`));
+  const childMatches = files.filter((file) => path.basename(file.filePath).endsWith(`-${childSessionId}.jsonl`));
+  if (parentMatches.length !== 1) fail("codex_tui_parent_session_not_unique");
+  if (childMatches.length !== 1) fail("codex_tui_child_session_not_unique");
+  const parent = parentMatches[0];
+  const child = childMatches[0];
+  const parentMeta = await readSessionMeta(parent.filePath);
+  const childMeta = await readSessionMeta(child.filePath);
+  if (parentMeta?.id !== threadId || parentMeta?.originator !== "codex-tui" || parentMeta?.source !== "cli") fail("codex_tui_parent_source_invalid");
+  if (
+    childMeta?.id !== childSessionId ||
+    childMeta?.originator !== "codex-tui" ||
+    childMeta?.source?.subagent?.thread_spawn?.parent_thread_id !== threadId
+  ) fail("codex_tui_child_session_mismatch");
+  if (!isFresh(child.stats, sinceMs)) fail("codex_tui_session_stale");
+  const parentSlice = await readCodexTuiParentEventSlice({ parent, threadId, childSessionId, marker, sinceMs });
+  const childSessionText = await readBoundedFile(child, maxBytes, "codex_tui_child_session_too_large");
+  const childRecords = parseJsonlRecords(childSessionText);
+  const childMetas = childRecords.filter(({ value }) => value?.type === "session_meta" && value?.payload?.id === childSessionId);
+  const childFinals = childRecords.filter(({ value }) =>
+    value?.type === "event_msg" &&
+    value?.payload?.type === "item_completed" &&
+    value?.payload?.item?.type === "AgentMessage" &&
+    value?.payload?.item?.phase === "final_answer" &&
+    tuiAgentMessageText(value.payload.item).trim() === marker);
+  const responseFinals = childRecords.filter(({ value }) =>
+    value?.type === "response_item" &&
+    value?.payload?.type === "message" &&
+    value?.payload?.phase === "final_answer" &&
+    tuiAgentMessageText(value.payload).trim() === marker);
+  const taskCompletions = childRecords.filter(({ value }) =>
+    value?.type === "event_msg" &&
+    value?.payload?.type === "task_complete" &&
+    value?.payload?.last_agent_message === marker);
+  if (childMetas.length !== 1 || childFinals.length !== 1 || responseFinals.length !== 1 || taskCompletions.length !== 1) fail("codex_tui_child_final_invalid");
+  const completedAtMs = Date.parse(taskCompletions[0].value?.timestamp ?? "");
+  const finalAtMs = Date.parse(childFinals[0].value?.timestamp ?? "");
+  const responseAtMs = Date.parse(responseFinals[0].value?.timestamp ?? "");
+  if (!Number.isFinite(completedAtMs) || !Number.isFinite(finalAtMs) || !Number.isFinite(responseAtMs) || completedAtMs < sinceMs || finalAtMs < sinceMs || responseAtMs < sinceMs || completedAtMs < finalAtMs || completedAtMs < responseAtMs) fail("codex_tui_child_timestamp_invalid");
+  const childFragmentEntries = [childMetas[0], childFinals[0], responseFinals[0], taskCompletions[0]].sort((left, right) => left.line - right.line);
+  const childFragmentText = `${childFragmentEntries.map((entry) => entry.raw).join("\n")}\n`;
+  const observed = observeCodexJsonl(parentSlice.parentSessionText).filter((event) =>
+    event.family === "agent_subagent" &&
+    /(?:^|\.)spawn_agent$/u.test(String(event.hostSurface ?? "")) &&
+    event.sessionId === threadId &&
+    event.childSessionId === childSessionId &&
+    event.completionBoundary === "returned_child_final" &&
+    ["completed", "returned"].includes(event.resultStatus));
+  if (observed.length !== 1) fail("codex_tui_observed_spawn_invalid");
+  return {
+    ...parentSlice,
+    childSessionText,
+    childFragmentText,
+    childFragmentDigest: sha256(childFragmentText),
+    childSnapshotSize: child.stats.size,
+    childSourceLines: childFragmentEntries.map((entry) => ({ lineNumber: entry.line, sha256: sha256(`${entry.raw}\n`) })),
+    childCompletionSourceLineNumbers: childFragmentEntries.slice(1).map((_, index) => index + 2),
+    threadId,
+    childSessionId,
+    lifecycleId: `${threadId}:${childSessionId}:${parentSlice.eventId}`,
+    marker,
+    markerDigest: sha256(marker),
+    observedAt: new Date(completedAtMs).toISOString(),
+    sourceCategory: "codex_tui_sessions",
+    runtimeIsolation: "codex_tui_current_session",
+    hostOriginator: "codex-tui",
+    hostSource: "cli",
+    cliVersion: parentMeta.cli_version ?? childMeta.cli_version ?? null,
+    parentSessionRef: path.relative(sessionsRoot, parent.filePath).replaceAll("\\", "/"),
+    childSessionRef: path.relative(sessionsRoot, child.filePath).replaceAll("\\", "/"),
+    nativeInvocation: observed[0],
+  };
+}
+
 function outputText(payload) {
   const output = payload?.output;
   if (typeof output === "string") return output;

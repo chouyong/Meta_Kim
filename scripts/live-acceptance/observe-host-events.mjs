@@ -772,6 +772,16 @@ export function observeCodexJsonl(text) {
   };
   for (const record of records) {
     const payload = payloadOf(record.value);
+    const tuiActivity = record.value?.type === "event_msg" &&
+      payload?.type === "item_completed" &&
+      payload?.item?.type === "SubAgentActivity"
+      ? {
+          ...payload.item,
+          event_id: payload.item.id,
+          agent_thread_id: payload.item.agent_thread_id ?? payload.item.child_thread_id,
+          agent_path: payload.item.agent_path ?? payload.item.task_path ?? payload.item.path,
+        }
+      : null;
     if (record.value?.type === "session_meta") {
       threadId = record.value?.payload?.id ?? record.value?.payload?.session_id ?? threadId;
       if (threadId) rootSessionIds.add(threadId);
@@ -987,6 +997,16 @@ export function observeCodexJsonl(text) {
       if (childId) agentStarts.set(`child:${childId}`, activity);
       if (taskPath) agentStarts.set(`path:${taskPath}`, activity);
     }
+    if (tuiActivity && ["started", "interacted"].includes(tuiActivity.kind)) {
+      const activity = {
+        line: record.line,
+        observedAt: rawHostTimestamp(record.value, tuiActivity),
+        payload: tuiActivity,
+      };
+      if (tuiActivity.event_id) agentStarts.set(tuiActivity.event_id, activity);
+      if (tuiActivity.agent_thread_id) agentStarts.set(`child:${tuiActivity.agent_thread_id}`, activity);
+      if (tuiActivity.agent_path) agentStarts.set(`path:${tuiActivity.agent_path}`, activity);
+    }
     if (
       payload?.type === "sub_agent_activity" &&
       ["completed", "task_complete", "result", "returned"].includes(payload?.kind)
@@ -1007,6 +1027,24 @@ export function observeCodexJsonl(text) {
       if (callId) agentCompletions.set(callId, completion);
       if (childId) agentCompletions.set(`child:${childId}`, completion);
       if (taskPath) agentCompletions.set(`path:${taskPath}`, completion);
+    }
+    if (
+      tuiActivity &&
+      ["completed", "task_complete", "result", "returned"].includes(tuiActivity.kind)
+    ) {
+      const completionStatus = tuiActivity.status ?? tuiActivity.result_status ?? tuiActivity.outcome;
+      const completionSucceeded = tuiActivity.success === true ||
+        ["success", "completed", "returned", "verified"].includes(completionStatus);
+      if (completionSucceeded && tuiActivity.error == null && tuiActivity.is_error !== true) {
+        const completion = {
+          line: record.line,
+          observedAt: rawHostTimestamp(record.value, tuiActivity),
+          payload: tuiActivity,
+        };
+        if (tuiActivity.event_id) agentCompletions.set(tuiActivity.event_id, completion);
+        if (tuiActivity.agent_thread_id) agentCompletions.set(`child:${tuiActivity.agent_thread_id}`, completion);
+        if (tuiActivity.agent_path) agentCompletions.set(`path:${tuiActivity.agent_path}`, completion);
+      }
     }
   }
   if (rootSessionIds.size > 1 || crossSessionCorrelationDetected) return [];

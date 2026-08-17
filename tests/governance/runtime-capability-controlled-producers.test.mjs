@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test, { after } from "node:test";
 import { runCodexCompositeEngineeringProducer, runCodexDesktopEngineeringSessionProducer, runCodexDesktopSessionCapabilityProducer, runControlledRuntimeCapabilityProducer } from "../../scripts/runtime-capability-producers.mjs";
-import { readCodexDesktopEngineeringEvidence, readCodexDesktopSessionEvidence } from "../../scripts/live-acceptance/read-codex-session-evidence.mjs";
+import { readCodexDesktopEngineeringEvidence, readCodexDesktopSessionEvidence, readCodexTuiSessionEvidence } from "../../scripts/live-acceptance/read-codex-session-evidence.mjs";
 import { loadEffectiveRuntimeCapabilityClaims } from "../../scripts/effective-runtime-capability-claims.mjs";
 import { evaluateRouteExecutionGate } from "../../scripts/runtime-execution-gate.mjs";
 import { controlledProducerStageFromVerification, selectVerificationBoundControlledAttempts, writeRuntimeCapabilityAcceptanceAttempt } from "../../scripts/runtime-capability-acceptance.mjs";
@@ -145,24 +145,23 @@ function injectedExecutor(request) {
     assert.doesNotMatch(request.prompt, /Do not call Write/u);
   }
   if (request.runtime === "codex" && ["agent", "subagent"].includes(request.capability)) {
-    const normalizedPrompt = request.prompt.toLowerCase();
     const spawnInstruction = request.prompt.split(/[.!?]/u).find((sentence) =>
       sentence.includes("spawn_agent") && /exactly once/iu.test(sentence)
     );
-    const spawnIndex = normalizedPrompt.indexOf("spawn_agent");
-    const returnedChildMatch = /spawn_agent\s+(?:returns?|returned)\s+(?:a\s+)?child/iu.exec(request.prompt.slice(spawnIndex + 1));
-    const returnedChildIndex = returnedChildMatch ? spawnIndex + 1 + returnedChildMatch.index : -1;
-    const waitIndex = normalizedPrompt.indexOf("wait", returnedChildIndex + 1);
-    const completedIndex = normalizedPrompt.indexOf("completed", waitIndex + 1);
     assert.ok(spawnInstruction, `${request.capability} must call native spawn_agent exactly once`);
-    assert.ok(returnedChildIndex > spawnIndex, `${request.capability} must bind the child returned by spawn_agent`);
-    assert.ok(waitIndex > returnedChildIndex, `${request.capability} must wait only after receiving the child`);
-    assert.ok(completedIndex > waitIndex, `${request.capability} must wait until the child is completed`);
+    assert.match(request.prompt, /collaboration\.spawn_agent/u);
+    assert.match(request.prompt, /task_name="meta_kim_probe"/u);
+    assert.match(request.prompt, /message="Return exactly META_KIM_CAPABILITY_/u);
+    assert.match(request.prompt, /collaboration\.wait_agent/u);
+    assert.equal(readFileSync(path.join(request.workspace, ".git", "HEAD"), "utf8"), "ref: refs/heads/main\n");
+    const probeInstructions = readFileSync(path.join(request.workspace, "AGENTS.md"), "utf8");
+    assert.match(probeInstructions, /Controlled Runtime Probe/u);
+    assert.match(probeInstructions, /Start now by calling collaboration\.spawn_agent\./u);
+    assert.match(request.prompt, /After a successful spawn returns a child id/u);
+    assert.match(request.prompt, /wait_agent until that child reports completed/u);
     const prohibitions = request.prompt.split(/[.!?]/u).map((sentence) => sentence.toLowerCase());
-    assert.ok(
-      prohibitions.some((sentence) => /never|do not/u.test(sentence) && sentence.includes("wait") && sentence.includes("before") && sentence.includes("spawn_agent")),
-      `${request.capability} must forbid wait-before-spawn`,
-    );
+    assert.match(request.prompt, /never call the waiting tool without a child id/u);
+    assert.match(request.prompt, /Call collaboration\.spawn_agent now\.$/u);
     assert.ok(
       prohibitions.some((sentence) => sentence.includes("do not") && sentence.includes("text") && /pretend|simulate|imitate|substitute|replace|claim/u.test(sentence)),
       `${request.capability} must forbid textual imitation of the native tool lifecycle`,
@@ -322,6 +321,63 @@ function injectedCodexEngineeringExecutor(request) {
   return { status: 0, signal: null, stdout: `${jsonl(records)}\n`, stderr: "", runtimeVersion: "codex-engineering-test" };
 }
 
+function codexTuiFixture() {
+  const codexHome = mkdtempSync(path.join(tmpdir(), "meta-kim-codex-tui-"));
+  temporaryRoots.add(codexHome);
+  const sessions = path.join(codexHome, "sessions", "2026", "08", "17");
+  mkdirSync(sessions, { recursive: true });
+  const threadId = "88888888-8888-4888-8888-888888888888";
+  const childSessionId = "99999999-9999-4999-8999-999999999999";
+  const nonce = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+  const marker = `META_KIM_CAPABILITY_AGENT_SUBAGENT_${nonce}`;
+  const callId = "call_tui_fixture";
+  const childPath = "/root/tui_child";
+  const now = new Date().toISOString();
+  const parent = [
+    { timestamp: now, type: "session_meta", payload: { id: threadId, originator: "codex-tui", source: "cli", cli_version: "0.147.0" } },
+    { timestamp: now, type: "response_item", payload: { type: "function_call", name: "spawn_agent", namespace: "collaboration", arguments: "gAAAAAfixture", call_id: callId } },
+    { timestamp: now, type: "event_msg", payload: { type: "item_completed", item: { type: "SubAgentActivity", id: callId, kind: "started", agent_thread_id: childSessionId, agent_path: childPath } } },
+    { timestamp: now, type: "response_item", payload: { type: "function_call_output", call_id: callId, output: JSON.stringify({ task_name: childPath }) } },
+    { timestamp: now, type: "response_item", payload: { type: "agent_message", id: "tui-final", author: childPath, recipient: "/root", content: [{ type: "input_text", text: `Message Type: FINAL_ANSWER\nPayload:\n${marker}` }] } },
+  ];
+  const child = [
+    { timestamp: now, type: "session_meta", payload: { id: childSessionId, originator: "codex-tui", source: { subagent: { thread_spawn: { parent_thread_id: threadId } } }, cli_version: "0.147.0" } },
+    { timestamp: now, type: "event_msg", payload: { type: "token_count", info: { total_token_usage: { total_tokens: 1 } } } },
+    { timestamp: now, type: "turn_context", payload: { cwd: packageRoot } },
+    { timestamp: now, type: "event_msg", payload: { type: "item_completed", thread_id: childSessionId, item: { type: "AgentMessage", id: "tui-child-final", content: [{ type: "Text", text: marker }], phase: "final_answer" } } },
+    { timestamp: now, type: "response_item", payload: { type: "message", id: "tui-child-final", role: "assistant", content: [{ type: "output_text", text: marker }], phase: "final_answer" } },
+    { timestamp: now, type: "event_msg", payload: { type: "task_complete", last_agent_message: marker } },
+  ];
+  writeFileSync(path.join(sessions, `rollout-parent-${threadId}.jsonl`), `${jsonl(parent)}\n`, "utf8");
+  writeFileSync(path.join(sessions, `rollout-child-${childSessionId}.jsonl`), `${jsonl(child)}\n`, "utf8");
+  return { codexHome, threadId, childSessionId, marker, sinceMs: Date.now() - 5_000 };
+}
+
+function injectedCodexV147ApplyPatchExecutor({ wrongPath = false } = {}) {
+  return (request) => {
+    assert.equal(request.runtime, "codex");
+    assert.equal(request.capability, "apply_patch / edit");
+    const marker = request.prompt.match(/META_KIM_CAPABILITY_APPLY_PATCH_EDIT_[0-9a-f-]{36}/u)?.[0];
+    writeFileSync(path.join(request.workspace, "meta-kim-probe.txt"), `after-${marker}\n`, "utf8");
+    const changedPath = wrongPath
+      ? path.join(path.dirname(request.workspace), "wrong-workspace", "meta-kim-probe.txt")
+      : path.join(request.workspace, "meta-kim-probe.txt");
+    return {
+      status: 0,
+      signal: null,
+      stderr: "",
+      runtimeVersion: "codex-cli 0.147.0",
+      stdout: `${jsonl([
+        { type: "thread.started", thread_id: "codex-v147-edit" },
+        { type: "item.started", item: { id: "read-before", type: "command_execution", command: "Get-Content meta-kim-probe.txt", status: "in_progress" } },
+        { type: "item.completed", item: { id: "read-before", type: "command_execution", command: "Get-Content meta-kim-probe.txt", aggregated_output: `before-${marker}`, exit_code: 0, status: "completed" } },
+        { type: "item.started", item: { id: "edit", type: "file_change", changes: [{ path: changedPath, kind: "add" }], status: "in_progress" } },
+        { type: "item.completed", item: { id: "edit", type: "file_change", changes: [{ path: changedPath, kind: "add" }], status: "completed" } },
+      ])}\n`,
+    };
+  };
+}
+
 test("controlled receipts stay advisory while compatible routes hand off to the current host", () => {
   for (const runtime of ["claude_code", "codex"]) {
     const projectRoot = fixtureProject();
@@ -360,13 +416,25 @@ test("controlled producer binds Claude to the fail-closed provider resolver whil
   assert.match(promptBuilder, /native edit\/apply-patch capability/u);
   assert.match(producerExecutor, /if \(request\.runtime === "claude_code"\) \{\s*env = resolveClaudeLiveProviderEnvironmentSync\(\);/u);
   assert.match(producerExecutor, /runCli\(request\.command, request\.args, \{\s*cwd: request\.workspace,\s*env,/u);
-  assert.match(producerExecutor, /runtimeIsolation: request\.runtime === "codex" \? "ephemeral_auth_only" : "empty_setting_sources_strict_mcp_current_auth"/u);
+  assert.match(producerExecutor, /revalidateCodexLiveProviderConfigSync\(request\.codexProviderBinding\)/u);
+  assert.match(producerExecutor, /isolated_auth_provider_and_probe_rules_only/u);
   assert.match(commandBuilder, /"--setting-sources",\s*"",/u);
   assert.match(commandBuilder, /"--strict-mcp-config",/u);
   assert.match(commandBuilder, /"--mcp-config", path\.join\(workspace, "meta-kim-empty-mcp\.json"\),/u);
 
   assert.match(producerExecutor, /isolatedRuntimeHome = mkdtempSync\(path\.join\(os\.tmpdir\(\), "meta-kim-codex-probe-"\)\)/u);
-  assert.match(producerExecutor, /const authSource = path\.join\(sourceRuntimeHome, "auth\.json"\);/u);
+  assert.match(source, /import \{ resolveCodexLiveProviderConfigSync, revalidateCodexLiveProviderConfigSync \} from "\.\/codex-live-provider-config\.mjs";/u);
+  assert.match(source, /resolveCodexLiveProviderConfigSync\(\)/u);
+  assert.match(commandBuilder, /\.\.\.\(codexProviderBinding\?\.args \?\? \[\]\)/u);
+  assert.match(commandBuilder, /"features\.multi_agent=true"/u);
+  assert.match(commandBuilder, /"features\.multi_agent_v2=true"/u);
+  assert.match(commandBuilder, /"agents\.max_threads=2"/u);
+  assert.match(commandBuilder, /"agents\.max_depth=1"/u);
+  assert.match(commandBuilder, /windows\.sandbox/u);
+  assert.doesNotMatch(commandBuilder, /"--ephemeral"/u);
+  assert.doesNotMatch(commandBuilder, /"--ignore-user-config"/u);
+  assert.doesNotMatch(commandBuilder, /"--skip-git-repo-check"/u);
+  assert.match(producerExecutor, /const authSource = request\.codexProviderBinding\.authPath;/u);
   assert.match(producerExecutor, /copyFileSync\(authSource, path\.join\(isolatedRuntimeHome, "auth\.json"\)\);/u);
   assert.match(producerExecutor, /CODEX_HOME: isolatedRuntimeHome,/u);
   assert.match(producerExecutor, /CODEX_SKILLS_DIR: path\.join\(isolatedRuntimeHome, "skills"\),/u);
@@ -547,6 +615,25 @@ test("one Codex engineering invocation emits three facet-specific advisory recei
   assertHostHandoffOnly(evaluateRouteExecutionGate({ runtime: "codex", taskShape: "engineering_execution", effectiveMatrix: testAware.effectiveMatrix }));
 });
 
+test("Codex 0.147 file_change binds marker evidence to the exact controlled probe path", () => {
+  const projectRoot = fixtureProject();
+  const accepted = runControlledRuntimeCapabilityProducer({
+    projectRoot,
+    runtime: "codex",
+    capability: "apply_patch / edit",
+    executor: injectedCodexV147ApplyPatchExecutor(),
+  });
+  assert.equal(accepted.receipt.outcome, "pass");
+  const state = loadEffectiveRuntimeCapabilityClaims({ packageRoot, projectRoot, allowTestReceipts: true });
+  assert.equal(state.overlayStatus.state, "applied", state.issues.join("\n"));
+  assert.throws(() => runControlledRuntimeCapabilityProducer({
+    projectRoot: fixtureProject(),
+    runtime: "codex",
+    capability: "apply_patch / edit",
+    executor: injectedCodexV147ApplyPatchExecutor({ wrongPath: true }),
+  }), /did not observe a capability-specific completed host event/u);
+});
+
 test("recomputing receipt, attempt and index hashes can only forge advisory status", () => {
   const projectRoot = fixtureProject();
   const produced = runControlledRuntimeCapabilityProducer({ projectRoot, runtime: "codex", capability: "shell", executor: injectedExecutor });
@@ -705,6 +792,78 @@ test("one streamed Codex Desktop spawn lifecycle proves distinct agent and subag
   } finally {
     if (previousHome === undefined) delete process.env.CODEX_HOME;
     else process.env.CODEX_HOME = previousHome;
+    rmSync(fixture.codexHome, { recursive: true, force: true });
+  }
+});
+
+test("Codex TUI parent and child lifecycle stays distinct from Desktop evidence", async () => {
+  const projectRoot = fixtureProject();
+  const fixture = codexTuiFixture();
+  const previousHome = process.env.CODEX_HOME;
+  process.env.CODEX_HOME = fixture.codexHome;
+  try {
+    const evidence = await readCodexTuiSessionEvidence(fixture);
+    assert.equal(evidence.sourceCategory, "codex_tui_sessions");
+    assert.equal(evidence.runtimeIsolation, "codex_tui_current_session");
+    assert.equal(evidence.hostOriginator, "codex-tui");
+    assert.equal(evidence.hostSource, "cli");
+    assert.equal(evidence.nativeInvocation.hostSurface, "collaboration.spawn_agent");
+    const produced = await runCodexDesktopSessionCapabilityProducer({
+      projectRoot,
+      ...fixture,
+      reader: (options) => readCodexTuiSessionEvidence(options),
+    });
+    assert.deepEqual(produced.results.map((entry) => entry.receipt.compositeLifecycle.sourceCategory), ["codex_tui_sessions", "codex_tui_sessions"]);
+    assert.equal(produced.results.every((entry) => entry.receipt.hostInvocation.runtimeIsolation === "codex_tui_current_session"), true);
+    assert.equal(produced.results.every((entry) => entry.receipt.compositeLifecycle.hostOriginator === "codex-tui"), true);
+    const state = loadEffectiveRuntimeCapabilityClaims({ packageRoot, projectRoot, allowTestReceipts: true });
+    assert.equal(
+      state.overlayStatus.state,
+      "applied",
+      state.issues.join("\n"),
+    );
+  } finally {
+    if (previousHome === undefined) delete process.env.CODEX_HOME;
+    else process.env.CODEX_HOME = previousHome;
+    rmSync(fixture.codexHome, { recursive: true, force: true });
+  }
+});
+
+test("Codex TUI reader uses fresh lifecycle events when the active parent mtime is stale", async () => {
+  const fixture = codexTuiFixture();
+  try {
+    const parentPath = path.join(fixture.codexHome, "sessions", "2026", "08", "17", `rollout-parent-${fixture.threadId}.jsonl`);
+    const staleTime = new Date(fixture.sinceMs - 60_000);
+    utimesSync(parentPath, staleTime, staleTime);
+    const evidence = await readCodexTuiSessionEvidence(fixture);
+    assert.equal(evidence.threadId, fixture.threadId);
+    assert.equal(evidence.childSessionId, fixture.childSessionId);
+  } finally {
+    rmSync(fixture.codexHome, { recursive: true, force: true });
+  }
+});
+
+test("Codex TUI reader rejects lifecycle events older than the evidence window", async () => {
+  const fixture = codexTuiFixture();
+  try {
+    const parentPath = path.join(fixture.codexHome, "sessions", "2026", "08", "17", `rollout-parent-${fixture.threadId}.jsonl`);
+    const oldTimestamp = new Date(fixture.sinceMs - 60_000).toISOString();
+    const parentText = readFileSync(parentPath, "utf8").replaceAll(/"timestamp":"[^"]+"/gu, `"timestamp":"${oldTimestamp}"`);
+    writeFileSync(parentPath, parentText, "utf8");
+    await assert.rejects(() => readCodexTuiSessionEvidence(fixture), /codex_tui_spawn_lifecycle_not_unique/u);
+  } finally {
+    rmSync(fixture.codexHome, { recursive: true, force: true });
+  }
+});
+
+test("Codex TUI reader rejects a Desktop source masquerade", async () => {
+  const fixture = codexTuiFixture();
+  try {
+    const parentPath = path.join(fixture.codexHome, "sessions", "2026", "08", "17", `rollout-parent-${fixture.threadId}.jsonl`);
+    const text = readFileSync(parentPath, "utf8").replace('"source":"cli"', '"source":"vscode"');
+    writeFileSync(parentPath, text, "utf8");
+    await assert.rejects(() => readCodexTuiSessionEvidence(fixture), /codex_tui_parent_source_invalid/u);
+  } finally {
     rmSync(fixture.codexHome, { recursive: true, force: true });
   }
 });

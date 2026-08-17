@@ -18,6 +18,7 @@ The changelog explains the user-facing problem or risk each release solved, what
 
 - **Windows npm executable scripts use stable LF shebangs.** Repository attributes prevent checkout line-ending conversion from breaking the packaged `bin/*.mjs` entrypoints.
 - **Packed four-runtime global installs use a dedicated bounded Windows-safe timeout.** The immutable projection-package and durable MCP materialization chain may exceed the generic five-minute command budget on Windows, so current and historical global install lanes receive a fail-closed ten-minute allowance while ordinary commands remain capped at five minutes.
+- **Codex 0.147 controlled runtime evidence is source-accurate on Windows.** Live probes isolate explicit provider overrides, use the supported unelevated Windows sandbox, and replay current `file_change` plus TUI parent/child lifecycle evidence only when the exact workspace, session, event time, and capability marker bindings match.
 - **Global Claude Code and Codex projections remain package-bound and reproducible.** The synchronized runtime assets continue to use the stable projection package and preserve user-owned configuration.
 
 ## [3.0.0] - 2026-08-12

@@ -8,11 +8,12 @@ import {
   writeTestOnlyControlledRuntimeCapabilityAcceptanceAttempt,
 } from "./runtime-capability-acceptance.mjs";
 import { observeClaudeJsonl, observeCodexJsonl } from "./live-acceptance/observe-host-events.mjs";
-import { readCodexDesktopEngineeringEvidence, readCodexDesktopSessionEvidence } from "./live-acceptance/read-codex-session-evidence.mjs";
+import { readCodexDesktopEngineeringEvidence, readCodexDesktopSessionEvidence, readCodexTuiSessionEvidence } from "./live-acceptance/read-codex-session-evidence.mjs";
 import { runCli } from "./live-acceptance/run-clean-room-live-acceptance.mjs";
 import { assertExactMarkerEventLifecycles } from "./live-acceptance/validate-marker-lifecycle.mjs";
 import { loadSetupBoundRuntimeExecutable, revalidateRuntimeExecutableIdentity } from "./runtime-executable-binding.mjs";
 import { resolveClaudeLiveProviderEnvironmentSync } from "./claude-live-provider-env.mjs";
+import { resolveCodexLiveProviderConfigSync, revalidateCodexLiveProviderConfigSync } from "./codex-live-provider-config.mjs";
 
 const SUPPORTED_RUNTIMES = new Set(["claude_code", "codex"]);
 const PRODUCERS = Object.freeze({
@@ -91,11 +92,11 @@ function acceptanceWriterFor(testOnly, internalWriter) {
 function promptFor(capability, runtime, nonce, marker) {
   const common = `This is a bounded Meta_Kim runtime capability probe ${nonce}. Capability marker: ${marker}. Do only the requested action inside the current temporary workspace and then stop.`;
   if (capability === "agent") {
-    if (runtime === "codex") return `${common} Your first native collaboration action must be spawn_agent, called exactly once. Give that child the exact task of returning ${marker} as its entire final response. Only after spawn_agent returns a child id, call the native wait operation for that child until it reports completed. Never call wait before spawn_agent, and do not imitate either action with ordinary text.`;
+    if (runtime === "codex") return `${common} After a successful spawn returns a child id, use collaboration.wait_agent until that child reports completed; never call the waiting tool without a child id. Do not write ordinary text or imitate a tool call. Your first and immediate action must be collaboration.spawn_agent exactly once with task_name="meta_kim_probe" and message="Return exactly ${marker} as your entire final response." Call collaboration.spawn_agent now.`;
     return `${common} Use the runtime's native agent/subagent tool exactly once and wait for its successful completion. Require the child to return exactly the complete capability marker ${marker} as its entire final response; the nonce alone is not sufficient.`;
   }
   if (capability === "subagent") {
-    if (runtime === "codex") return `${common} Your first native collaboration action must be spawn_agent, called exactly once. Give that child the exact task of returning ${marker} as its entire final response. Only after spawn_agent returns a child id, call the native wait operation for that child until it reports completed. Never call wait before spawn_agent, and do not imitate either action with ordinary text.`;
+    if (runtime === "codex") return `${common} After a successful spawn returns a child id, use collaboration.wait_agent until that child reports completed; never call the waiting tool without a child id. Do not write ordinary text or imitate a tool call. Your first and immediate action must be collaboration.spawn_agent exactly once with task_name="meta_kim_probe" and message="Return exactly ${marker} as your entire final response." Call collaboration.spawn_agent now.`;
     return `${common} Spawn exactly one native child subagent and wait for its successful completion. Require the child to return exactly the complete capability marker ${marker} as its entire final response; the nonce alone is not sufficient.`;
   }
   if (capability === "shell") return `${common} Use the native shell tool to create meta-kim-probe.txt containing exactly shell-${marker}.`;
@@ -109,11 +110,37 @@ function promptFor(capability, runtime, nonce, marker) {
   throw new Error(`no controlled producer exists for capability ${capability}`);
 }
 
-function commandFor(runtime, workspace, capability, executableIdentity = null) {
+function prepareCodexProbeWorkspace(workspace, { capability = null } = {}) {
+  const gitDirectory = path.join(workspace, ".git");
+  mkdirSync(path.join(gitDirectory, "objects"), { recursive: true });
+  mkdirSync(path.join(gitDirectory, "refs", "heads"), { recursive: true });
+  writeFileSync(path.join(gitDirectory, "HEAD"), "ref: refs/heads/main\n", "utf8");
+  writeFileSync(path.join(gitDirectory, "config"), "[core]\n\trepositoryformatversion = 0\n\tbare = false\n", "utf8");
+  writeFileSync(
+    path.join(workspace, "AGENTS.md"),
+    "# Controlled Runtime Probe\n\nWork only inside this temporary repository. The caller authorizes exactly the native capability operation in the prompt. Do not replace native tool evidence with ordinary text.\n" +
+      (["agent", "subagent"].includes(capability)
+        ? "For this probe, the waiting tool is forbidden until a child id exists. Do not write an assistant message before the first tool call. Start now by calling collaboration.spawn_agent.\n"
+        : ""),
+    "utf8",
+  );
+}
+
+function commandFor(runtime, workspace, capability, executableIdentity = null, codexProviderBinding = null) {
   const argsPrefix = executableIdentity?.argsPrefix ?? [];
   if (runtime === "codex") return {
     command: executableIdentity?.realpath ?? "test-only-codex",
-    args: [...argsPrefix, "exec", "--json", "--ephemeral", "--ignore-user-config", "--skip-git-repo-check", "-s", "workspace-write", "-C", workspace, "-"],
+    args: [
+      ...argsPrefix,
+      "exec",
+      ...(codexProviderBinding?.args ?? []),
+      "-c", "features.multi_agent=true",
+      "-c", "features.multi_agent_v2=true",
+      "-c", "agents.max_threads=2",
+      "-c", "agents.max_depth=1",
+      ...(process.platform === "win32" ? ["-c", 'windows.sandbox="unelevated"'] : []),
+      "--json", "-s", "workspace-write", "-C", workspace, "-",
+    ],
     observer: observeCodexJsonl,
   };
   const claudeTool = capability === "shell"
@@ -147,10 +174,9 @@ function productionExecutor(request) {
   if (request.runtime === "claude_code") {
     env = resolveClaudeLiveProviderEnvironmentSync();
   } else if (request.runtime === "codex") {
+    revalidateCodexLiveProviderConfigSync(request.codexProviderBinding);
     isolatedRuntimeHome = mkdtempSync(path.join(os.tmpdir(), "meta-kim-codex-probe-"));
-    const sourceRuntimeHome = process.env.CODEX_HOME || path.join(os.homedir(), ".codex");
-    const authSource = path.join(sourceRuntimeHome, "auth.json");
-    if (!existsSync(authSource)) throw new Error("codex auth.json is required for the isolated native probe");
+    const authSource = request.codexProviderBinding.authPath;
     copyFileSync(authSource, path.join(isolatedRuntimeHome, "auth.json"));
     env = {
       ...process.env,
@@ -169,10 +195,11 @@ function productionExecutor(request) {
       timeoutMs: request.timeoutMs,
     });
     revalidateRuntimeExecutableIdentity(request.executableIdentity);
+    if (request.runtime === "codex") revalidateCodexLiveProviderConfigSync(request.codexProviderBinding);
     return {
       ...result,
       runtimeVersion: String(version.stdout ?? version.stderr).trim().split(/\r?\n/u)[0],
-      runtimeIsolation: request.runtime === "codex" ? "ephemeral_auth_only" : "empty_setting_sources_strict_mcp_current_auth",
+      runtimeIsolation: request.runtime === "codex" ? "isolated_auth_provider_and_probe_rules_only" : "empty_setting_sources_strict_mcp_current_auth",
       executableIdentity: request.executableIdentity,
     };
   } finally {
@@ -192,7 +219,21 @@ function productionExecutor(request) {
   }
 }
 
-function eventMatches(runtime, capability, event, rawText, marker) {
+function codexFileChangeTouchesProbe(sourceText, workspace) {
+  const expectedPath = path.resolve(workspace, "meta-kim-probe.txt");
+  for (const line of String(sourceText).split(/\r?\n/u)) {
+    let record;
+    try {
+      record = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if ((record?.item?.changes ?? []).some((change) => path.resolve(String(change?.path ?? "")) === expectedPath)) return true;
+  }
+  return false;
+}
+
+function eventMatches(runtime, capability, event, rawText, marker, workspace) {
   const surface = String(event.hostSurface ?? event.providerId ?? "").toLowerCase();
   const lines = String(rawText).split(/\r?\n/u);
   const sourceText = (event.sourceLines ?? []).map((line) => lines[line - 1] ?? "").join("\n");
@@ -203,15 +244,20 @@ function eventMatches(runtime, capability, event, rawText, marker) {
       Boolean(event.childSessionId) &&
       event.resultTextSha256 === exactMarkerDigest;
   }
+  if (capability === "apply_patch / edit") {
+    const markerBound = sourceText.includes(marker) || (
+      runtime === "codex" &&
+      rawText.includes(`before-${marker}`) &&
+      codexFileChangeTouchesProbe(sourceText, workspace)
+    );
+    return markerBound && event.family === "runtime_tool" && (runtime === "codex" ? /file_change|apply_patch|patch/u.test(surface) : /edit|write|patch/u.test(surface));
+  }
   if (!sourceText.includes(marker)) return false;
   if (capability === "shell") return event.family === "runtime_tool" && /bash|shell|command/u.test(surface);
   if (capability === "filesystem") {
     return event.family === "runtime_tool" && (runtime === "codex"
       ? /shell|command/u.test(surface) && /\b(?:get-content|cat|type|read)\b/iu.test(sourceText) && !/(?:>|set-content|out-file|remove-item|del\b|rm\b)/iu.test(sourceText)
       : /^(read|glob|grep)$/u.test(surface));
-  }
-  if (capability === "apply_patch / edit") {
-    return event.family === "runtime_tool" && (runtime === "codex" ? /file_change|apply_patch|patch/u.test(surface) : /edit|write|patch/u.test(surface));
   }
   return false;
 }
@@ -423,6 +469,7 @@ export function runCodexCompositeEngineeringProducer({
   mkdirSync(workspace, { recursive: true });
   mkdirSync(artifactsDir, { recursive: true });
   mkdirSync(receiptsDir, { recursive: true });
+  prepareCodexProbeWorkspace(workspace);
   const nonce = randomUUID();
   const marker = `META_KIM_CAPABILITY_ENGINEERING_${nonce}`;
   const prompt = engineeringPrompt(marker);
@@ -551,12 +598,13 @@ export async function runCodexDesktopSessionCapabilityProducer({
     throw new Error("Codex Desktop session producer supports only agent and subagent facets");
   }
   const canonicalCodexHome = path.join(os.homedir(), ".codex");
-  if (reader === readCodexDesktopSessionEvidence && codexHome) {
+  const canonicalSessionReader = reader === readCodexDesktopSessionEvidence || reader === readCodexTuiSessionEvidence;
+  if (canonicalSessionReader && codexHome) {
     if (path.resolve(codexHome) !== path.resolve(canonicalCodexHome)) throw new Error("Codex Desktop producer can read only canonical ~/.codex");
   }
-  const evidence = await reader({ codexHome: reader === readCodexDesktopSessionEvidence ? canonicalCodexHome : codexHome, threadId, childSessionId, marker, sinceMs });
-  if (evidence.sourceCategory !== "codex_home_sessions") throw new Error("Codex Desktop session source category mismatch");
-  const nonce = String(marker).match(/META_KIM_CAPABILITY_SUBAGENT_([0-9a-f-]{36})$/u)?.[1];
+  const evidence = await reader({ codexHome: canonicalSessionReader ? canonicalCodexHome : codexHome, threadId, childSessionId, marker, sinceMs });
+  if (!new Set(["codex_home_sessions", "codex_tui_sessions"]).has(evidence.sourceCategory)) throw new Error("Codex session source category mismatch");
+  const nonce = String(marker).match(/META_KIM_CAPABILITY_(?:SUBAGENT|AGENT_SUBAGENT)_([0-9a-f-]{36})$/u)?.[1];
   if (!nonce) throw new Error("Codex Desktop session marker is invalid");
   const paths = prepareRuntimeCapabilityAcceptanceStore({ projectRoot, profile });
   const producerRoot = path.join(paths.profileRoot, "runtime-capability-producers");
@@ -589,10 +637,15 @@ export async function runCodexDesktopSessionCapabilityProducer({
     childSourceLines: evidence.childSourceLines,
     childAgentPath: evidence.childAgentPath,
     parentAgentPath: evidence.parentAgentPath,
+    hostOriginator: evidence.hostOriginator ?? "Codex Desktop",
+    hostSource: evidence.hostSource ?? "vscode",
     rawCompositeDigest: sha256(rawBytes),
     facetBindings: {
       agent: { eventId: evidence.eventId, sourceLines: evidence.nativeInvocation.sourceLines.filter((line) => line !== Math.max(...evidence.nativeInvocation.sourceLines)).sort((a, b) => a - b) },
-      subagent: { eventId: `${evidence.childSessionId}:task_complete`, sourceLines: [parentLineCount + 2, parentLineCount + 3] },
+      subagent: {
+        eventId: `${evidence.childSessionId}:task_complete`,
+        sourceLines: (evidence.childCompletionSourceLineNumbers ?? [2, 3]).map((line) => parentLineCount + line),
+      },
     },
   };
   const results = [];
@@ -618,7 +671,7 @@ export async function runCodexDesktopSessionCapabilityProducer({
       schemaVersion: PRODUCER_RECEIPT_SCHEMA_VERSION,
       attestationAuthority: "controlled_producer",
       producer: CODEX_DESKTOP_COMPOSITE_PRODUCER,
-      testOnly: reader !== readCodexDesktopSessionEvidence,
+      testOnly: !canonicalSessionReader,
       runtime: "codex",
       runtimeVersion: String(evidence.cliVersion ?? "").trim(),
       capability,
@@ -628,7 +681,7 @@ export async function runCodexDesktopSessionCapabilityProducer({
       observedAt,
       outcome: "pass",
       hostInvocation: {
-        runtimeIsolation: "codex_desktop_current_session",
+        runtimeIsolation: evidence.runtimeIsolation ?? "codex_desktop_current_session",
         request,
         requestDigest: sha256(JSON.stringify(request)),
         result,
@@ -717,6 +770,7 @@ export function runControlledRuntimeCapabilityProducer({
   mkdirSync(workspace, { recursive: true });
   mkdirSync(artifactsDir, { recursive: true });
   mkdirSync(receiptsDir, { recursive: true });
+  if (runtime === "codex") prepareCodexProbeWorkspace(workspace, { capability });
   const nonce = randomUUID();
   const marker = `META_KIM_CAPABILITY_${capability.replace(/[^a-z0-9]+/giu, "_").toUpperCase()}_${nonce}`;
   if (capability === "filesystem") writeFileSync(path.join(workspace, "meta-kim-probe.txt"), `${marker}\n`, "utf8");
@@ -725,9 +779,12 @@ export function runControlledRuntimeCapabilityProducer({
   const executableIdentity = executor === productionExecutor
     ? loadSetupBoundRuntimeExecutable({ projectRoot: paths.projectRoot, profile: paths.profile, runtime })
     : { realpath: `<test-only:${runtime}>`, sha256: sha256(`test-only:${runtime}`), size: 0, bindingSource: "explicit_test_only_executor" };
-  const command = commandFor(runtime, workspace, capability, executableIdentity);
+  const codexProviderBinding = executor === productionExecutor && runtime === "codex"
+    ? resolveCodexLiveProviderConfigSync()
+    : null;
+  const command = commandFor(runtime, workspace, capability, executableIdentity, codexProviderBinding);
   const prompt = promptFor(capability, runtime, nonce, marker);
-  const request = { runtime, capability, mode, workspace, command: command.command, args: command.args, prompt, timeoutMs, executableIdentity };
+  const request = { runtime, capability, mode, workspace, command: command.command, args: command.args, prompt, timeoutMs, executableIdentity, codexProviderBinding };
   let result;
   let completed = false;
   try {
@@ -739,7 +796,7 @@ export function runControlledRuntimeCapabilityProducer({
     const rawText = rawBytes.toString("utf8");
     const events = command.observer(rawText);
     assertExactMarkerEventLifecycles(rawText, marker);
-    const matched = events.filter((event) => eventMatches(runtime, capability, event, rawText, marker) && ["completed", "returned"].includes(event.resultStatus));
+    const matched = events.filter((event) => eventMatches(runtime, capability, event, rawText, marker, workspace) && ["completed", "returned"].includes(event.resultStatus));
     if (matched.length === 0) throw new Error(`${producer.id} did not observe a capability-specific completed host event`);
     assertWorkspaceOutcome(workspace, capability, marker);
     const observedAt = new Date().toISOString();
@@ -822,6 +879,18 @@ export async function produceRuntimeCapabilityWithAcceptanceWriter(options, acce
     if (options.runtime !== "codex") throw new Error("Codex Desktop agent source supports only codex");
     return runCodexDesktopSessionCapabilityProducer({
       ...common,
+      threadId: options.threadId,
+      childSessionId: options.childSessionId,
+      marker: options.marker,
+      sinceMs: options.sinceMs,
+      capabilities: options.capabilities,
+    });
+  }
+  if (options.source === "codex_tui_agent_subagent") {
+    if (options.runtime !== "codex") throw new Error("Codex TUI agent source supports only codex");
+    return runCodexDesktopSessionCapabilityProducer({
+      ...common,
+      reader: readCodexTuiSessionEvidence,
       threadId: options.threadId,
       childSessionId: options.childSessionId,
       marker: options.marker,

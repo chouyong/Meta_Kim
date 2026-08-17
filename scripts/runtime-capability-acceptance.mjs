@@ -249,12 +249,30 @@ function validateCodexDesktopSourceBindings(receipt, rawText) {
     event.childSessionId === lifecycle.childSessionId && event.hostSurface === "collaboration.spawn_agent" &&
     event.completionBoundary === "returned_child_final" && event.resultStatus === "returned");
   if (parentEvents.length !== 1) throw new Error("Codex Desktop parent lifecycle no longer proves native spawn and return");
+  const parentRecords = parentLines.map((line) => JSON.parse(line));
   const childRecords = childLines.map((line) => JSON.parse(line));
+  const parentMeta = parentRecords.find((entry) => entry?.type === "session_meta")?.payload;
   const childMeta = childRecords.find((entry) => entry?.type === "session_meta")?.payload;
-  const final = childRecords.filter((entry) => entry?.type === "event_msg" && entry?.payload?.type === "agent_message" && entry?.payload?.phase === "final_answer" && entry?.payload?.message === receipt.capabilityMarker);
   const complete = childRecords.filter((entry) => entry?.type === "event_msg" && entry?.payload?.type === "task_complete" && entry?.payload?.last_agent_message === receipt.capabilityMarker);
-  if (childMeta?.id !== lifecycle.childSessionId || childMeta?.source?.subagent?.thread_spawn?.parent_thread_id !== lifecycle.threadId || final.length !== 1 || complete.length !== 1) {
-    throw new Error("Codex Desktop child session no longer proves the exact completed marker");
+  if (lifecycle.sourceCategory === "codex_tui_sessions") {
+    const final = childRecords.filter((entry) =>
+      entry?.type === "event_msg" && entry?.payload?.type === "item_completed" &&
+      entry?.payload?.item?.type === "AgentMessage" && entry?.payload?.item?.phase === "final_answer" &&
+      (entry.payload.item.content ?? []).filter((item) => item?.type === "Text").map((item) => item.text).join("").trim() === receipt.capabilityMarker);
+    const responseFinal = childRecords.filter((entry) =>
+      entry?.type === "response_item" && entry?.payload?.type === "message" && entry?.payload?.phase === "final_answer" &&
+      (entry.payload.content ?? []).filter((item) => item?.type === "output_text").map((item) => item.text).join("").trim() === receipt.capabilityMarker);
+    if (
+      parentMeta?.id !== lifecycle.threadId || parentMeta?.originator !== "codex-tui" || parentMeta?.source !== "cli" ||
+      childMeta?.id !== lifecycle.childSessionId || childMeta?.originator !== "codex-tui" ||
+      childMeta?.source?.subagent?.thread_spawn?.parent_thread_id !== lifecycle.threadId ||
+      final.length !== 1 || responseFinal.length !== 1 || complete.length !== 1
+    ) throw new Error("Codex TUI child session no longer proves the exact completed marker");
+  } else {
+    const final = childRecords.filter((entry) => entry?.type === "event_msg" && entry?.payload?.type === "agent_message" && entry?.payload?.phase === "final_answer" && entry?.payload?.message === receipt.capabilityMarker);
+    if (childMeta?.id !== lifecycle.childSessionId || childMeta?.source?.subagent?.thread_spawn?.parent_thread_id !== lifecycle.threadId || final.length !== 1 || complete.length !== 1) {
+      throw new Error("Codex Desktop child session no longer proves the exact completed marker");
+    }
   }
   const expected = receipt.eventEvidence[0];
   const sourceLines = rawText.split(/\r?\n/u);
@@ -438,7 +456,7 @@ function validateControlledProducerReceipt(receipt, runtime, capability, mode) {
   if (!receipt.rawArtifact?.path || !/^[a-f0-9]{64}$/iu.test(String(receipt.rawArtifact?.sha256 ?? ""))) throw new Error("controlled producer receipt lacks raw artifact binding");
   if (!/^[0-9a-f-]{36}$/iu.test(String(receipt.capabilityNonce ?? ""))) throw new Error("controlled producer receipt lacks capability nonce");
   const expectedMarker = receipt.producer?.id === CODEX_DESKTOP_COMPOSITE_PRODUCER_ID
-    ? `META_KIM_CAPABILITY_SUBAGENT_${receipt.capabilityNonce}`
+    ? `${receipt.compositeLifecycle?.sourceCategory === "codex_tui_sessions" ? "META_KIM_CAPABILITY_AGENT_SUBAGENT" : "META_KIM_CAPABILITY_SUBAGENT"}_${receipt.capabilityNonce}`
     : [CODEX_ENGINEERING_COMPOSITE_PRODUCER_ID, CODEX_DESKTOP_ENGINEERING_PRODUCER_ID].includes(receipt.producer?.id)
       ? `META_KIM_CAPABILITY_ENGINEERING_${receipt.capabilityNonce}`
     : `META_KIM_CAPABILITY_${capability.replace(/[^a-z0-9]+/giu, "_").toUpperCase()}_${receipt.capabilityNonce}`;
@@ -453,6 +471,10 @@ function validateControlledProducerReceipt(receipt, runtime, capability, mode) {
     entry.resultTextSha256 !== digest(receipt.capabilityMarker) ||
     entry.resultSourceLines.length === 0
   )) throw new Error("agent/subagent producer receipt result is not the exact capability marker");
+  if (
+    !composite && capability === "apply_patch / edit" &&
+    (receipt.workspaceOutcome?.kind !== "bounded_file" || receipt.workspaceOutcome?.contentSha256 !== digest(`after-${receipt.capabilityMarker}\n`))
+  ) throw new Error("apply-patch producer receipt lacks the exact final workspace marker");
   if (receipt.producer?.id === CODEX_DESKTOP_COMPOSITE_PRODUCER_ID) validateCodexDesktopCompositeReceipt(receipt, runtime, capability);
   if (receipt.producer?.id === CODEX_ENGINEERING_COMPOSITE_PRODUCER_ID) validateCodexEngineeringCompositeReceipt(receipt, runtime, capability);
   if (receipt.producer?.id === CODEX_DESKTOP_ENGINEERING_PRODUCER_ID) validateCodexDesktopEngineeringReceipt(receipt, runtime, capability);
@@ -485,13 +507,26 @@ function validateCodexDesktopCompositeReceipt(receipt, runtime, capability) {
   const binding = lifecycle?.facetBindings?.[capability];
   const agentBinding = lifecycle?.facetBindings?.agent;
   const subagentBinding = lifecycle?.facetBindings?.subagent;
+  const sessionSourceValid =
+    (
+      lifecycle?.sourceCategory === "codex_home_sessions" &&
+      receipt.hostInvocation?.runtimeIsolation === "codex_desktop_current_session" &&
+      (lifecycle?.hostOriginator == null || lifecycle.hostOriginator === "Codex Desktop") &&
+      (lifecycle?.hostSource == null || lifecycle.hostSource === "vscode")
+    ) ||
+    (
+      lifecycle?.sourceCategory === "codex_tui_sessions" &&
+      receipt.hostInvocation?.runtimeIsolation === "codex_tui_current_session" &&
+      lifecycle?.hostOriginator === "codex-tui" &&
+      lifecycle?.hostSource === "cli"
+    );
   if (
     runtime !== "codex" || !["agent", "subagent"].includes(capability) ||
-    receipt.mode !== "interactive_host" || receipt.hostInvocation?.runtimeIsolation !== "codex_desktop_current_session" ||
+    receipt.mode !== "interactive_host" ||
     receipt.producer?.family !== "agent_subagent" || JSON.stringify(receipt.producer?.compositeFacets) !== JSON.stringify(["agent", "subagent"]) ||
     lifecycle?.allowlisted !== true || lifecycle?.facet !== capability ||
     JSON.stringify(lifecycle?.facets) !== JSON.stringify(["agent", "subagent"]) ||
-    lifecycle?.sourceCategory !== "codex_home_sessions" ||
+    !sessionSourceValid ||
     lifecycle?.markerDigest !== digest(receipt.capabilityMarker) ||
     lifecycle?.observedAt !== receipt.observedAt || !Number.isFinite(Date.parse(lifecycle?.observedAt ?? "")) ||
     lifecycle?.childSessionId !== event?.childSessionId || binding?.eventId !== event?.eventId || JSON.stringify(binding?.sourceLines) !== JSON.stringify(event?.sourceLines) ||
@@ -571,6 +606,22 @@ function rawEventProvesCapability(runtime, capability, event, sourceText, marker
     return event?.family === "runtime_tool" && /shell|command/u.test(surface) && /\b(?:get-content|cat|type|read)\b/iu.test(sourceText) && !/(?:>|set-content|out-file|remove-item|del\b|rm\b)/iu.test(sourceText);
   }
   if (capability === "apply_patch / edit") return event?.family === "runtime_tool" && (runtime === "codex" ? /file_change|apply_patch|patch/u.test(surface) : /edit|write|patch/u.test(surface));
+  return false;
+}
+
+function codexFileChangeBindsControlledProbe(sourceText, receipt) {
+  const args = receipt.hostInvocation?.request?.args ?? [];
+  const workspaceFlag = args.lastIndexOf("-C");
+  const workspace = workspaceFlag >= 0 ? args[workspaceFlag + 1] : null;
+  const expectedSuffix = `/runtime-capability-producers/workspaces/${receipt.attemptId}`.toLowerCase();
+  if (typeof workspace !== "string" || !path.isAbsolute(workspace) || !workspace.replaceAll("\\", "/").toLowerCase().endsWith(expectedSuffix)) return false;
+  const expectedPath = path.resolve(workspace, "meta-kim-probe.txt");
+  for (const line of String(sourceText).split(/\r?\n/u)) {
+    let record;
+    try { record = JSON.parse(line); } catch { continue; }
+    const changes = record?.item?.changes ?? record?.payload?.item?.changes ?? [];
+    if (changes.some((change) => path.isAbsolute(String(change?.path ?? "")) && path.resolve(String(change.path)) === expectedPath)) return true;
+  }
   return false;
 }
 
@@ -918,7 +969,7 @@ export function writeTestOnlyControlledRuntimeCapabilityAcceptanceAttempt(option
 
 /** Formal product boundary. Callers choose a supported source; producer and writer stay fixed internally. */
 export async function produceRuntimeCapabilityAcceptance(options = {}) {
-  const allowed = new Set(["live_controlled", "codex_desktop_agent_subagent", "codex_desktop_engineering"]);
+  const allowed = new Set(["live_controlled", "codex_desktop_agent_subagent", "codex_tui_agent_subagent", "codex_desktop_engineering"]);
   if (!allowed.has(options.source)) throw new Error("unsupported controlled production source");
   if (Object.hasOwn(options, "executor") || Object.hasOwn(options, "reader") || Object.hasOwn(options, "codexHome")) {
     throw new Error("production capability API does not accept injected executor, reader, or codexHome");
@@ -1124,7 +1175,13 @@ export function validateRuntimeCapabilityAcceptanceAttemptEvidence(attempt, {
             issues.push(`controlled producer event ${expected.eventId} child result is not the exact capability marker`);
           }
           const sourceLines = expected.sourceLines.map((line) => rawText.split(/\r?\n/u)[line - 1] ?? "").join("\n");
-          if (!sourceLines.includes(source.value.capabilityMarker)) issues.push(`controlled producer event ${expected.eventId} is not capability-marker-bound`);
+          const markerBound = sourceLines.includes(source.value.capabilityMarker) || (
+            attempt.runtime === "codex" && attempt.capability === "apply_patch / edit" &&
+            rawText.includes(`before-${source.value.capabilityMarker}`) &&
+            source.value.workspaceOutcome?.contentSha256 === digest(`after-${source.value.capabilityMarker}\n`) &&
+            codexFileChangeBindsControlledProbe(sourceLines, source.value)
+          );
+          if (!markerBound) issues.push(`controlled producer event ${expected.eventId} is not capability-marker-bound`);
           if (!rawEventProvesCapability(attempt.runtime, attempt.capability, actual, sourceLines, source.value.capabilityMarker)) issues.push(`controlled producer event ${expected.eventId} does not prove ${attempt.capability}`);
         }
       }
