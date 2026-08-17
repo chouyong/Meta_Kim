@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { existsSync, readdirSync, statSync } from "node:fs";
-import { join, posix } from "node:path";
+import { join, posix, win32 } from "node:path";
 
 export function readProcessText(result) {
   const stdout =
@@ -122,11 +122,11 @@ export function homebrewPythonCandidates(
 
 export function pythonCandidates(platform = process.platform, env = process.env) {
   if (platform === "win32") {
-    return [
-      { command: "py", args: ["-3"] },
-      { command: "python", args: [] },
-      { command: "python3", args: [] },
-    ];
+    // Windows discovery is handled below through `where.exe` and known install
+    // roots so persisted/probed launchers are absolute python.exe paths. Avoid
+    // `py -3` and bare App Execution Aliases: both can surface visible launcher
+    // UI even when the actual interpreter is healthy.
+    return [];
   }
   return [
     { command: "python3", args: [] },
@@ -195,6 +195,7 @@ export function discoverWindowsPythonPathCommands(spawnFn = spawnSync) {
       result = spawnFn("where.exe", [commandName], {
         encoding: "utf8",
         shell: false,
+        windowsHide: true,
       });
     } catch {
       continue;
@@ -203,6 +204,10 @@ export function discoverWindowsPythonPathCommands(spawnFn = spawnSync) {
     for (const line of readProcessText(result).split(/\r?\n/u)) {
       const exePath = line.trim();
       if (!/python(?:3)?\.exe$/iu.test(exePath)) continue;
+      if (!win32.isAbsolute(exePath)) continue;
+      if (exePath.replaceAll("\\", "/").toLowerCase().includes("/windowsapps/")) {
+        continue;
+      }
       const key = exePath.toLowerCase();
       if (seen.has(key)) continue;
       seen.add(key);
@@ -269,6 +274,7 @@ export function detectPython310(
       result = spawnFn(candidate.command, [...candidate.args, "--version"], {
         encoding: "utf8",
         shell: false,
+        windowsHide: true,
       });
     } catch {
       return null;
@@ -347,7 +353,62 @@ export function runPythonModule(
     encoding: "utf8",
     shell: false,
     ...options,
+    windowsHide: true,
   });
+}
+
+const GRAPHIFY_EXECUTABLE_RESOLVER = String.raw`
+import os, site, sys, sysconfig
+names = ("graphify.exe", "graphify") if os.name == "nt" else ("graphify",)
+candidates = []
+exe_dir = os.path.dirname(os.path.abspath(sys.executable))
+try:
+    user_scheme = sysconfig.get_preferred_scheme("user")
+    user_scripts = sysconfig.get_path("scripts", scheme=user_scheme)
+except (AttributeError, KeyError, TypeError, ValueError):
+    user_scripts = None
+dirs = [
+    exe_dir,
+    os.path.join(exe_dir, "Scripts"),
+    sysconfig.get_path("scripts"),
+    user_scripts,
+]
+user_base = site.USER_BASE
+if user_base:
+    dirs.extend([os.path.join(user_base, "Scripts"), os.path.join(user_base, "bin")])
+for directory in dirs:
+    if directory:
+        candidates.extend(os.path.join(directory, name) for name in names)
+for candidate in candidates:
+    if candidate and os.path.isfile(candidate):
+        print(os.path.abspath(candidate))
+        break
+`;
+
+/** Resolve the console script installed for the already-selected interpreter. */
+export function resolveGraphifyExecutable(
+  python,
+  spawnFn = spawnSync,
+) {
+  if (!python?.command || !Array.isArray(python.args)) return null;
+  let result;
+  try {
+    result = spawnFn(
+      python.command,
+      [...python.args, "-c", GRAPHIFY_EXECUTABLE_RESOLVER],
+      { encoding: "utf8", shell: false, windowsHide: true },
+    );
+  } catch {
+    return null;
+  }
+  if (result?.error || result?.status !== 0) return null;
+  const candidate = String(result.stdout ?? "").split(/\r?\n/u)[0]?.trim();
+  if (!candidate) return null;
+  const base = candidate.replaceAll("\\", "/").split("/").at(-1)?.toLowerCase();
+  return (
+    (win32.isAbsolute(candidate) || posix.isAbsolute(candidate)) &&
+    (base === "graphify" || base === "graphify.exe")
+  ) ? candidate : null;
 }
 
 export function extractPipShowVersion(text) {

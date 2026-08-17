@@ -29,6 +29,12 @@ function hasAll(raw, markers, label) {
   }
 }
 
+function hasExactly(raw, markers, label) {
+  assert(Array.isArray(raw), `${label} must be an array`);
+  assert(raw.length === markers.length, `${label} must contain exactly ${markers.length} entries`);
+  hasAll(raw, markers, label);
+}
+
 function assertContract() {
   const contract = readJson("config/contracts/stage-runtime-control-contract.json");
   assert(contract.contractId === "stage-runtime-control-contract", "wrong contract id");
@@ -38,6 +44,10 @@ function assertContract() {
   assert(
     contract.controlPlaneRules?.businessWorkflowMayBlockTools === false,
     "business workflow phases must not directly block tools",
+  );
+  assert(
+    contract.controlPlaneRules?.sideEffectsRequireExecutionStage === false,
+    "ordinary local side effects must not require the Execution stage",
   );
   assert(
     contract.stageChecks?.actionPolicy?.mustNotRequireCommitPackets === true,
@@ -50,6 +60,14 @@ function assertContract() {
   assert(
     contract.stageChecks?.commitRequirements?.requiresExplicitTransitionIntent === true,
     "commit requirements must require explicit transition intent",
+  );
+  assert(
+    contract.stageChecks?.executionLease?.requiredForBusinessMutation === false,
+    "execution lease must not authorize ordinary project mutation",
+  );
+  assert(
+    contract.stageChecks?.executionLease?.requiredForPublicReadyClaim === true,
+    "execution lease must remain required for public-ready claims",
   );
   assert(
     contract.activationPolicy?.autoPromptActivation?.creates === "hook_observed",
@@ -89,13 +107,69 @@ function assertContract() {
   );
   hasAll(
     contract.fetchPolicy?.inProgressMustAllow ?? [],
-    ["repo_search", "capability_scan", "spine_state_write", "planning_file_update", "visible_status_notice"],
+    [
+      "repo_search",
+      "capability_scan",
+      "spine_state_write",
+      "planning_file_update",
+      "task_bookkeeping_control_plane",
+      "visible_status_notice",
+      "ordinary_project_file_mutation",
+      "ordinary_local_command_execution",
+    ],
     "fetchPolicy.inProgressMustAllow",
   );
+  assert(
+    !Object.hasOwn(contract.fetchPolicy ?? {}, "inProgressMustDelay"),
+    "Fetch must not retain a hard-delay policy for task bookkeeping",
+  );
   hasAll(
-    contract.fetchPolicy?.inProgressMustDelay ?? [],
-    ["task_bookkeeping_control_plane_until_fetch_evidence"],
-    "fetchPolicy.inProgressMustDelay",
+    contract.fetchPolicy?.taskBookkeepingPolicy?.appliesDuring ?? [],
+    ["critical", "fetch_pre_evidence"],
+    "fetchPolicy.taskBookkeepingPolicy.appliesDuring",
+  );
+  hasAll(
+    contract.fetchPolicy?.taskBookkeepingPolicy?.tools ?? [],
+    ["TaskCreate", "TaskUpdate", "TodoWrite"],
+    "fetchPolicy.taskBookkeepingPolicy.tools",
+  );
+  assert(
+    contract.fetchPolicy?.taskBookkeepingPolicy?.hookDisposition === "allow_without_hard_deny",
+    "Critical/pre-evidence Fetch task bookkeeping must not be hard-denied by Hook",
+  );
+  assert(
+    contract.fetchPolicy?.taskBookkeepingPolicy?.queryBypassDisposition ===
+      "deny_read_only_boundary",
+    "queryBypass must keep task bookkeeping outside its pure read-only boundary",
+  );
+  assert(
+    contract.fetchPolicy?.taskBookkeepingPolicy?.sequencingGuidance === "soft_anti_churn_only",
+    "task bookkeeping sequencing must remain soft anti-churn guidance",
+  );
+  hasAll(
+    contract.fetchPolicy?.taskBookkeepingPolicy?.mustNotCountAs ?? [],
+    ["fetch_evidence", "agent_dispatch", "stage_progress"],
+    "fetchPolicy.taskBookkeepingPolicy.mustNotCountAs",
+  );
+  assert(
+    contract.fetchPolicy?.taskBookkeepingPolicy?.agentDispatchGate ===
+      "independent_and_unchanged",
+    "real Agent dispatch governance must remain independent from task bookkeeping",
+  );
+  assert(
+    contract.fetchPolicy?.queryBypassControlPlanePolicy?.disposition ===
+      "deny_mutating_control_plane_allow_read_only_queries",
+    "queryBypass must distinguish mutating control-plane tools from read-only queries",
+  );
+  hasExactly(
+    contract.fetchPolicy?.queryBypassControlPlanePolicy?.denyTools,
+    ["TaskCreate", "TaskUpdate", "TodoWrite", "TaskStop", "EnterPlanMode", "ExitPlanMode"],
+    "fetchPolicy.queryBypassControlPlanePolicy.denyTools",
+  );
+  hasExactly(
+    contract.fetchPolicy?.queryBypassControlPlanePolicy?.allowTools,
+    ["TaskList", "TaskGet", "TaskOutput"],
+    "fetchPolicy.queryBypassControlPlanePolicy.allowTools",
   );
   hasAll(
     contract.fetchPolicy?.inProgressMustNotRequire ?? [],
@@ -144,7 +218,7 @@ function assertPrdAndPackage() {
     "package.json missing meta:prd:stage-runtime-control:validate",
   );
   assert(
-    pkg.scripts?.["meta:verify:governance"]?.includes(
+    `${pkg.scripts?.["meta:verify:governance"] ?? ""} ${pkg.scripts?.["meta:verify:governance:core"] ?? ""}`.includes(
       "meta:prd:stage-runtime-control:validate",
     ),
     "meta:verify:governance must include P-115 validator",
@@ -152,29 +226,39 @@ function assertPrdAndPackage() {
 }
 
 function assertRuntimeSources() {
-  for (const sourcePath of [
-    "canonical/runtime-assets/shared/hooks/spine-state.mjs",
-  ]) {
-    const source = readText(sourcePath);
-    assert(
-      source.includes("requiresFetchRecordOnCommit: true"),
-      `${sourcePath} must use commit-scoped fetchRecord requirement`,
-    );
-    assert(
-      !source.includes("requiresFetchRecord: true"),
-      `${sourcePath} must not require fetchRecord for a stage-in-progress action`,
-    );
-    hasAll(
-      source,
-      ["state.stageTransitionIntent === \"commit\"", "Stage commit requires a fetchRecord"],
-      sourcePath,
-    );
-    hasAll(
-      source,
-      ["stageRuntimeControl", "isHookObservedState", "hookGateMode"],
-      sourcePath,
-    );
-  }
+  const facadePath = "canonical/runtime-assets/shared/hooks/spine-state.mjs";
+  const gatePath = "canonical/runtime-assets/shared/hooks/spine-state-gates.mjs";
+  const facadeSource = readText(facadePath);
+  const gateSource = readText(gatePath);
+
+  hasAll(
+    facadeSource,
+    [
+      'from "./spine-state-gates.mjs"',
+      "checkStageRequirements",
+      "stageRuntimeControl",
+      "isHookObservedState",
+      "hookGateMode",
+    ],
+    facadePath,
+  );
+  assert(
+    !facadeSource.includes("requiresFetchRecordOnCommit: true"),
+    `${facadePath} must not duplicate the shared gate policy source`,
+  );
+  assert(
+    gateSource.includes("requiresFetchRecordOnCommit: true"),
+    `${gatePath} must use commit-scoped fetchRecord requirement`,
+  );
+  assert(
+    !gateSource.includes("requiresFetchRecord: true"),
+    `${gatePath} must not require fetchRecord for a stage-in-progress action`,
+  );
+  hasAll(
+    gateSource,
+    ["state.stageTransitionIntent === \"commit\"", "Stage commit requires a fetchRecord"],
+    gatePath,
+  );
 
   const hook = readText("canonical/runtime-assets/claude/hooks/enforce-agent-dispatch.mjs");
   assert(!/^\s*advanceStage,?$/m.test(hook), "hook must not import advanceStage");
@@ -182,8 +266,30 @@ function assertRuntimeSources() {
   assert(!/advanceStage\(state,\s*'fetch'\)/.test(hook), "hook must not auto-advance to Fetch");
   hasAll(
     hook,
-    ["isHookObservedState", "observedModeNotice", "allowObservedModeExecution"],
+    [
+      "isHookObservedState",
+      "observedModeNotice",
+      "Local execution tools are not stage drivers",
+      "must never block or warn on ordinary project edits or local commands",
+      "Passive control-plane tools, including task/todo bookkeeping, are allowed",
+      "Bookkeeping never records an Agent dispatch",
+    ],
     "enforce-agent-dispatch.mjs",
+  );
+  assert(
+    !hook.includes("shouldDelayTaskBookkeeping") &&
+      !hook.includes("formatTaskBookkeepingDelayDeny"),
+    "Hook must not retain a Critical/pre-evidence Fetch task-bookkeeping hard deny",
+  );
+  assert(
+    !hook.includes("formatDesignStageMutationDeny") &&
+      !hook.includes("formatPostExecutionStageDeny"),
+    "ordinary local execution must not retain stage-mutation denial helpers",
+  );
+  assert(
+    !hook.includes('source: "spine_chain"') &&
+      !hook.includes('source: "spine_chain_walk"'),
+    "dispatch history must not be treated as runtime caller identity",
   );
 
   const activation = readText("canonical/runtime-assets/shared/hooks/activate-meta-theory-spine.mjs");
@@ -205,12 +311,16 @@ function assertRegressionTests() {
       "read-only hook allowance does not auto-advance Critical to Fetch",
       "Fetch stage allows Bash spine-state writes even before fetchRecord exists",
       "Fetch stage allows planning files before fetchRecord exists",
-      "Fetch stage delays task bookkeeping before Fetch evidence exists",
-      "Fetch business mutation denial does not instruct Agent dispatch",
-      "Fetch self-lock allows repair-only Node fetchRecord spine-state write",
-      `${deprecatedModeMarker} residue in spine state cannot skip dispatch governance`,
+      "Fetch stage allows task bookkeeping without treating it as Fetch evidence",
+      "fanout-eligible TaskCreate stays bookkeeping and does not substitute for Agent dispatch",
+      "Fetch stage allows ordinary business file mutation without warning",
+      "dispatch history cannot impersonate a meta-agent caller or warn on project mutation",
+      "runtime-injected meta-agent identity still enforces the readonly role boundary",
+      "managed stages allow ordinary local commands without warning",
+      "Fetch stage allows Node state repair and ordinary Node project writes",
+      `${deprecatedModeMarker} residue in spine state cannot skip Agent dispatch governance`,
       "auto prompt activation creates observed advisory state instead of managed hard-gate state",
-      "observed hook state allows ordinary local file mutation with one readable notice",
+      "observed hook state allows ordinary local file mutation without notice",
       "observed hook state does not block commands by keyword or command class",
       "observed hook state keeps command execution advisory even when text contains high-risk words",
       "auto prompt activation does not create command-class publish approvals",

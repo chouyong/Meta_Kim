@@ -233,10 +233,52 @@ async function checkHooks() {
   return { mode: "project", settingsPath };
 }
 
+export function buildDoctorSyncCheckPlan(targetContext) {
+  const projectProjectionMode =
+    targetContext?.localOverrides?.projectProjectionMode ?? "project";
+  const activeTargets = Array.isArray(targetContext?.activeTargets)
+    ? targetContext.activeTargets
+    : [];
+
+  if (projectProjectionMode === "global_only") {
+    return {
+      skipped: false,
+      projectProjectionMode,
+      activeTargets,
+      checkKind: "minimal_hook_closure",
+      args: [
+        path.join(repoRoot, "scripts", "sync-runtimes.mjs"),
+        "--check",
+        "--scope",
+        "project",
+      ],
+    };
+  }
+
+  const args = [
+    path.join(repoRoot, "scripts", "sync-runtimes.mjs"),
+    "--check",
+    "--scope",
+    "project",
+  ];
+  if (activeTargets.length > 0) {
+    args.push("--targets", activeTargets.join(","));
+  }
+  return {
+    skipped: false,
+    projectProjectionMode,
+    activeTargets,
+    checkKind: "full_project_projection",
+    args,
+  };
+}
+
 async function checkSync() {
+  const targetContext = await resolveTargetContext();
+  const plan = buildDoctorSyncCheckPlan(targetContext);
   const { stderr, stdout } = await execFileAsync(
     process.execPath,
-    [path.join(repoRoot, "scripts", "sync-runtimes.mjs"), "--check"],
+    plan.args,
     { cwd: repoRoot, encoding: "utf8" },
   );
   if (stderr && stderr.trim()) {
@@ -245,6 +287,7 @@ async function checkSync() {
   if (process.env.DOCTOR_GOVERNANCE_VERBOSE === "1" && stdout?.trim()) {
     process.stdout.write(stdout);
   }
+  return plan;
 }
 
 async function checkValidateRun() {
@@ -274,17 +317,17 @@ async function checkValidateRun() {
 }
 
 async function checkLocalState() {
-  const state = await ensureProfileState();
-  const targetContext = await resolveTargetContext();
   const collision = await detectProfileCollision({
-    profile: state.profile,
-    runtimeFamily: state.runtimeFamily,
+    profile: process.env.META_KIM_PROFILE,
+    runtimeFamily: process.env.META_KIM_RUNTIME_FAMILY,
   });
   if (collision.collision) {
     throw new Error(
-      `profile collision detected for ${state.profile}: expected ${collision.expectedProfileKey}, found ${collision.existing?.profileKey}`,
+      `profile collision detected: expected ${collision.expectedProfileKey}, found ${collision.existing?.profileKey}`,
     );
   }
+  const state = await ensureProfileState();
+  const targetContext = await resolveTargetContext();
   let runIndexReady = false;
   try {
     await fs.access(state.runIndexPath);
@@ -369,9 +412,11 @@ async function main() {
   }
 
   try {
-    await checkSync();
+    const syncStatus = await checkSync();
     mirrorLines.push(
-      "  [ok] npm run meta:check:runtimes (mirrors match canonical)",
+      syncStatus.checkKind === "minimal_hook_closure"
+        ? "  [ok] global_only project safety surface (minimal Claude/Codex/Cursor Hook closure and cleanup state)"
+        : `  [ok] npm run meta:check:runtimes (mirrors match canonical; targets=${syncStatus.activeTargets.join(",") || "default"})`,
     );
   } catch (e) {
     failed = true;
@@ -447,7 +492,9 @@ async function main() {
   }
 }
 
-main().catch((e) => {
-  console.error(e);
-  process.exitCode = 1;
-});
+if (path.resolve(process.argv[1] ?? "") === fileURLToPath(import.meta.url)) {
+  main().catch((e) => {
+    console.error(e);
+    process.exitCode = 1;
+  });
+}

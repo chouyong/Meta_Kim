@@ -4,13 +4,25 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
 import { readMetaRunStatus } from "../canonical/runtime-assets/shared/hooks/spine-state.mjs";
+import {
+  getMetaRunStatusCopy,
+  resolveMetaKimCliLanguage,
+} from "./meta-kim-i18n.mjs";
 
 const args = new Set(process.argv.slice(2));
 const json = args.has("--json");
 const latest = args.has("--latest");
+const details = args.has("--details") || args.has("--verbose");
+const langEqualsArg = process.argv.find((arg) => arg.startsWith("--lang="));
+const langIndex = process.argv.indexOf("--lang");
+const cliLanguage =
+  langEqualsArg?.slice("--lang=".length) ||
+  (langIndex >= 0 ? process.argv[langIndex + 1] : null);
 const profileArg = process.argv.find((arg) => arg.startsWith("--profile="));
 const profile =
-  profileArg?.slice("--profile=".length) || process.env.META_KIM_STATE_PROFILE;
+  profileArg?.slice("--profile=".length) ||
+  process.env.META_KIM_PROFILE ||
+  process.env.META_KIM_STATE_PROFILE;
 
 const DEFAULT_LABELS = {
   inactive: "meta_governance_status=inactive",
@@ -40,6 +52,60 @@ const LATEST_LABELS = {
   separator: "=",
   listSeparator: "; ",
 };
+
+function humanCopy(languageHint = null) {
+  const { language } = cliLanguage
+    ? resolveMetaKimCliLanguage(cliLanguage)
+    : languageHint
+      ? resolveMetaKimCliLanguage(languageHint)
+      : resolveMetaKimCliLanguage();
+  return getMetaRunStatusCopy(language);
+}
+
+function humanValue(value, copy) {
+  const key = String(value ?? "none");
+  return copy.values[key] ?? key;
+}
+
+function redactSensitiveText(value, sensitiveValues = []) {
+  let text = String(value ?? "");
+  for (const sensitiveValue of sensitiveValues) {
+    const secret = typeof sensitiveValue === "string" ? sensitiveValue.trim() : "";
+    if (!secret) continue;
+    if (text.includes(secret)) {
+      if (secret.length < 8) return "redacted_in_status_summary";
+      text = text.split(secret).join("redacted_in_status_summary");
+    }
+  }
+  return text;
+}
+
+function toPublicStatusProjection(value, options = {}) {
+  if (Array.isArray(value)) {
+    return value.map((item) => toPublicStatusProjection(item, options));
+  }
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value)
+        .filter(
+          ([key]) =>
+            !/fingerprint/iu.test(key) && key !== "taskIdentitySource",
+        )
+        .map(([key, item]) => [key, toPublicStatusProjection(item, options)]),
+    );
+  }
+  if (typeof value === "string") {
+    return redactSensitiveText(value, options.sensitiveValues);
+  }
+  return value;
+}
+
+function localizeEmbeddedEnums(value, copy) {
+  return String(value ?? copy.values.none).replace(
+    /(?<=[:/])(pass|partial|failed|blocked|pending|unknown)(?=[:/;\s]|$)/gu,
+    (match) => humanValue(match, copy),
+  );
+}
 
 function safeProfileName(value) {
   const candidate = value || "default";
@@ -192,43 +258,64 @@ function summarizeLatestGovernedExecution(cwd, latestExecution) {
     toRepoRelative(cwd, artifact.runReport?.markdownPath) ||
     toRepoRelative(cwd, paths.markdownPath);
 
-  return {
+  const sensitiveValues = [artifact.task, decisionSummary.task];
+  return toPublicStatusProjection({
     runId,
-    task: artifact.task || decisionSummary.task || "unknown",
+    // Keep the legacy key for machine consumers, but status surfaces must never
+    // duplicate the governed artifact's raw task. The explicit report command
+    // remains the user-authorized detail surface.
+    task: "redacted_in_status_summary",
+    taskDisclosure: "use_explicit_report_readback",
     status: artifact.status || decisionSummary.status || "unknown",
     publicReady,
-    summary:
+    summary: redactSensitiveText(
       decisionSummary.plainLanguageSummary ||
-      artifact.userExperienceNotice?.expectation ||
-      "none",
+        artifact.userExperienceNotice?.expectation ||
+        "none",
+      sensitiveValues,
+    ),
     ownerHandoff: summarizeOwnerHandoff(panel.ownerHandoff),
     runtimeEvidence: runtimeRecords.length
       ? runtimeRecords.map(summarizeRuntimeRecord).join(LATEST_LABELS.listSeparator)
       : LATEST_LABELS.none,
-    releaseBoundary: summarizeReleaseBoundaries(runtimeRecords),
+    releaseBoundary: redactSensitiveText(
+      summarizeReleaseBoundaries(runtimeRecords),
+      sensitiveValues,
+    ),
     report: markdownPath || LATEST_LABELS.none,
     nextCommand: `npm run meta:theory:report -- --run-id ${runId}`,
     jsonPath:
       toRepoRelative(cwd, latestRecord.jsonPath) ||
       toRepoRelative(cwd, paths.artifactPath),
-  };
+  });
 }
 
-function renderLatestSummary(summary) {
-  if (!summary) return LATEST_LABELS.missing;
+function renderLatestSummary(summary, copy, showDetails = false) {
+  const labels = copy.labels;
+  if (!summary) return labels.missing;
 
-  return [
-    `${LATEST_LABELS.latestRun}${LATEST_LABELS.separator}${summary.runId}`,
-    `${LATEST_LABELS.task}${LATEST_LABELS.separator}${summary.task}`,
-    `${LATEST_LABELS.status}${LATEST_LABELS.separator}${summary.status}`,
-    `${LATEST_LABELS.publicReady}${LATEST_LABELS.separator}${summary.publicReady}`,
-    `${LATEST_LABELS.summary}${LATEST_LABELS.separator}${summary.summary}`,
-    `${LATEST_LABELS.ownerHandoff}${LATEST_LABELS.separator}${summary.ownerHandoff}`,
-    `${LATEST_LABELS.runtimeEvidence}${LATEST_LABELS.separator}${summary.runtimeEvidence}`,
-    `${LATEST_LABELS.releaseBoundary}${LATEST_LABELS.separator}${summary.releaseBoundary}`,
-    `${LATEST_LABELS.report}${LATEST_LABELS.separator}${summary.report}`,
-    `${LATEST_LABELS.nextCommand}${LATEST_LABELS.separator}${summary.nextCommand}`,
-  ].join("\n");
+  const separator = labels.separator ?? "=";
+  const primary = [
+    labels.title,
+    `${labels.latestRun}${separator}${summary.runId}`,
+    `${labels.status}${separator}${humanValue(summary.status, copy)}`,
+    `${labels.publicReady}${separator}${humanValue(summary.publicReady, copy)}`,
+    `${labels.summary}${separator}${summary.summary}`,
+  ];
+  if (summary.releaseBoundary !== LATEST_LABELS.none) {
+    primary.push(`${labels.releaseBoundary}${separator}${localizeEmbeddedEnums(summary.releaseBoundary, copy)}`);
+  }
+  primary.push(
+    `${labels.report}${separator}${summary.report}`,
+    `${labels.nextCommand}${separator}${summary.nextCommand}`,
+  );
+  if (showDetails) {
+    primary.push(
+      `${labels.ownerHandoff}${separator}${summary.ownerHandoff}`,
+      `${labels.runtimeEvidence}${separator}${localizeEmbeddedEnums(summary.runtimeEvidence, copy)}`,
+    );
+  }
+  return primary.join("\n");
 }
 
 if (latest) {
@@ -243,25 +330,28 @@ if (latest) {
     process.exit(0);
   }
 
-  console.log(renderLatestSummary(summary));
+  const copy = humanCopy(latestExecution?.artifact?.resolvedOutputLanguage);
+  console.log(renderLatestSummary(summary, copy, details));
   process.exit(0);
 }
 
 const status = await readMetaRunStatus(process.cwd(), profile);
 
 if (json) {
-  console.log(JSON.stringify(status || null, null, 2));
+  const publicStatus = status ? toPublicStatusProjection(status) : null;
+  console.log(JSON.stringify(publicStatus, null, 2));
   process.exit(0);
 }
 
 if (!status) {
-  console.log(DEFAULT_LABELS.inactive);
+  console.log(humanCopy().labels.inactive);
   process.exit(0);
 }
 
+const copy = humanCopy(status.resolvedOutputLanguage);
 const labels = {
-  ...DEFAULT_LABELS,
-  ...(status.publicLabels && typeof status.publicLabels === "object"
+  ...copy.labels,
+  ...(!cliLanguage && status.publicLabels && typeof status.publicLabels === "object"
     ? status.publicLabels
     : {}),
 };
@@ -269,12 +359,12 @@ const labels = {
 if (status.active === false) {
   const continuation =
     status.deactivationReason === "session_stop"
-      ? "local_continuity_or_new_run_only"
+      ? humanValue("local_continuity_or_new_run_only", copy)
       : status.continuationBoundary?.mode || labels.none;
   console.log(
     [
       labels.inactive,
-      `${labels.reason || "reason"}${labels.separator}${status.deactivationReason || labels.none}`,
+      `${labels.reason || "reason"}${labels.separator}${humanValue(status.deactivationReason || "none", copy)}`,
       `${labels.continuation || "continuation"}${labels.separator}${continuation}`,
       `${labels.current}${labels.separator}${status.currentStage || labels.none}`,
     ].join("\n"),

@@ -6,7 +6,778 @@
 
 更新说明先解释本次解决的用户痛点或风险，再说明为了解决它改了什么、为什么重要。过细的内部任务编号、低价值 backlog id 和实现流水账不放在这里；需要精确证据时，请看 Git 历史、测试、生成报告和 PRD 产物。
 
-## Unreleased
+## [3.0.0] - 2026-08-12
+
+### 新增内容
+
+- **治理执行现在只有一套分层真相。** 纯 Domain 规则负责判断证据、继续/停止、依赖安全推进、调度候选、lease/claim、运行健康和额度观察，本身不写入、不授权；Application 负责编排用例，Data 负责耐久 SQLite/事务，Presentation 只生成只读视图。旧脚本入口保留为兼容门面，不再形成平行实现。
+- **A01-A12 用用户能理解的结果闭合了 3.0 架构。** A01-A03 分开已验证证据、继续建议和依赖安全候选；A04-A07 复用既有调度与执行权威，只投影 claim、health、quota，不创造第二控制器；A08 把同一份摘要绑定的运行渲染成原生面板、看板、Markdown 或 HTML；A09 统一耐久执行事件与仓储语义；A10 分开 setup 编排和 package/runtime 基础设施；A11 让知识生命周期变更可回滚、受审批约束；A12 让文档与发布声明只能来自当前合同、runtime 证据、打包真相和发布门。
+- **知识进化在 Warden 精确批准前始终只是候选。** 年龄、评分、生成建议或旧版 approval 都不能写入、删除或授权执行。批准必须绑定精确目标、操作、源摘要、候选摘要、回滚方案和 scope；源文件漂移会直接拒绝。退休只保留 tombstone，基础能力不能被退休，未知状态和用户状态会保留。
+- **运行投影明确是只读的。** 原生面板、看板、Markdown、HTML 共用同一个语义摘要，不能派工、标记完成、推进耐久 cursor、创建 claim/lease，也不能成为第二套运行状态权威。
+
+### 变更
+
+- **安装和更新会先把精确打包产物固定到不可变目录，再写持久全局配置。** CLI 继续作为用户入口；Application 与 Infrastructure 边界负责验证 package receipt、稳定根目录、子进程、写入边界和安装结果。help、status、doctor 仍是不会物化安装包的诊断命令，check 仍只读。
+- **Codex agent fan-out 使用更稳妥的默认值。** 新装/默认配置最多同时运行 2 个 agent 线程、只允许 1 层嵌套；用户显式设置的其它上限会保留，Meta_Kim 旧默认值 6 会迁移到新默认值。
+- **工具端支持继续按证据分层。** Claude Code 和 Codex 是默认正式投影；OpenClaw 和 Cursor 是非默认兼容投影，工具端专属改造必须提供各自的严格证据。OpenClaw 仍没有 Meta_Kim typed-plugin 工具阻断 adapter，Cursor 的任意原生选择弹窗权威仍未验证。
+
+### 修复
+
+- **上游依赖安装器不能再把自己的 Codex 配置当成用户授权。** 更新会以安装前的用户快照为基线，因此不会复活用户已删除的第三方 MCP server，不会静默接纳安装器新增的 server，也不会留下已知 Meta_Kim benchmark/test 临时项目记录。用户自己的 MCP、项目、hooks、agents 和其它无关设置保持不变。
+
+### 证据边界
+
+- Codex app-server 与 Claude SDK/CLI 的 Decision substrate 仍永久非授权：它能关联一次展示请求与观察到的返回，但当前公开宿主接口不能证明 Codex Desktop UI、真人身份或真人回答。可信宿主/Desktop 权威继续停放，直到真实证据出现。
+- 旧治理 gate 的等价迁移与 cutover 仍延期。Meta_Kim 3.0 不声称旧 gate 已被替换，shadow 结果或只读投影也不会改变生产执行权威。
+
+## [2.9.30] - 2026-08-10
+
+### 新增内容
+
+- **Meta_Kim 3.0 现在有了可持久化、但不授予权限的宿主事件声明基底。** Codex app-server 与 Claude SDK/CLI 适配器会精确绑定 decision、challenge、实际展示内容摘要、运行时 session 或 thread、turn、item 与 request 身份；持久化内容仅包含有界引用和摘要。它可以记录展示、返回已观测、消费、过期与失效转换，但不会宣称宿主、真人或回答已经得到独立验证。
+- **宿主事件重放与崩溃恢复保持 fail closed。** profile-local 仓储使用不可变 revision、精确 compare-and-swap、彼此独立的宿主事件与 challenge 唯一性、有界读取，以及仅限已证明 owner 死亡时的锁恢复。Codex 与 Claude 适配器要求宿主能够重投尚未确认的返回，并且只在匹配 observation 已持久化后确认，因此 CAS 前后中断都能收敛，同时不会授予执行权限。
+- **真实运行时探针不再用模拟结果冒充宿主权威。** Codex 0.146 app-server 探针会关联真实 `requestUserInput` 请求与完成的 turn，并保留宿主内置 Other 入口；Claude Code 2.1.220 / Agent SDK 0.3.220 探针通过已配置的 MiniMax-M3 provider 关联 active `AskUserQuestion` callback 与 stream 结果。两条探针都明确记录答案由机器/脚本选择，并保持真人验证、当前宿主权威和执行授权为 false。
+
+### 安全
+
+- **所有新增宿主事件 Gate 永久保持非授权。** 对外没有 verifier 或 `answered_verified` API；所有适配器结果都保持 `executionAllowed=false`；原始 prompt 与 answer 不会进入持久化；accessor、Proxy、稀疏数组、跨 runtime、跨 session、跨 request、过期和重放输入都会 fail closed。
+- **发布包继续保持精确分层。** package 精确新增 5 个已批准的 `src` Domain、schema、Data 仓储与运行时适配器文件；现有有界 `scripts/**/*.mjs` 分发范围同时包含 3 个永久非授权的真实探针/composition 脚本。Domain 不依赖文件系统，适配器通过 port 接收仓储能力而不是直接导入存储层，也没有新增宽泛的 `src/**` 打包入口或 runner 授权接线。
+
+### 修复内容
+
+- **四运行时安装/更新发布预检现在与另外两条重型四运行时验收一样，每个模式拥有有界的 10 分钟上限。** 普通命令继续使用原有时间限制，超时也仍会 fail closed；这项调整避免繁忙 Windows 主机上的有效外部依赖安装被旧的 3 分钟上限提前切断。
+
+### 验证
+
+- Domain、仓储、Codex、Claude、fake-host 集成、架构边界与 package closure 聚焦测试已通过 `65/65`，`meta:check` 也已通过。fake/injected host port 不能证明真实 Codex/Claude 宿主身份、真人身份或真实 transport 的持久性，因此 M3-P2 仍保持进行中，等待后续真实宿主 E2E 增量。发布前仍必须完成一次 verified Graphify rebuild，并在稳定源码快照上完整通过一次 `npm run meta:verify:all`。
+- 真实 Codex transport 与 Claude SDK callback 探针已经通过精确关联，但公开宿主接口仍不能证明 Codex Desktop UI 或真人回答。用户选择等待可信宿主证明，而不是降低证据标准，因此 M3-P2 保持阻塞，M3-P3、最终全回归和 3.0 发布均未启动。
+
+## [2.9.29] - 2026-08-09
+
+### 新增内容
+
+- **Meta_Kim 3.0 现在有了 fail-closed 的原生决策基础。** Codex 与 Claude 的原生选择适配器可以发起、规范化、过期并记录宿主回答声明，但不会授予执行权限。所有声明在未来真实宿主观测路径证明 session 身份、展示内容和单次消费之前，都保持非授权状态。
+- **决策权威现在会拒绝伪造或过期的终态。** domain 层使用半开到期边界、语义重放绑定、选项归属校验、payload/reference 完整性检查和不可枚举快照加固，避免把结构通过误当成已验证回答。
+
+### 修复内容
+
+- **打包安装/更新验证为两条最重的四运行时更新提供了各自的有界时间预算。** 项目感知全局刷新与便携运行时准备各自最多等待 10 分钟，普通命令仍保持 5 分钟上限。发布证据只保留有界、脱敏的元数据，并继续对超时、输出截断、signal 和不一致进程结果 fail closed。
+- **能力发现帮助入口现在严格只读。** `discover:global -- --help` 与 `-h` 只输出用法，不扫描运行时，也不重写 canonical 能力索引，避免发布套件在测试帮助入口时反过来使自己的源码快照失效。
+
+### 验证
+
+- 原生决策权威、适配器、安全、边界、package closure 与既有 decision/governance 聚焦测试已通过 `63/63`，三路独立 Review 已接受。发布仍要求在稳定源码快照上重新完整通过一次 `npm run meta:verify:all`；聚焦测试不能替代发布证据。
+
+## [2.9.28] - 2026-08-09
+
+### 修复内容
+
+- **macOS 临时目录基路径现在会先解析为真实路径再使用。** 这让临时基路径在 macOS 的路径别名和链接场景下保持可靠，包含已合并 [#52](https://github.com/KimYx0207/Meta_Kim/pull/52) 的可靠性修复。
+- **报告隐私门禁现在允许已文档化的 `~/` 展示别名，但仍会拦截真实机器身份。** 安全且已文档化的别名不再触发误报；真实的本地用户、主机和机器路径身份仍会阻断报告，包含已合并 [#53](https://github.com/KimYx0207/Meta_Kim/pull/53) 的隐私门禁修复。
+- **canonical Memory Hook 现在会在调用 `existsSync` 前拒绝非字符串 transcript 路径。** 这补上了已经证实的 Node 24 `DEP0187` 边界，但不把它宣称为原始 setup warning 的成因。
+- **公开的 Claude controlled producer 现在与调用方环境路由隔离。** `meta-kim runtime produce` 只从精确的 `CLAUDE_CONFIG_DIR` 读取 allowlist 内的 provider 配置，剥离环境中继承的 Anthropic、cloud provider 变量和 `NODE_OPTIONS`；缺少有效 endpoint 与 credential 时 fail closed，避免已配置的 MiniMax-M3 被调用方环境静默路由到其他 provider。
+- **贡献者致谢：** 感谢 [@qitiandashenggogogo](https://github.com/qitiandashenggogogo) 在 [#52](https://github.com/KimYx0207/Meta_Kim/pull/52) 和 [#53](https://github.com/KimYx0207/Meta_Kim/pull/53) 中已合并的贡献。
+
+### 验证
+
+- 已执行的聚焦证据：Graphify 24/24、runtime 25/25、Hook 13/13。这不是完整发布门禁，也不构成已经发布的声明。
+
+## [2.9.27] - 2026-08-05
+
+### 修复内容
+
+- **正式打包 CLI 的全局安装与更新现在会迁移已有 MCP Memory runtime，不再直接跳过。** v2.9.26 的不可变正式包虽然正确刷新了 Claude/Codex 投影，却误把独立的 Memory 运行生命周期视为已经处理，导致历史用户仍可能保留旧的、会受系统代理影响的开机脚本。现在正式包会按正常策略完成依赖判断、旁路候选升级、精确暂停自有进程、失败回滚、开机文件刷新、自动重启和健康回读；全新安装、同版本重装、缺少依赖和显式跳过可选工具的行为保持不变。
+- **没有旧 manifest 记录的 Windows 启动链，也只会在归属证据完整时自动纳管。** 更新必须同时验证历史 PowerShell 字节、CMD/VBS 完整引用链、未变化的 active runtime 状态、安全的物理 runtime/Python/数据库文件、身份一致且健康的 listener，以及路径不存在既有或并发 manifest 所有者。缺失、被修改、链接、归属含糊或用户自有内容一律不碰，并保持 fail closed。
+- **全局 Memory 生命周期不再把 `.mcp.json` 写进不可变正式包。** 回滚状态改存于 Meta_Kim 用户状态目录，因此 Memory 迁移成功后不会破坏 stable package 闭包，也不会误改调用者项目；对外仍由 `meta-kim-runtime` 提供唯一的 Meta_Kim MCP server 入口。
+- **切换后验证只容忍短暂观测空窗，不放宽身份匹配。** Windows 健康与进程身份回读会在最多 5 秒内有限重试，但成功时仍必须精确匹配同一可执行文件、launcher、参数、host 和端口；持续不一致仍会回滚。
+- **Windows 短暂目录占用不再让全局 Skill 安装倒在最后一次改名。** 普通 Skill 首次落盘、归档落盘和 `meta-skill-creator` 多目标事务，现在只会对本事务拥有的精确同级 rename 在 `EPERM`、`EBUSY` 或 `EACCES` 下做短时有界重试。持续占用仍会明确失败，且不会发布半成品；原有正式目标或已准备的 staging 保持可恢复，也不会泛化删除或重试未知路径。
+- **正式包发布验证不再让耗时的历史升级验收把“已经复制”的 runtime 观测快照拖到过期。** 只读建议快照改为在历史用户验收结束后、便携安装 CLI 回读前一刻才复制。真实主机证据的 24 小时新鲜度要求完全不变；本修复只消除检查与使用之间的竞态，不会把旧证据伪装成新证据。
+- **受控 Claude 能力探测不再继承提示词改写设置或无关 MCP server。** 它保留当前认证边界，但使用空 setting sources、严格空 MCP 配置和仅限本能力的原生工具运行。edit 探测还要求最终只能保留一行精确的 `after-<marker>`，禁止保留 `before` marker 或增加解释文字。这样既不会被用户配置中的提示词优化替换掉受控动作，也不会加载十几万 Token 的无关上下文，更不会因假失败再次浪费实机探测。
+- **贡献者致谢：** 感谢 [@qitiandashenggogogo](https://github.com/qitiandashenggogogo) 发起 [#50](https://github.com/KimYx0207/Meta_Kim/pull/50) 和 [#51](https://github.com/KimYx0207/Meta_Kim/pull/51) 的贡献；这些成果与其上的历史安装用户迁移加固一并保留在本版本中。
+
+### 验证
+
+- 验证包含针对真实“旧 manifest 未登记”Memory runtime 的正式包全局更新，并回读历史链在不扩大归属边界的前提下完成纳管、Windows launcher 已使用禁用代理的 `HttpClientHandler`、所引用可执行文件存在、重启后服务健康、没有残留孤儿启动项，且不可变正式包仍与其精确 receipt 一致。聚焦回归还注入了短暂与持续的 Windows rename 锁，证明普通 Skill 与多目标 meta-skill 事务共享有界恢复、失败原子性和可恢复 staging 边界，断言便携 runtime 观测只能在耗时的历史升级验收之后复制，并把实机 edit 探测绑定到唯一精确的最终行。
+
+## [2.9.26] - 2026-08-05
+
+### 修复内容
+
+- **Windows 历史安装用户重新安装或更新时，不再需要手动结束 MCP Memory 或删除被占用文件。** 只有 endpoint PID、启动身份、可执行文件、launcher、参数、host/port、全局 manifest、当前解释器和数据库都与 Meta_Kim 记录的权威完全一致，安装器才会暂停旧服务；未知 listener 或用户改动一律 fail closed。对同版本重装和历史版本更新，安装器会先在旁路目录准备并验证候选，再停止旧 runtime；切换、重启或健康/身份回读失败时，会恢复旧 runtime、数据库、启动文件、MCP 配置项和 active state。
+- **Windows 启动项与依赖检查不再把机器环境问题丢给用户处理。** 精确匹配的 Meta_Kim 孤儿启动项会在依赖步骤前自动修复；健康依赖直接复用，缺失依赖进入正常安装，替换失败保留上一份可工作 runtime。PowerShell 5.1 与 7 的本地健康检查会绕过用户代理，真实 503 等 HTTP 失败仍会判定为失败；相关子进程均隐藏窗口、禁用 shell 并设置有界超时。
+- **历史安装状态会沿正常 update 路径做严格受限的自动迁移。** 只有同时满足历史分类与精确所有权的陈旧 manifest 记录，才会在全局安装锁内移除；不可读、仍存在、已漂移、链接或用户所有内容全部保留。install、update 与精确 uninstall 还共用不可变投影包的 digest 锁，避免清理与正在使用该包的进程竞态。
+- **发布证明更严格，也更适配 Windows 网络环境。** Release 审计与规划关闭使用有界 WinINET/WinHTTP/直连策略、可信 Windows 系统工具、显式代理/TLS 清理、调用方仓库状态权威，以及精确 asset 大小与摘要绑定。新增 `meta:release:plan` 根据真实 diff 推荐 smoke 或 full；install、runtime、安全、未知或空变更会 fail closed 到完整门禁，且不会削弱 `meta:verify:all`。
+- **运行时声明继续保留真实来源。** 仓库外或链接报告不能继承仓库 run identity；runtime acceptance 统一写入规范运行端名称；未知运行端在写状态前失败；激活元数据也不能凭空制造 provider registry 未声明的支持能力。
+- **Graphify 发布重建现在能严格恢复上游序列化边界，同时不掩盖危险输出。** 单一 `$text` JSON 对象包装的超边、节点列表外层精确的 `{item:[...]}` 包装、精确的 `name/kind/paths/weight` 备用超边结构，以及严格处于 0–1 的十进制置信度字符串，都会先纳入绑定白名单并规范化，再继续执行原有 ID/引用校验。公开 `https://` 标签不再被误判为 Windows 盘符路径，安全的 `~/.meta-kim` 展示别名会渲染为 `<meta-kim-home>`；字段混搭或多余字段、非法包装或置信度、不安全别名穿越、悬空引用、真实本机路径和不完整图谱身份仍会阻断发布。
+- **贡献者致谢：** 感谢 [@qitiandashenggogogo](https://github.com/qitiandashenggogogo) 在 [#50](https://github.com/KimYx0207/Meta_Kim/pull/50) 和 [#51](https://github.com/KimYx0207/Meta_Kim/pull/51) 中提供的初始贡献。本版本继续保留这两项已合并贡献，并补齐其上的历史用户更新、回滚与发布证明加固。
+
+### 验证
+
+- 发布验证覆盖全新安装、同版本重装、历史版本更新、部分失败残留、用户改动漂移、Windows 精确进程权威、事务回滚与直接重试、本地健康检查绕过代理、受锁保护的历史 manifest 迁移、共享包生命周期锁、公共打包 CLI 安装/更新、runtime/provider 来源，以及 GitHub Release 精确绑定。
+
+## [2.9.25] - 2026-08-05
+
+### 修复内容
+
+- **Windows 已安装 CLI 在“当前 Node 可执行文件旁边没有自带 npm”时也能完成全局更新。** 稳定包同步会先检查 Node/npm 的直接安装布局，再从净化后的 PATH 安全解析真实 `npm.cmd` 及其绝对 `npm-cli.js`，全程不经过可见 shell。这样可兼容 Codex/便携 Node 启动器，同时保留不可变包权威和无 shell 子进程边界。
+- **繁忙 Windows 主机上的发布验证不再误报失败。** Graphify 合并属性现在是仓库正式跟踪规则，不会在验证中途产生未跟踪文件；Job Object 的“监督进程死亡”探针为高负载 PowerShell 进程查询保留了足够观察时间；并发验证历史夹具也会有限重试 Windows 临时目录清理。这些改动都没有放宽生产断言。
+- **v2.9.23 与 v2.9.24 的兼容修复全部继续保留。** 历史启动项自动清理、依赖状态处理、全局 `meta-theory` 投影、Graphify 隐藏探测、PR #50/#51 修正和精确 Release 审计提升均未改变。再次感谢 [@qitiandashenggogogo](https://github.com/qitiandashenggogogo) 在 [#50](https://github.com/KimYx0207/Meta_Kim/pull/50) 和 [#51](https://github.com/KimYx0207/Meta_Kim/pull/51) 中提供的初始贡献。
+
+### 验证
+
+- 验证覆盖便携 Node/无内置 npm 回归、真实打包后的全局更新、标准完整发布门禁和 GitHub Release 精确绑定。
+
+## [2.9.24] - 2026-08-05
+
+### 修复内容
+
+- **公开的发布审计 CLI 现在会在生成精确发布绑定后正常结束。** 运行时能力证据提升不再反向导入正在执行的审计模块，消除了循环模块等待；此前该问题会先写出有效的 `published_bound` 记录，随后以 Node 的 top-level await 未完成警告退出。
+- **v2.9.23 的安装、更新、启动项自动修复、Graphify 隐藏探测、全局 Claude Hook 与 runtime rebind 修复保持不变。** 本补丁只为修复其发布后审计命令而取代 v2.9.23，并继续保留对 [@qitiandashenggogogo](https://github.com/qitiandashenggogogo) 在 [#50](https://github.com/KimYx0207/Meta_Kim/pull/50) 和 [#51](https://github.com/KimYx0207/Meta_Kim/pull/51) 中贡献的致谢。
+
+### 验证
+
+- 发布验证覆盖共享 canonical 哈希边界、新旧验证报告阶段结构、真实打包后的审计 CLI，以及一次新的干净完整打包产品门禁和后续精确 GitHub Release 绑定。
+
+## [2.9.23] - 2026-08-04
+
+### 修复内容
+
+- **Windows 历史安装用户不再需要手工删除失效的 MCP Memory 开机启动项。** 正常安装/更新会在依赖处理前，仅识别并清理“命令目标已经丢失”的 Meta_Kim 精确 `mcp-memory-silent.vbs` 形态；公开的恢复卸载入口也能执行同一套有边界修复，未知或被用户修改的启动文件继续保留。
+- **MCP Memory 依赖安装现在会区分“从未安装”“已有健康环境”和“替换失败”。** 安装/更新不再盲信 PATH 中第一个候选，而是验证真实可执行性；健康环境直接复用，新环境只有验证通过后才激活，升级候选失败时保留原来可用的运行时。
+- **Claude 的历史 MCP 注册会通过公开更新入口自动迁移。** 严格历史识别现在覆盖过去产生的直接 Node 和 `cmd /c` 形态，包括绝对 `node.exe` 路径；只把已证明属于 Meta_Kim 的 `meta_kim_runtime` 替换成稳定的 `meta-kim-runtime`，其他服务器、认证、环境变量和用户配置保持不变。
+- **历史安装用户兼容性成为发布硬规则。** 安装、更新、同步、清理、依赖、启动项、manifest 和生成配置相关改动，必须覆盖全新安装、同版本重装、历史版本升级、上次安装残留和用户修改漂移；维护者专用清理命令或只修全新安装的补丁不再算产品修复。
+- **Windows 的 Graphify 验证不再调用 `py -3` 或弹出可见终端。** 自动发现只接受 PATH 或标准安装目录中的绝对 `python.exe` / `python3.exe`，拒绝 WindowsApps 别名，并把版本、pip、Graphify、Git 与迁移相关子进程统一隐藏运行；没有 Python 时会干净地进入依赖缺失分支，已有健康 Python 时直接复用。
+- **全局 Claude Code 安装现在会真正注册已经投影的能力优先治理 Hook。** 历史全局设置在正常更新时补上 `enforce-agent-dispatch`，重复更新保持幂等，项目内与全局治理不再出现一边生效、一边漏接线的差异。
+- **运行时 CLI 升级后可以只刷新启动清单，不再顺带重装开机启动。** 新的 `meta-kim runtime rebind` 公开入口只重绑 Claude Code / Codex 可执行身份，严格校验 target、scope 和 Node 版本。macOS / Linux 的 MCP Memory 启动链与 Windows 一样由正常更新写入精确 manifest，不依赖文件名或脚本文本启发式判断。
+- **贡献致谢：** 感谢 [@qitiandashenggogogo](https://github.com/qitiandashenggogogo) 通过 [#50](https://github.com/KimYx0207/Meta_Kim/pull/50) 和 [#51](https://github.com/KimYx0207/Meta_Kim/pull/51) 发现全局 Claude 治理 Hook 漏接线与运行时清单重绑问题，并提供初始实现；本版本在这些贡献基础上补齐历史更新、公开 CLI、跨平台 scope、安全边界和发行回归。
+
+### 验证
+
+- 标准完整发布门禁使用真实打包后的公开 CLI，覆盖安装、更新、重复更新、历史迁移、孤儿启动项自动修复、跨平台启动链 manifest、归属卸载、用户状态保留、运行时重绑、全局 Claude Hook 补线、隐藏式 Graphify 探测、运行时同步与治理回归。
+
+## [2.9.22] - 2026-08-02
+
+### 修复内容
+
+- **Claude Code 的进度保存现在可以在只有 `python3`、没有裸 `python` 命令的新版 macOS 上正常工作。** macOS 和 Linux 优先尝试 `python3`，并保留 `python` 作为兼容回退；每个候选都必须先证明满足 Python 3.10+，才会运行 memory helper。
+- **Windows Python Hook 不再回退到 `py.exe`，也不会再弹出可见控制台窗口。** Claude Code 和生成的 Codex Hook 会从安全的明确路径、PATH 和常见非 PATH 安装目录中选择经过验证的解释器；过期环境覆盖、WindowsApps 别名和 `py` launcher 都会被拒绝，子进程统一隐藏窗口启动。
+- **兼容修复没有改变 Hook 原有行为。** stdin/stdout 转发、退出码处理、有界探针和执行超时继续保留，运行时证据账本也已重新绑定到修正后的 Claude canonical 投影。
+
+### 验证
+
+- 跨平台安装器与 MCP Memory Hook 定向回归 83/83 通过，运行时证据回归 11/11 通过，运行时能力矩阵已按修正后的源码指纹验证通过。
+
+## [2.9.21] - 2026-08-01
+
+### 修复内容
+
+- **run-status 不再把治理任务原文或稳定 fingerprint 复制到状态输出。** 文本、详情和 JSON 共用同一份脱敏公开投影；嵌套 fingerprint 会被移除，自由文本若重复任务内容会被脱敏，完整报告内容只通过显式报告回读查看。
+- **Codex planning Hook 不再携带维护者电脑上的固定 Python 路径。** 安装/更新只记录通过共享活探针的解释器描述，生成的 runner 每次仍重新验证 Python 3.10+；过期环境覆盖、过期安装提示、失效 PATH 和只会伪造 `--version` 的程序都会被拒绝并继续寻找有效解释器。
+- **失效解释器不再让 Hook 长时间卡顿。** PATH 候选先检查文件存在，每个可执行探针使用较短的有界超时。
+
+### 验证
+
+- 状态、安装器、packed 回读、Graphify runtime、PRD、同步和项目聚焦检查通过。两路独立 Review 曾退回第一版；嵌套 fingerprint、短任务、非 PATH 回退、过期 hint 和超时反例均已进入回归。修正候选按低风险发布使用 release smoke，不重复无关的完整发布套件。
+
+## [2.9.20] - 2026-08-01
+
+### 修复内容
+
+- **npx 继续作为受支持的全局安装/更新入口，但可回收 cache 不再成为永久运行权威。** 在写入 Claude Code 或 Codex 的 Commands、Hooks、合并配置前，候选实现先把精确安装包物化到由“包版本 + 打包文件 SHA-256”定位的共享不可变目录；所有持久执行引用只从这个稳定根生成。
+- **只读、执行环境和所有权边界保持明确。** help、status、doctor 不会只因调用就物化稳定目录；check 按 npm 的真实打包文件集核对，但不写用户 npm cache。版本探测、真实 pack 与 install 共用一次性私有 cache/temp，稳定 child 会去掉临时执行环境覆盖。卸载先清除持久引用，再删除 receipt、first-party 文件与目录闭包都精确匹配的 manifest-owned bundle。
+- **物化过程被意外中断后可以恢复，但不会信任或删除未知内容。** 同一摘要由带 owner 的锁串行创建；已死亡且缺少 receipt 的残缺目录会连同证据一起原子隔离后再重建，完整但不可信的目录仍然 fail closed。稳定 child 还会先把结构化项目部署记录还原成真实目标目录，再运行 Graphify 工具。
+- **保留的 Hook 备份不再膨胀活跃能力清单。** discovery 只在遍历前剪枝 Meta_Kim 精确命名的非运行态 Hook 备份目录；磁盘上的备份全部保留，名称中只是包含 `backup` 等字样的用户目录仍会被发现。在维护者验收机上，活跃 Hook 记录从 5947 降到 153，可搜索能力条目从 7573 降到 1779。
+- **发布证明会真实覆盖“临时根消失”这一故障。** packed 公共 CLI 从 npx 形状的临时包根更新 Claude Code 与 Codex，删除全部可回收来源，再从精确稳定 authority 执行 check，并回读 Commands、Hooks、合并配置、manifest 完整性和所有引用路径。若当前版本的 Git tag 已存在，发布预检会在昂贵探针前直接阻断，避免未升版本的候选借更旧历史 tag 取得通过。
+
+### 验证
+
+- lifecycle、cleanup、Hook 投影、packed proof、tag guard、release binding 与 first-party 漂移定向回归已通过，并完成 correctness、security、completeness 独立反证。安全口径只覆盖正常 cache 删除、意外内容漂移、链接路径拒绝和精确卸载所有权；不声称抵抗同一用户下的恶意进程、被替换的 Node/npm 或供应链攻击。P-141、P-151、P-154、P-156、Cursor live、Docker 验收和已取消的 Claude 上下文删减 A/B 继续保持独立。
+
+## [2.9.19] - 2026-08-01
+
+### 修复内容
+
+- **Windows runtime 验收不再根据可复用 PID 反推整棵进程树，而是用私有 Job Object 管住自己创建的进程。** 根进程先以 suspended 状态创建，成功加入 Job 后才恢复；kill-on-close、owner 进程 handle 与 supervisor pipe lease 共同覆盖 timeout、launcher 崩溃、Node supervisor 退出和根进程提前结束，确保真正加入 Job 的成员被排空。
+- **runtime 命令输出有界保存，同时保留完整流证据。** 每个输出流只保留有限正文与尾部，但记录完整字节数和 SHA-256；UTF-8 截断不会产生破损字符，仓库路径、用户 home、WSL 路径和凭据默认脱敏，次级临时文件清理失败也不会覆盖主要进程清理结果。
+- **清理声明与真实控制范围一致。** 发布证据只能验证 runner 自己拥有的 Windows Job 或 POSIX detached process group；明确不声称能清理任意完整系统进程树，也不覆盖脱离该进程组创建的进程。标准发布链新增一次串行 process-guard 阶段，避免这些生命周期测试在其他套件中重复执行。
+- **Windows PowerShell 5.1 现在会显式按 UTF-8 读取 evaluator 启动规格。** 无 BOM JSON 交接中的真实中文 Agent 定义、emoji、重音拉丁文、日文和韩文不再损坏；launcher/result 矛盾、越界协议数值和畸形公开失败证据会 fail closed，不会被误报为清理已验证。
+- **主要进程清理真值与次级控制目录清理分开记录。** 临时目录残留会继续作为有界、固定白名单的次级失败显示，但已经自洽证明的 Windows Job 或 POSIX 进程组清理不会被它覆盖。公开报告不会带出原始命令、提示词、路径、环境变量、输出、stack 或 signal。
+- **Graphify 重建现在能正确处理当前工作区中有意删除的受跟踪文件。** 在计算当前仓库快照前会排除 Git 索引里已删除的旧路径，替换旧进程 guardian 不再因 `ENOENT` 让代码图迁移崩溃；若文件在摘要过程中并发消失，验证仍会 fail closed。
+- **Graphify 在 Windows 安装已验证代码图时，只对短暂目录锁做有限重试。** `EPERM`、`EBUSY`、`EACCES` 使用很短且有上限的退避；其他错误立即失败，重试耗尽仍恢复上一份已验证图，不会放宽发布门。
+- **OpenClaw 2026.7.1 的 SQLite 认证存储不再让兼容 smoke 失败，也不会触发旧式凭据复制。** Meta_Kim 识别由 OpenClaw 管理的 per-agent SQLite store，把认证继承继续交给运行端处理，绝不复制凭据数据库；只有不存在当前 store 的旧安装才继续使用固定 JSON 文件兼容镜像。
+
+### 验证
+
+- 定向回归覆盖 root/child/grandchild timeout 清理、根进程非零退出后的后代排空、launcher 崩溃、Node supervisor 退出、缺失 launcher 结果、残留 timer、stdout/stderr 洪泛、默认脱敏、UTF-8 分片/规格往返、POSIX 结果竞争、矛盾协议组合及主要/次级清理真值。correctness、security、completeness 三路独立 Review 最终均为 P0/P1/P2=0。最终仍以最终提交上的单一 clean 15/15 标准门、精确 Release 绑定和 Claude Code/Codex 正式全局读回为准；此前第 8 项失败报告和后续 Claude-only 定向诊断都不算发布证据。
+
+## [2.9.18] - 2026-08-01
+
+### 修复内容
+
+- **治理判断与运行状态事务现在有了清晰边界。** `spine-state.mjs` 继续作为唯一兼容入口和状态权威，路径/profile、任务身份、HMAC、迁移、锁/CAS、激活与终止全部留在原事务链；无文件 I/O 的阶段、能力、选择面与 fan-out 判断被抽到单一共享规则模块，局部修改不再与持久化实现混在一起。
+- **Claude Code、Codex 与 Cursor 的 Hook 投影会先安装依赖，再替换引用它的入口。** 项目同步、全局同步、setup、清理白名单和能力发现目录都认识新的共享依赖；更新中断不会留下“新入口已经生效、依赖文件却还不存在”的本次新增窗口。
+- **共享治理常量不能再被同进程导入方篡改。** 阶段顺序、公开标签、选择面状态与嵌套阶段策略均已深冻结，Meta Agent 名单保持私有；伪造 owner 不能通过修改共享数组进入主 dispatch chain。
+
+### 验证
+
+- 旧 `spine-state.mjs` 的 43 个导出完整保留，14 个迁移后的规则导出仍与新模块保持同一引用。定向回归覆盖状态 CAS/迁移/中断修复、三运行端冷启动、packed/global Hook 投影、依赖写入顺序、策略常量篡改和伪 owner；correctness、security、projection completeness 三路独立 Review 最终均为 P0/P1/P2=0。发布仍以标准完整门、精确 Release 绑定和 Claude Code/Codex 正式全局读回为最终证据。
+
+## [2.9.17] - 2026-07-31
+
+### 修复内容
+
+- **Codex Agent 与 Skill 发现现在会保留来源，不再把同名定义压成一条未经确认的能力。** 内容完全相同的副本仍可作为别名复用；互相冲突或元数据无效的定义只用于诊断，不能进入普通或动态执行路由。真实文件系统定义优先于过期缓存，项目与全局冲突继续保留各自的所有权和修复边界。
+- **离线路由不能再用传入 JSON 或环境变量伪造 Codex 原生自定义 Agent 权限。** 只有当前交互宿主可以证明原生 `agent_type` 支持；离线选择会拒绝自报的宿主 schema，并安全退回本次运行范围内的 owner contract。
+- **能力诊断和公开输出更安全，也更诚实。** 新增 Codex Skill 预检与 JSONL 重放命令，用来报告候选能力集合压力和已观察事件标记，不冒充宿主完成，也不推断因果关系。公开清单与路由输出会清除密钥和本机路径，以摘要代替完整 developer instructions；安装所有权无法验证时会 fail closed。
+- **标准发布验收不再把维护者接管的 Graphify 产物当作新鲜生产证据。** 门禁现在会亲自启动并观察确定性的本地代码图更新，绑定过程中未变化的仓库快照，再在不使用 LLM 的情况下重新聚类，最后执行原有身份与新鲜度检查；旧产物接管只保留为恢复手段。
+
+### 验证
+
+- 定向发现、路由、YAML 元数据、所有权、隐私与重放回归已通过，覆盖冲突自定义 Agent、动态 lane 中的无效 provider、带引号或逗号/分号的本机路径、包含秘密的环境片段、进程失败退出，以及只有事件标记但没有独立宿主回执的情况。correctness、product-fit、security 三路独立 Review 均未发现剩余 P0/P1/P2。发布前仍必须完成标准完整发布验证、真实打包产品安装、Release 精确绑定，以及 Claude Code/Codex 最终全局读回。本版本不声称已经修复 Codex 宿主元数据截断。
+
+## [2.9.16] - 2026-07-31
+
+### 修复内容
+
+- **Codex CLI 0.146 现在能收到合法的自定义 Agent 发布熔断请求。** 自包含的子任务验收在显式指定 `agent_type` 时同步使用 `fork_turns: "none"`，避免宿主拒绝“指定 Agent + 默认继承完整对话”的参数组合。
+- **完整发布验收现在会在同一次运行中持续保留并核对同一组声明运行端投影。** 同步与读回阶段都从规范 `sync` 清单明确选择 Claude Code、Codex、OpenClaw、Cursor，不再在跨端 smoke 前退回本机默认目标，或把刚生成的四端文件误判为过期。
+- **Claude Code 2.1.202 的异步 Agent 只有在精确子任务结果和完整任务生命周期都结束后，才会成为有效证据。** Agent 与 subagent 观察现在同时绑定 session、tool call、task、子任务结果、完成边界和 marker digest；失败、重复、乱序、跨 session 或只有装饰文本的结果都会 fail closed，不再被误判成成功的子任务。
+- **当独立 Codex CLI 无法调用时，Codex Desktop 可以从当前原生任务提供新鲜发布证据。** 读取器兼容当前结构化输出块，忽略外层仍在运行的字符串输出，同时继续要求命令、文件读取与补丁操作按精确顺序完成；普通字符串或自报的 `Exit code: 0` 不能制造成功 capability receipt。
+- **已完成的 Graphify extract 现在可以显式、安全接管，不必重复提取。** 接管前必须同时绑定精确 HEAD、仓库文件清单与内容、普通文件产物哈希、图身份、报告计数和“源码未晚于提取产物”的时间证据；随后只能从 cluster/stamp 接续。rebuild 还会把规范的 `~/.meta-kim/...` 文档示例确定性改写为非本地展示标记，真实 home 路径、未知 alias 和路径穿越形式仍然 fail closed。
+- **runtime-capability 证据回归的冻结时钟已与仓库证据日期同步。** 基线不再把现有的 2026-07-31 OpenClaw 投影观察误判为未来证据，同时负例仍会拒绝真正更晚的观察日期。
+
+### 验证
+
+- 定向 observer、producer、原始记录重放、acceptance 与 Graphify 安全回归覆盖 Claude 同步/异步 Agent 生命周期、精确子任务结果哈希、重复与失败终态、跨 session/call 拼接、Codex Desktop 字符串输出反证、合法结构化桌面证据、安全接管现有 extract、错 HEAD/源码变化拒绝以及私有路径/穿越拒绝。Graphify 门禁修复加入前，correctness、security/truth、completeness 三路独立 Review 均未发现剩余 P0/P1/P2；新增修复仍需通过标准完整发布验证和发布后的精确包绑定。当前生产观察已精确覆盖 Claude Code 5/5 与 Codex 5/5。
+
+## [2.9.15] - 2026-07-31
+
+### 修复内容
+
+- **不再把 OpenClaw 的声明式 `executionBlock` 策略描述成机械工具调用拦截。** canonical 运行端边界现在明确：拒绝说明只是策略指导，真正阻断或改写工具调用需要 OpenClaw typed plugin Hook。Meta_Kim 仍不声称已经安装该 adapter，也不会把 Claude Code 或 Codex 的 deny-payload 语义直接复制到 OpenClaw。
+
+### 验证
+
+- correctness、security/truth、completeness 三路独立 Review 已关闭全部 P0/P1。私有 capability-gap PRD 测试 56/56 通过，五分类严格验收通过，运行端投影同步与 `git diff --check` 通过；发布前只执行一次的全局 fresh readback 已确认 Claude Code/Codex 的治理 Agent、Meta-Theory Skill、Hooks、Commands、MCP 与 choice 配置均为当前版本。
+
+## [2.9.14] - 2026-07-30
+
+### 修复内容
+
+- **从 GitHub 下载源码包或在 Windows 上用 Git 克隆时，不会再仅因文本换行符为 LF/CRLF 就触发仓库证据校验失败。** UTF-8 文本现在按统一 LF 表示计算仓库源码绑定，非文本文件仍保持原始字节哈希，因此相同的受跟踪内容可在源码包、npm 安装包和本地工作区中得到一致结果。
+
+### 验证
+
+- 仓库证据回归同时验证 LF 与 CRLF 分发结果一致，并保留非 UTF-8 文件的原始字节敏感哈希。GitHub 源码包形态与实际 npm 打包产品形态均不再出现 SHA-256 不匹配。发布前仍必须完成标准完整发布门禁与发布后的精确包绑定审计。
+
+## [2.9.13] - 2026-07-29
+
+### 修复内容
+
+- **Claude Code 不再持续调用已经失效的 Windows 旧 Python 目录中的 Graphify。** 安装与更新会从 Meta_Kim 实际选中的 Python 解释器解析 console script，包括带版本号的 Windows 用户脚本目录，再只把已确认的 `hook-guard read/search` 旧项迁移为无 shell 的 `command` + `args` 形式；解析过程不会信任 `PATH` 中另一个同名 `graphify`。
+- **纯全局更新现在能修复已有用户 Hook，但不会擅自创建项目或用户接线。** 已有 guide 内容不再阻止上游 Graphify 刷新；未知命令与裸命令保持不变；settings 写入先备份并原子替换；Doctor 在没有已验证新路径时只报告缺失 executable，不删除也不改写旧 Hook。
+- **Graphify 重建不再把本机私有路径留在节点 `source_url` 中。** 输出清洗只移除该字段内已识别的 Windows、UNC、macOS、Linux 与 home-relative 本机路径，记录精确脱敏数量，同时保留 HTTP(S) 与仓库相对来源。
+
+### 验证
+
+- 定向回归覆盖 parser、sanitizer、Doctor、runtime resolver、setup flow、Graphify CLI safety、输出隐私与 Windows integration，包括原始 Python 3.11 正斜杠命令、当前 Python 3.14 用户脚本目录、selected-interpreter 绑定、拒绝 `PATH` 回退、幂等、未知 Hook 保留、备份/原子写失败、global-only 不创建配置、私有 `source_url` 脱敏，以及 Doctor 诊断前后原始字节不变。独立 release-fit 与 Hook-safety Review 已关闭全部 P0-P2。只有标准完整发布验证与发布后的精确包绑定都通过后才发布本版本；Docker、Cursor 产品执行、任务预算与可选 live certification 不从这些定向检查推断。
+
+## [2.9.12] - 2026-07-28
+
+### 修复内容
+
+- **上下文工程预算不再在宿主尚未观察和测量时提前通过。** 默认 governed run 会保持 `partial`，直到 runtime 证明实际加载的固定/可变上下文、给出有限非负的输入 token 数、完成重复/冲突/遗漏检查，并把每条已观察 source 绑定到证据。缺失测量现在会形成明确 blocker，不再被硬编码成 `pass`。
+- **所有 public-ready 验证入口现在消费同一份上下文真值。** 通用 run-artifact validator 与 strict intent validator 都会拒绝缺包、partial、blocked、未测量、未观察或缺少证据引用的 context budget。top-level 与 `coreLoop` 副本必须一致，成功的嵌套包不能遮蔽失败副本；非 public-ready 运行仍可省略该包。
+
+### 验证
+
+- 定向 public-ready/context-budget 回归覆盖通用 validator、strict validator、governed runner、产品目标路径、有效 fixtures 和 top-level/`coreLoop` 遮蔽反例；correctness、completeness、collision 三路独立 Review 已接受最终隔离 diff。只有标准完整发布门和发布后的精确包绑定都通过后才发布本版本；Graphify、Docker、任务预算、Cursor 产品执行和可选 live certification 不从定向检查中推断。
+
+## [2.9.11] - 2026-07-28
+
+### 修复内容
+
+- **Claude Code 与 Codex 的能力证据现在只说明“当前宿主可以尝试接手”，不再冒充 Meta_Kim 已授权或已执行。** 兼容的宿主能力进入明确交接状态；历史观察始终只是参考，明确不支持、仅供参考、错误 runtime 和未证实的原生选择能力继续阻断。独立 runner 只生成有边界的宿主请求，callback、环境变量、JSON、receipt 或自哈希都不能制造当前执行权限。
+- **Runtime 观察从一张报告矩阵变成可恢复、按能力绑定的正式产品路径。** 打包后的 CLI 可记录和读取 Claude Code/Codex 共十项精确能力，绑定真实 producer 事件与发布 lineage，保留失败证据用于诊断，MCP 明确输出 populated 10/0 与 empty 0/10，同时所有持久化结果都不能反向开启执行。
+- **安装与发布证明现在验证用户真正运行的包。** Windows 启动清单绑定发现入口、shim、launcher 和 JavaScript 入口，但不虚构同用户信任根，也不声称彻底消除 TOCTOU。带项目刷新的全局更新会先把 managed deployment 记录规范成绝对清单根目录，不会在项目能力复制后误判失败。当前、项目、历史三条安装/升级路径必须精确覆盖 canonical 四目标；Verification、Release audit、release close 和只读观察入口复算同一个原始证明，旧格式、缺目标、只报数量或自报成功都会失败。
+- **Packed MCP 验收现在会把只读观察与它真实产生的有效矩阵比较。** 包内 canonical 原始矩阵仍必须完全一致；MCP 回读则必须与同一已安装包、同一隔离只读快照重新计算出的有效矩阵完全一致。预期的 advisory 叠加不再误报发布失败，同时原始矩阵漂移或有效状态漂移仍会被拒绝。
+- **治理验收现在读取当前按运行模式拆分的 runtime claim 格式。** 每个声明的 runtime mode 都必须有非空 `evidenceRefs` 和完整 `claimsByMode` 事实，不再错误要求已经废弃的顶层 `evidence` 占位字段；旧结构或缺字段记录仍会 fail closed。
+- **Graphify 现在能在子目录存在同名文件时，为仓库根目录文件生成稳定且唯一的标签。** 根文件使用真实的显式相对写法，例如 `./README.md`；普通文件和子目录的最短唯一路径保持不变，并由回归测试保护可重放的身份校验。
+
+### 验证
+
+- 十一轮反证与返工依次关闭了伪授权、路由死锁、原生选择歧义、Stage Runner 绕过、启动身份漂移、packed 源泄漏、目标集合不完整、发布审计误信、worker 错误归因和连续发布 lineage 问题。最终 correctness、security、product-completeness 三路独立 Review 均无 P0/P1/P2，Meta-Review 已授权进入标准发布门。已有 Claude Code 5/5、Codex 5/5 的生产观察只读复用，没有重复调用模型。Cursor 产品执行、Docker、任务预算和可选 live-certified 外部签名均不是本版验收证据。
+
+## [2.9.10] - 2026-07-28
+
+### 修复内容
+
+- **Graphify 的“最新”现在证明身份规则和仓库内容，不再只比较 Git 提交号。** 所有真实 upstream file node 都使用已安装 Graphify 0.9.28 的 Unicode normalizer 和完整 source path 身份；proof 精确绑定仓库文件清单与内容、全部节点与关系、两份 hyperedge 表面、analysis、provenance、sanitization 和报告数量。同名的 Claude 适配器与共享实现保持两个真实、可分别查询的节点。
+- **增量更新和聚类中断现在从一致快照恢复。** Extract checkpoint 保存内容绑定的 graph/analysis 输入，cluster checkpoint 再绑定最终 report；sidecar 截断、graph 部分写入、report 被改、上游命令运行期间源码变化、community 仍引用旧节点或孤儿 snapshot，都不能冒充 current。增量更新发现新节点或改名节点尚未进入 analysis 时会自动重新聚类，且每个 graph node 必须恰好属于一个 community。
+- **Graphify 生成证据不再泄露或跟随私有本机路径。** Graph、analysis 的键和值、report 正文和恢复 snapshot 都拒绝 Windows、UNC、Unix home 及分隔符后的 `~/` 路径，错误不会回显秘密。Graphify output、state 和 snapshot 必须是位于真实仓库输出目录内的普通文件；混合大小写 `GIT_*` 错仓、junction 和 symlink 外跳都会 fail closed。
+- **跨运行时发布验收现在使用目标 Claude Code 自己的 provider，不再误继承调用方 provider。** Hook 隔离仍使用空 setting sources，同时只从 Claude 全局设置中白名单读取 provider、模型和 timeout 环境。这样从 Codex 发起的发布检查会调用用户配置的 `MiniMax-M3`，不会再把这个模型名发给调用进程里残留的 GLM 接口；其他任意 settings 环境项仍不会进入验收子进程。
+
+### 验证
+
+- correctness、反例和 security 三路独立 Review 把闪退、旧 proof、TOCTOU、路径泄漏、symlink、community 漏项/重复和孤儿 snapshot 反例转成回归后，最终 P0/P1/P2 均为 0。Graphify 聚焦测试 69/69，Claude provider 环境测试 24/24，唯一私有 PRD 合约 56/56；真实 Python 3.14.6 / Graphify 0.9.28 重建和独立检查已绑定每个实际表示的节点、精确 link、community 引用和真实 file identity，且没有开放 checkpoint。发布验收还明确排除了 Windows CEF 继承仓库工作目录时可能生成的根目录 `debug.log`，并用回归测试证明这种机器日志不会再让知识图证明过期；双主运行时发布保险丝随后以真实 `MiniMax-M3` Claude Code 调用和 Codex 调用共同得到 release-grade 证据。上游 88 个零节点来源和 semantic collision 完整性明确留在 P-149。Docker、任务预算和 Cursor 产品执行不作为验收证据。
+
+## [2.9.9] - 2026-07-27
+
+### 修复内容
+
+- **私有工作队列现在可以收尾公开发布，但不会因此被公开。** 打包后的 `meta-kim release close` 读取唯一被 ignore 的 PRD `ACTIVE` 行，只向已经存在且同样被 ignore 的 planning 文件追加一段人话、幂等的发布事实。它不会创建公共 backlog 镜像、公开 PRD，也不会把 planning 段落变成第二个队列权威。
+- **发布收尾会重新证明当前公开事实和全局状态，不再相信本地“成功”标签。** 写入前，命令会把哈希串联的 `published_bound` 证据与 GitHub 上真实的 annotated tag、Release、重新下载的 tgz、精确 clean verification report 和 remote main 再做一次绑定；随后检查系统账户真实默认目录里的 Claude Code/Codex 全局投影，并在投影和 record 发布前后紧邻复核 PRD、tracked tree、tag、audit、planning presence 与 marker。
+- **闪退恢复和恶意本地路径重定向都会 fail closed。** 不可变备份、逐文件原子替换、完整内容 hash 的 closure record 与稳定 marker，使重跑可以保留正确结果、只补缺项。被跟踪或不私有的 planning、畸形 marker、脱链/伪造 audit、篡改 record、symlink/junction、并发修改队列或文件、runtime/source/Node preload 重定向，以及 Windows 大小写不敏感的 `GIT_*` 假仓库重定向都会被拒绝，不能冒充 `release_closed`。
+
+### 验证
+
+- correctness、反例和 security 三路独立 Review 把实际攻击反例转成回归后，最终均为 P0/P1 归零。正式验收覆盖 release-close 与 release-audit 定向测试、CLI UX、完整 governance 回归、打包边界、项目同步/检查、标准全量发布门禁、发布后的精确包审计，以及 Claude Code/Codex 最终全局 setup 回读。Docker、任务预算和 Cursor 产品执行不作为验收证据。
+
+## [2.9.8] - 2026-07-27
+
+### 修复内容
+
+- **全量验收失败不再抹掉之前的证据。** 每次 `meta:verify:all` 结束都会先写入不可变 attempt，再更新兼容旧读取方的 `verification-report.json` latest 投影。独立的最近发布级指针会保留可直接交给发布审计的精确 clean attempt，即使后面又跑了诊断或失败验收也不会丢。
+- **报告写到一半时闪退，不会再让以后每次验收都卡死。** Attempt 与 lock owner 只有在完整原子写入后才对外可见；第一次升级会导入旧 clean 报告。半截旧 projection、坏 attempt、死锁和 PID 被复用的陈旧锁会原样保留为恢复证据，但不再阻断下一份报告。
+- **并发运行和自定义输出不会互相串历史。** Latest 由完成时间和 attempt ID 稳定决定，不依赖抢锁顺序；不同自定义报告路径各用自己的 history；Windows 大小写别名和路径穿越 ID 不能覆盖不可变 attempt；现有发布审计仍能读取新增字段后的报告。
+
+### 验证
+
+- 定向回归覆盖崩溃残留、旧报告迁移、并发、自定义路径、Windows 大小写 alias、路径穿越和 exact 发布审计。正式发布前仍必须完成标准全量门禁、精确包绑定与 Claude Code/Codex 全局 setup 回读。Docker、任务预算和 Cursor 产品执行不作为验收证据。
+
+## [2.9.7] - 2026-07-27
+
+### 修复内容
+
+- **运行端专用 provider 不再冒充其他运行端也支持。** Claude Code、Codex、Cursor、OpenClaw 及 HookPrompt adapter 只在声明的目标运行端保留正向 claim；所有非目标 adapter 都明确阻塞、安装层与系统层为 unsupported，且不再复制目标运行端的激活事件。
+- **Provider claim 现在只有一个长期事实源。** `providers[*].support` 负责可用性真值，显式 runtime target 负责适用范围，`runtimeAdapters` 只是由 schema 和 validator 双重校验的投影。静态 registry 不得声称 provider 已被选择、调用、完成或现场运行；这些只能来自本次运行证据。
+- **Validator 会拒绝“看起来完整”的假记录。** 负例覆盖跨运行端 `verified`、用 support override 伪扩目标、adapter/source mapping 漂移、自相矛盾的 state/status、激活事件泄漏和私有运行状态字段。Claude Code 与 Codex 的目标能力保持 verified；本版没有把 Cursor 产品执行包装成已处理。
+
+### 验证
+
+- 本次由 provider 定向测试、完整 governance 回归、真实 schema 校验、项目同步/检查、标准发布门禁、精确发布绑定以及 Claude Code/Codex 全局 setup 回读共同验收。Docker、任务预算和 Cursor 产品执行不作为验收证据。
+
+## [2.9.6] - 2026-07-27
+
+### 修复内容
+
+- **发布证据现在可以被审计，不再靠事后回忆拼接。** 打包后的 `meta-kim release audit` 会把本地与 GitHub annotated tag、peeled commit/tree、干净全量验证报告、公开 Release 和上传的 npm 包写入不可变、哈希串联的 attempt 记录。旧版本如果已经找不到当时的干净报告，只能明确记为 verification unbound，不能补写成 exact。
+- **被替换过代码的包不能继承干净发布结论。** exact 升级要求本地 tgz 与 GitHub asset 都逐字节等于同一份干净 `meta:verify:all` 实际安装并测试过的 npm 候选包；只有包名、版本号或 `package.json` 相同会被拒绝。
+- **审计证据只能写进仓库拥有的状态目录。** 输出根目录及其 `attempts`、`stale-locks` 子目录会在 lock、record、pointer 或 stale-lock 写入前拒绝 symlink/junction 跳转。失败 attempt 继续追加保存，不会覆盖最近一次成功绑定。
+
+### 验证
+
+- 发布验收覆盖审计与 junction 反例、完整 governance 回归、脏候选与干净提交两轮标准 `meta:verify:all`、packed CLI、发布后附加到 GitHub Release 的 exact `published_bound` 记录，以及 Claude Code/Codex 最终全局 setup 回读。Docker、任务预算与 Cursor 产品执行不作为验收正证。
+
+## [2.9.5] - 2026-07-27
+
+### 修复内容
+
+- **`meta:theory:report latest` 现在会说清楚自己选的是哪一种 “latest”。** 命令仍然读取最后一次 committed governed report，合法的 `partial` 报告也会正常打开；但 JSON 摘要新增稳定的 `selection` 区块，明确区分 committed report 指针和当前 active lifecycle run。
+- **当前运行状态不能再静默改写报告读取结果。** active 关系只通过 Meta_Kim canonical status reader 判断；弱格式或坏掉的 `active-run.json` 投影不被信任，自定义报告目录保持隔离，显式 runId 仍精确读取指定的 committed artifact。
+- **Claude Code 和 Codex 的命令说明保持同一边界。** 两端投影都会提示操作者报告 selected run、artifact claim status、active-run relation 与继续命令，同时不得输出任务原文或 task fingerprint。
+
+### 验证
+
+- 标准 `meta:verify:all` 在一次不中断运行中 13/13 全过，覆盖四运行端隔离 install/update、packed 用户与项目 install/update/re-update、全局 Hook、Meta-Theory 1,366 项 0 失败（3 项按设计跳过）、integration，以及 fresh Claude Code/Codex live release fuse。Docker、任务预算和 Cursor 产品执行没有被当作验收正证。
+
+## [2.9.4] - 2026-07-26
+
+### 修复内容
+
+- **LangGraph 现在可以进入真实 Dynamic Workflow，但不会变成第二套工作流引擎。** 可选 ready-set adapter 只消费 `coreLoop.stageDagPacket` 已经选好的精确节点，用 LangGraph Functional API 的 `entrypoint` 和 `task` 包裹执行；流程图、checkpoint、lease、恢复和 merge 权威仍在 Meta_Kim。
+- **普通安装完全不变。** 默认仍用原生执行；只有显式选择 `--stage-runner-orchestrator langgraph` 才动态加载维护者自己安装的 `@langchain/langgraph`；包缺失或接口不兼容会明确失败，不会静默退回原生路径。
+- **真实打包外部消费者验收证明了边界。** 普通候选包没有 LangGraph 依赖，显式选择时会明确失败且不回退原生路径；单独安装 `@langchain/langgraph@1.4.8` 后，A 节点耐久提交时故意结束进程，再启动只执行 B，最终 merge 一次。验收中的确定性 worker 明确标成 test-only，不能冒充原生运行端正证。没有凭证支持的 OpenAI Agents 与 Claude Agent SDK 适配器仍如实标记为未实现、未做 live 证明。
+- **Claude Code 的 live 发布验收不再被无关的用户提示词 Hook 改写结构化证据。** 验收器读取真实已安装的运行端 Agent 定义，校验声明身份和边界字段、记录完整文件摘要，再通过 Claude 原生 `--setting-sources "" --agents --agent` 路径绑定紧凑投影。空设置源只排除无关的用户/项目 Hook，不会禁用显式内联 Agent，也不切断宿主管理的登录凭据。用户 Hook 不会被修改，报告也会把这种 inline binding 与普通加载的自定义 Agent 明确区分。
+- **MCP Memory 的安装、更新和开机启动现在可恢复且安静。** 安装路径固定为 `mcp-memory-service[sqlite]==11.5.5`，强制使用 ONNX 并禁止 hash embedding。更新先构建并行候选环境、证明联网与开机离线两种真实 ONNX 向量，再取得 endpoint 事务锁；随后只停止 PID、启动身份、可执行文件/launcher、host、port 与 argv 全部匹配的 listener，对已静止的 SQLite 数据库执行 backup 与 `quick_check`，并在候选服务健康且监听进程身份匹配后，才依次更新 MCP 配置、boot 文件和 active 状态。由目标 runtime 验证的绝对数据库路径会同时写进 MCP 配置、live env、全部 boot launcher、active state 和 recovery journal，自定义数据库不会在重启后静默退回默认路径。崩溃恢复先取得同一 endpoint 锁，在 restore 前精确停止旧或候选 writer，遇到未知 listener 则 fail closed。恢复材料只保存 MCP Memory 条目与必要状态，使用私有权限；commit 后立即删除敏感 backup/recovery，失败材料也只按受控命名保守过期。setup 与 boot 共用 owner-aware endpoint mkdir 锁，不再使用名称级广泛杀进程或 GUI 通知。
+- **Windows C++ 运行库代际混装时，不再退回 hash 或只给一个模糊的安装失败。** 包安装成功但 ONNX 依赖探针失败时，setup 只允许从本机 Visual Studio 官方 Redist 树中发现完整、同版本的 x64 CRT bundle，把允许列表 DLL 放到候选 ONNX 模块旁并重试一次。非 Windows、文件不完整或混版、符号链接/路径逃逸、缺少官方资产都会 fail closed；setup 不写 System32、不下载任意 DLL，也不借用其他应用私带的运行库。
+
+## [2.9.3] - 2026-07-26
+
+### 解决的问题
+
+Meta_Kim 已能让 Claude Code 和 Codex 执行 Dynamic Workflow 阶段图，但进程中断后仍接近“重新运行原请求”。闪退可能让已完成 worker 再做一次，生成产物也可能与运行状态不一致；原有 checkpoint/replay 字段并不等于可耐久恢复到具体节点。
+
+### 修复内容
+
+- **governed run 现在从 append-only SQLite kernel 恢复。** 每个 run 精确绑定任务与 canonical graph digest，记录哈希事件链、节点 attempt、checkpoint、lease、fencing token、coordinator、fork lineage 和真实 traversed edge。节点完成与边遍历原子提交；事件、投影、checkpoint、claim 或物化摘要被篡改时 fail closed。
+- **闪退后只继续没做完的工作。** 正式 runner 把新执行和恢复入口分开；活跃 lease 不能被抢占；只有身份绑定的 staging/final artifact 状态可修复；最终只物化一对 JSON/Markdown，不重跑 worker。子进程强制退出测试证明：A 已完成就保留，只在 lease 到期后继续 B，merge 只执行一次。
+- **Claude Code 与 Codex 共用同一耐久接口，但不会多出第二张图。** 两端仍只消费 `coreLoop.stageDagPacket`；bridge 只保存 execution projection，不能重定义阶段、依赖或 merge owner。本版本仍禁止外部副作用；effect reconciliation 只是以后适配器启用副作用前的安全边界，不冒充真实外部 effect 证明。
+- **运行端启动和留存证据进一步收紧。** Windows CLI 按 PATH 目录先后选择可用入口；子进程只继承精确列出的登录/配置变量，不再按前缀通配；内置和自定义 worker 输出都会在耐久保存前限长、脱敏。
+- **全局更新能收口 Codex App 的路径再生成，但不会接管用户配置。** Codex 生成新的有效内置 marketplace 路径、旁边又留着 Meta_Kim 旧的精确冲突注释时，合并器只删除这条旧受管注释并结束对应 journal ownership；未知、重复、不相邻或用户自写内容仍 fail closed。
+
+### 验证
+
+- durable kernel、runner、bridge、graph、CLI、唯一 PRD、篡改、闪退恢复、artifact 修复、凭证边界和遍历边的针对性测试为 126/126；独立架构、持久化、bridge、安全与最终 Review 均未发现 P1/P2 阻塞。
+- 原生 run `p117-2026-07-26T05-36-46-515Z` 四项产品场景全部通过：最终环境边界修复后，Claude Code 与 Codex 各完成一次串行 worker 和一次真实重叠的双 worker fan-out/merge。
+- 耐久正式入口 run `p117-governed-2026-07-26T05-39-25-380Z` 在 Codex 与 Claude Code 两端均通过且 `releaseEligible=true`，单独证明了 kernel-backed 执行与物化路径，不拿四场景 bridge 验收替代耐久证据。
+- 标准 `meta:verify:all` 在同一次不中断运行中 13/13 全过，覆盖四目标隔离 install/update、packed 用户/项目 install-update、全局 Hook、Graphify、setup、Meta-Theory 1342 项 0 失败、integration 以及 fresh Claude Code/Codex live release fuse。Docker、Cursor 产品执行、合成 provider 输出、任务/token 预算、项目修改和外部副作用均不属于本次验收。
+
+## [2.9.2] - 2026-07-26
+
+### 解决的问题
+
+闪退或 Stop Hook 中断后，Meta_Kim 可能留下大量 `active=true` 的历史 run-status。后续新提示词看起来会继承旧的 Critical 阶段状态；同时 Claude Code 与 Codex 的 Stop Hook 还没有在同一生命周期合同下收口，又不能把两个运行端的 Hook 强行合并成同一份实现。
+
+### 修复内容
+
+- **run continuity 改为 spine 唯一权威，公开 status 只是可修复投影。** 新 run ID 小写且带随机后缀；refresh/Stop 写入必须匹配 expected run；active/status 可以从 spine 修复；强验证的旧记录只迁移一次为 `archived_legacy`，unknown/malformed 原样保留。
+- **任务身份不再保存原始提示词。** 状态里只保存项目/profile 本地 HMAC fingerprint；不安全 JSON 边界在首写前拒绝；已有 HMAC-bound run 但 key 丢失/损坏时 fail closed；嵌套 raw prompt 字段会从持久化状态中剥离。
+- **Claude Code 与 Codex 保持必要的 Hook 来源分离。** 共享层只放 spine、锁、路径、生命周期和 Codex/Cursor 通用逻辑；Claude Code 保留自己的 Stop 入口和 memory hook 来源。Codex 项目/全局 Stop 现在会保留用户 Hook，先保存 memory，再执行生命周期 cleanup。
+- **完整 meta-theory 发布测试获得与大型验证阶段一致的安全余量。** 已通过的 1,269 项测试不会再仅因前序真实运行端检查造成的临时机器负载而被 180 秒门限误杀。
+- **Claude Code 与 Codex 保留各自适合的发布探针路径。** Claude 继续直接验证自定义 Agent 绑定；只有 Codex 在 Claude 完成后进入干净子进程，避免前一运行端状态拖慢 Codex 宿主事件发现；双运行时仍由一个发布熔断器统一判定。
+- **Codex 宿主事件偶发漏收时会重试，但不复用证据。** 最多两次尝试各自使用全新的隔离子进程和进程树守护；首败保留安全摘要，清理失败立即停止，只有某一次自身的严格 live 证据可以通过。探针保留 Codex 登录信息，但忽略无关的用户 MCP 配置；外壳非零退出时，也只能依据同一新鲜 session 中已经完成的原生派发恢复，不会再丢掉 Codex 实际做完的任务。外层发布阶段的安全超时也覆盖负载下的两次尝试。
+- **Windows 探针清理不再依赖 `taskkill` 进程提供器是否健康。** 隔离 Codex evaluator 启动前，Toolhelp32 守护器必须先 ready；正常结束或超时都会清理完整后代树、验证零存活，无法证明清理完成就让发布门失败。
+- **本地验收历史很长时，status 仍可正常使用。** 简洁 CLI 与其回归测试可承载完整内部 footprint 数据，不再因为 Node 较小的默认子进程输出缓冲而静默失败。
+
+### 验证
+
+- run-status lifecycle、八阶段 spine、Hook canonical ownership、data integrity、MCP memory hooks、project bootstrap、runtime sync manifest、global hook policy、W2 transaction safety 和唯一 PRD 合同的聚焦测试均通过。
+- 真实本地状态先备份再迁移：216 条陈旧 active 历史被归档，303 条已终止记录保留，最后只剩 1 条当前 v2 active。
+- 标准 packed `meta:verify:all` 已 13/13 通过，并包含 fresh Claude Code/Codex live evidence 与全局 Hook 检查。Docker、fixture-only、projection-only 没有被当作产品正证。
+
+## [2.9.1] - 2026-07-25
+
+### 解决的问题
+
+Meta_Kim 已经能生成唯一权威的阶段 DAG 和 Dynamic Workflow worker 计划，但默认产物仍停在 `planned_not_executed`：没有原生 worker 真正消费这张图，耗时始终为零，replay/checkpoint 字段也容易被误解成已经执行。只接 Codex 同样不符合 Claude Code + Codex 双主运行端的产品边界。
+
+### 修复内容
+
+- **同一张阶段图现在能在两个主运行端执行真实只读工作。** 显式 `--execute-stage-dag` 路径直接消费 `coreLoop.stageDagPacket`，复用现有 safe-ready-set 调度器处理串行和 fan-out，通过薄适配器调用 Codex 或 Claude Code，最后只做一次确定性的本地合并。运行端不能重定义阶段、依赖、wave 或 merge owner；默认路径仍然只做计划。
+- **真实执行证据会在 governed artifact 保存前写入。** worker 记录实际运行端绑定、原生 session/message、开始/结束时间、非零耗时、终态结果、工具次数、输出摘要和失败分类；只有观察到真实结果，才会替换计划 worker、Execution 耗时和 LangGraph-style runtime evidence。Review 仍负责判断结果是否真的满足任务，本版本不声称支持耐久恢复。
+- **桥接器适合 Claude Code 与 Codex 的正常安全环境。** 两端都使用无 shell 拼接的只读启动方式，去掉父会话标记，只继承白名单内的系统/运行端/认证变量；副作用任务在启动前拒绝，本机路径默认脱敏，超时只作为失控进程保险。Claude Code 2.1.202 的流式结果只有在同 session 的成功终态记录与最终文本精确一致时才算完成。
+
+### 验证
+
+- 独立宿主 run `p117-2026-07-25T12-37-33-190Z` 四项原生桥接场景全部通过且 `releaseEligible=true`：Codex 与 Claude Code 各完成一个串行 worker 和一个真实区间重叠的双 worker fan-out/merge，并具备精确文件内容、原生 session/message、读取/搜索工具、非零耗时和本地 merge 证据。
+- 正式入口 run `p117-governed-2026-07-25T12-39-56-219Z` 同样为 `releaseEligible=true`：`meta:theory:run` 分别通过 Codex 与 Claude Code 完成 package 检查，并在两个保存产物中把计划执行真相替换成真实结果。
+- Docker、WSL、任务/token/成本预算、提权、项目写入、外部副作用和合成 provider 输出都不能满足本次产品验收。
+
+## [2.9.0] - 2026-07-25
+
+### 解决的问题
+
+首版 Harness Fitness Lab 已能证明 runner 会如实报告负结果，但简单任务和高风险任务出现质量天花板，无法分别判断核心治理、Review 链和 Evolution 的价值与成本。继续事后收紧隐藏测试，或人为设置任务耗时预算，只会制造失败，不是在测量用户结果。
+
+### 修复内容
+
+- **实验能拆分组件，又不会把天花板任务改造成陷阱。** P-135 新增 `baseline -> slim -> reviewed -> full` 累积梯子，每个任务/组重复 3 次；每题 5 条可见要求与 5 条 held-out 行为检查一一绑定；简单任务改成无预算的 single-flight 并发语义场景。只有所有组都达到相同满分时，才允许用自然 token/耗时差异证明额外成本；成本证据永远不能冒充质量收益。
+- **默认治理深度按实测价值收敛。** Critical / Fetch / Thinking 仍是 canonical 顺序与真相边界，但明确、低风险的本地任务只需简洁的内联记录。Review / Meta-Review 按风险、歧义、影响范围、验证失败或声明强度触发。Evolution 能力和 canonical 阶段完整保留，但退出默认执行脚手架；没有持久学习触发条件时，直接内联记录 `none-with-reason`，不再派发 Evolution 工作。
+- **Fitness trial 在闪退后可以真正续跑。** provider 身份与结构化 provider 证据分离保存，旧结果可安全推断；正式结果指针不参与不可变合同定义摘要。同一正式 run-id 重启后复用了全部 36 个 trial，没有再次调用 provider。
+
+### 验证
+
+- Windows 原生 Codex 正式矩阵完成 36/36 个 live trial，保留完整 JSONL trajectory 且全部具备产品证据资格；四组均为 9/9、盲评 5/5，因此没有任何治理组件被宣称有质量收益。
+- 核心治理相对 baseline 的 token/墙钟成本为 1.201×/1.354×，改为条件启用；Review 相对 slim 为 1.029×/0.971×，同样条件启用；Evolution 相对 reviewed 为 1.525×/1.289×，从默认脚手架移除。
+- Docker、WSL、任务预算、提权或绕过 sandbox 均未参与验收；fixture 和被用户叫停在 2/12 的预算实验只保留为诊断，不能计产品证据。
+
+## [2.8.93] - 2026-07-24
+
+### 解决的问题
+
+Meta_Kim 已经有大量治理结构，但此前没有受控实验能证明这些结构是否真的改善任务结果。Windows Codex 试跑还曾把 headless 审批策略覆盖误判成整个平台只读，既阻塞真实产品证据，也容易把 Docker 诊断错当成用户路径验收。
+
+### 修复内容
+
+- **Harness Fitness Lab 开始测量真实结果，而不是 packet 完整度。** Codex 原生 runner 按固定随机顺序执行 3 类任务 × 3 组 × 3 次试验，使用隔离且已有初始提交的工作区、held-out 环境测试、匿名质量评分、完整 JSONL trajectory、token/工具/返工/墙钟指标、不可变可续跑结果，并明确区分诊断证据和产品证据。
+- **Windows 原生试验改用 Codex 支持的权限路径。** 独立宿主把 `:workspace`、`on-request` 与原生 auto-reviewer 绑定，只使用一个外部 Git 工作区根，并拒绝嵌套在 Codex Desktop managed session 中运行。Docker、fixture、计划结果、提权和绕过 sandbox 都不能满足产品验收。
+- **首轮负结论被如实保留。** 27 次原生试验全部完成：完整治理 9/9，基线与去掉 Review 均为 8/9，成本在 1.5 倍预算内；但只有模糊产品任务显著提升，因此通用 2/3 fitness 门槛仍失败，Review 也没有证明独立收益。下一项是消除基准天花板并做治理瘦身，而不是继续堆框架。
+
+### 验证
+
+- 独立 Windows 原生 pilot 在不使用 Docker、不提权、不绕过 sandbox 的条件下完成真实文件修改、公开测试和 held-out 测试。
+- 正式矩阵完成 27/27 个 live Codex trial，并保留 `criteriaPass=false`，没有为了发布而篡改结论。
+- 发布前必须通过合同、计划器、provider 参数安全、评分、失败分母、partial pilot、package surface、唯一 PRD、Graphify、投影、setup、Meta-Theory、integration 和 packed release 验证。
+
+## [2.8.92] - 2026-07-24
+
+### 解决的问题
+
+标准发布链此前可能在 smoke evaluator 进程正常退出后报告成功，即使 evaluator 自己的证据已经标明运行时只有 projection、并不具备 release-grade。Claude 发现逻辑还把 Agent View 命令误当成自定义 Agent 定义来源；Codex 则可能仅凭模型生成的 JSON 或超时恢复结果通过 live evaluator，而没有证明真实子 Agent 已完成。最终导致发布声明强于 Claude Code 和 Codex 的底层证据。
+
+### 修复内容
+
+- **标准发布现在只有一道双主运行时保险丝。** release evaluator 固定检查 Claude Code 与 Codex，先验证完整的九个治理 Agent 结构清单，再要求两个主运行时各有一次真实宿主调用成功。smoke、canonical fallback、fixture、模型自述 JSON 和 projection-only 证据仍可诊断，但不能打开发布保险丝。
+- **运行时身份只按宿主实际证明的层级报告。** Claude 自定义 Agent 从真实的项目/全局声明中发现，并通过 `claude --agent` 主会话绑定实测；Codex 从 TOML 的 `name` 字段发现定义。当活动 `spawn_agent` schema 没有 `agent_type` 时，完成的 child 会诚实记录为 run-scoped 调用，不会被误报成已经加载某个 custom Agent。
+- **Codex CLI 未完整转发事件时，仍能安全验证完成链。** evaluator 优先消费原生 JSONL；如果 Codex 0.144.x 已持久化完成的协作事件、但 `exec --json` 没有转发，则只接受本轮精确且新鲜的 exec thread 及其唯一 child 回链。错误、陈旧、重复、超大小、链接路径或 fixture 证据全部 fail closed；公开报告只保留 ID 与摘要。
+- **全局更新在宿主规范化和动态重建后仍保持真实归属。** Claude 只有在解包后的 Windows `cmd` 启动定义精确命中 manifest 指纹时，才允许迁移受管的持久化 MCP；Codex TOML 日志只会折叠宿主恢复后的完全相同重放，或在受管结果不变时重基到最新宿主值。命令被追加参数或目标结果变化时仍然 fail closed。
+
+### 验证
+
+- evaluator、observer、发布链、session 关联、路径安全和隐私聚焦回归 77 个全部通过；独立 P0/P1 Review 未发现发布真相或信息泄漏阻断项。
+- 真实双主运行时保险丝通过：Claude Code 与 Codex 均为 `strictReleasePass=true`；Codex 证明了 `spawn_agent -> returned_child_final`，同时保持诚实的 run-scoped 绑定边界。
+- 全局 MCP 归属、持久化 bundle 生命周期、Codex TOML 日志与 manifest 聚焦回归全部通过，并完成真实 v2.8.91 到 v2.8.92 的全局同步及同步后检查。
+- 正式发布前，最终候选必须继续通过完整 packed-product、四运行时投影/安装、Graphify、setup、Meta-Theory、integration 与双主运行时发布套件。
+
+## [2.8.91] - 2026-07-21
+
+### 解决的问题
+
+2.8.90 已经会在主 setup 和 Graphify CLI 安装器执行后修复 Windows 上的不安全 Graphify 命令，但仍漏了两条真实用户路径：项目复制后的初始化器会独立运行 `graphify hook install`，可能再次生成同样的反斜杠命令；已经出错的旧项目也没有对外可用的迁移命令。因此，手动改好某一个项目的 `.claude/settings.json` 只能修好该项目，不能安全迁移另一个未纳管项目；Meta_Kim 也不应该在没有明确授权范围时扫描并改写磁盘上的任意仓库。
+
+### 修复内容
+
+- **Meta_Kim 负责的每条 Graphify 安装路径都关闭 Windows shell 边界。** post-copy 初始化器会在上游安装命令后立即清理项目 Hook；install/update 刷新也会清理用户明确选择或已有 manifest 纳管的 Claude 项目。未纳管项目保持不动。
+- **旧项目现在有公开且范围明确的迁移命令。** 在出错项目目录运行 `meta-kim doctor hooks --fix`。稳定 CLI 默认只处理调用者当前项目；`--project-root <目录>` 可明确选择另一个项目，只有显式加 `--all` 才会包含用户级设置。
+- **修复范围窄且可恢复。** 只改写已知的 Windows `graphify.EXE hook-guard read|search` shell 形式；保留 Hook 元数据和含空格的可执行路径；原始 JSON 必须先成功备份，再以原子替换方式写入。其他未知不兼容 Hook 仍然只诊断、不自动改写。
+- **全局 Codex 配置在外部漂移后仍可逆恢复。** 如果 active marketplace 键再次出现在 Meta_Kim 以前生成的禁用冲突注释旁边，planner 现在会把相邻重复状态收敛成一条受管注释，并记录可精确反演的 mutation，不会再让全局同步永久停在 partial。
+
+### 验证
+
+- Hook doctor、清理器、公开 CLI、Graphify 接线和运行时聚焦测试 106 个全部通过；完整 setup 测试 415 个全部通过。
+- Codex config planner 回归套件 26 个测试全部通过，并用维护者此前失败的真实配置形态完成了精确内存往返。
+- packed-product 预检成功执行四运行时安装/更新探针，并用真实 npm 包完成一次安装和连续两次更新。
+- 在最初报错的多媒体项目中，新启动的 Claude Code `Read` 探针和 `meta-kim doctor hooks --project-root ... --silent` 都未出现 Hook 错误。
+
+## [2.8.90] - 2026-07-21
+
+### 解决的问题
+
+graphify 上游安装器会把 Windows shell 形式的 hook 命令（`C:\Users\<用户>\...\graphify.EXE hook-guard read`）写进项目 `.claude/settings.json`。Claude Code 在 Windows 上用 Git Bash 跑 shell 形式 hook，反斜杠被当成转义字符吞掉，路径塌成类似 `C:UsersKim...graphify.EXE`，于是每次 `Read`、`Glob`、`Bash` 工具调用都会刷一条 non-blocking 的 `command not found`。Meta_Kim 的 hook 体检已经能把它诊断为 `windows_shell_backslash_path` 不兼容，但只是诊断——安装和更新流程每次还会重新生成那条坏命令，所以在 Windows 上 clone 仓库的人每次全新安装都会撞上同样的报错。
+
+### 修复内容
+
+- **graphify hook 命令在安装时就被修好，而不是只被诊断。** `graphify hook install` 跑完后，setup 流程（`setup.mjs`）和 `meta:graphify:install` / `meta:graphify:update` 流程都会把 Windows shell 形式的 graphify 命令改写成 direct-spawn 的 `command` + `args` 形式（例如 `command: "C:\\...\\graphify.EXE"`，`args: ["hook-guard", "read"]`）。direct-spawn hook 不经过 Bash，可执行文件路径原样保留。修复只在 Windows 生效，幂等，改写前写带时间戳的备份，并且只动 graphify 注入的命令——其他用户 hook 保持原样，等用户自己处理。
+
+### 验证
+
+- 新增 `rewriteHookToDirectSpawn` 单测（在 `doctor-hooks`）覆盖盘符和 UNC 路径改写、安全形式放行（正斜杠、引号包裹、已拆 `args`、裸 `graphify`）、非 graphify 命令保留、非 win32 不处理。
+- 新增 `sanitizeGraphifyWindowsHooks` 单测覆盖文件读写往返、非 win32 不处理、幂等、备份生成、文件缺失、非 graphify 保留、权限和同组 hook 保留。
+- 完整 `npm run meta:test:setup` 通过，409 个测试，0 失败。
+
+## [2.8.89] - 2026-07-16
+
+### 解决的问题
+
+Meta-Theory 里曾有多个组件同时决定同一条执行路线：入口分类器本应只识别任务，却又决定能不能弹出原生选择、是否允许并行和需要多少条执行线。这些判断可能与规范 Skill、执行选择器和真实宿主不一致，结果是该让用户选择时很少出现交互，而本来可以安全并行的工作又可能被串行化，甚至被一个可选编排 Skill 卡住。另一方面，旧 Claude `PostToolUse:Write` Memory Hook 如果以 CommonJS `.js` 形式落在 `type=module` 项目里，会反复报错；Hook 诊断还可能把无法解析目标路径的外部命令误判成健康或损坏文件。
+
+### 修复内容
+
+- **入口分类器只报告事实，不再拥有执行策略。** 它现在只返回入口路径和可观察信号，不再决定原生选择状态、并行授权、执行线数量或阶段策略。
+- **原生选择统一由一个运行时感知策略处理。** 路线、范围、风险、owner 和验收标准发生实质分叉时才进入选择；Claude Code 使用 `AskUserQuestion`，Codex 使用 `request_user_input`。原生弹窗没有回答、返回空值、被拒绝或被宿主吞掉时，会阻断或回到责任阶段，不再偷偷当成同意。
+- **核心循环合同成为唯一并行权威。** 八个阶段之间保留有序合并屏障；当前阶段内部所有互不依赖的工作，则在依赖、资源、权限、隔离、有效工作量和宿主容量允许时运行最大安全 ready set。父子路径和未知写入范围会被视为真实冲突，不再制造看似并行、实际可能互相覆盖的执行。
+- **原生并行不再依赖 `agent-teams-playbook`。** Claude Agent/Task 或 Codex `spawn_agent` 配合权威阶段 DAG 就足够。该 Skill 只保留为可选适配器，缺少它不会阻断、不会降级，也不能替代真实宿主调用证据。
+- **Hook 诊断和旧资产退役更安全。** `doctor-hooks` 支持显式项目根目录，能够识别 ESM 项目中不兼容的 CommonJS `.js` 目标，并把无法解析目标路径的命令标为“未验证”，而不是猜测健康或损坏。自动修复仍只处理能够证明已丢失的僵尸目标；未知或不兼容的用户资产继续保留，等待明确处理。
+- **Claude 全局刷新可以保留正在使用的持久 MCP runtime。** 新的显式维护参数可以只刷新全局 Skill、Agents、commands 和安装清单，不替换正在运行的 MCP bundle，也不重写用户 MCP 配置；默认同步行为保持不变。
+
+### 验证
+
+- 原生选择、阶段 DAG、Hook doctor、运行时投影、ownership 和受治理执行的聚焦回归全部通过，覆盖错误原生界面、空回答、路径碰撞、未知写入范围和旧 Hook 等情况。
+- Meta-Theory 共运行 1,188 项测试：1,183 通过、0 失败、5 项声明跳过。
+- 一次全新的 `npm run meta:verify:all` 完整通过全部 `13/13` 个标准发布级阶段，`releaseGrade=true`，其中包含四运行时安装/更新探针，以及真实 npm 打包后的用户安装、项目安装和重复更新验收。
+- 项目和四个运行时的用户级全局 Meta-Theory 投影均已同步，并启用了全局 Hook。Claude 持久 MCP bundle 与注册项已事务式升级到 `2.8.89`，写入前自动备份，过程中没有终止 Claude。可选私有签名 `live-certified` 验证本次未请求。
+
+## [2.8.88] - 2026-07-16
+
+### 解决的问题
+
+跨运行时的 dispatch Hook 仍把普通本地文件与命令工具当成阶段推进器。用户只是让 Meta_Kim 修改业务文件，也可能因为当前处于 Fetch、Thinking 或其他治理阶段而被拦截或警告；严重时连修复状态的命令本身也会被拦住，形成自锁。但这个 Hook 真正需要治理的是 Agent dispatch，而不是普通项目操作。另一方面，Windows 上的 Claude Code 会把 Meta_Kim 持久 MCP 的精确启动命令规范化为等价的 `cmd /c` 形式。全局安装与更新因此把 Meta_Kim 自己的条目误判为“用户未归属冲突”，无法完成 Claude 用户级全局安装。
+
+### 修复内容
+
+- **`enforce-agent-dispatch` 不再按阶段限制普通项目操作。** 本地文件修改和命令执行不再因为 Meta_Kim 当前阶段而被拒绝或警告。Agent dispatch 治理、明确的只读查询承诺，以及由运行时可信注入的 meta-agent 只读边界仍然保留。
+- **历史 dispatch 记录不再冒充当前调用者。** dispatch chain 里曾经出现过 meta-agent，不会再把主线程后续业务文件修改误认成 meta-agent 写入，也不会产生假警告。
+- **Claude 的精确 Windows MCP 包装形式会被识别为 Meta_Kim 自有条目。** 安装器只接受对预期可执行文件与参数进行精确包装的 `cmd`/`cmd.exe`；额外参数、路径变化、拼接命令、环境漂移和未知相似项仍按用户冲突保护。
+- **Claude 全局安装与清理 ownership 保持精确。** 检查和同步会保留等价包装形式，安装清单记录实际注册条目的指纹，后续更新或清理只处理 Meta_Kim 自己的片段，不会认领整份 `.claude.json`。
+- **真实打包生命周期覆盖 Claude 规范化行为。** 打包后的全局安装测试会把注册项改写为 Claude 的包装形式，验证检查与同步幂等、清单指纹一致，并证明无关用户配置不受影响。
+
+### 验证
+
+- Hook、阶段运行时、Claude 全局资产和打包运行时生命周期的聚焦回归全部通过，包含未知冲突拒绝、meta-agent 边界和只读查询边界。
+- Claude 用户级 Agent、Skill、Hook、settings 注册、commands、持久 MCP bundle 与安装清单已同步；全目标全局发布检查通过。
+- 一次不中断的 `npm run meta:verify:all` 完整通过全部 `13/13` 个标准发布级阶段，`releaseGrade=true`；Graphify 新鲜度与差异格式检查也通过。
+- 可选的私有签名 `live-certified` 验证未请求，它与标准发布门禁保持独立。
+
+## [2.8.87] - 2026-07-15
+
+### 解决的问题
+
+全局运行时安装、更新和清理仍有几处依赖固定假设：运行时 profile、旧 Agent 路径、安装包位置和上一版本号都可能被写成特定值。这样既会让合法的新运行时 profile 无法接入，也可能留下已经退役的投影，或把“路径看起来合理”误当成“Meta_Kim 确实拥有”。Codex 配置在 ownership 不确定时虽然会安全保留，但还不能记录为精确、可逆的真实差量。打包后的 MCP 运行时也可能返回结构正确的占位资源，却没有证明能力矩阵、Agent 和 Meta-Theory 内容确实来自已安装包。与此同时，setup 与测试子进程可能污染真实用户的能力盘点和项目注册表；打包发布验证仍混用了源码仓库证据与安装后产品事实，并依赖固定的历史版本基线。
+
+### 修复内容
+
+- **运行时投影与迁移改为由来源声明驱动。** 各运行时 profile 自行声明输出路径、renderer 和退役边界；历史 Agent 指纹从 Git 历史生成到规范迁移目录，不再维护固定 Agent 或路径清单。未来 profile 结构不完整时会失败关闭。
+- **安装 ownership 精确且可逆。** Manifest 策略会同时绑定类别、来源、运行时、资产类型、用途和路径，全部匹配后才允许清理。Codex `config.toml` 只记录真实发生的 mutation，保留原始注释、换行和字节形态，通过原子 compare-and-swap 落盘，并能在不删除用户其他修改的前提下精确逆向恢复。内容漂移、TOML 歧义、符号链接越界、伪造用途和旧 command-only ownership 都会被保留或阻断，不再靠猜测处理。
+- **MCP 运行时事实来自真实安装包。** 全局同步会安装带版本的持久 bundle，并校验精确包身份与目录结构。服务端从该安装包读取并验证完整运行时能力矩阵、规范 Agent 与 Meta-Theory 资源；传输验收会拒绝占位、缺项、重复、空内容和越界资源。运行时启动不再依赖源码仓库、`npx` 或环境 `PATH`。
+- **能力发现与本地状态不再跨运行时或测试泄漏。** Claude 与 Codex 通过明确的 runtime-family profile 共享盘点语义，不再因偶然入口文件名发生冲突。定向刷新会保留未选运行时的既有盘点，并发刷新通过文件锁与原子替换发布；Setup 只负责一次最终盘点刷新，子进程测试使用隔离用户目录；新的项目注册表修复命令只清理精确匹配且已经不存在的临时项目记录，并提供 dry-run 与备份保护。
+- **全局清理只认声明过的 ownership。** `global_only` 退役、OpenClaw workspace、Memory Hook、持久 MCP bundle、Agent、Skill、Command、Hook 与能力索引统一使用 profile 或契约生成的 allowlist，并采用最具体匹配。未知文件、用户漂移、项目运行时沉淀副本和第三方配置都不会被触碰。
+- **发布验证动态证明真实打包产品。** 隔离安装后的 tarball 会执行真实安装、更新、重复更新、项目更新、MCP 和历史升级路径。上一稳定版本从 Git 标签动态选择，不再写死版本号；超时来自发布策略契约；耗时 packed 验收拥有独立测试 lane；缺少历史记录时标准发布验证会失败，只有显式诊断模式可以降级。
+- **发布测试实时显示进度且不重复执行 packed CLI。** Node 测试 runner 会直接流式输出子进程进度；快速 setup 与子进程重型分组由 import 关系动态识别，不维护固定文件清单；真实 packed CLI 验收只在发布预检执行，不再在标准 setup 阶段重复。
+
+### 验证
+
+- Codex TOML 规划与逆向恢复、Manifest 与卸载安全、MCP 安装包/资源契约、全局 Agent 迁移、项目注册表隔离、setup 编排及 packed package 边界等聚焦测试已在开发过程中通过。
+- 一次完整 `npm run meta:verify:all` 已通过全部 `13/13` 个标准发布级阶段，`releaseGrade=true`、`packedProductProofComplete=true`，源码快照在整轮验证期间保持稳定。Meta-Theory 阶段共运行 1,190 项测试：1,185 通过、0 失败、5 跳过。
+- 可选私有签名 `live-certified` 验证本次未请求，继续与标准发布门保持分离。
+
+## [2.8.86] - 2026-07-14
+
+### 解决的问题
+
+过去“安装到全局”和“运行时需要在项目内沉淀能力”被混成了一个生命周期。用户明明选择全局安装，却可能不清楚项目目录为什么仍有运行时文件；后续全局更新又可能漏掉已经受管的项目，或误碰为了当前项目而专门迭代的能力。Agent、Skill、Command、MCP、Hook 和工具的状态也没有稳定区分“发现、选择、请求宿主调用、真实返回、失败、可选外部认证”。此外，Issue #48 暴露了两个真实打包更新缺陷：`npx` 临时包被要求包含仅源码仓库存在的 `.gitignore`，以及用户已经同意安装 MCP Memory 后，这次授权没有限定传给 Claude 设置写入子步骤。
+
+### 修复内容
+
+- **安装范围与项目能力归属彻底分开。** 用户安装或更新时仍可选择全局或项目。全局更新只刷新已经带有合法 Meta_Kim bootstrap manifest 的受管项目，不会凭空创建新项目投影。全局发现且无需修改的能力直接使用；只有当前项目确实需要新建或迭代 Agent、Skill、Command 时，才复制到项目并记录为独立的运行时沉淀，后续全局操作会保护它。
+- **受管项目更新同时保证新鲜度和用户内容安全。** manifest 所有的生成投影会先备份再替换为当前包版本；共享配置进行合并；未知文件和项目沉淀能力保持不动。计划、真实写入、旧文件清理和显式冗余清理统一读取同一份 ownership 记录。
+- **受治理执行展示真实运行状态，不再靠界面猜测。** 修改前会完成能力发现，并解析 owner、Agent、Skill、Command/工具、MCP、Hook 与验证路径。聊天状态明确区分已选择、已请求、已调用、已返回、失败和外部认证；只有当前 Codex 宿主能力与投影 TOML 同时支持时，才会宣称调用了自定义 Agent。
+- **只有实质分支才进入真实方案挑战。** 范围、风险、验收或实现形态真正发生分叉时才触发 Plan Challenge；“我理解了你的要求”和“授权开始执行”保持分离。没有路线分支的普通工作不会被重复确认卡住。
+- **Issue #48 的打包更新问题已修复。** 打包安装只验证产品包实际携带的文件，不再要求源码专用 `.gitignore`。用户明确同意 MCP Memory 后，授权只传给本次选中的 Claude 子操作；单独运行 installer 仍保持失败关闭。Claude 和 Codex 的全局设置也改为 staging、同步落盘、原子替换，异常中断不会截断用户 JSON。
+- **发布验收改走真实用户路径。** 真实 npm 打包后的 CLI 会覆盖 Claude Code、Codex、Cursor、OpenClaw 的安装和更新，并验证从公开版 `v2.8.85` 更新到 `v2.8.86`，不再只以仓库源码直跑作为产品通过证据。
+
+### 验证
+
+- Issue #48 相关 setup 与 MCP Memory 聚焦测试 `71/71` 通过；全局 Hook/设置策略测试 `19/19` 通过，其中包括 Claude、Codex 原子替换失败注入。
+- 打包产品安装/更新验收覆盖四个声明运行时和上一公开版本基线。
+- 最终发布树上的标准 `npm run meta:verify:all` 通过，`releaseGrade=true`；可选私有签名 `live-certified` 验证本次未请求。
+
+## [2.8.85] - 2026-07-13
+
+### 解决的问题
+
+通过 `setup.mjs` 更新时，父脚本会把 `--lang` 无差别传给所有子脚本，其中两个严格 CLI 并不支持该参数，导致更新在真正写入前就直接失败。精确参数错误明明已经显示，后续提示却仍猜测 EBUSY、网络或冲突，Codex 等运行时用户甚至会看到 Claude 专属路径和修复命令。标准发布验证又绕过了真实的 setup 父入口，直接调用 installer，因此没有证明父子参数契约真的兼容。
+
+### 修复内容
+
+- **setup 使用显式子脚本 CLI 契约。** 安装、更新与快速部署共用生产参数构造器；支持本地化的子脚本接收用户选择语言，严格的全局 Meta-Theory 同步只接收其支持的参数。未知子脚本契约和旧数组调用会明确失败，不再静默丢失语言。
+- **installer 的语言处理完整且失败关闭。** 空格写法与等号写法真实等价，只接受受支持的语言代码和别名，内部能力盘点也继承同一个有效语言。
+- **真实父子边界进入回归测试。** setup 的生产构造器会生成快速部署、安装、更新的真实参数并交给 installer 校验；严格全局同步则在隔离运行时目录中真实执行，证明不会收到语言参数，也不会写入用户目录。
+- **四语失败提示准确且保留完整帮助。** 英文、简体中文、日文、韩文均以上方第一条精确错误为准；目录占用、网络、权限与冲突建议仅在日志明确出现时适用；恢复命令不再写死 Claude，也不再建议使用通配符删除可能属于用户的目录。
+- **用户选择语言贯穿到最终验证。** 运行时同步、能力盘点、依赖安装和项目验证不再在同一次流程中切回宿主语言。
+
+### 验证
+
+- 合并后的 setup、语言、严格参数与 UX 聚焦检查 `109/109` 通过；最后一组语言/验证边界检查 `63/63` 通过。
+- 完整 setup 套件 `648/649` 通过、`0` 失败，Windows 上 `1` 条为预期 POSIX 专属跳过。
+- 正确性、安全性、UX/测试三个独立复核均已关闭全部 Critical/HIGH；第二轮结果为 `0` Critical、`0` HIGH。
+- 一次完整 `npm run meta:verify:all` 通过标准发布门，`releaseGrade=true`；可选私有签名 `live-certified` 验证未请求。
+
+## [2.8.84] - 2026-07-13
+
+### 解决的问题
+
+Meta_Kim 的安装、更新和清理流程仍有几条路径会把“没有被 Git 跟踪”误当成“属于 Meta_Kim”。Hook 删除或改名后可能留下幽灵文件；内容已经正确的受管文件仍可能被重复备份和重写；用户的损坏配置可能被覆盖；部分清理失败或运行时不一致也可能被汇总成成功。并发 setup/cleanup、进程中断、Windows Junction 和 NTFS ADS 还缺少一条统一安全边界。与此同时，长时间发布探针可能看起来像卡住，关键恢复提示也没有始终以用户语言出现在聊天和终端状态中。
+
+### 修复内容
+
+- **受管文件统一进入安全事务生命周期。** 安装、更新、同步和清理现在共同使用精确 manifest + 旧哈希所有权、根目录/Junction 越界检查、冲突预检、已验证备份、staging、原子提交、回滚、receipt 绑定恢复日志、确定性路径和跨进程锁。
+- **清理可恢复，并默认保护用户状态。** 删除或改名的旧受管项只有在精确证明所有权后才会退役；内容漂移、未知文件、损坏配置、仅初始化配置和用户自有内容都会保留，并返回可操作的 `partial` 或阻断结果。内容已经正确的受管文件是真正 no-op，不再产生备份、重写和 mtime 抖动。
+- **跨运行时检查如实反映结果。** Claude、Codex、Cursor、OpenClaw 的 Hook/配置写入共用安全边界；`global_only` 会验证全部必需 Hook 依赖对；OpenClaw check 检测到不一致时返回非零退出码；setup 同步或备份失败不再被总结为成功。
+- **用户提示保持可见并完成多语言统一。** 安装、清理、状态、详情、失败、选择和恢复步骤在英文、简体中文、日文、韩文中保持一致。移除了重复的更新确认，但迁移风险、安全说明和下一步操作仍保留在聊天/终端首要界面，不要求用户翻生成文件。
+- **发布证据和 Windows 报告写入更稳定。** 标准验证把四运行时隔离安装/更新探针绑定到稳定源码快照，在长任务开始前显示进度，并在失败时给出恢复动作。受治理运行替换报告文件时，只对 Windows 短暂占用错误执行有限重试，其他错误继续立即失败。
+- **大型 setup 安全策略拆成聚焦模块。** 受管文件事务与项目 bootstrap 文件安全逻辑进入独立小模块，不再继续膨胀 `setup.mjs`，也不靠调用点重复堆防护。
+
+### 验证
+
+- 受治理运行界面聚焦测试 `12/12` 通过；完整 Meta-Theory 测试 `1137/1142` 通过、`0` 失败、`5` 条为预期条件跳过。
+- 完整 setup 测试 `641/642` 通过、`0` 失败、Windows 上 `1` 条为预期 POSIX 专属跳过；集成测试 `6/6` 通过。
+- Claude Code、Codex、Cursor、OpenClaw 项目投影、全局 Meta-Theory 技能/命令及 Claude/Codex 全局 Hook 已同步并检查；Graphify 已重建并通过新鲜度验证。
+- 一次完整 `npm run meta:verify:all` 通过全部 `11/11` 标准发布级阶段，`releaseGrade=true`；隔离安装和更新探针分别核验四个运行时产物。可选私有签名 `live-certified` 验证未请求，继续与普通发布门分离。
+
+## [2.8.83] - 2026-07-12
+
+### 解决的问题
+
+Meta-Theory 激活 Hook 曾可能把任意工作目录误当成项目，并在那里生成 `.meta-kim` 或 `graphify-out`。PR 的第一版修复移除了这个不安全兜底，但项目根解析仍分别存在于激活 Hook 与 post-copy 初始化器中，只接受 Claude 专属的显式根目录，而且还没有保证 Claude、Codex、Cursor、全局同步和项目 bootstrap 的每条投影路径都会把解析器依赖与激活器一起安装。维护者入口文档也尚未说明这条新的稳定边界。
+
+### 修复内容
+
+- **项目根解析统一为一份共享实现。** 激活 Hook 和 post-copy 初始化器共同使用 `project-root.mjs`，不再维护两份可能漂移的逻辑。
+- **跨运行时兜底顺序安全且明确。** 可信显式声明优先；当前 cwd 已由 marker 证明为项目时优先于 payload；只有绝对路径且有 marker 证明的运行时 payload 才能作为最后兜底。相对 payload 和无 marker 的任意目录都会被拒绝。
+- **post-copy 直接接收已确认的项目根。** 激活 Hook 显式传递 `--project-root`，post-copy 不再自行猜测第二个项目位置。
+- **所有投影都携带完整依赖。** Claude、Codex、Cursor 项目 Hook、全局 Hook 包、`setup.mjs --project-bootstrap`、包清单与托管文件清理都会让 `project-root.mjs` 和激活器一起安装、一起退役。
+- **维护者文档与运行时事实一致。** `AGENTS.md` 与 `CLAUDE.md` 已补充解析优先级、无合法根时不写入，以及共享依赖必须成组投影的规则，没有给普通用户增加额外安装步骤。
+
+### 验证
+
+- 真实子进程测试覆盖任意临时目录、`.git` 与 bootstrap marker、嵌套目录、无效声明、跨运行时 payload 字段、跨仓库重定向、相对路径拒绝、Hook 到 post-copy 参数绑定，以及从实际生成的 Codex Hook 目录启动。
+- Claude Code、Codex、OpenClaw、Cursor 的项目与全局投影已同步；Claude/Codex 全局 Hook 包已备份并刷新。
+- 一次完整标准发布级验证通过全部 `11/11` 阶段，`releaseGrade=true`；可选的私有签名 `live-certified` 验证仍是独立且本次未请求的保障层。
+
+## [2.8.82] - 2026-07-12
+
+### 解决的问题
+
+Codex 或 Claude 的当前聊天已经真实调用并返回子代理后，Meta_Kim 仍可能因为缺少逐项精确关联或额外独立认证，把用户看到的状态写成“不可用”。用户执行事实、内部审计和可选的外部认证被压成了一个状态；同时，重要进度仍过度依赖生成文件，安装/更新失败、运行标识、宿主观察证据和重复验证链也可能产生含糊或不安全的完成结论。
+
+### 修复内容
+
+- **用户执行事实与内部保障状态正式分离。** 当前原生工具结果直接决定聊天状态；已完成、已调用、部分失败、失败、被拒绝、被阻止、真正不可用和待关联分别表达。缺少精确审计关联不再抹掉已成功的调用，只有宿主不支持或缺少 provider 且没有成功/严格失败 binding 时才显示“不可用”。
+- **聊天窗口成为主要的人话运行界面。** 开始、路线、执行、审查、验证、风险、负责人交接和下一步会按用户语言显示。英文、简体中文、日文和韩文报告/面板不再暴露 packet 名、provider id、lane 枚举和认证术语，同时不减少有用提示。
+- **可编辑产物不能给自己发合格证。** 调用方 JSON、环境提示、公开 trust 开关、UI badge、fixture 和普通运行文件不能制造“已调用/已完成/独立复核完成”。Codex/Claude 宿主观察、内容寻址候选包、固定信任根和可选私有签名验证继续失败关闭，并与标准发布门保持分离。
+- **治理运行与安装流程失败关闭。** Run ID 具备路径安全和并发防碰撞能力，显式覆盖必须授权，latest 指针原子更新，读取结果绑定目标运行。Setup 会汇总部署、MCP、Graphify 与可选步骤失败，部分安装不能再报告成功。
+- **路由和验证链更稳定。** 自然语言分类覆盖多语言 UX 请求且不依赖内容品牌；展示消费者只读取用户状态，严格验证器只读取顶层审计包；标准验证链统一由一个编排器负责，不再递归重复阶段。
+
+### 验证
+
+- Claude Code、Codex、OpenClaw、Cursor 的项目与全局 Meta-Theory 投影已同步；Claude/Codex 全局 Hook 已备份并同步。
+- Graphify 已重建并通过新鲜度检查。
+- 一次完整 `npm run meta:verify:all` 在同一报告中通过全部 `11/11` 标准发布级阶段，`releaseGrade=true`。
+- 可选的私有签名 `live-certified` 验证未请求；这不影响标准发布，也不改变当前聊天中真实调用已经发生的事实。
+
+## [2.8.81] - 2026-07-12
+
+### 解决的问题
+
+Meta_Kim 曾把内容业务请求误判为运行时平台治理，并在路由、外部研究判断和项目命名中写入具体内容平台名称。这会让通用治理层因为用户提到某个品牌而走不同路线。与此同时，GoalPro 与 Kim_Decision 虽已作为依赖接入，但缺少清晰的用户侧使用边界。
+
+### 修复内容
+
+- **业务意图与运行时平台治理分开判断。** 只有 Hook、适配器、权限、MCP、安装、配置等技术信号才进入运行时治理；内容和增长任务不再因为提到“平台”而被误路由。
+- **移除内容平台品牌路由。** 产品编排、外部研究判断、真实发布风险识别和项目 ID 改为识别第三方服务、最新规则、发布、授权、内容自动化等通用意图，不再依赖品牌名称。
+- **Kim_Decision 明确为决策镜头，不是执行器。** 明确的决策请求可在 Critical、Fetch、Thinking 中用于锁定问题、判断证据和选择路径；它不能成为代码执行者、排程器或实现负责人。
+- **GoalPro 保持按需、仅提示词边界。** 只有用户明确需要 Goal Prompt、Loop Prompt 或目标契约时才选择；Evolution 不创建用户目标，Loop 只会在已有 Goal 结果后出现。
+- **GoalPro 与 Kim_Decision 纳入正式依赖登记。** Provider、依赖、安装、兼容性和路由记录覆盖 Claude Code、Codex、Cursor、OpenClaw，并明确各自边界。
+
+### 验证
+
+- 标准完整发布门禁：`npm run meta:verify:all`。
+- 已覆盖新决策路由与通用内容自动化行为的路由、依赖、入口分类、受治理交付物和产品体验验证。
+
+## [2.8.80] - 2026-07-11
+
+### 解决的问题
+
+Meta_Kim 仍在安装和路由外部官方 `skill-creator`，但项目现在已经有维护边界更清楚、验收能力更完整的 `meta-skill-creator`。只替换仓库地址并不够：Claude Code 与 Codex 使用不同的用户 Skill 根目录，Codex 还需要兼容副本；空依赖选择必须保持为空；已有 `skill-creator` 必须继续归用户所有；多目录更新失败时也不能只安装成功一部分。
+
+### 修复
+
+- **Meta Skill Creator 成为正式的 Skill 创建 provider。** 依赖清单、能力索引、路由、基础能力校验和演化指引统一选择 `KimYx0207/meta-skill-creator`，不再把外部官方包作为 Claude Code/Codex 的默认创建能力。
+- **按照宿主真实发现目录安装。** Claude Code 安装到 `~/.claude/skills`；Codex 安装到 `~/.agents/skills`，并同步 `~/.codex/skills` 兼容副本；自定义 `CODEX_HOME` 时正式用户目录仍保持正确。
+- **三个目标目录使用同一个安装/更新事务。** 新包先完成验证与 staging，再替换 live 目录；中途失败会回滚全部目标，恢复不完整时明确保留备份路径，符号链接/Junction 越界会失败关闭。
+- **已有 `skill-creator` 完全不处理。** Meta_Kim 只改变 provider 选择，不删除、迁移或重命名用户副本、兼容副本或 Codex 系统内置 Skill。
+- **依赖筛选与 CLI 查询保持安全。** 显式空 `--skills` 不安装任何依赖；帮助和未知参数继续保证零写入。
+
+### 验证
+
+- 安装事务专项测试 `10/10` 通过；路由、provider 和基础能力聚焦套件 `10/10` 通过。
+- 上游 commit `ace057d771c1baaa58811a00a2cbbdcad30d8e72` 通过包结构与闭环校验；三份安装副本的 `SKILL.md` SHA-256 均为 `1528407a46fb3f47c035a831e91a8965f8a711f0ad6df458a7f7ef563d46d682`。
+- Claude Code 与 Codex 全新只读会话均发现并读取了已安装的 `meta-skill-creator`；用户、兼容和 Codex 系统内置的旧 `skill-creator` 整树哈希保持不变。
+- 标准完整发布门 `npm run meta:verify:all` 在更新发布元数据前通过全部 `11/11` 阶段；最终发布检查会重跑版本、包内容和 diff 断言。
+
+## [2.8.79] - 2026-07-11
+
+### 解决的问题
+
+安装、运行状态、Hook、能力发现和发布链长期存在重复实现与危险边界。大规模清理即使通过聚焦测试，仍可能出现 profile 状态分裂、全局同步穿透 Windows Junction、把用户自有同名 Hook 当成 Meta_Kim 文件、`--help` 发生真实写入、恢复的设计测试没有进入标准测试链，以及发布验证无法证明最终包内容等问题。
+
+### 修复
+
+- **运行状态统一为一套防碰撞 profile 契约。** 应用层和 Hook 层复用同一清洗实现；路径穿越、Unicode、同名碰撞和超长输入都会得到稳定隔离的身份，正常 profile 保持兼容。即使使用自定义状态目录或并发写入，spine、active-run 和 run-status 也会解析到同一 profile。
+- **全局同步在文件系统和所有权边界上失败关闭。** 帮助和未知参数保证零写入；runtime home 写入拒绝符号链接/Junction 越界；退休 Hook 只有在证明属于 Meta_Kim 后才会先备份再删除，并且只清理对应的受管 settings 项。用户自有同名文件和 settings 不受影响。
+- **Hook 只有一个 canonical 实现，同时保留运行时差异。** Claude 兼容适配器投影共享实现；能力索引同时记录 canonical 与 adapter 路径；真正独立的 Claude/OpenClaw 同名 Hook 使用不同 namespace，不再按文件名错误合并。
+- **CLI 与 Setup 在任意目录下保持一致。** 包 CLI 从自身安装位置解析脚本；Setup 对 `--参数 值` 和 `--参数=值` 使用同一消费路径；空值和未知参数会在安装动作前失败。
+- **数据与报告辅助层完成模块化和事务化。** 项目库存、报告上下文、Memory endpoint、SQLite 事务、Setup policy 和 governed fan-out 共用模块替代重复临时代码，同时保留用户数据和回滚边界。
+- **设计 PoC 的保留与退役边界明确。** 四个配置驱动设计模块、合同和 59 个测试继续打包并进入标准测试；无调用的 validator 草稿和过期 RESULTS 报告继续退役。守卫只拦真实可执行消费，不误伤文档和包清单否定断言。
+- **标准发布链覆盖所有测试和包边界。** 测试库存明确覆盖 unit、setup、integration、meta-theory 和 design-gate；离线 `npm pack --dry-run` 断言证明必需文件进入包、退役文件不进入包。
+
+### 验证
+
+- correctness、security、completeness 三视角反证审查，覆盖路径穿越、名称碰撞、用户同名 Hook、settings 所有权和 Windows Junction。
+- 更新发布元数据前的合并修复聚焦测试：`130/130` 通过。
+- `npm run meta:test:inventory`、`npm run meta:test:unit` 与离线包清单断言。
+- 发布提交前必须完成四运行时同步、Graphify 重建、`npm run meta:verify:all` 和最终 package/diff 检查。
 
 ## [2.8.78] - 2026-07-11
 

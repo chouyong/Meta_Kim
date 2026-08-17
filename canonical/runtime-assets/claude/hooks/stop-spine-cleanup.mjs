@@ -1,52 +1,49 @@
 import process from "node:process";
-import { unlink } from "node:fs/promises";
-import { join } from "node:path";
 import { readJsonFromStdin } from "./utils.mjs";
-import { readSpineState, resolveRepoLocalStateDir } from "./spine-state.mjs";
+import {
+  readSpineStateIncludingInactive,
+  terminalizeSpineState,
+} from "./spine-state.mjs";
 
-// Stop hook: deactivate spine state on session end.
-// Reads spine state, marks inactive, or deletes if evolution completed.
+// Claude Code Stop entrypoint. Keep this runtime-facing adapter independent
+// from the generic Codex/Cursor entrypoint: only the lifecycle implementation
+// in spine-state.mjs is shared across runtimes.
 
 await readJsonFromStdin();
 
 const cwd = process.cwd();
-const DEFAULT_SPINE_STATE_DIR = ".meta-kim/state/default/spine";
-const SPINE_STATE_DIR = resolveRepoLocalStateDir(
-  cwd,
-  process.env.META_KIM_SPINE_STATE_DIR,
-  DEFAULT_SPINE_STATE_DIR,
-);
 
 try {
-  const state = await readSpineState(cwd);
-  if (!state || !state.active) {
+  const state = await readSpineStateIncludingInactive(cwd);
+  if (!state) {
     process.exit(0);
   }
 
-  // If evolution completed, clean up the file
-  if (state.stages?.evolution?.status === "completed") {
-    const filePath = join(SPINE_STATE_DIR, "spine-state.json");
-    try {
-      await unlink(filePath);
-    } catch {
-      // File may already be gone, that's fine
-    }
+  const evolutionCompleted =
+    state.deactivationReason === "evolution_completed" ||
+    state.stages?.evolution?.status === "completed";
+  const result = await terminalizeSpineState(cwd, {
+    expectedRunId: state.runId,
+    reason: evolutionCompleted ? "evolution_completed" : "session_stop",
+    removeStateFile: evolutionCompleted,
+  });
+  if (!result.terminalized) {
     process.stderr.write(
-      "[spine-cleanup] evolution completed, spine state removed\n",
+      `[spine-cleanup] skipped stale Claude Stop request, reason=${result.reason || "authoritative_state_changed"}\n`,
+    );
+    process.exit(0);
+  }
+  if (evolutionCompleted) {
+    process.stderr.write(
+      `[spine-cleanup] Claude evolution completed, run=${result.runId || "unknown"} terminalized before spine state removal\n`,
     );
   } else {
-    // Mark inactive but keep for potential session recovery
-    state.active = false;
-    state.deactivatedAt = new Date().toISOString();
-    state.deactivationReason = "session_stop";
-    const { writeSpineState } = await import("./spine-state.mjs");
-    await writeSpineState(cwd, state);
     process.stderr.write(
-      `[spine-cleanup] spine deactivated at stage=${state.currentStage}, agents dispatched=${state.dispatchedAgents.length}\n`,
+      `[spine-cleanup] Claude spine deactivated at stage=${state.currentStage}, agents dispatched=${state.dispatchedAgents?.length || 0}\n`,
     );
   }
 } catch {
-  // Non-critical: never block session stop
+  // Stop cleanup is advisory and must never prevent Claude Code shutdown.
 }
 
 process.exit(0);

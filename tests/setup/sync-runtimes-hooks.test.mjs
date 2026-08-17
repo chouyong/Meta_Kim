@@ -7,13 +7,16 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  readdirSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
 import os from "node:os";
 import { fileURLToPath } from "node:url";
 import { dirname } from "node:path";
+import { createHash } from "node:crypto";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(__dirname, "..", "..");
@@ -53,20 +56,41 @@ function createTempSourceRepoFixture() {
 }
 
 function runSyncGlobal(targets, extraEnv = {}) {
+  const runtimeHome =
+    extraEnv.META_KIM_CODEX_HOME ?? extraEnv.META_KIM_CLAUDE_HOME ?? null;
+  const isolatedUserHome = runtimeHome ? dirname(runtimeHome) : null;
   return spawnSync(
     process.execPath,
     [
-      "scripts/sync-runtimes.mjs",
-      "--scope",
-      "global",
+      "scripts/sync-global-meta-theory.mjs",
       "--targets",
       targets,
+      "--with-global-hooks",
     ],
     {
       cwd: repoRoot,
       encoding: "utf8",
       stdio: ["ignore", "pipe", "pipe"],
-      env: { ...process.env, ...extraEnv },
+      env: {
+        ...process.env,
+        ...(isolatedUserHome
+          ? { HOME: isolatedUserHome, USERPROFILE: isolatedUserHome }
+          : {}),
+        ...extraEnv,
+      },
+    },
+  );
+}
+
+function runProjectSyncFromFixture(tempRoot, args = []) {
+  return spawnSync(
+    process.execPath,
+    ["scripts/sync-runtimes.mjs", ...args],
+    {
+      cwd: repoRoot,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+      env: { ...process.env, META_KIM_REPO_ROOT: tempRoot },
     },
   );
 }
@@ -117,6 +141,191 @@ describe("runtime hook sync contract", () => {
     assert.doesNotMatch(output, /\.claude\/hooks\//);
   });
 
+  test("global_only project sync keeps Claude Codex Cursor hook dependency pairs resolvable", () => {
+    const tempRoot = createTempSourceRepoFixture();
+    try {
+      const overrideDir = join(tempRoot, ".meta-kim");
+      mkdirSync(overrideDir, { recursive: true });
+      writeFileSync(
+        join(overrideDir, "local.overrides.json"),
+        `${JSON.stringify({ projectProjectionMode: "global_only" }, null, 2)}\n`,
+      );
+
+      const retiredHookSentinel = "// user-owned legacy basename\n";
+      for (const runtimeDir of [".claude", ".codex", ".cursor"]) {
+        const hooksDir = join(tempRoot, runtimeDir, "hooks");
+        mkdirSync(hooksDir, { recursive: true });
+        writeFileSync(
+          join(hooksDir, "hook-i18n.mjs"),
+          retiredHookSentinel,
+          "utf8",
+        );
+      }
+
+      const sync = runProjectSyncFromFixture(tempRoot);
+      assert.equal(sync.status, 0, sync.stderr || sync.stdout);
+      assert.doesNotMatch(
+        sync.stdout + sync.stderr,
+        /missing canonical.*hook-i18n|缺失的 canonical.*hook-i18n/iu,
+      );
+
+      for (const runtimeDir of [".claude", ".codex", ".cursor"]) {
+        const hooksDir = join(tempRoot, runtimeDir, "hooks");
+        const activatorPath = join(hooksDir, "activate-meta-theory-spine.mjs");
+        const projectRootPath = join(hooksDir, "project-root.mjs");
+        const spineStateGatesPath = join(hooksDir, "spine-state-gates.mjs");
+        assert.equal(existsSync(activatorPath), true, `${runtimeDir} activator missing`);
+        assert.equal(existsSync(projectRootPath), true, `${runtimeDir} project-root missing`);
+        assert.equal(
+          existsSync(spineStateGatesPath),
+          true,
+          `${runtimeDir} spine-state gate dependency missing`,
+        );
+        assert.match(
+          readFileSync(activatorPath, "utf8"),
+          /from "\.\/project-root\.mjs"/u,
+          `${runtimeDir} activator must resolve its paired project-root dependency`,
+        );
+        assert.equal(
+          readFileSync(join(hooksDir, "hook-i18n.mjs"), "utf8"),
+          retiredHookSentinel,
+          `${runtimeDir} same-name legacy file must be preserved without exact ownership proof`,
+        );
+      }
+
+      assert.equal(existsSync(join(tempRoot, ".codex", "agents")), false);
+      assert.equal(existsSync(join(tempRoot, ".cursor", "agents")), false);
+      assert.equal(existsSync(join(tempRoot, ".agents", "skills")), false);
+
+      const check = runProjectSyncFromFixture(tempRoot, ["--check", "--json"]);
+      assert.equal(check.status, 0, check.stderr || check.stdout);
+      const summary = JSON.parse(check.stdout);
+      assert.equal(summary.status, "ok");
+      assert.deepEqual(summary.targets, []);
+    } finally {
+      rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("global_only cleanup rejects a project runtime-root Junction without reading outside", () => {
+    const tempRoot = createTempSourceRepoFixture();
+    const outsideRoot = mkdtempSync(join(os.tmpdir(), "meta-kim-global-only-outside-"));
+    try {
+      mkdirSync(join(tempRoot, ".meta-kim"), { recursive: true });
+      writeFileSync(join(tempRoot, ".meta-kim", "local.overrides.json"), `${JSON.stringify({ projectProjectionMode: "global_only" }, null, 2)}\n`);
+      mkdirSync(join(tempRoot, ".agents"), { recursive: true });
+      writeFileSync(join(outsideRoot, "outside.txt"), "preserve\n");
+      symlinkSync(outsideRoot, join(tempRoot, ".agents", "skills"), process.platform === "win32" ? "junction" : "dir");
+
+      const result = runProjectSyncFromFixture(tempRoot);
+      assert.notEqual(result.status, 0);
+      assert.match(result.stderr + result.stdout, /Refusing to follow a project symlink or Junction/u);
+      assert.equal(readFileSync(join(outsideRoot, "outside.txt"), "utf8"), "preserve\n");
+    } finally {
+      rmSync(tempRoot, { recursive: true, force: true });
+      rmSync(outsideRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("global runtime sync rejects a runtime-home junction into the immutable package store", () => {
+    const root = mkdtempSync(join(os.tmpdir(), "meta-kim-global-store-junction-"));
+    try {
+      const storeRoot = join(
+        root,
+        ".meta-kim",
+        "runtime",
+        "projection-packages",
+      );
+      const claudeHome = join(root, "claude");
+      mkdirSync(storeRoot, { recursive: true });
+      symlinkSync(
+        storeRoot,
+        claudeHome,
+        process.platform === "win32" ? "junction" : "dir",
+      );
+
+      const result = spawnSync(
+        process.execPath,
+        [
+          "scripts/sync-runtimes.mjs",
+          "--scope",
+          "global",
+          "--targets",
+          "claude",
+          "--global-assets",
+          "hooks",
+        ],
+        {
+          cwd: repoRoot,
+          encoding: "utf8",
+          stdio: ["ignore", "pipe", "pipe"],
+          env: {
+            ...process.env,
+            HOME: root,
+            USERPROFILE: root,
+            META_KIM_CLAUDE_HOME: claudeHome,
+          },
+        },
+      );
+      assert.notEqual(result.status, 0);
+      assert.match(result.stderr + result.stdout, /immutable package store/u);
+      assert.deepEqual(readdirSync(storeRoot), []);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test("global_only cleanup preserves descendant files inside a runtime-sedimented Skill root", () => {
+    const tempRoot = createTempSourceRepoFixture();
+    try {
+      const stateRoot = join(tempRoot, ".meta-kim", "state", "default");
+      const skillRoot = join(tempRoot, ".agents", "skills", "custom-project-skill");
+      const skillFile = join(skillRoot, "SKILL.md");
+      const childFile = join(skillRoot, "references", "user-note.md");
+      mkdirSync(join(skillRoot, "references"), { recursive: true });
+      mkdirSync(stateRoot, { recursive: true });
+      writeFileSync(skillFile, "# custom skill\n");
+      writeFileSync(childFile, "# user note\n");
+      writeFileSync(join(tempRoot, ".meta-kim", "local.overrides.json"), `${JSON.stringify({ projectProjectionMode: "global_only" }, null, 2)}\n`);
+      writeFileSync(join(stateRoot, "project-capabilities.json"), `${JSON.stringify({
+        schemaVersion: "meta-kim-project-capabilities-v0.1",
+        capabilities: [{
+          type: "skill",
+          ownershipClass: "runtime_sedimented_project_copy",
+          dependencyUpdatePolicy: "preserve_project_copy",
+          files: [{ relPath: ".agents/skills/custom-project-skill/SKILL.md" }],
+        }],
+      }, null, 2)}\n`);
+      const childBytes = readFileSync(childFile);
+      const now = new Date().toISOString();
+      writeFileSync(join(tempRoot, ".meta-kim", "install-manifest.json"), `${JSON.stringify({
+        schemaVersion: 1,
+        scope: "project",
+        metaKimVersion: "test",
+        repoRoot: tempRoot,
+        createdAt: now,
+        updatedAt: now,
+        entries: [{
+          path: childFile,
+          category: "D",
+          source: "sync-runtimes",
+          purpose: "project-skill",
+          kind: "file",
+          installedAt: now,
+          sha256: createHash("sha256").update(childBytes).digest("hex"),
+          size: childBytes.length,
+        }],
+      }, null, 2)}\n`);
+
+      const result = runProjectSyncFromFixture(tempRoot);
+      assert.equal(result.status, 0, result.stderr || result.stdout);
+      assert.equal(readFileSync(childFile, "utf8"), "# user note\n");
+      assert.equal(readFileSync(skillFile, "utf8"), "# custom skill\n");
+    } finally {
+      rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
   test("global sync includes the meta-theory spine activation hook package", () => {
     const source = readFileSync(
       join(repoRoot, "scripts/sync-global-meta-theory.mjs"),
@@ -135,6 +344,14 @@ describe("runtime hook sync contract", () => {
         ),
       ),
       true,
+    );
+    assert.match(
+      source,
+      /GLOBAL_HOOK_PACKAGE_FILES = new Set\(\[[\s\S]*"project-root\.mjs"/,
+    );
+    assert.match(
+      source,
+      /GLOBAL_HOOK_PACKAGE_FILES = new Set\(\[[\s\S]*"spine-state-gates\.mjs"/,
     );
   });
 
@@ -160,8 +377,20 @@ describe("runtime hook sync contract", () => {
         ),
         true,
       );
+      assert.equal(
+        existsSync(join(codexHome, "hooks", "meta-kim", "project-root.mjs")),
+        true,
+      );
+      assert.equal(
+        existsSync(join(codexHome, "hooks", "meta-kim", "spine-state-gates.mjs")),
+        true,
+      );
       assert.equal(existsSync(join(codexHome, "hooks.json")), true);
-      assert.equal(existsSync(join(codexHome, "hooks", "graphify-context.mjs")), false);
+      assert.equal(
+        existsSync(join(codexHome, "hooks", "graphify-context.mjs")),
+        true,
+        "an unmanifested same-name root hook is user/unknown state and must be preserved",
+      );
       assert.equal(existsSync(join(codexHome, "hooks", "custom-user-hook.mjs")), true);
     } finally {
       rmSync(root, { recursive: true, force: true });

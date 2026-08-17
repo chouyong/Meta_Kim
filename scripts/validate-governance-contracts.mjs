@@ -29,7 +29,7 @@ assert(coreLoop.contractId === "meta-kim-core-loop-contract", "core loop contrac
 assert(
   coreLoop.defaultEntry?.entryScript === "scripts/run-meta-theory-governed-execution.mjs" &&
     coreLoop.defaultEntry?.packageScript === "meta:theory:run" &&
-    pkg.scripts?.["meta:theory:run"] === "node scripts/run-meta-theory-governed-execution.mjs",
+    pkg.scripts?.["meta:theory:run"] === "node scripts/run-meta-theory-governed-execution.mjs --emit-conversation-notice",
   "core loop contract default entry must point to the real meta:theory:run script",
 );
 assert(
@@ -92,24 +92,62 @@ for (const weapon of weapons.weapons ?? []) {
 }
 
 for (const project of dependencies.projects ?? []) {
-  assert(project.id !== "kim-decision", "Kim_Decision must remain reference-only, not a dependency project");
+  if (project.id === "kim-decision") {
+    assert(project.capabilityCard?.routeEligibility === "reference_only", "Kim_Decision dependency registry entry must remain reference_only");
+    assert(project.interface?.invokeAs === "reference" || project.interface?.invokeAs === "notInvokable", "Kim_Decision must not be an invokable dependency");
+  }
   assert(project.capabilityCard, `${project.id} missing capabilityCard`);
   assert(project.interface, `${project.id} missing interface`);
   assert(project.capabilityCard.inputContract && project.capabilityCard.outputContract, `${project.id} missing IO contract`);
 }
-assert(decisionPatterns.sourceBoundary?.notADependency === true, "decision pattern catalog must mark reference source as not a dependency");
+assert(decisionPatterns.sourceBoundary?.notInvokable === true, "decision pattern catalog must mark reference source as not invokable");
 assert(decisionPatterns.stagePatterns?.some((pattern) => pattern.stage === "critical"), "decision patterns must include Critical data");
 assert(decisionPatterns.stagePatterns?.some((pattern) => pattern.stage === "fetch"), "decision patterns must include Fetch data");
 assert(decisionPatterns.stagePatterns?.some((pattern) => pattern.stage === "thinking"), "decision patterns must include Thinking data");
 assert(decisionPatterns.stagePatterns?.some((pattern) => pattern.stage === "review"), "decision patterns must include Review data");
 
-for (const platform of runtimeMatrix.platforms ?? []) {
-  const records = [...(platform.capabilities ?? [])];
-  for (const record of records) {
-    assert(record.support && record.confidence && record.trigger && record.evidence, `${platform.platform}.${record.capability} missing support/confidence/trigger/evidence`);
-    assert(!(record.support === "native" && record.confidence === "unverified"), `${platform.platform}.${record.capability} native cannot be unverified`);
+export function assertRuntimeMatrixGovernanceShape(matrix) {
+  const modeFields = [
+    "hostSupport",
+    "hostConfidence",
+    "metaKimIntegration",
+    "acceptanceRequirement",
+    "acceptanceState",
+    "routeEligibility",
+  ];
+  for (const platform of matrix.platforms ?? []) {
+    const records = [...(platform.capabilities ?? [])];
+    for (const record of records) {
+      const context = `${platform.platform}.${record.capability}`;
+      assert(
+        record.support &&
+          record.confidence &&
+          record.trigger &&
+          Array.isArray(record.evidenceRefs) &&
+          record.evidenceRefs.length > 0 &&
+          record.claimsByMode &&
+          Object.keys(record.claimsByMode).length > 0,
+        `${context} missing support/confidence/trigger/evidenceRefs/claimsByMode`,
+      );
+      assert(
+        !(record.support === "native" && record.confidence === "unverified"),
+        `${context} native cannot be unverified`,
+      );
+      for (const mode of record.runtimeModes ?? []) {
+        const claim = record.claimsByMode[mode];
+        assert(claim, `${context}.${mode} missing mode claim`);
+        for (const field of modeFields) {
+          assert(claim[field] !== undefined, `${context}.${mode} missing ${field}`);
+        }
+        assert(
+          Array.isArray(claim.evidenceRefs) && claim.evidenceRefs.length > 0,
+          `${context}.${mode} missing evidenceRefs`,
+        );
+      }
+    }
   }
 }
+assertRuntimeMatrixGovernanceShape(runtimeMatrix);
 assert(osMatrix.operatingSystems?.some((entry) => entry.id === "macos"), "OS matrix missing macOS");
 assert(osMatrix.operatingSystems?.some((entry) => entry.id === "windows"), "OS matrix missing Windows");
 assert(osMatrix.operatingSystems?.some((entry) => entry.id === "linux"), "OS matrix missing Linux");

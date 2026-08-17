@@ -12,9 +12,12 @@ import os from "node:os";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
+import { buildIsolatedUserHomeEnv } from "./isolated-user-home-env.mjs";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const keepTemp = process.argv.includes("--keep-temp");
+const PROJECTION_PACKAGE_RECEIPT_PURPOSE =
+  "primary-runtime-global-projection-package-runtime-bundle:receipt";
 
 const projectCases = [
   {
@@ -96,6 +99,30 @@ function readJson(filePath) {
   return JSON.parse(readFileSync(filePath, "utf8"));
 }
 
+function normalizedPathText(value) {
+  const normalized = String(value).replaceAll("\\", "/");
+  return process.platform === "win32" ? normalized.toLowerCase() : normalized;
+}
+
+function stablePackageRootFromManifest(manifest) {
+  const receiptEntry = manifest?.entries?.find((entry) =>
+    entry.source === "sync-global-meta-theory" &&
+    entry.purpose === PROJECTION_PACKAGE_RECEIPT_PURPOSE &&
+    entry.kind === "file"
+  );
+  if (!receiptEntry || !existsSync(receiptEntry.path)) return null;
+  const receipt = readJson(receiptEntry.path);
+  if (typeof receipt.packageRootRelative !== "string") return null;
+  const packageRoot = path.resolve(path.dirname(receiptEntry.path), receipt.packageRootRelative);
+  return existsSync(packageRoot) ? packageRoot : null;
+}
+
+function hookCommands(config) {
+  return Object.values(config?.hooks ?? {}).flatMap((blocks) =>
+    (blocks ?? []).flatMap((block) => block.hooks ?? [])
+  ).map((hook) => hook.command).filter((command) => typeof command === "string");
+}
+
 const runtimeCompatibilityCatalog = readJson(
   path.join(repoRoot, "config", "runtime-compatibility-catalog.json"),
 );
@@ -111,7 +138,7 @@ function runNode(args, options = {}) {
     cwd: repoRoot,
     encoding: "utf8",
     maxBuffer: 10 * 1024 * 1024,
-    timeout: 120_000,
+    timeout: 300_000,
     windowsHide: true,
     env: { ...process.env, ...(options.env ?? {}) },
   });
@@ -145,6 +172,9 @@ function parseSetupJson(result) {
 
 function inspectProjectCase(baseDir, entry) {
   const projectDir = path.join(baseDir, entry.id);
+  const projectUserHome = path.join(baseDir, "project-user-home");
+  const projectEnv = buildIsolatedUserHomeEnv(projectUserHome);
+  const targetExistedBeforeDryRun = existsSync(projectDir);
   const targetsArg = entry.targets.join(",");
   const commonArgs = [
     "setup.mjs",
@@ -161,11 +191,12 @@ function inspectProjectCase(baseDir, entry) {
     // proving the instruction-file projection boundaries per target.
     "--project-instructions=managed",
   ];
-  const dryResult = runNode([...commonArgs, "--dry-run"]);
+  const dryResult = runNode([...commonArgs, "--dry-run"], { env: projectEnv });
   const dryParsed = parseSetupJson(dryResult);
-  const applyResult = runNode([...commonArgs, "--apply"]);
+  const targetCreatedByDryRun = !targetExistedBeforeDryRun && existsSync(projectDir);
+  const applyResult = runNode([...commonArgs, "--apply"], { env: projectEnv });
   const applyParsed = parseSetupJson(applyResult);
-  const currentResult = runNode([...commonArgs, "--dry-run"]);
+  const currentResult = runNode([...commonArgs, "--dry-run"], { env: projectEnv });
   const currentParsed = parseSetupJson(currentResult);
   const manifestPath = toFsPath(projectDir, ".meta-kim/state/default/project-bootstrap.json");
   const manifest = existsSync(manifestPath) ? readJson(manifestPath) : null;
@@ -181,6 +212,7 @@ function inspectProjectCase(baseDir, entry) {
     JSON.stringify(activeTargets) !== JSON.stringify(entry.targets) ? activeTargets : null;
   const ok =
     dryParsed.ok &&
+    !targetCreatedByDryRun &&
     applyParsed.ok &&
     currentParsed.ok &&
     missingExpected.length === 0 &&
@@ -198,6 +230,7 @@ function inspectProjectCase(baseDir, entry) {
     layer: "project",
     targets: entry.targets,
     status: ok ? "pass" : "fail",
+    targetCreatedByDryRun,
     dryRunStatus: dryParsed.payload?.results?.[0]?.state?.status ?? null,
     applyStatus: applyParsed.payload?.results?.[0]?.state?.status ?? null,
     postApplyDryRunStatus: currentParsed.payload?.results?.[0]?.state?.status ?? null,
@@ -282,12 +315,22 @@ function inspectGlobalSync(baseDir, { id, targets, withGlobalHooks = false }) {
       );
       const codexHooksJsonPath = path.join(homes.codex, "hooks.json");
       const codexHooksJson = existsSync(codexHooksJsonPath)
-        ? readFileSync(codexHooksJsonPath, "utf8")
-        : "";
+        ? readJson(codexHooksJsonPath)
+        : null;
+      const stablePackageRoot = stablePackageRootFromManifest(manifest);
+      const commands = hookCommands(codexHooksJson).map(normalizedPathText);
+      const stablePackageRootText = stablePackageRoot
+        ? normalizedPathText(stablePackageRoot)
+        : null;
+      const repoRootText = normalizedPathText(repoRoot);
       requiredChecks.codexGlobalHooksJson =
-        codexHooksJson.includes("activate-meta-theory-spine.mjs") &&
-        codexHooksJson.includes("--package-root") &&
-        codexHooksJson.includes(repoRoot.replace(/\\/g, "\\\\"));
+        stablePackageRootText !== null &&
+        commands.some((command) =>
+          command.includes("activate-meta-theory-spine.mjs") &&
+          command.includes("--package-root") &&
+          command.includes(stablePackageRootText)
+        ) &&
+        commands.every((command) => !command.includes(repoRootText));
     }
   }
   if (targets.includes("cursor")) {

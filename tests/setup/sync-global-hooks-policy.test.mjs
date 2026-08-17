@@ -1,14 +1,68 @@
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
 import { execFile, spawnSync } from "node:child_process";
-import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
+import { recordSetupRuntimeExecutableBindings } from "../../scripts/runtime-executable-binding.mjs";
 
 const execFileAsync = promisify(execFile);
 const REPO_ROOT = path.join(import.meta.dirname, "..", "..");
 const SCRIPT = path.join(REPO_ROOT, "scripts", "sync-global-meta-theory.mjs");
+const PROJECTION_PACKAGE_RECEIPT_PURPOSE =
+  "primary-runtime-global-projection-package-runtime-bundle:receipt";
+
+function normalizedPathText(value) {
+  const normalized = String(value).replaceAll("\\", "/");
+  return process.platform === "win32" ? normalized.toLowerCase() : normalized;
+}
+
+async function stablePackageRootFromManifest(root) {
+  const manifest = JSON.parse(
+    await readFile(path.join(root, ".meta-kim", "install-manifest.json"), "utf8"),
+  );
+  const receiptEntry = manifest.entries.find((entry) =>
+    entry.source === "sync-global-meta-theory" &&
+    entry.purpose === PROJECTION_PACKAGE_RECEIPT_PURPOSE &&
+    entry.kind === "file"
+  );
+  assert.ok(receiptEntry, "global manifest must identify the stable projection package receipt");
+  const receipt = JSON.parse(await readFile(receiptEntry.path, "utf8"));
+  return path.resolve(path.dirname(receiptEntry.path), receipt.packageRootRelative);
+}
+
+function assertUsesStablePackageRoot(content, stablePackageRoot, label) {
+  const normalized = normalizedPathText(content);
+  assert.ok(
+    normalized.includes(normalizedPathText(stablePackageRoot)),
+    `${label} must reference the manifest-authoritative stable package root`,
+  );
+  assert.equal(
+    normalized.includes(normalizedPathText(REPO_ROOT)),
+    false,
+    `${label} must not retain the source checkout root`,
+  );
+}
+
+function hookCommands(config) {
+  return Object.values(config.hooks ?? {}).flatMap((blocks) =>
+    (blocks ?? []).flatMap((block) => block.hooks ?? [])
+  ).map((hook) => hook.command).filter((command) => typeof command === "string");
+}
+
+function assertHookConfigUsesStablePackageRoot(config, stablePackageRoot, label) {
+  const commands = hookCommands(config).map(normalizedPathText);
+  assert.ok(
+    commands.some((command) => command.includes(normalizedPathText(stablePackageRoot))),
+    `${label} must reference the manifest-authoritative stable package root`,
+  );
+  assert.equal(
+    commands.some((command) => command.includes(normalizedPathText(REPO_ROOT))),
+    false,
+    `${label} must not retain the source checkout root`,
+  );
+}
 
 async function withTempRuntimeHomes(fn) {
   const root = await mkdtemp(path.join(os.tmpdir(), "meta-kim-global-sync-"));
@@ -29,14 +83,24 @@ async function withTempRuntimeHomes(fn) {
 }
 
 async function runScript(args, env) {
-  return execFileAsync(process.execPath, [SCRIPT, ...args], {
+  if (args.includes("--check")) {
+    recordSetupRuntimeExecutableBindings({
+      roots: [path.resolve(env.HOME)],
+      targets: ["claude", "codex"],
+      pathResolver: () => process.execPath,
+    });
+  }
+  const isolatedArgs = args.includes("--skip-durable-mcp")
+    ? args
+    : [...args, "--skip-durable-mcp"];
+  return execFileAsync(process.execPath, [SCRIPT, ...isolatedArgs], {
     cwd: REPO_ROOT,
     env,
     maxBuffer: 1024 * 1024 * 8,
   });
 }
 
-function hookCommands(hooks = {}) {
+function hookCommandsFromMap(hooks = {}) {
   const commands = [];
   for (const blocks of Object.values(hooks ?? {})) {
     for (const block of blocks ?? []) {
@@ -61,10 +125,156 @@ function eventArgs(command) {
 }
 
 describe("sync-global-meta-theory hook policy", () => {
+  test("help exits successfully without resolving or writing runtime homes", async () => {
+    await withTempRuntimeHomes(async ({ env, root }) => {
+      for (const flag of ["--help", "-h"]) {
+        const result = await runScript([flag], env);
+        assert.match(result.stdout, /Usage: node scripts\/sync-global-meta-theory\.mjs/);
+        assert.match(result.stdout, /--with-global-hooks/);
+        assert.match(result.stdout, /--skip-durable-mcp/);
+        assert.deepEqual(
+          await readdir(root),
+          [],
+          `${flag} must not create runtime home or manifest state`,
+        );
+      }
+    });
+  });
+
+  test("unknown and incomplete options fail closed without writing", async () => {
+    await withTempRuntimeHomes(async ({ env, root }) => {
+      for (const args of [
+        ["--typo"],
+        ["--lang", "zh-CN"],
+        ["--targets"],
+        ["--targets="],
+      ]) {
+        await assert.rejects(
+          () => runScript(args, env),
+          (error) => {
+            assert.match(
+              error.stderr,
+              /Unknown option: --(?:typo|lang)|--targets requires a comma-separated value/,
+            );
+            return true;
+          },
+        );
+        assert.deepEqual(
+          await readdir(root),
+          [],
+          `${args.join(" ")} must fail before creating runtime state`,
+        );
+      }
+    });
+  });
+
+  test("retired Hook cleanup preserves unowned same-name user files", async () => {
+    await withTempRuntimeHomes(async ({ env, root }) => {
+      const hooksDir = path.join(root, "claude", "hooks");
+      const userHook = path.join(hooksDir, "pre-git-push-confirm.mjs");
+      const settingsPath = path.join(root, "claude", "settings.json");
+      await mkdir(hooksDir, { recursive: true });
+      await writeFile(userHook, "// user-owned same-name Hook\n", "utf8");
+      await writeFile(
+        settingsPath,
+        `${JSON.stringify({
+          hooks: {
+            PreToolUse: [
+              {
+                matcher: "Bash",
+                hooks: [{ type: "command", command: `node "${userHook}"` }],
+              },
+            ],
+          },
+        })}\n`,
+        "utf8",
+      );
+
+      const result = await runScript(
+        ["--targets", "claude", "--with-global-hooks"],
+        env,
+      );
+
+      assert.equal(await readFile(userHook, "utf8"), "// user-owned same-name Hook\n");
+      assert.match(await readFile(settingsPath, "utf8"), /pre-git-push-confirm\.mjs/u);
+      assert.match(result.stderr, /Preserved unowned same-name Hook/);
+    });
+  });
+
+  test("owned retired Meta_Kim Hook is backed up before removal", async () => {
+    await withTempRuntimeHomes(async ({ env, root }) => {
+      const hooksDir = path.join(root, "claude", "hooks");
+      const retiredHook = path.join(hooksDir, "pre-git-push-confirm.mjs");
+      const ownedSource = `#!/usr/bin/env node
+// PreToolUse hook: remind before git push
+const readJsonFromStdin = true;
+const decision = { permissionDecision: "allow" };
+console.log("About to git push");
+`;
+      await mkdir(hooksDir, { recursive: true });
+      await writeFile(retiredHook, ownedSource, "utf8");
+
+      await runScript(["--targets", "claude", "--with-global-hooks"], env);
+
+      await assert.rejects(() => readFile(retiredHook, "utf8"));
+      const backupRoot = path.join(hooksDir, ".meta-kim-legacy-backup");
+      const stamps = await readdir(backupRoot);
+      assert.ok(stamps.length > 0);
+      assert.equal(
+        await readFile(path.join(backupRoot, stamps[0], path.basename(retiredHook)), "utf8"),
+        ownedSource,
+      );
+    });
+  });
+
+  test("runtime-home writes reject a commands junction that escapes the selected home", async () => {
+    await withTempRuntimeHomes(async ({ env, root }) => {
+      const codexHome = path.join(root, "codex");
+      const outside = path.join(root, "outside-codex-home");
+      await mkdir(codexHome, { recursive: true });
+      await mkdir(outside, { recursive: true });
+      await symlink(outside, path.join(codexHome, "commands"), "junction");
+
+      await assert.rejects(
+        () => runScript(["--targets", "codex"], env),
+        (error) => {
+          assert.match(error.stderr, /Refusing to follow a symlink or junction/);
+          return true;
+        },
+      );
+      assert.deepEqual(await readdir(outside), []);
+    });
+  });
+
+  test("runtime-home writes reject a commands junction into the immutable package store", async () => {
+    await withTempRuntimeHomes(async ({ env, root }) => {
+      const codexHome = path.join(root, "codex");
+      const storeRoot = path.join(
+        root,
+        ".meta-kim",
+        "runtime",
+        "projection-packages",
+      );
+      await mkdir(codexHome, { recursive: true });
+      await mkdir(storeRoot, { recursive: true });
+      await symlink(storeRoot, path.join(codexHome, "commands"), "junction");
+
+      await assert.rejects(
+        () => runScript(["--targets", "codex"], env),
+        (error) => {
+          assert.match(error.stderr, /immutable package store/);
+          return true;
+        },
+      );
+      await assert.rejects(() => readFile(path.join(storeRoot, "meta-theory.md"), "utf8"));
+    });
+  });
+
   test("default global sync/check does not require Claude global hooks", async () => {
     await withTempRuntimeHomes(async ({ env, root }) => {
       const sync = await runScript(["--targets", "claude"], env);
       assert.match(sync.stdout, /Skipped Claude Code global hooks/);
+      const stablePackageRoot = await stablePackageRootFromManifest(root);
 
       for (const commandName of [
         "meta-theory.md",
@@ -75,16 +285,35 @@ describe("sync-global-meta-theory hook policy", () => {
           path.join(root, "claude", "commands", commandName),
           "utf8",
         );
-        assert.ok(
-          command.includes(REPO_ROOT.replace(/\\/g, "/")),
-          `${commandName} must render the installed Meta_Kim package root`,
-        );
+        assertUsesStablePackageRoot(command, stablePackageRoot, commandName);
         assert.doesNotMatch(command, /__META_KIM_PACKAGE_ROOT__/);
       }
 
       const check = await runScript(["--check", "--targets", "claude"], env);
       assert.match(check.stdout, /global hooks skipped/);
       assert.match(check.stdout, /Claude Code commands/);
+    });
+  });
+
+  test("--skip-durable-mcp syncs Claude assets while preserving the running MCP runtime and config", async () => {
+    await withTempRuntimeHomes(async ({ env, root }) => {
+      const sync = await runScript(
+        ["--targets", "claude", "--skip-durable-mcp"],
+        env,
+      );
+      assert.match(sync.stdout, /skipped because explicitly requested with --skip-durable-mcp/);
+      await readFile(
+        path.join(root, "claude", "skills", "meta-theory", "SKILL.md"),
+        "utf8",
+      );
+      await assert.rejects(() => readFile(path.join(root, ".claude.json"), "utf8"));
+
+      const check = await runScript(
+        ["--check", "--targets", "claude", "--skip-durable-mcp"],
+        env,
+      );
+      assert.match(check.stdout, /not checked; skipped because explicitly requested/);
+      assert.match(check.stdout, /Claude Code global skill/);
     });
   });
 
@@ -115,18 +344,25 @@ describe("sync-global-meta-theory hook policy", () => {
       );
 
       await runScript(["--targets", "claude", "--with-global-hooks"], env);
+      const stablePackageRoot = await stablePackageRootFromManifest(root);
 
       const hookDir = path.join(root, "claude", "hooks", "meta-kim");
       for (const fileName of [
         "activate-meta-theory-spine.mjs",
         "block-dangerous-bash.mjs",
+        "spine-state-gates.mjs",
         "spine-state.mjs",
         "spine-state-utils.mjs",
         "stop-save-progress.mjs",
         "stop-memory-save.mjs",
         "utils.mjs",
       ]) {
-        await readFile(path.join(hookDir, fileName), "utf8");
+        const source = await readFile(path.join(hookDir, fileName), "utf8");
+        assert.equal(
+          normalizedPathText(source).includes(normalizedPathText(REPO_ROOT)),
+          false,
+          `${fileName} must not embed the source checkout root`,
+        );
       }
       for (const fileName of [
         "enforce-agent-dispatch.mjs",
@@ -134,6 +370,11 @@ describe("sync-global-meta-theory hook policy", () => {
         "stop-spine-cleanup.mjs",
       ]) {
         const source = await readFile(path.join(hookDir, fileName), "utf8");
+        assert.equal(
+          normalizedPathText(source).includes(normalizedPathText(REPO_ROOT)),
+          false,
+          `${fileName} must not embed the source checkout root`,
+        );
         assert.doesNotMatch(
           source,
           /\.\.\/\.\.\/shared\/hooks\//,
@@ -158,6 +399,11 @@ describe("sync-global-meta-theory hook policy", () => {
 
       const settings = JSON.parse(
         await readFile(path.join(root, "claude", "settings.json"), "utf8"),
+      );
+      assertHookConfigUsesStablePackageRoot(
+        settings,
+        stablePackageRoot,
+        "global Claude settings hooks",
       );
       const promptHooks = settings.hooks?.UserPromptSubmit?.flatMap(
         (block) => block.hooks ?? [],
@@ -257,11 +503,18 @@ describe("sync-global-meta-theory hook policy", () => {
     await withTempRuntimeHomes(async ({ env, root }) => {
       const rootHookDir = path.join(root, "claude", "hooks");
       await mkdir(rootHookDir, { recursive: true });
-      await writeFile(
-        path.join(rootHookDir, "post-format.mjs"),
-        "// locally modified legacy Meta_Kim hook\n",
+      const canonical = await readFile(
+        path.join(
+          REPO_ROOT,
+          "canonical",
+          "runtime-assets",
+          "claude",
+          "hooks",
+          "post-format.mjs",
+        ),
         "utf8",
       );
+      await writeFile(path.join(rootHookDir, "post-format.mjs"), canonical, "utf8");
 
       await runScript(["--targets", "claude", "--with-global-hooks"], env);
 
@@ -292,6 +545,7 @@ describe("sync-global-meta-theory hook policy", () => {
       await writeFile(sentinelPath, sentinel, "utf8");
 
       await runScript(["--targets", "codex", "--with-global-hooks"], env);
+      const stablePackageRoot = await stablePackageRootFromManifest(root);
 
       assert.equal(await readFile(sentinelPath, "utf8"), sentinel);
       assert.equal(await readFile(legacySkillPath, "utf8"), "user legacy claude skill\n");
@@ -305,10 +559,20 @@ describe("sync-global-meta-theory hook policy", () => {
         "bash-readonly-whitelist.mjs",
         "enforce-agent-dispatch.mjs",
       ]) {
-        await readFile(path.join(codexHookDir, fileName), "utf8");
+        const source = await readFile(path.join(codexHookDir, fileName), "utf8");
+        assert.equal(
+          normalizedPathText(source).includes(normalizedPathText(REPO_ROOT)),
+          false,
+          `${fileName} must not embed the source checkout root`,
+        );
       }
       const hooksJson = JSON.parse(
         await readFile(path.join(root, "codex", "hooks.json"), "utf8"),
+      );
+      assertHookConfigUsesStablePackageRoot(
+        hooksJson,
+        stablePackageRoot,
+        "global Codex hooks",
       );
       const promptHooks = hooksJson.hooks?.UserPromptSubmit?.flatMap(
         (block) => block.hooks ?? [],
@@ -318,7 +582,8 @@ describe("sync-global-meta-theory hook policy", () => {
           (hook) =>
             hook.command.includes("activate-meta-theory-spine.mjs") &&
             hook.command.includes("--package-root") &&
-            hook.command.includes(REPO_ROOT),
+            normalizedPathText(hook.command).includes(normalizedPathText(stablePackageRoot)) &&
+            !normalizedPathText(hook.command).includes(normalizedPathText(REPO_ROOT)),
         ),
         "global Codex hooks.json must register prompt-entry project bootstrap hook with package-root evidence",
       );
@@ -342,7 +607,7 @@ describe("sync-global-meta-theory hook policy", () => {
       const hooksJson = JSON.parse(
         await readFile(path.join(root, "codex", "hooks.json"), "utf8"),
       );
-      const medusaCommands = hookCommands(hooksJson.hooks).filter((command) =>
+      const medusaCommands = hookCommandsFromMap(hooksJson.hooks).filter((command) =>
         /medusa-(?:postscan-enqueue|findings-surface)\.mjs/.test(command),
       );
       assert.ok(
@@ -397,6 +662,7 @@ describe("sync-global-meta-theory hook policy", () => {
   test("Codex global skill sync/check uses the Codex skill projection", async () => {
     await withTempRuntimeHomes(async ({ env, root }) => {
       await runScript(["--targets", "codex"], env);
+      const stablePackageRoot = await stablePackageRootFromManifest(root);
 
       const skillPath = path.join(
         root,
@@ -420,10 +686,7 @@ describe("sync-global-meta-theory hook policy", () => {
         path.join(root, "codex", "commands", "meta-theory.md"),
         "utf8",
       );
-      assert.ok(
-        command.includes(REPO_ROOT.replace(/\\/g, "/")),
-        "global Codex command must render the installed Meta_Kim package root",
-      );
+      assertUsesStablePackageRoot(command, stablePackageRoot, "global Codex meta-theory command");
       assert.doesNotMatch(command, /__META_KIM_PACKAGE_ROOT__/);
       assert.match(command, /run-meta-theory-governed-execution\.mjs/);
       assert.match(command, /--emit-conversation-notice/);
@@ -432,10 +695,7 @@ describe("sync-global-meta-theory hook policy", () => {
           path.join(root, "codex", "commands", commandName),
           "utf8",
         );
-        assert.ok(
-          extraCommand.includes(REPO_ROOT.replace(/\\/g, "/")),
-          `global Codex ${commandName} must render the installed Meta_Kim package root`,
-        );
+        assertUsesStablePackageRoot(extraCommand, stablePackageRoot, `global Codex ${commandName}`);
         assert.doesNotMatch(extraCommand, /__META_KIM_PACKAGE_ROOT__/);
       }
 
@@ -631,7 +891,7 @@ Critical -> Fetch -> Thinking -> Review
     });
   });
 
-  test("Codex global hooks merge preserves user hooks and repairs stale Meta_Kim entries", async () => {
+  test("Codex global hooks merge preserves user hooks and detects stale Meta_Kim entries", async () => {
     await withTempRuntimeHomes(async ({ env, root }) => {
       const codexHome = path.join(root, "codex");
       await mkdir(codexHome, { recursive: true });
@@ -645,11 +905,13 @@ Critical -> Fetch -> Thinking -> Review
                 {
                   hooks: [
                     { type: "command", command: "node user-only.js" },
-                    {
-                      type: "command",
-                      command: `node "${path.join(codexHome, "hooks", "meta-kim", "old-spine.mjs")}"`,
-                    },
                   ],
+                },
+              ],
+              Stop: [
+                {
+                  matcher: "*",
+                  hooks: [{ type: "command", command: "node user-stop-only.js" }],
                 },
               ],
             },
@@ -665,8 +927,24 @@ Critical -> Fetch -> Thinking -> Review
       const merged = JSON.parse(await readFile(hooksPath, "utf8"));
       const rendered = JSON.stringify(merged);
       assert.match(rendered, /node user-only\.js/);
-      assert.doesNotMatch(rendered, /old-spine\.mjs/);
+      assert.match(rendered, /node user-stop-only\.js/);
       assert.match(rendered, /activate-meta-theory-spine\.mjs/);
+      assert.match(rendered, /stop-spine-cleanup\.mjs/);
+      const stopCommands = (merged.hooks.Stop ?? [])
+        .flatMap((entry) => entry.hooks ?? [])
+        .map((hook) => hook.command);
+      assert.equal(
+        stopCommands.filter((command) => command.includes("meta-kim-memory-save.mjs")).length,
+        1,
+      );
+      assert.equal(
+        stopCommands.filter((command) => command.includes("stop-spine-cleanup.mjs")).length,
+        1,
+      );
+      assert.ok(
+        stopCommands.findIndex((command) => command.includes("meta-kim-memory-save.mjs")) <
+        stopCommands.findIndex((command) => command.includes("stop-spine-cleanup.mjs")),
+      );
       assert.match(rendered, /--package-root/);
 
       await assert.rejects(
@@ -688,6 +966,66 @@ Critical -> Fetch -> Thinking -> Review
           return true;
         },
       );
+    });
+  });
+
+  test("global settings writes are atomic and preserve user JSON on injected failure", async () => {
+    await withTempRuntimeHomes(async ({ env, root }) => {
+      const fixtures = [
+        {
+          id: "claude-settings",
+          target: path.join(root, "claude", "settings.json"),
+          args: ["--targets", "claude", "--with-global-hooks"],
+        },
+        {
+          id: "codex-hooks",
+          target: path.join(root, "codex", "hooks.json"),
+          args: ["--targets", "codex", "--with-global-hooks"],
+        },
+      ];
+
+      for (const fixture of fixtures) {
+        await mkdir(path.dirname(fixture.target), { recursive: true });
+        const original = `${JSON.stringify(
+          {
+            unknownUserField: { preserve: true, runtime: fixture.id },
+            hooks: {
+              UserPromptSubmit: [
+                { hooks: [{ type: "command", command: "node user-only.js" }] },
+              ],
+            },
+          },
+          null,
+          2,
+        )}\n`;
+        await writeFile(fixture.target, original, "utf8");
+
+        await assert.rejects(
+          () =>
+            runScript(fixture.args, {
+              ...env,
+              META_KIM_TEST_FAIL_ATOMIC_SETTINGS_WRITE: fixture.id,
+            }),
+          (error) => {
+            assert.match(error.stderr, new RegExp(`Injected atomic settings write failure: ${fixture.id}`));
+            return true;
+          },
+        );
+
+        const preserved = await readFile(fixture.target, "utf8");
+        assert.equal(preserved, original);
+        assert.deepEqual(JSON.parse(preserved).unknownUserField, {
+          preserve: true,
+          runtime: fixture.id,
+        });
+        assert.equal(
+          (await readdir(path.dirname(fixture.target))).some((entry) =>
+            entry.includes(".meta-kim-staged-"),
+          ),
+          false,
+          "failed atomic writes must clean their staged file",
+        );
+      }
     });
   });
 

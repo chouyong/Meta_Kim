@@ -191,11 +191,19 @@ describe("SKILL.md structural integrity", async () => {
   });
 
   describe("Progressive disclosure boundaries", () => {
-    test("SKILL.md stays lean and delegates details to references", () => {
-      const lineCount = raw.split(/\r?\n/).length;
-      assert.ok(
-        lineCount <= 500,
-        `SKILL.md should stay <= 500 lines after progressive disclosure; got ${lineCount}`,
+    test("SKILL.md delegates specialized detail through the reference index", () => {
+      const referenceSection = extractSecondLevelSection(raw, "Reference loading");
+      assert.ok(referenceSection, "SKILL.md must keep one explicit reference-loading boundary");
+      for (const file of REFERENCE_FILES) {
+        assert.ok(
+          referenceSection.includes(`\`${file}\``),
+          `Reference loading must route specialized detail to ${file}`,
+        );
+      }
+      assert.doesNotMatch(
+        raw,
+        /```json\s*\{\s*"\$schema"/,
+        "SKILL.md must not inline machine schemas instead of delegating to contracts/references",
       );
     });
 
@@ -215,13 +223,11 @@ describe("SKILL.md structural integrity", async () => {
       assert.ok(raw.includes("verificationPacket.fixEvidence"));
     });
 
-    test("agent-teams-playbook is scoped to real parallel execution lanes", () => {
-      assert.match(
-        raw,
-        /Thinking[\s\S]{0,120}Execution[\s\S]{0,240}agent-teams-playbook/i,
-      );
-      assert.match(raw, /2\+ executable worker lanes/i);
-      assert.match(raw, /DAG.*collision/i);
+    test("stage DAG is authoritative and agent-teams-playbook is optional", () => {
+      assert.match(raw, /coreLoop\.stageDagPacket[\s\S]{0,240}runtime authority/i);
+      assert.match(raw, /maximal safe ready set/i);
+      assert.match(raw, /agent-teams-playbook[\s\S]{0,180}optional/i);
+      assert.match(raw, /never a prerequisite for safe native fan-out/i);
       assert.doesNotMatch(
         raw,
         /Apply `agent-teams-playbook`[\s\S]{0,80}before substantive work/i,
@@ -230,36 +236,47 @@ describe("SKILL.md structural integrity", async () => {
 
     test("runtime command does not force agent-teams-playbook for all non-trivial work", async () => {
       const command = await readFile("canonical/runtime-assets/codex/commands/meta-theory.md");
-      assert.match(command, /2\+ executable worker lanes/i);
-      assert.match(command, /DAG.*collision/i);
+      assert.match(command, /authoritative stage DAG[\s\S]{0,120}native `spawn_agent`/i);
+      assert.match(command, /agent-teams-playbook[\s\S]{0,80}optional/i);
+      assert.match(command, /optional_adapter_not_selected/i);
       assert.doesNotMatch(command, /For any non-trivial task,\s*first apply `agent-teams-playbook`/i);
     });
 
-    test("Codex /meta-theory command surfaces governed run output and requires the top-level native spawn tool", async () => {
+    test("Codex /meta-theory command surfaces governed output and uses the adaptive top-level spawn contract", async () => {
       const command = await readFile("canonical/runtime-assets/codex/commands/meta-theory.md");
       const pkg = await readJson("package.json");
       assert.match(command, /__META_KIM_PACKAGE_ROOT__\/scripts\/run-meta-theory-governed-execution\.mjs/);
       assert.match(command, /--runtime codex/);
       assert.match(command, /meta:theory:run:notice -- --runtime codex "\$ARGUMENTS"/);
-      assert.match(command, /relay the compact stdout notice/i);
+      assert.match(command, /localized stderr progress snapshots/i);
+      assert.match(command, /stdout as the single final machine-readable JSON summary/i);
       assert.match(command, /Windows\/npm paths strip forwarded flags/i);
       assert.match(pkg.scripts["meta:theory:run:notice"], /--emit-conversation-notice/);
-      assert.match(command, /top-level native `spawn_agent`/i);
-      assert.match(command, /`task_name`, `message`, and `fork_turns`/);
-      assert.match(command, /bounded worker message/i);
-      assert.match(command, /Do not pass `agent_type` or `fork_context`/);
+      assert.match(command, /top-level `spawn_agent`/i);
+      assert.match(command, /`task_name`/);
+      assert.match(command, /`message`/);
+      assert.match(command, /`fork_turns`/);
+      assert.match(command, /ownerBindingMode=native_custom_agent/i);
+      assert.match(command, /active schema exposes `agent_type`/i);
+      assert.match(command, /run_scoped_owner_contract/i);
+      assert.match(command, /omit `nativeAgentType`\/`agent_type`/i);
+      assert.doesNotMatch(command, /fork_context/);
       assert.match(command, /Do not discover or fall back to a legacy namespaced spawn API/);
       assert.doesNotMatch(command, /multi_agent_v1\.spawn_agent/);
     });
 
-    test("Codex runtime reference uses the top-level native spawn task contract", async () => {
+    test("Codex runtime reference uses the adaptive top-level spawn task contract", async () => {
       const reference = await readFile("canonical/skills/meta-theory/references/runtime-codex.md");
       assert.match(reference, /Codex global or project owners?/);
       assert.match(reference, /top-level `spawn_agent`/);
       assert.match(reference, /`task_name`/);
       assert.match(reference, /`message`/);
       assert.match(reference, /`fork_turns`/);
-      assert.match(reference, /Do not pass `agent_type` or `fork_context`/);
+      assert.match(reference, /Select `native_custom_agent`/i);
+      assert.match(reference, /schema-confirmed `agent_type`/i);
+      assert.match(reference, /run_scoped_owner_contract/i);
+      assert.match(reference, /omit `nativeAgentType`\/`agent_type`/i);
+      assert.doesNotMatch(reference, /fork_context/);
       assert.doesNotMatch(reference, /multi_agent_v1\.spawn_agent/);
     });
 
@@ -319,10 +336,13 @@ describe("SKILL.md structural integrity", async () => {
       const runner = await readFile("scripts/run-meta-theory-governed-execution.mjs");
       assert.match(runner, /argValue\("--runtime"/);
       assert.match(runner, /normalizeRouteRuntime\(runtimeArg\)/);
-      assert.match(runner, /selectExecutionRoute\(\{ task, runtime: routeRuntime, os: routeOs \}\)/);
+      assert.match(runner, /SELECT_EXECUTION_ROUTE_SCRIPT/);
+      assert.match(runner, /"--runtime",\s*routeRuntime/);
       assert.match(runner, /runtimeFamily: routeRuntime/);
-      assert.match(runner, /The Node governed runner cannot call the active host Agent\/Task or spawn_agent tool directly/);
-      assert.doesNotMatch(runner, /cannot call the Codex App\/CLI spawn_agent host tool directly/);
+      assert.match(runner, /hostInvocationRequestPacket/);
+      assert.match(runner, /runtimeInvocationPlanPacket/);
+      assert.match(runner, /selected_not_invoked/);
+      assert.match(runner, /routeRuntime/);
     });
 
     test("SKILL.md preserves product reasoning, ten-x path challenge, and user-facing closure", () => {
@@ -579,10 +599,11 @@ describe("Canonical meta-agent boundary structure", () => {
     );
   });
 
-  test("meta-conductor scopes agent-teams-playbook to parallel lanes only", async () => {
+  test("meta-conductor makes native stage-DAG fan-out sufficient", async () => {
     const conductor = await readFile("canonical/agents/meta-conductor.md");
-    assert.match(conductor, /2\+ executable worker lanes/i);
-    assert.match(conductor, /DAG.*collision/i);
+    assert.match(conductor, /authoritative stage DAG[\s\S]{0,180}native Agent\/Task\/`spawn_agent`/i);
+    assert.match(conductor, /agent-teams-playbook[\s\S]{0,120}optional/i);
+    assert.match(conductor, /never a prerequisite for fan-out/i);
     assert.doesNotMatch(
       conductor,
       /At the start of Stage 4 \(Execution\), use the `agent-teams-playbook` provider package/i,

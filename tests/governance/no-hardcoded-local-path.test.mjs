@@ -1,6 +1,32 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import {
+  assertPortablePackedReferences,
+  collectNonPortablePackedReferences,
+} from "../../scripts/verify-packed-user-install-update.mjs";
+
+const MAINTAINER_PATH_PATTERNS = [
+  /\b[A-Za-z]:[/\\]KimProject(?:[/\\]|$)/iu,
+  /\b[A-Za-z]:[/\\]Users[/\\]Kim(?:[/\\]|$)/iu,
+];
+
+function collectMaintainerPaths(value, location = "$") {
+  if (typeof value === "string") {
+    return MAINTAINER_PATH_PATTERNS.some((pattern) => pattern.test(value))
+      ? [{ location, value }]
+      : [];
+  }
+  if (Array.isArray(value)) {
+    return value.flatMap((entry, index) => collectMaintainerPaths(entry, `${location}[${index}]`));
+  }
+  if (value && typeof value === "object") {
+    return Object.entries(value).flatMap(([key, entry]) =>
+      collectMaintainerPaths(entry, `${location}.${key}`),
+    );
+  }
+  return [];
+}
 
 test("governance scripts and registries do not hardcode personal Kim_Decision path", () => {
   for (const file of [
@@ -11,4 +37,54 @@ test("governance scripts and registries do not hardcode personal Kim_Decision pa
   ]) {
     assert.doesNotMatch(readFileSync(file, "utf8"), /D:[/\\]KimProject[/\\]Kim_Decision/i, file);
   }
+});
+
+test("dependency registry contains no maintainer drive paths", () => {
+  const registry = JSON.parse(
+    readFileSync("config/capability-index/dependency-project-registry.json", "utf8"),
+  );
+  assert.deepEqual(
+    collectMaintainerPaths(registry),
+    [],
+    "use repository URI/revision evidence instead of a maintainer workspace path",
+  );
+  assert.deepEqual(
+    collectMaintainerPaths({ examples: ["C:/path/to/project", "D:/Project/example"] }),
+    [],
+    "generic Windows path examples are documentation, not maintainer path leakage",
+  );
+});
+
+test("packed generated runtime fragments reject source homes, deleted pack roots, and placeholders", () => {
+  const sourceRoot = "D:/work/source-repository";
+  const maintainerHome = "C:/Users/Maintainer";
+  const deletedPackRoot = "E:/temp/npm-pack/extract/package";
+  const forbiddenRoots = [sourceRoot, maintainerHome, deletedPackRoot];
+  const valid = {
+    command: "meta-kim",
+    args: ["mcp", "serve"],
+    runtimeWrapper: "C:/Users/RuntimeUser/.claude/hooks/meta-kim/launcher.mjs",
+  };
+  assert.deepEqual(
+    assertPortablePackedReferences(valid, { forbiddenRoots }),
+    { status: "passed", findingCount: 0 },
+  );
+
+  const findings = collectNonPortablePackedReferences(
+    {
+      source: `${sourceRoot}/scripts/mcp/meta-runtime-server.mjs`,
+      legacyHome: `${maintainerHome}/old-install`,
+      deletedPack: `${deletedPackRoot}/bin/meta-kim.mjs`,
+      placeholder: "__REPO_ROOT__/scripts/mcp/meta-runtime-server.mjs",
+    },
+    { forbiddenRoots },
+  );
+  assert.deepEqual(
+    new Set(findings.map((finding) => finding.reason)),
+    new Set(["forbidden_machine_root", "unresolved_placeholder"]),
+  );
+  assert.throws(
+    () => assertPortablePackedReferences({ command: "REPLACE_WITH_REPO_ROOT/bin" }),
+    /non-portable references/u,
+  );
 });

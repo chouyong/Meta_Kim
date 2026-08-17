@@ -86,7 +86,7 @@ function cliArgValue(name) {
 }
 
 function readText(filePath, maxChars = MAX_TEXT) {
-  if (!filePath || !existsSync(filePath)) return "";
+  if (typeof filePath !== "string" || !filePath || !existsSync(filePath)) return "";
   try {
     const text = readFileSync(filePath, "utf8");
     return text.length > maxChars ? text.slice(-maxChars) : text;
@@ -267,7 +267,8 @@ function startMemoryServiceBackground(endpoint) {
       windowsHide: true,
       env: {
         ...process.env,
-        MCP_ALLOW_ANONYMOUS_ACCESS: "true",
+        MCP_ALLOW_ANONYMOUS_ACCESS:
+          process.env.MCP_ALLOW_ANONYMOUS_ACCESS || "true",
         HF_HUB_OFFLINE: "1",
         TRANSFORMERS_OFFLINE: "1",
       },

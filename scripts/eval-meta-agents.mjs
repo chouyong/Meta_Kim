@@ -1,4 +1,4 @@
-import { execFile, spawn } from "node:child_process";
+import { execFile } from "node:child_process";
 import crypto from "node:crypto";
 import { readFileSync } from "node:fs";
 import { promises as fs } from "node:fs";
@@ -11,20 +11,256 @@ import {
   canonicalAgentsDir,
   canonicalRuntimeAssetsDir,
 } from "./meta-kim-sync-config.mjs";
+import {
+  buildClaudeSettingsIsolatedAgentOverride,
+  redactClaudeLiveCommandText,
+} from "./claude-live-agent-override.mjs";
+import { resolveClaudeLiveProviderEnvironment } from "./claude-live-provider-env.mjs";
+import { observeCodexJsonl } from "./live-acceptance/observe-host-events.mjs";
+import { readCodexSessionEvidence } from "./live-acceptance/read-codex-session-evidence.mjs";
+import {
+  cleanupActiveChildren,
+  installSignalCleanup,
+  PROCESS_TREE_CLEANUP_BOUNDARY,
+  PROCESS_TREE_CLEANUP_CLAIM,
+  runCommandWithIgnoredStdin,
+  runWindowsGuardedCommand,
+  isSafeWindowsLauncherFailureOperation,
+  isSafeWindowsLauncherFailureReason,
+} from "./eval-process-runner.mjs";
 
 const execFileAsync = promisify(execFile);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, "..");
 const rawArgs = process.argv.slice(2);
 const requireAllRuntimes = process.argv.includes("--require-all-runtimes");
+const processTreeCleanupNonClaim = Object.freeze({
+  processTreeCleanupClaim: PROCESS_TREE_CLEANUP_CLAIM,
+  processTreeCleanupBoundary: PROCESS_TREE_CLEANUP_BOUNDARY,
+});
+
+const MAX_PUBLIC_SECONDARY_CLEANUP_FAILURES = 4;
+const MAX_PUBLIC_OUTPUT_LIMIT_STREAM_INPUTS = 8;
+const MAX_PUBLIC_OUTPUT_LIMIT_STREAMS = 2;
+const PUBLIC_PROCESS_FAILURE_CODES = new Set([
+  "META_KIM_ACTIVE_CHILD_CLEANUP_FAILED",
+  "META_KIM_CHILD_COMMAND_FAILED",
+  "META_KIM_CHILD_COMMAND_LAUNCH_FAILED",
+  "META_KIM_COMMAND_ABORTED",
+  "META_KIM_COMMAND_CLEANUP_FAILED",
+  "META_KIM_COMMAND_OUTPUT_LIMIT_EXCEEDED",
+  "META_KIM_COMMAND_TIMEOUT",
+  "META_KIM_POSIX_PROCESS_GROUP_CLEANUP_FAILED",
+  "META_KIM_RUNNER_CONTROL_DIRECTORY_CLEANUP_FAILED",
+  "META_KIM_WINDOWS_JOB_PROCESS_GROUP_DRAIN_FAILED",
+  "META_KIM_WINDOWS_JOB_PROCESS_GROUP_FINAL_CLEANUP_FAILED",
+  "META_KIM_WINDOWS_JOB_PROCESS_GROUP_LAUNCHER_EARLY_EXIT",
+  "META_KIM_WINDOWS_PROCESS_LAUNCHER_FORCE_STOP_FAILED",
+  "META_KIM_WINDOWS_PROCESS_RUNNER_RESULT_CORRUPT",
+  "META_KIM_WINDOWS_PROCESS_RUNNER_RESULT_UNVERIFIED",
+]);
+const PUBLIC_PROCESS_SYSTEM_CODES = new Set([
+  "E2BIG",
+  "EACCES",
+  "EAGAIN",
+  "EBADF",
+  "EINVAL",
+  "EMFILE",
+  "ENOENT",
+  "ENOEXEC",
+  "ENOMEM",
+  "ENOTDIR",
+  "EPERM",
+]);
+const PUBLIC_PROCESS_CLEANUP_REASONS = new Set([
+  "aborted_cleanup_failed",
+  "cleanup_evidence_inconsistent",
+  "cleanup_unverified",
+  "finally_launcher_cleanup_failed",
+  "finally_launcher_exit_unverified",
+  "launcher_exit_unverified",
+  "launcher_exit_mismatch_after_verified_result",
+  "launcher_force_stop_exit_unverified",
+  "launcher_force_stop_failed",
+  "launcher_force_stop_rejected",
+  "launcher_force_stopped_after_cleanup_timeout",
+  "launcher_result_corrupt",
+  "launcher_result_missing",
+  "launcher_result_reason_unrecognized",
+  "launcher_result_schema_invalid",
+  "launcher_still_alive_control_directory_retained",
+  "launcher_verified_result_inconsistent",
+  "output_limit_cleanup_failed",
+  "posix_process_group_exit_unverified",
+  "timeout_cleanup_failed",
+]);
+const PUBLIC_SECONDARY_CLEANUP_FAILURE_CODES = new Set([
+  "META_KIM_RUNNER_CONTROL_DIRECTORY_CLEANUP_FAILED",
+]);
+const PUBLIC_SECONDARY_CLEANUP_FAILURE_REASONS = new Set([
+  "runner_temp_cleanup_failed",
+]);
+const PUBLIC_OWNED_PROCESS_GROUP_SCOPES = new Set([
+  "runner_owned_process_group",
+  "posix_detached_process_group",
+  "windows_job_object_owned_process_group",
+]);
+
+function isPublicProcessCleanupReason(value) {
+  return (
+    isSafeWindowsLauncherFailureReason(value) ||
+    PUBLIC_PROCESS_CLEANUP_REASONS.has(value)
+  );
+}
+
+function publicProcessFailureEvidence(error) {
+  if ((typeof error !== "object" && typeof error !== "function") || error === null) {
+    return {};
+  }
+
+  const evidence = {};
+
+  if (PUBLIC_PROCESS_FAILURE_CODES.has(error.code)) evidence.code = error.code;
+  if (PUBLIC_PROCESS_SYSTEM_CODES.has(error.systemCode)) {
+    evidence.systemCode = error.systemCode;
+  }
+  if (isSafeWindowsLauncherFailureOperation(error.launcherFailureOperation)) {
+    evidence.launcherFailureOperation = error.launcherFailureOperation;
+  }
+  if (
+    Number.isSafeInteger(error.launcherWin32Error) &&
+    error.launcherWin32Error >= 0 &&
+    error.launcherWin32Error <= 0xffff_ffff
+  ) {
+    evidence.launcherWin32Error = error.launcherWin32Error;
+  }
+  if (Number.isSafeInteger(error.timeoutMs) && error.timeoutMs >= 0) {
+    evidence.timeoutMs = error.timeoutMs;
+  }
+  if (
+    error.exitCode === null ||
+    (Number.isSafeInteger(error.exitCode) &&
+      error.exitCode >= 0 &&
+      error.exitCode <= 0xffff_ffff)
+  ) {
+    evidence.exitCode = error.exitCode;
+  }
+  if (Array.isArray(error.outputLimitStreams)) {
+    const outputLimitStreams = [
+      ...new Set(
+        error.outputLimitStreams
+          .slice(0, MAX_PUBLIC_OUTPUT_LIMIT_STREAM_INPUTS)
+          .filter((stream) => stream === "stdout" || stream === "stderr"),
+      ),
+    ].slice(0, MAX_PUBLIC_OUTPUT_LIMIT_STREAMS);
+    if (outputLimitStreams.length > 0) {
+      evidence.outputLimitStreams = outputLimitStreams;
+    }
+  }
+
+  const cleanupEvidenceFields = [
+    "ownedProcessGroupCleanupVerified",
+    "ownedProcessGroupCleanupFailure",
+    "ownedProcessGroupCleanupReason",
+    "ownedProcessGroupSurvivorCount",
+    "ownedProcessGroupScope",
+    "launcherStillAlive",
+    "launcherForcedStop",
+    "runnerControlDirectoryRetained",
+  ];
+  const hasCleanupEvidence = cleanupEvidenceFields.some((field) =>
+    Object.hasOwn(error, field),
+  );
+  const cleanupScopeAllowed = PUBLIC_OWNED_PROCESS_GROUP_SCOPES.has(
+    error.ownedProcessGroupScope,
+  );
+  const survivorCountAllowed =
+    error.ownedProcessGroupSurvivorCount === null ||
+    (Number.isSafeInteger(error.ownedProcessGroupSurvivorCount) &&
+      error.ownedProcessGroupSurvivorCount >= 0 &&
+      error.ownedProcessGroupSurvivorCount <= 0xffff_ffff);
+  const verifiedLauncherStateCoherent =
+    error.ownedProcessGroupScope === "windows_job_object_owned_process_group"
+      ? error.launcherStillAlive === false
+      : error.launcherStillAlive !== true;
+  const verifiedCleanupTuple =
+    error.ownedProcessGroupCleanupVerified === true &&
+    error.ownedProcessGroupCleanupFailure === false &&
+    error.ownedProcessGroupCleanupReason === null &&
+    (error.ownedProcessGroupSurvivorCount === null ||
+      error.ownedProcessGroupSurvivorCount === 0) &&
+    cleanupScopeAllowed &&
+    verifiedLauncherStateCoherent &&
+    error.launcherForcedStop !== true;
+  const failedCleanupTuple =
+    error.ownedProcessGroupCleanupVerified === false &&
+    error.ownedProcessGroupCleanupFailure === true &&
+    isPublicProcessCleanupReason(error.ownedProcessGroupCleanupReason) &&
+    survivorCountAllowed &&
+    cleanupScopeAllowed &&
+    (error.launcherStillAlive === undefined ||
+      typeof error.launcherStillAlive === "boolean") &&
+    (error.launcherForcedStop === undefined ||
+      typeof error.launcherForcedStop === "boolean") &&
+    (error.runnerControlDirectoryRetained === undefined ||
+      typeof error.runnerControlDirectoryRetained === "boolean");
+
+  if (verifiedCleanupTuple || failedCleanupTuple) {
+    evidence.ownedProcessGroupCleanupVerified =
+      error.ownedProcessGroupCleanupVerified;
+    evidence.ownedProcessGroupCleanupFailure =
+      error.ownedProcessGroupCleanupFailure;
+    evidence.ownedProcessGroupCleanupReason =
+      error.ownedProcessGroupCleanupReason;
+    evidence.ownedProcessGroupSurvivorCount =
+      error.ownedProcessGroupSurvivorCount;
+    evidence.ownedProcessGroupScope = error.ownedProcessGroupScope;
+    for (const field of [
+      "launcherStillAlive",
+      "launcherForcedStop",
+      "runnerControlDirectoryRetained",
+    ]) {
+      if (typeof error[field] === "boolean") evidence[field] = error[field];
+    }
+  } else if (hasCleanupEvidence) {
+    evidence.ownedProcessGroupCleanupVerified = false;
+    evidence.ownedProcessGroupCleanupFailure = true;
+    evidence.ownedProcessGroupCleanupReason = "cleanup_evidence_inconsistent";
+  }
+  if (error.processTreeCleanupClaim === PROCESS_TREE_CLEANUP_CLAIM) {
+    evidence.processTreeCleanupClaim = PROCESS_TREE_CLEANUP_CLAIM;
+  }
+  if (error.processTreeCleanupBoundary === PROCESS_TREE_CLEANUP_BOUNDARY) {
+    evidence.processTreeCleanupBoundary = PROCESS_TREE_CLEANUP_BOUNDARY;
+  }
+
+  if (Array.isArray(error.secondaryCleanupFailures)) {
+    const secondaryCleanupFailures = error.secondaryCleanupFailures
+      .slice(0, MAX_PUBLIC_SECONDARY_CLEANUP_FAILURES)
+      .filter(
+        (failure) =>
+          PUBLIC_SECONDARY_CLEANUP_FAILURE_CODES.has(failure?.code) &&
+          PUBLIC_SECONDARY_CLEANUP_FAILURE_REASONS.has(failure?.reason),
+      )
+      .map((failure) => ({ code: failure.code, reason: failure.reason }));
+    if (secondaryCleanupFailures.length > 0) {
+      evidence.secondaryCleanupFailures = secondaryCleanupFailures;
+    }
+  }
+
+  return evidence;
+}
+const primaryReleaseFuse = rawArgs.includes("--primary-release-fuse");
 const evalMode =
-  rawArgs.includes("--live") || rawArgs.includes("--mode=live")
+  primaryReleaseFuse || rawArgs.includes("--live") || rawArgs.includes("--mode=live")
     ? "live"
     : "smoke";
 const runtimeArg = rawArgs.find((arg) => arg.startsWith("--runtime="));
 const agentArg = rawArgs.find((arg) => arg.startsWith("--agent="));
 const selectedRuntimes = new Set(
-  runtimeArg
+  primaryReleaseFuse
+    ? ["claude", "codex"]
+    : runtimeArg
     ? runtimeArg
         .slice("--runtime=".length)
         .split(",")
@@ -62,8 +298,12 @@ const cursorLiveHarnessContractPath = path.join(
   "contracts",
   "cursor-live-turn-harness-contract.json",
 );
-const activeChildren = new Map();
-let cleanupInFlight = false;
+const CODEX_LIVE_TIMEOUT_MS = 180_000;
+const CODEX_SESSION_SETTLE_TIMEOUT_MS = 10_000;
+const CODEX_SESSION_SETTLE_INTERVAL_MS = 250;
+const PRIMARY_RELEASE_RUNTIME_PROCESS_TIMEOUT_MS = Object.freeze({
+  codex: 240_000,
+});
 
 const RUNTIME_FAILURE_TAXONOMY = Object.freeze({
   pass: "pass",
@@ -122,19 +362,47 @@ async function readCanonicalAgentIds() {
     .sort();
 }
 
-async function readRuntimeAgentIdsOrCanonical(runtimeAgentsDir, extension) {
-  if (await fileExists(runtimeAgentsDir)) {
-    return {
-      source: path.relative(repoRoot, runtimeAgentsDir).replace(/\\/g, "/"),
-      ids: (await fs.readdir(runtimeAgentsDir))
-        .filter((file) => file.endsWith(extension))
-        .map((file) => file.slice(0, -extension.length))
-        .sort(),
-    };
+function declaredAgentName(text, extension) {
+  const match = extension === ".toml"
+    ? String(text).match(/^\s*name\s*=\s*["']([^"']+)["']/mu)
+    : String(text).match(/^\s*name\s*:\s*["']?([^\s"']+)["']?\s*$/mu);
+  return match?.[1]?.trim() || null;
+}
+
+async function readRuntimeAgentDefinitions(runtimeAgentsDirs, extension) {
+  const definitions = new Map();
+  const sources = [];
+  for (const [index, runtimeAgentsDir] of runtimeAgentsDirs.entries()) {
+    if (!(await fileExists(runtimeAgentsDir))) continue;
+    const sourceCategory = index === 0 ? "project" : "global";
+    sources.push(sourceCategory);
+    for (const file of (await fs.readdir(runtimeAgentsDir)).filter((entry) => entry.endsWith(extension)).sort()) {
+      const filePath = path.join(runtimeAgentsDir, file);
+      const sourceText = await fs.readFile(filePath, "utf8");
+      const name = declaredAgentName(sourceText, extension);
+      if (!name || definitions.has(name)) continue;
+      definitions.set(name, {
+        name,
+        sourceCategory,
+        sourceDigest: crypto.createHash("sha256").update(sourceText).digest("hex"),
+      });
+    }
   }
   return {
-    source: "canonical/agents",
-    ids: await readCanonicalAgentIds(),
+    source: sources.length > 0 ? sources.join("+") : "runtime-agent-definitions-missing",
+    sources,
+    definitions: [...definitions.values()],
+    ids: [...definitions.keys()].sort(),
+  };
+}
+
+function publicRuntimeAgentInventory(discoveredAgents, expectedAgentIds) {
+  const required = new Set(expectedAgentIds);
+  return {
+    ids: discoveredAgents.ids.filter((agentId) => required.has(agentId)),
+    definitions: discoveredAgents.definitions.filter((definition) =>
+      required.has(definition.name)
+    ),
   };
 }
 
@@ -297,90 +565,6 @@ function delay(ms) {
   return new Promise((resolve) => {
     setTimeout(resolve, ms);
   });
-}
-
-function markChildActive(child, label) {
-  activeChildren.set(child.pid, { child, label });
-  child.once("close", () => {
-    activeChildren.delete(child.pid);
-  });
-}
-
-async function killProcessTree(pid, options = {}) {
-  const signal = options.signal ?? "SIGTERM";
-  if (!pid) {
-    return;
-  }
-
-  if (process.platform === "win32") {
-    try {
-      await execFileAsync("taskkill", ["/PID", String(pid), "/T", "/F"], {
-        cwd: repoRoot,
-        timeout: 15_000,
-        windowsHide: true,
-      });
-    } catch {
-      // Best-effort cleanup; process may already be gone.
-    }
-    return;
-  }
-
-  const targets = [-pid, pid];
-  for (const target of targets) {
-    try {
-      process.kill(target, signal);
-      return;
-    } catch {
-      // try next target
-    }
-  }
-}
-
-async function terminateChildTree(child, options = {}) {
-  const pid = child?.pid;
-  if (!pid || child.exitCode !== null) {
-    return;
-  }
-
-  const graceMs = options.graceMs ?? 5_000;
-  await killProcessTree(pid, { signal: "SIGTERM" });
-
-  for (let waited = 0; waited < graceMs; waited += 100) {
-    if (child.exitCode !== null) {
-      return;
-    }
-    await delay(100);
-  }
-
-  await killProcessTree(pid, { signal: "SIGKILL" });
-}
-
-async function cleanupActiveChildren(reason) {
-  if (cleanupInFlight) {
-    return;
-  }
-  cleanupInFlight = true;
-
-  const entries = [...activeChildren.values()];
-  if (entries.length > 0) {
-    logProgress(`${reason}; cleaning ${entries.length} child process(es)`);
-  }
-
-  await Promise.allSettled(
-    entries.map(({ child }) => terminateChildTree(child)),
-  );
-}
-
-function installSignalCleanup() {
-  const handleSignal = (signal) => {
-    void cleanupActiveChildren(`received ${signal}`).finally(() => {
-      process.exitCode = 130;
-      process.exit();
-    });
-  };
-
-  process.once("SIGINT", () => handleSignal("SIGINT"));
-  process.once("SIGTERM", () => handleSignal("SIGTERM"));
 }
 
 /** Only resolve CLIs and print JSON — same logic as eval, no smoke tests. */
@@ -1393,10 +1577,13 @@ function tryExtractCodexReply(raw) {
 
 function extractCodexThreadId(raw) {
   const events = parseJsonLines(raw);
-  const started = events.find(
-    (event) => event.type === "thread.started" && event.thread_id,
+  const started = events.filter(
+    (event) =>
+      event.type === "thread.started" &&
+      typeof event.thread_id === "string" &&
+      event.thread_id.length > 0,
   );
-  return typeof started?.thread_id === "string" ? started.thread_id : null;
+  return started.length === 1 ? started[0].thread_id : null;
 }
 
 async function resolveOpenClawCommand() {
@@ -1629,169 +1816,88 @@ async function runOpenClawAgentTurn(command, args, options) {
   const heartbeatMs = 30_000;
   const sessionTimeoutMs = options.sessionTimeoutMs ?? 90_000;
   const startedAtMs = Date.now();
+  const commandAbort = new AbortController();
+  const pollAbort = new AbortController();
 
-  return new Promise((resolve, reject) => {
-    const child = spawn(command.file, command.toArgs(args), {
+  async function recoverFromSession(stdout = "", stderr = "") {
+    const payload = await readOpenClawSessionPayload(
+      options.agentId,
+      options.sessionId,
+      startedAtMs,
+      options.sessionDirs ?? [],
+    );
+    return payload
+      ? { stdout, stderr, payload, recoveredFromSession: true }
+      : null;
+  }
+
+  const commandPromise = runCommandWithIgnoredStdin(
+    command.file,
+    command.toArgs(args),
+    {
       cwd: options.cwd,
       env: options.env,
-      windowsHide: true,
-      detached: process.platform !== "win32",
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    markChildActive(child, `${command.file} ${command.toArgs(args).join(" ")}`);
+      timeout: sessionTimeoutMs,
+      signal: commandAbort.signal,
+    },
+  );
+  const commandOutcome = commandPromise.then(
+    (result) => ({ type: "command", result, error: null }),
+    (error) => ({ type: "command", result: null, error }),
+  );
+  const sessionOutcome = (async () => {
+    let nextHeartbeatAt = startedAtMs + heartbeatMs;
+    while (!pollAbort.signal.aborted) {
+      await delay(sessionPollMs);
+      if (pollAbort.signal.aborted) return null;
+      const recovered = await recoverFromSession();
+      if (recovered) return { type: "session", result: recovered };
+      if (Date.now() >= nextHeartbeatAt) {
+        const elapsedSeconds = Math.round((Date.now() - startedAtMs) / 1_000);
+        logProgress(
+          `OpenClaw live turn still running for ${options.agentId} (${elapsedSeconds}s, session ${options.sessionId})`,
+        );
+        nextHeartbeatAt += heartbeatMs;
+      }
+    }
+    return null;
+  })();
 
-    let stdout = "";
-    let stderr = "";
-    let finished = false;
-    let pollInFlight = false;
-
-    async function settle(error, result) {
-      if (finished) {
-        return;
+  try {
+    const first = await Promise.race([commandOutcome, sessionOutcome]);
+    if (first?.type === "session") {
+      commandAbort.abort();
+      const stopped = await commandOutcome;
+      if (stopped.error?.code !== "META_KIM_COMMAND_ABORTED") {
+        if (stopped.error) throw stopped.error;
+      } else {
+        first.result.stdout = stopped.error.stdout ?? "";
+        first.result.stderr = stopped.error.stderr ?? "";
       }
-      finished = true;
-      clearInterval(pollId);
-      clearInterval(heartbeatId);
-      clearTimeout(timeoutId);
-      if (result?.recoveredFromSession && child.exitCode === null) {
-        void terminateChildTree(child, { graceMs: 1_000 });
-      }
-      if (error) {
-        reject(error);
-        return;
-      }
-      resolve(result);
+      return first.result;
     }
 
-    async function recoverFromSession() {
-      const payload = await readOpenClawSessionPayload(
-        options.agentId,
-        options.sessionId,
-        startedAtMs,
-        options.sessionDirs ?? [],
+    if (first?.error) {
+      const recovered = await recoverFromSession(
+        first.error.stdout ?? "",
+        first.error.stderr ?? "",
       );
-      if (!payload) {
-        return null;
-      }
-      return {
-        stdout,
-        stderr,
-        payload,
-        recoveredFromSession: true,
-      };
+      if (recovered) return recovered;
+      throw first.error;
     }
 
-    const pollId = setInterval(() => {
-      if (finished || pollInFlight) {
-        return;
-      }
-      pollInFlight = true;
-      recoverFromSession()
-        .then((result) => {
-          if (result) {
-            void settle(null, result);
-          }
-        })
-        .catch((error) => {
-          void settle(error);
-        })
-        .finally(() => {
-          pollInFlight = false;
-        });
-    }, sessionPollMs);
-
-    const heartbeatId = setInterval(() => {
-      if (finished) {
-        return;
-      }
-      const elapsedSeconds = Math.round((Date.now() - startedAtMs) / 1_000);
-      logProgress(
-        `OpenClaw live turn still running for ${options.agentId} (${elapsedSeconds}s, session ${options.sessionId})`,
-      );
-    }, heartbeatMs);
-
-    const timeoutId = setTimeout(() => {
-      recoverFromSession()
-        .then((result) => {
-          if (result) {
-            void settle(null, result);
-            return;
-          }
-          void terminateChildTree(child, { graceMs: 1_000 });
-          const failureDetails = mergeCommandOutput(stdout, stderr);
-          void settle(
-            new Error(
-              `Command timed out after ${sessionTimeoutMs}ms: ${command.file} ${command.toArgs(args).join(" ")}${
-                failureDetails ? `\n${failureDetails}` : ""
-              }`,
-            ),
-          );
-        })
-        .catch((error) => {
-          void settle(error);
-        });
-    }, sessionTimeoutMs);
-
-    child.stdout.on("data", (chunk) => {
-      stdout += chunk.toString();
-    });
-    child.stderr.on("data", (chunk) => {
-      stderr += chunk.toString();
-    });
-    child.on("error", (error) => {
-      void settle(error);
-    });
-    child.on("close", (code, signal) => {
-      if (finished) {
-        return;
-      }
-      if (code === 0) {
-        recoverFromSession()
-          .then((result) => {
-            if (result) {
-              void settle(null, result);
-              return;
-            }
-            try {
-              void settle(null, {
-                stdout,
-                stderr,
-                payload: extractOpenClawReply(mergeCommandOutput(stdout, stderr)),
-                recoveredFromSession: false,
-              });
-            } catch (error) {
-              void settle(error);
-            }
-          })
-          .catch((error) => {
-            void settle(error);
-          });
-        return;
-      }
-
-      recoverFromSession()
-        .then((result) => {
-          if (result) {
-            void settle(null, result);
-            return;
-          }
-          const failureDetails = [stderr.trim(), stdout.trim()]
-            .filter(Boolean)
-            .join("\n");
-          const suffix = signal ? ` (signal: ${signal})` : "";
-          void settle(
-            new Error(
-              `Command failed: ${command.file} ${command.toArgs(args).join(" ")}${suffix}${
-                failureDetails ? `\n${failureDetails}` : ""
-              }`,
-            ),
-          );
-        })
-        .catch((error) => {
-          void settle(error);
-        });
-    });
-  });
+    const { stdout, stderr } = first.result;
+    const recovered = await recoverFromSession(stdout, stderr);
+    if (recovered) return recovered;
+    return {
+      stdout,
+      stderr,
+      payload: extractOpenClawReply(mergeCommandOutput(stdout, stderr)),
+      recoveredFromSession: false,
+    };
+  } finally {
+    pollAbort.abort();
+  }
 }
 
 function mergeCommandOutput(stdout, stderr) {
@@ -1841,8 +1947,22 @@ function tailText(value, maxChars = 2_000) {
   return text.slice(-maxChars);
 }
 
+function diagnosticSha256(value) {
+  return crypto.createHash("sha256").update(String(value ?? "")).digest("hex");
+}
+
 function shouldForceCodexLiveTimeoutFixture() {
   return process.env.META_KIM_CODEX_LIVE_TIMEOUT_FIXTURE === "1";
+}
+
+function shouldForceCodexLiveNonzeroFixture() {
+  return ["returned", "weak"].includes(
+    process.env.META_KIM_CODEX_LIVE_NONZERO_FIXTURE,
+  );
+}
+
+function shouldForceCodexLiveWeakNormalFixture() {
+  return process.env.META_KIM_CODEX_LIVE_WEAK_NORMAL_FIXTURE === "1";
 }
 
 function buildCodexLiveTimeoutFixtureStdout() {
@@ -1892,6 +2012,134 @@ function buildCodexLiveTimeoutFixtureError() {
   error.stdout = buildCodexLiveTimeoutFixtureStdout();
   error.stderr = "fixture stderr tail";
   return error;
+}
+
+function buildCodexLiveNonzeroFixtureError(
+  fixtureShape = process.env.META_KIM_CODEX_LIVE_NONZERO_FIXTURE,
+) {
+  const runtimePayload = {
+    runtime: "codex",
+    governed_entry: "meta-theory",
+    warden_entry_gate: true,
+    conductor_orchestration: true,
+    orchestrationTaskBoardPacket: {
+      synthesisOwner: "meta-conductor",
+      route: "Warden -> Conductor -> board -> workerTaskPackets",
+    },
+    workerTaskPackets: [
+      {
+        owner: "meta-prism",
+        roleDisplayName: "review",
+        deliverable: "Verify completed work after a nonzero wrapper exit.",
+        verificationOwner: "meta-warden",
+      },
+    ],
+    verificationOwner: "meta-warden",
+  };
+  const childSessionId = "nonzero-fixture-child";
+  const taskPath = "/root/nonzero-fixture-child";
+  const callId = "nonzero-fixture-spawn";
+  const weakCall = {
+    id: callId,
+    type: "collab_tool_call",
+    tool: "spawn_agent",
+    receiver_thread_id: childSessionId,
+  };
+  const returnedChildRecords = [
+    {
+      type: "response_item",
+      payload: {
+        type: "function_call",
+        name: "spawn_agent",
+        namespace: "collaboration",
+        call_id: callId,
+        arguments: JSON.stringify({
+          message: "review through a run-scoped owner contract",
+        }),
+      },
+    },
+    {
+      type: "response_item",
+      payload: {
+        type: "function_call_output",
+        call_id: callId,
+        output: "accepted",
+      },
+    },
+    {
+      type: "event_msg",
+      payload: {
+        type: "sub_agent_activity",
+        event_id: callId,
+        kind: "started",
+        agent_thread_id: childSessionId,
+        agent_path: taskPath,
+      },
+    },
+    {
+      type: "response_item",
+      payload: {
+        type: "agent_message",
+        author: taskPath,
+        recipient: "/root",
+        content: [
+          {
+            type: "input_text",
+            text: "The child returned its completed review.",
+          },
+        ],
+      },
+    },
+  ];
+  const weakDispatchOnlyRecords = [
+    { type: "item.started", item: weakCall },
+    {
+      type: "item.completed",
+      item: {
+        ...weakCall,
+        status: "completed",
+        result: "dispatch accepted but child return is absent",
+      },
+    },
+  ];
+  const error = new Error(
+    "Command failed after completed Codex fixture invocation",
+  );
+  error.code = "META_KIM_CHILD_COMMAND_FAILED";
+  error.stdout = [
+    JSON.stringify({
+      type: "thread.started",
+      thread_id: "codex-live-nonzero-fixture-thread",
+    }),
+    ...(fixtureShape === "returned"
+      ? returnedChildRecords
+      : weakDispatchOnlyRecords
+    ).map((record) => JSON.stringify(record)),
+    JSON.stringify({
+      type: "item.completed",
+      item: {
+        id: "nonzero-fixture-final-json",
+        type: "agent_message",
+        status: "completed",
+        text: JSON.stringify(runtimePayload),
+      },
+    }),
+  ].join("\n");
+  error.stderr = "fixture wrapper exited nonzero";
+  return error;
+}
+
+function codexRecoveryHasReturnedChildFinal(evidence) {
+  const invocation = evidence?.nativeInvocation;
+  return (
+    evidence?.behaviorDiagnosticOk === true &&
+    evidence?.nativeInvocationObserved === true &&
+    invocation?.completionBoundary === "returned_child_final" &&
+    typeof invocation?.resultMessageId === "string" &&
+    invocation.resultMessageId.length > 0 &&
+    typeof invocation?.resultTextSha256 === "string" &&
+    invocation.resultTextSha256.length > 0
+  );
 }
 
 function isOptionalRuntimeUnavailable(message) {
@@ -1953,6 +2201,18 @@ function summarizeClaudeRuntime(discovery, results) {
   return {
     status: "passed",
     ok: true,
+    nativeInvocationObserved:
+      results.length > 0 &&
+      results.every(
+        (result) => result.ok === true && result.nativeInvocationObserved === true,
+      ),
+    releaseFuseInvocationObserved:
+      results.length > 0 &&
+      results.every(
+        (result) => result.ok === true && result.nativeInvocationObserved === true,
+      ),
+    nativeInvocationKind: "claude_main_session_inline_custom_agent_binding",
+    customizationIsolation: "empty_setting_sources_cli_inline_agent",
     discovery,
     results,
   };
@@ -1997,9 +2257,12 @@ function classifyRuntimeFailure(runtimeName, report, mode) {
   }
 
   if (status === "passed") {
-    return mode === "live"
+    if (mode !== "live") return RUNTIME_FAILURE_TAXONOMY.projectionOnly;
+    return report?.releaseFuseInvocationObserved === true &&
+        report?.fixture !== true &&
+        report?.recoveredFromTimeout !== true
       ? RUNTIME_FAILURE_TAXONOMY.pass
-      : RUNTIME_FAILURE_TAXONOMY.projectionOnly;
+      : RUNTIME_FAILURE_TAXONOMY.liveIncomplete;
   }
   if (reason.includes("timeout")) {
     return RUNTIME_FAILURE_TAXONOMY.timeout;
@@ -2086,7 +2349,10 @@ function buildRuntimeEvidenceRecord(runtimeName, report, mode) {
   const strictReleasePass =
     status === "passed" &&
     mode === "live" &&
-    failureClass === RUNTIME_FAILURE_TAXONOMY.pass;
+    failureClass === RUNTIME_FAILURE_TAXONOMY.pass &&
+    report?.releaseFuseInvocationObserved === true &&
+    report?.fixture !== true &&
+    report?.recoveredFromTimeout !== true;
   return {
     runtime: runtimeName,
     mode,
@@ -2120,7 +2386,7 @@ function buildRuntimeEvidencePacket(report, runtimeStatuses) {
     schemaVersion: "runtime-evidence-v0.1",
     generatedAt: report.timestamp,
     mode: report.mode,
-    strictRuntimesRequired: requireAllRuntimes,
+    strictRuntimesRequired: requireAllRuntimes || primaryReleaseFuse,
     records,
     failureClasses,
     summary: {
@@ -2159,87 +2425,162 @@ function codexLivePayloadOk(structuralOk, runtimePayload) {
   );
 }
 
-async function runCommandWithIgnoredStdin(file, args, options = {}) {
-  return new Promise((resolve, reject) => {
-    const child = spawn(file, args, {
-      cwd: options.cwd,
-      env: options.env,
-      windowsHide: true,
-      detached: process.platform !== "win32",
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    markChildActive(child, `${file} ${args.join(" ")}`);
+function inspectCodexLiveEvidence(
+  stdout,
+  {
+    structuralOk,
+    representativeAgentId,
+    fixture = false,
+    hostEventText = stdout,
+    sessionEvidence = null,
+    sessionLookupFailure = null,
+  },
+) {
+  const runtimePayload = tryExtractCodexReply(stdout);
+  const behaviorDiagnosticOk = codexLivePayloadOk(structuralOk, runtimePayload);
+  const observedEvents = fixture ? [] : observeCodexJsonl(hostEventText);
+  const rootSessionIds = new Set(
+    observedEvents.map((event) => event.sessionId).filter(Boolean),
+  );
+  const matchingNativeInvocations = observedEvents.filter(
+    (event) =>
+      event.family === "agent_subagent" &&
+      /(?:^|\.)spawn_agent$/u.test(String(event.hostSurface ?? "")) &&
+      (event.nativeAgentType == null ||
+        event.nativeAgentType === representativeAgentId) &&
+      (event.nativeAgentType === representativeAgentId
+        ? event.ownerBindingMode === "native_custom_agent"
+        : event.ownerBindingMode === "run_scoped_owner_contract") &&
+      typeof event.childSessionId === "string" &&
+      event.childSessionId.length > 0 &&
+      typeof event.sessionId === "string" &&
+      event.sessionId.length > 0 &&
+      ["completed", "returned"].includes(event.resultStatus) &&
+      event.completionBoundary === "returned_child_final" &&
+      typeof event.resultMessageId === "string" &&
+      event.resultMessageId.length > 0 &&
+      typeof event.resultTextSha256 === "string" &&
+      event.resultTextSha256.length > 0 &&
+      typeof event.outputDigest === "string" &&
+      event.outputDigest.length > 0,
+  );
+  const nativeInvocation =
+    !fixture &&
+    structuralOk &&
+    behaviorDiagnosticOk &&
+    rootSessionIds.size === 1 &&
+    matchingNativeInvocations.length === 1
+      ? matchingNativeInvocations[0]
+      : null;
+  return {
+    runtimePayload,
+    behaviorDiagnosticOk,
+    nativeInvocation,
+    nativeInvocationObserved: nativeInvocation != null,
+    customAgentInvocationObserved:
+      nativeInvocation?.nativeAgentType === representativeAgentId,
+    releaseFuseInvocationObserved: nativeInvocation != null,
+    sessionEvidence,
+    sessionLookupFailure,
+  };
+}
 
-    let stdout = "";
-    let stderr = "";
-    let finished = false;
-    let timeoutId = null;
+function publicCodexSessionEvidence(evidence) {
+  if (!evidence) return null;
+  return {
+    threadId: evidence.threadId,
+    childSessionId: evidence.childSessionId,
+    sessionDigest: evidence.sessionDigest,
+    childSessionDigest: evidence.childSessionDigest,
+    sourceCategory: evidence.sourceCategory,
+    cliVersion: evidence.cliVersion,
+  };
+}
 
-    function settle(error, result) {
-      if (finished) {
-        return;
-      }
-      finished = true;
-      if (timeoutId) {
-        clearTimeout(timeoutId);
-      }
-      if (error) {
-        reject(error);
-        return;
-      }
-      resolve(result);
-    }
+function codexSessionNativeInvocationMatches(invocation, representativeAgentId) {
+  return (
+    invocation?.family === "agent_subagent" &&
+    /(?:^|\.)spawn_agent$/u.test(String(invocation?.hostSurface ?? "")) &&
+    invocation?.nativeAgentType === representativeAgentId &&
+    invocation?.ownerBindingMode === "native_custom_agent" &&
+    typeof invocation?.childSessionId === "string" &&
+    invocation.childSessionId.length > 0 &&
+    typeof invocation?.sessionId === "string" &&
+    invocation.sessionId.length > 0 &&
+    invocation?.resultStatus === "returned" &&
+    invocation?.completionBoundary === "returned_child_final" &&
+    typeof invocation?.resultMessageId === "string" &&
+    invocation.resultMessageId.length > 0 &&
+    typeof invocation?.resultTextSha256 === "string" &&
+    invocation.resultTextSha256.length > 0 &&
+    typeof invocation?.outputDigest === "string" &&
+    invocation.outputDigest.length > 0
+  );
+}
 
-    if (typeof options.timeout === "number" && options.timeout > 0) {
-      timeoutId = setTimeout(() => {
-        void terminateChildTree(child).finally(() => {
-          const error = new Error(
-            `Command timed out after ${options.timeout}ms: ${file} ${args.join(" ")}`,
-          );
-          error.code = "META_KIM_COMMAND_TIMEOUT";
-          error.timeoutMs = options.timeout;
-          error.command = `${file} ${args.join(" ")}`;
-          error.stdout = stdout;
-          error.stderr = stderr;
-          settle(error);
-        });
-      }, options.timeout);
-    }
-
-    child.stdout.on("data", (chunk) => {
-      stdout += chunk.toString();
-    });
-
-    child.stderr.on("data", (chunk) => {
-      stderr += chunk.toString();
-    });
-
-    child.on("error", (error) => {
-      settle(error);
-    });
-
-    child.on("close", (code, signal) => {
-      if (finished) {
-        return;
-      }
-      if (code === 0) {
-        settle(null, { stdout, stderr });
-        return;
-      }
-
-      const failureDetails = [stderr.trim(), stdout.trim()]
-        .filter(Boolean)
-        .join("\n");
-      const suffix = signal ? ` (signal: ${signal})` : "";
-      settle(
-        new Error(
-          `Command failed: ${file} ${args.join(" ")}${suffix}${
-            failureDetails ? `\n${failureDetails}` : ""
-          }`,
-        ),
-      );
-    });
+async function inspectCodexLiveEvidenceWithSessionFallback(
+  stdout,
+  {
+    structuralOk,
+    representativeAgentId,
+    fixture = false,
+    sinceMs,
+    sessionSettleTimeoutMs = 0,
+  },
+) {
+  const directEvidence = inspectCodexLiveEvidence(stdout, {
+    structuralOk,
+    representativeAgentId,
+    fixture,
   });
+  if (fixture || directEvidence.nativeInvocationObserved) return directEvidence;
+
+  const threadId = extractCodexThreadId(stdout);
+  if (!threadId) return directEvidence;
+  const settleDeadline = Date.now() + Math.max(0, sessionSettleTimeoutMs);
+  let latestEvidence = directEvidence;
+  do {
+    try {
+      const sessionEvidence = await readCodexSessionEvidence({
+        codexHome: process.env.CODEX_HOME,
+        threadId,
+        sinceMs,
+      });
+      latestEvidence = inspectCodexLiveEvidence(stdout, {
+        structuralOk,
+        representativeAgentId,
+        hostEventText: sessionEvidence.parentSessionText,
+        sessionEvidence: publicCodexSessionEvidence(sessionEvidence),
+      });
+      if (
+        latestEvidence.behaviorDiagnosticOk === true &&
+        latestEvidence.nativeInvocationObserved !== true &&
+        codexSessionNativeInvocationMatches(
+          sessionEvidence.nativeInvocation,
+          representativeAgentId,
+        )
+      ) {
+        latestEvidence = {
+          ...latestEvidence,
+          nativeInvocation: sessionEvidence.nativeInvocation,
+          nativeInvocationObserved: true,
+          customAgentInvocationObserved: true,
+          releaseFuseInvocationObserved: true,
+        };
+      }
+      if (latestEvidence.nativeInvocationObserved) return latestEvidence;
+    } catch (error) {
+      latestEvidence = {
+        ...directEvidence,
+        sessionLookupFailure:
+          typeof error?.code === "string"
+            ? error.code
+            : "codex_session_lookup_failed",
+      };
+    }
+    if (Date.now() >= settleDeadline) return latestEvidence;
+    await delay(CODEX_SESSION_SETTLE_INTERVAL_MS);
+  } while (true);
 }
 
 function openClawStructuredPayloadLooksReal(agentId, payload) {
@@ -2825,74 +3166,26 @@ async function runClaudeDiscovery(agentIds) {
   logProgress(
     `Claude discovery: checking ${agentIds.length} registered agent(s)`,
   );
-  const cmd = await getResolvedClaudeCommand();
-  const help = await runCommandWithIgnoredStdin(
-    cmd.file,
-    cmd.toArgs(["--help"]),
-    {
-      cwd: repoRoot,
-      timeout: 30_000,
-      env: { ...process.env, CI: "1", NO_COLOR: "1" },
-    },
-  );
-  const supportsAgentsCommand = /^\s{2}agents\s/m.test(help.stdout);
-
-  async function discoverFromProjectFiles(extra = {}) {
-    const discoveredAgents = await readRuntimeAgentIdsOrCanonical(
+  const discoveredAgents = await readRuntimeAgentDefinitions(
+    [
       path.join(repoRoot, ".claude", "agents"),
-      ".md",
-    );
-    const projectAgents = new Set(discoveredAgents.ids);
-    const missing = agentIds.filter((agentId) => !projectAgents.has(agentId));
-    return {
-      ok: missing.length === 0,
-      missing,
-      source: discoveredAgents.source,
-      cliSupportsAgentsCommand: false,
-      ...extra,
-    };
-  }
-
-  if (!supportsAgentsCommand) {
-    return discoverFromProjectFiles();
-  }
-
-  let stdout;
-  try {
-    ({ stdout } = await runCommandWithIgnoredStdin(
-      cmd.file,
-      cmd.toArgs(["agents"]),
-      {
-        cwd: repoRoot,
-        timeout: 120_000,
-        env: { ...process.env, NO_COLOR: "1" },
-      },
-    ));
-  } catch (error) {
-    const message = String(error.message);
-    if (message.includes("'claude agents' is not available")) {
-      return discoverFromProjectFiles({
-        cliSupportsAgentsCommand: true,
-        fallbackReason: "claude-agents-command-unavailable",
-        fallbackError: error.message,
-      });
-    }
-    if (message.includes("requires an interactive terminal")) {
-      return discoverFromProjectFiles({
-        cliSupportsAgentsCommand: true,
-        fallbackReason: "claude-agents-command-non-tty",
-        fallbackError: error.message,
-      });
-    }
-    throw error;
-  }
-
-  const missing = agentIds.filter((agentId) => !stdout.includes(agentId));
+      path.join(os.homedir(), ".claude", "agents"),
+    ],
+    ".md",
+  );
+  const installedAgents = new Set(discoveredAgents.ids);
+  const missing = agentIds.filter((agentId) => !installedAgents.has(agentId));
+  const publicInventory = publicRuntimeAgentInventory(discoveredAgents, agentIds);
   return {
     ok: missing.length === 0,
     missing,
-    source: "claude-agents-command",
-    cliSupportsAgentsCommand: true,
+    ids: publicInventory.ids,
+    definitions: publicInventory.definitions,
+    source: discoveredAgents.source,
+    sources: discoveredAgents.sources,
+    expectedInventorySource: "canonical/agents",
+    discoveryKind: "declared_runtime_agent_definitions",
+    diagnosticOnlyCommand: "claude agents",
   };
 }
 
@@ -2906,8 +3199,33 @@ async function runClaudeSmoke(agentIds) {
   };
 }
 
+async function resolveClaudeLiveAgentOverride(agentId) {
+  const candidates = [
+    {
+      sourceCategory: "project",
+      filePath: path.join(repoRoot, ".claude", "agents", `${agentId}.md`),
+    },
+    {
+      sourceCategory: "global",
+      filePath: path.join(os.homedir(), ".claude", "agents", `${agentId}.md`),
+    },
+  ];
+  for (const candidate of candidates) {
+    if (!(await fileExists(candidate.filePath))) continue;
+    const sourceText = await fs.readFile(candidate.filePath, "utf8");
+    return {
+      sourceCategory: candidate.sourceCategory,
+      sourceDigest: crypto.createHash("sha256").update(sourceText).digest("hex"),
+      agents: buildClaudeSettingsIsolatedAgentOverride(sourceText, agentId),
+    };
+  }
+  throw new Error(`Claude runtime agent definition is missing for ${agentId}`);
+}
+
 async function runClaudeCases(agentIds) {
   const results = [];
+  const claudeLiveProviderEnv =
+    await resolveClaudeLiveProviderEnvironment();
 
   for (let index = 0; index < agentIds.length; index += 1) {
     const agentId = agentIds[index];
@@ -2923,6 +3241,7 @@ async function runClaudeCases(agentIds) {
     }
 
     try {
+      const runtimeAgentOverride = await resolveClaudeLiveAgentOverride(agentId);
       let finalResult = null;
       for (let attempt = 1; attempt <= 2; attempt += 1) {
         const scoutInstruction =
@@ -2930,7 +3249,7 @@ async function runClaudeCases(agentIds) {
             ? "meta-scout 的 owns 必须分别覆盖：能力基线/发现，tool-skill-MCP/ROI，外部候选/采纳建议；refuses 必须分别覆盖：不直接执行工具或运行时动作，不负责协调/dispatch/loadout/final approval。"
             : "owns 必须覆盖自身定义里三个不同责任族；refuses 必须覆盖不执行业务任务和跨 owner 边界。";
         const prompt =
-          "你正在做 Meta_Kim 元 agent 角色边界自检。先依据当前 Claude Code 已加载的 agent 定义、frontmatter、AGENTS/CLAUDE 上下文和边界说明，不要凭通用 agent 印象补写。" +
+          "你正在做 Meta_Kim 元 agent 角色边界自检。只依据通过 --agents 显式绑定的已安装 Claude Code agent 定义及其中的 description、own、do_not_touch、boundary，不要凭通用 agent 印象补写。" +
           "只返回符合 schema 的 JSON，不要解释。JSON 必须包含 agent、owns、refuses、artifact、delegates_to。" +
           `agent 字段必须精确写 ${agentId}；` +
           "owns 写 3 个短语，每条必须来自不同责任族；refuses 写 2 个短语，每条必须是明确拒绝边界；" +
@@ -2938,12 +3257,18 @@ async function runClaudeCases(agentIds) {
           "artifact 写你最核心的产物；delegates_to 写跨边界时最常升级/委派的 2 个 agent id。";
 
         const cmd = await getResolvedClaudeCommand();
+        const inlineAgentsJson = JSON.stringify(runtimeAgentOverride.agents);
+        const sensitiveCommandValues = [inlineAgentsJson, claudeSchema, prompt];
         const { stdout } = await runCommandWithIgnoredStdin(
           cmd.file,
           cmd.toArgs([
+            "--setting-sources",
+            "",
             "-p",
             "--output-format",
             "json",
+            "--agents",
+            inlineAgentsJson,
             "--agent",
             agentId,
             "--json-schema",
@@ -2953,7 +3278,10 @@ async function runClaudeCases(agentIds) {
           {
             cwd: repoRoot,
             timeout: 150_000,
-            env: { ...process.env, NO_COLOR: "1" },
+            env: claudeLiveProviderEnv,
+            commandDisplay: `claude --setting-sources <none> -p --agents <runtime-definition> --agent ${agentId} --json-schema <schema> <prompt>`,
+            redactText: (value) =>
+              redactClaudeLiveCommandText(value, sensitiveCommandValues),
           },
         );
 
@@ -2968,6 +3296,14 @@ async function runClaudeCases(agentIds) {
         finalResult = {
           agentId,
           ok: payload.agent === agentId && score >= 0.8 && !scoutDrift,
+          nativeInvocationObserved: true,
+          nativeInvocationKind: "claude_main_session_inline_custom_agent_binding",
+          nativeInvocationCommand: `claude --setting-sources <none> -p --agents <runtime-definition> --agent ${agentId}`,
+          agentDefinitionSourceCategory: runtimeAgentOverride.sourceCategory,
+          agentDefinitionSourceDigest: runtimeAgentOverride.sourceDigest,
+          customizationIsolation: "empty_setting_sources_cli_inline_agent",
+          providerEnvironmentSource:
+            "claude_global_settings_allowlist_then_process_fallback",
           score,
           matchedGroups,
           missedGroups,
@@ -2988,6 +3324,7 @@ async function runClaudeCases(agentIds) {
           retryable: true,
           reason: "claude_runtime_unavailable",
           error: error.message,
+          ...publicProcessFailureEvidence(error),
         });
 
         for (const remainingAgentId of agentIds.slice(index + 1)) {
@@ -3007,6 +3344,7 @@ async function runClaudeCases(agentIds) {
         agentId,
         ok: false,
         error: error.message,
+        ...publicProcessFailureEvidence(error),
       });
     }
   }
@@ -3014,13 +3352,13 @@ async function runClaudeCases(agentIds) {
   return results;
 }
 
-async function runClaudeLive(agentIds) {
-  const discovery = await runClaudeDiscovery(agentIds);
-  const results = await runClaudeCases(agentIds);
+async function runClaudeLive(expectedAgentIds, probeAgentIds = expectedAgentIds) {
+  const discovery = await runClaudeDiscovery(expectedAgentIds);
+  const results = await runClaudeCases(probeAgentIds);
   return summarizeClaudeRuntime(discovery, results);
 }
 
-async function runCodexSmoke() {
+async function runCodexSmoke(expectedAgentIds) {
   const codexCmd = await getResolvedCodexCommand();
   let versionStdout;
   try {
@@ -3049,9 +3387,16 @@ async function runCodexSmoke() {
 
   const configExamplePath = path.join(repoRoot, "codex", "config.toml.example");
   const configExample = await fs.readFile(configExamplePath, "utf8");
-  const codexAgents = await readRuntimeAgentIdsOrCanonical(
-    path.join(repoRoot, ".codex", "agents"),
+  const codexAgents = await readRuntimeAgentDefinitions(
+    [
+      path.join(repoRoot, ".codex", "agents"),
+      path.join(os.homedir(), ".codex", "agents"),
+    ],
     ".toml",
+  );
+  const publicCodexAgents = publicRuntimeAgentInventory(
+    codexAgents,
+    expectedAgentIds,
   );
   const payload = {
     runtime: "codex",
@@ -3059,9 +3404,14 @@ async function runCodexSmoke() {
     entrypoint: "AGENTS.md",
     canonical_skill_root: "canonical/skills/meta-theory",
     sync_manifest: "config/sync.json",
-    custom_agents: codexAgents.ids,
+    custom_agents: publicCodexAgents.ids,
     custom_agents_source: codexAgents.source,
-    mcp_supported: configExample.includes("[mcp_servers.meta_kim_runtime]"),
+    custom_agent_definitions: publicCodexAgents.definitions,
+    expected_inventory_source: "canonical/agents",
+    custom_agent_inventory_kind: "definitions_only_not_live_loaded",
+    mcp_supported: await fs
+      .access(path.join(repoRoot, "scripts", "mcp", "meta-runtime-server.mjs"))
+      .then(() => true, () => false),
     sandbox_configurable: configExample.includes("sandbox_mode"),
     approvals_configurable: configExample.includes("approval_policy"),
     suppresses_unstable_feature_warning: configExample.includes(
@@ -3077,7 +3427,7 @@ async function runCodexSmoke() {
     payload.entrypoint === "AGENTS.md" &&
     payload.canonical_skill_root === "canonical/skills/meta-theory" &&
     payload.sync_manifest === "config/sync.json" &&
-    payload.custom_agents.includes("meta-warden") &&
+    expectedAgentIds.every((agentId) => payload.custom_agents.includes(agentId)) &&
     payload.mcp_supported === true &&
     payload.sandbox_configurable === true &&
     payload.approvals_configurable === true &&
@@ -3092,16 +3442,27 @@ async function runCodexSmoke() {
   };
 }
 
-async function runCodexLive() {
+async function runCodexLive(expectedAgentIds, representativeAgentId = "meta-prism") {
   const forceTimeoutFixture = shouldForceCodexLiveTimeoutFixture();
-  const codexCmd = forceTimeoutFixture
+  const forceNonzeroFixture = shouldForceCodexLiveNonzeroFixture();
+  const forceWeakNormalFixture = shouldForceCodexLiveWeakNormalFixture();
+  const codexCmd =
+    forceTimeoutFixture || forceNonzeroFixture || forceWeakNormalFixture
     ? { file: "codex-fixture", toArgs: (args) => args.map(String) }
     : await getResolvedCodexCommand();
   let versionStdout;
   try {
     logProgress("Codex live: probing CLI and running repository smoke prompt");
-    if (forceTimeoutFixture) {
-      versionStdout = "codex-cli timeout-fixture";
+    if (
+      forceTimeoutFixture ||
+      forceNonzeroFixture ||
+      forceWeakNormalFixture
+    ) {
+      versionStdout = forceTimeoutFixture
+        ? "codex-cli timeout-fixture"
+        : forceNonzeroFixture
+        ? "codex-cli nonzero-fixture"
+        : "codex-cli weak-normal-fixture";
     } else {
       ({ stdout: versionStdout } = await runCommandWithIgnoredStdin(
         codexCmd.file,
@@ -3128,9 +3489,16 @@ async function runCodexLive() {
 
   const configExamplePath = path.join(repoRoot, "codex", "config.toml.example");
   const configExample = await fs.readFile(configExamplePath, "utf8");
-  const codexAgents = await readRuntimeAgentIdsOrCanonical(
-    path.join(repoRoot, ".codex", "agents"),
+  const codexAgents = await readRuntimeAgentDefinitions(
+    [
+      path.join(repoRoot, ".codex", "agents"),
+      path.join(os.homedir(), ".codex", "agents"),
+    ],
     ".toml",
+  );
+  const publicCodexAgents = publicRuntimeAgentInventory(
+    codexAgents,
+    expectedAgentIds,
   );
   const payload = {
     runtime: "codex",
@@ -3138,9 +3506,14 @@ async function runCodexLive() {
     entrypoint: "AGENTS.md",
     canonical_skill_root: "canonical/skills/meta-theory",
     sync_manifest: "config/sync.json",
-    custom_agents: codexAgents.ids,
+    custom_agents: publicCodexAgents.ids,
     custom_agents_source: codexAgents.source,
-    mcp_supported: configExample.includes("[mcp_servers.meta_kim_runtime]"),
+    custom_agent_definitions: publicCodexAgents.definitions,
+    expected_inventory_source: "canonical/agents",
+    custom_agent_inventory_kind: "definitions_only_not_live_loaded",
+    mcp_supported: await fs
+      .access(path.join(repoRoot, "scripts", "mcp", "meta-runtime-server.mjs"))
+      .then(() => true, () => false),
     sandbox_configurable: configExample.includes("sandbox_mode"),
     approvals_configurable: configExample.includes("approval_policy"),
     suppresses_unstable_feature_warning: configExample.includes(
@@ -3156,7 +3529,7 @@ async function runCodexLive() {
     payload.entrypoint === "AGENTS.md" &&
     payload.canonical_skill_root === "canonical/skills/meta-theory" &&
     payload.sync_manifest === "config/sync.json" &&
-    payload.custom_agents.includes("meta-warden") &&
+    expectedAgentIds.every((agentId) => payload.custom_agents.includes(agentId)) &&
     payload.mcp_supported === true &&
     payload.sandbox_configurable === true &&
     payload.approvals_configurable === true &&
@@ -3167,11 +3540,22 @@ async function runCodexLive() {
   const schemaPath = path.join(schemaDir, "codex-live-orchestration.schema.json");
   await fs.writeFile(schemaPath, codexLiveOrchestrationSchema, "utf8");
 
-  let runtimePayload = null;
+  let liveEvidence = null;
+  let commandStartedAtMs = null;
   try {
+    const childTask =
+      'This task is entirely self-contained. Do not inspect files or call tools. Review whether the words "primary runtime evidence" are precise. Explain any ambiguity briefly and recommend tighter wording if needed. Return a concise review for the parent.';
+    const directLifecycle =
+      `const spawned = await tools.multi_agent_v1__spawn_agent({ message: ${JSON.stringify(childTask)}, agent_type: ${JSON.stringify(representativeAgentId)}, fork_turns: "none" }); ` +
+      "text(JSON.stringify(spawned)); " +
+      "const waited = await tools.multi_agent_v1__wait_agent({ targets: [spawned.agent_id], timeout_ms: 120000 }); " +
+      "text(JSON.stringify(waited));";
     const prompt =
-      "Return JSON only. Prove the governed Meta_Kim Codex route for one tiny task: " +
-      "identify whether a reusable skill should be created for repeated release report formatting. " +
+      `Use the native spawn_agent collaboration tool exactly once. In Codex code mode it is exposed as multi_agent_v1__spawn_agent; call it directly without enumerating ALL_TOOLS or inspecting repository files. If its active schema exposes agent_type, set it to ${representativeAgentId} and set fork_turns to "none" because the bounded child task below is self-contained; otherwise omit the selector and use a run-scoped owner contract. ` +
+      "Never use task_name or a nickname as proof of owner identity. " +
+      `In one code exec run exactly this source with no leading or trailing statements: ${directLifecycle} ` +
+      "Do not add variables, helper functions, use task instead of message, pass id instead of targets, or retry the spawn. After that exact wait returns the child final, return JSON only. Never call the nonexistent multi_agent_v1__wait alias. " +
+      "Do not claim the child ran unless the tool call completed. " +
       'Set runtime to "codex" and governed_entry to "meta-theory". ' +
       "Set warden_entry_gate and conductor_orchestration true only if the route is Warden -> Conductor. " +
       'orchestrationTaskBoardPacket.synthesisOwner must be "meta-conductor" and route must mention Warden -> Conductor -> board -> workerTaskPackets. ' +
@@ -3180,6 +3564,9 @@ async function runCodexLive() {
 
     const codexExecArgs = codexCmd.toArgs([
       "exec",
+      "--ignore-user-config",
+      "--enable",
+      "multi_agent",
       "--json",
       "--skip-git-repo-check",
       "--sandbox",
@@ -3190,43 +3577,109 @@ async function runCodexLive() {
       repoRoot,
       prompt,
     ]);
+    commandStartedAtMs = Date.now();
     if (forceTimeoutFixture) {
       throw buildCodexLiveTimeoutFixtureError();
     }
-    const { stdout } = await runCommandWithIgnoredStdin(
-      codexCmd.file,
-      codexExecArgs,
-      {
-        cwd: repoRoot,
-        timeout: 120_000,
-        env: { ...process.env, NO_COLOR: "1" },
-      },
-    );
+    if (forceNonzeroFixture) {
+      throw buildCodexLiveNonzeroFixtureError();
+    }
+    let stdout;
+    if (forceWeakNormalFixture) {
+      stdout = buildCodexLiveNonzeroFixtureError("weak").stdout;
+    } else {
+      ({ stdout } = await runCommandWithIgnoredStdin(
+        codexCmd.file,
+        codexExecArgs,
+        {
+          cwd: repoRoot,
+          timeout: CODEX_LIVE_TIMEOUT_MS,
+          env: { ...process.env, NO_COLOR: "1" },
+        },
+      ));
+    }
 
-    runtimePayload = extractCodexReply(stdout);
+    liveEvidence = await inspectCodexLiveEvidenceWithSessionFallback(stdout, {
+      structuralOk,
+      representativeAgentId,
+      fixture: forceTimeoutFixture,
+      sinceMs: commandStartedAtMs,
+    });
   } catch (error) {
     if (isCommandTimeoutFailure(error)) {
-      const recoveredPayload = tryExtractCodexReply(error.stdout);
-      const recoveredOk = codexLivePayloadOk(structuralOk, recoveredPayload);
-      if (recoveredOk) {
+      const timeoutEvidence = await inspectCodexLiveEvidenceWithSessionFallback(
+        error.stdout,
+        {
+          structuralOk,
+          representativeAgentId,
+          fixture: forceTimeoutFixture,
+          sinceMs: commandStartedAtMs,
+          sessionSettleTimeoutMs: CODEX_SESSION_SETTLE_TIMEOUT_MS,
+        },
+      );
+      if (codexRecoveryHasReturnedChildFinal(timeoutEvidence)) {
         return {
           status: "passed",
           ok: true,
+          releaseFuseInvocationObserved: true,
+          nativeInvocationObserved:
+            timeoutEvidence.customAgentInvocationObserved === true,
+          customAgentInvocationObserved:
+            timeoutEvidence.customAgentInvocationObserved === true,
+          nativeInvocationKind: "codex_spawn_agent_child_completion",
+          ownerBindingMode: timeoutEvidence.nativeInvocation.ownerBindingMode,
+          nativeAgentType: timeoutEvidence.nativeInvocation.nativeAgentType,
+          wrapperTimedOutAfterCompletedInvocation: true,
+          sample: {
+            ...payload,
+            runtime_smoke: timeoutEvidence.runtimePayload,
+            runtime_native_invocation: timeoutEvidence.nativeInvocation,
+            runtime_session_evidence: timeoutEvidence.sessionEvidence,
+            runtime_recovery: {
+              wrapperTimedOutAfterCompletedInvocation: true,
+              reason: "codex_wrapper_timeout_after_completed_native_invocation",
+              errorClass: "codex_wrapper_timeout_after_completed_invocation",
+              stage: "codex_exec_orchestration_prompt",
+              timeoutMs: error.timeoutMs ?? CODEX_LIVE_TIMEOUT_MS,
+              threadId: extractCodexThreadId(error.stdout),
+              stdoutSha256: diagnosticSha256(error.stdout),
+              stderrSha256: diagnosticSha256(error.stderr),
+              sessionLookupFailure:
+                timeoutEvidence.sessionLookupFailure ?? null,
+            },
+          },
+        };
+      }
+      const recoveredPayload = timeoutEvidence.runtimePayload;
+      const recoveredDiagnosticOk = timeoutEvidence.behaviorDiagnosticOk;
+      if (recoveredDiagnosticOk) {
+        return {
+          status: "skipped",
+          ok: false,
+          skipped: true,
+          retryable: true,
+          reason: "codex_live_timeout_recovered_diagnostic_only",
           recoveredFromTimeout: true,
+          nativeInvocationObserved: false,
           sample: {
             ...payload,
             runtime_smoke: recoveredPayload,
+            runtime_session_evidence: timeoutEvidence.sessionEvidence,
             runtime_recovery: {
               recoveredFromTimeout: true,
               reason: "codex_live_timeout_recovered",
               stage: "codex_exec_orchestration_prompt",
-              timeoutMs: error.timeoutMs ?? 120_000,
+              timeoutMs: error.timeoutMs ?? CODEX_LIVE_TIMEOUT_MS,
               threadId: extractCodexThreadId(error.stdout),
               retryCommand:
                 "node scripts/eval-meta-agents.mjs --runtime=codex --live",
               promptContract:
                 "Warden -> Conductor -> orchestrationTaskBoardPacket -> workerTaskPackets",
-              stderrTail: tailText(error.stderr),
+              errorClass: "command_timeout",
+              stdoutSha256: diagnosticSha256(error.stdout),
+              stderrSha256: diagnosticSha256(error.stderr),
+              sessionLookupFailure:
+                timeoutEvidence.sessionLookupFailure ?? null,
             },
           },
         };
@@ -3243,7 +3696,7 @@ async function runCodexLive() {
             skipped: true,
             reason: "codex_live_timeout",
             stage: "codex_exec_orchestration_prompt",
-            timeoutMs: error.timeoutMs ?? 120_000,
+            timeoutMs: error.timeoutMs ?? CODEX_LIVE_TIMEOUT_MS,
             threadId: extractCodexThreadId(error.stdout),
             retryCommand:
               "node scripts/eval-meta-agents.mjs --runtime=codex --live",
@@ -3251,11 +3704,62 @@ async function runCodexLive() {
               "Use the Codex session record for threadId when stdout contains a thread.started event.",
             promptContract:
               "Warden -> Conductor -> orchestrationTaskBoardPacket -> workerTaskPackets",
-            stdoutTail: tailText(error.stdout),
-            stderrTail: tailText(error.stderr),
+            errorClass: "command_timeout",
+            stdoutSha256: diagnosticSha256(error.stdout),
+            stderrSha256: diagnosticSha256(error.stderr),
+            sessionLookupFailure:
+              timeoutEvidence.sessionLookupFailure ?? null,
           },
         },
       };
+    }
+    if (
+      error?.code === "META_KIM_CHILD_COMMAND_FAILED" &&
+      typeof error?.stdout === "string"
+    ) {
+      const completedEvidence =
+        await inspectCodexLiveEvidenceWithSessionFallback(error.stdout, {
+          structuralOk,
+          representativeAgentId,
+          fixture: false,
+          sinceMs: commandStartedAtMs,
+          sessionSettleTimeoutMs: CODEX_SESSION_SETTLE_TIMEOUT_MS,
+        });
+      if (codexRecoveryHasReturnedChildFinal(completedEvidence)) {
+        return {
+          status: "passed",
+          ok: true,
+          releaseFuseInvocationObserved: true,
+          nativeInvocationObserved:
+            completedEvidence.customAgentInvocationObserved === true,
+          customAgentInvocationObserved:
+            completedEvidence.customAgentInvocationObserved === true,
+          nativeInvocationKind: "codex_spawn_agent_child_completion",
+          ownerBindingMode:
+            completedEvidence.nativeInvocation.ownerBindingMode,
+          nativeAgentType: completedEvidence.nativeInvocation.nativeAgentType,
+          wrapperFailedAfterCompletedInvocation: true,
+          sample: {
+            ...payload,
+            runtime_smoke: completedEvidence.runtimePayload,
+            runtime_native_invocation: completedEvidence.nativeInvocation,
+            runtime_session_evidence: completedEvidence.sessionEvidence,
+            runtime_recovery: {
+              wrapperFailedAfterCompletedInvocation: true,
+              reason:
+                "codex_wrapper_failed_after_completed_native_invocation",
+              errorClass:
+                "codex_wrapper_nonzero_after_completed_invocation",
+              stage: "codex_exec_orchestration_prompt",
+              threadId: extractCodexThreadId(error.stdout),
+              stdoutSha256: diagnosticSha256(error.stdout),
+              stderrSha256: diagnosticSha256(error.stderr),
+              sessionLookupFailure:
+                completedEvidence.sessionLookupFailure ?? null,
+            },
+          },
+        };
+      }
     }
     if (isRetryableCodexFailure(error.message)) {
       return {
@@ -3269,7 +3773,9 @@ async function runCodexLive() {
           runtime_smoke: {
             skipped: true,
             reason: "codex_runtime_unavailable",
-            error: error.message,
+            errorClass: error?.code ?? "codex_runtime_unavailable",
+            stdoutSha256: diagnosticSha256(error?.stdout),
+            stderrSha256: diagnosticSha256(error?.stderr),
           },
         },
       };
@@ -3279,14 +3785,32 @@ async function runCodexLive() {
     await fs.rm(schemaDir, { recursive: true, force: true });
   }
 
-  const ok = codexLivePayloadOk(structuralOk, runtimePayload);
+  const runtimePayload = liveEvidence?.runtimePayload ?? null;
+  const nativeInvocation = liveEvidence?.nativeInvocation ?? null;
+  const releaseFuseInvocationObserved =
+    liveEvidence?.releaseFuseInvocationObserved === true;
+  const customAgentInvocationObserved =
+    liveEvidence?.customAgentInvocationObserved === true;
+  const liveOk =
+    liveEvidence?.behaviorDiagnosticOk === true && releaseFuseInvocationObserved;
 
   return {
-    status: ok ? "passed" : "failed",
-    ok,
+    status: liveOk ? "passed" : "failed",
+    ok: liveOk,
+    reason: liveOk ? null : "codex_release_fuse_spawn_not_observed",
+    releaseFuseInvocationObserved,
+    nativeInvocationObserved: customAgentInvocationObserved,
+    customAgentInvocationObserved: customAgentInvocationObserved,
+    nativeInvocationKind: "codex_spawn_agent_child_completion",
+    ownerBindingMode: nativeInvocation?.ownerBindingMode ?? null,
+    nativeAgentType: nativeInvocation?.nativeAgentType ?? null,
     sample: {
       ...payload,
       runtime_smoke: runtimePayload,
+      runtime_native_invocation: nativeInvocation,
+      runtime_session_evidence: liveEvidence?.sessionEvidence ?? null,
+      runtime_session_lookup_failure:
+        liveEvidence?.sessionLookupFailure ?? null,
     },
   };
 }
@@ -3303,7 +3827,10 @@ async function runCursorSmoke() {
   );
   const cursorHooksPath = path.join(repoRoot, ".cursor", "hooks.json");
   const cursorRulesDir = path.join(repoRoot, ".cursor", "rules");
-  const cursorAgents = await readRuntimeAgentIdsOrCanonical(cursorAgentsDir, ".md");
+  const cursorAgents = await readRuntimeAgentDefinitions(
+    [cursorAgentsDir, path.join(os.homedir(), ".cursor", "agents")],
+    ".md",
+  );
   const skill = await readTextOrCanonical(
     cursorSkillPath,
     path.join(canonicalAgentsDir, "..", "skills", "meta-theory", "SKILL.md"),
@@ -3601,7 +4128,7 @@ async function runCursorLive() {
 
 async function collectOpenClawBaseStatus({ useMainConfig = false } = {}) {
   logProgress("OpenClaw smoke: preparing local config and validating hooks");
-  await runCommandWithIgnoredStdin("node", [prepareOpenClawScriptPath], {
+  await runCommandWithIgnoredStdin(process.execPath, [prepareOpenClawScriptPath], {
     cwd: repoRoot,
     timeout: 120_000,
     env: openClawChildEnv(),
@@ -4014,8 +4541,222 @@ async function runOpenClawLive() {
   }
 }
 
+async function runPrimaryReleaseRuntimeIsolated(runtimeName) {
+  const timeout = PRIMARY_RELEASE_RUNTIME_PROCESS_TIMEOUT_MS[runtimeName];
+  if (!Number.isSafeInteger(timeout) || timeout <= 0) {
+    throw new Error(`Unsupported primary release runtime: ${runtimeName}`);
+  }
+
+  const runner =
+    process.platform === "win32"
+      ? runWindowsGuardedCommand
+      : runCommandWithIgnoredStdin;
+  const attemptEvidence = [];
+
+  for (let attempt = 1; attempt <= 2; attempt += 1) {
+    logProgress(
+      `${runtimeName} primary fuse: starting isolated runtime process attempt ${attempt}/2`,
+    );
+    try {
+      const commandResult = await runner(
+        process.execPath,
+        [
+          fileURLToPath(import.meta.url),
+          `--runtime=${runtimeName}`,
+          "--live",
+        ],
+        {
+          cwd: repoRoot,
+          env: process.env,
+          timeout,
+        },
+      );
+      const { stdout } = commandResult;
+      const ownedProcessGroupCleanupVerified =
+        commandResult.ownedProcessGroupCleanupVerified === true;
+      const childReport = JSON.parse(stdout);
+      const runtimeReport = childReport?.[runtimeName];
+      const exactRuntimeScope =
+        Array.isArray(childReport?.requestedRuntimes) &&
+        childReport.requestedRuntimes.length === 1 &&
+        childReport.requestedRuntimes[0] === runtimeName;
+      const releaseGrade =
+        childReport?.mode === "live" &&
+        exactRuntimeScope &&
+        runtimeReport?.status === "passed" &&
+        childReport?.runtimeEvidencePacket?.summary?.releaseGrade === true;
+      if (releaseGrade) {
+        return {
+          ...runtimeReport,
+          primaryReleaseProcessIsolation: "runtime_subprocess",
+          primaryReleaseProcessAttempts: attempt,
+          priorAttemptEvidence: attemptEvidence,
+          ownedProcessGroupCleanupVerified:
+            process.platform === "win32"
+              ? ownedProcessGroupCleanupVerified === true
+              : true,
+          ownedProcessGroupScope:
+            process.platform === "win32"
+              ? "windows_job_object_owned_process_group"
+              : "posix_detached_process_group",
+          ...processTreeCleanupNonClaim,
+        };
+      }
+
+      const runtimeStatus = ["failed", "skipped", "blocked"].includes(
+        runtimeReport?.status,
+      )
+        ? runtimeReport.status
+        : "invalid";
+      attemptEvidence.push({
+        attempt,
+        outcome: "non_release_grade_report",
+        runtimeStatus,
+        failureClass:
+          childReport?.runtimeEvidencePacket?.records?.find(
+            (record) => record?.runtime === runtimeName,
+          )?.failureClass ?? "unknown_failure",
+        reasonDigest: diagnosticSha256(runtimeReport?.reason ?? "missing_reason"),
+        ownedProcessGroupCleanupVerified:
+          process.platform === "win32"
+            ? ownedProcessGroupCleanupVerified === true
+            : true,
+        ownedProcessGroupScope:
+          process.platform === "win32"
+            ? "windows_job_object_owned_process_group"
+            : "posix_detached_process_group",
+        ...processTreeCleanupNonClaim,
+      });
+    } catch (error) {
+      if (
+        error?.code === "META_KIM_CHILD_COMMAND_FAILED" &&
+        (process.platform !== "win32" ||
+          error?.ownedProcessGroupCleanupVerified === true)
+      ) {
+        let childReport = null;
+        try {
+          childReport = JSON.parse(error.stdout);
+        } catch {
+          // A non-JSON child failure falls through to the generic safe digest below.
+        }
+        const runtimeReport = childReport?.[runtimeName];
+        const exactRuntimeScope =
+          childReport?.mode === "live" &&
+          Array.isArray(childReport?.requestedRuntimes) &&
+          childReport.requestedRuntimes.length === 1 &&
+          childReport.requestedRuntimes[0] === runtimeName;
+        if (exactRuntimeScope && runtimeReport) {
+          attemptEvidence.push({
+            attempt,
+            outcome: "non_release_grade_child_exit",
+            runtimeStatus: ["failed", "skipped", "blocked"].includes(
+              runtimeReport.status,
+            )
+              ? runtimeReport.status
+              : "invalid",
+            failureClass:
+              childReport?.runtimeEvidencePacket?.records?.find(
+                (record) => record?.runtime === runtimeName,
+              )?.failureClass ?? "unknown_failure",
+            reasonDigest: diagnosticSha256(
+              runtimeReport?.reason ?? "missing_reason",
+            ),
+            ownedProcessGroupCleanupVerified: true,
+            ownedProcessGroupScope:
+              process.platform === "win32"
+                ? "windows_job_object_owned_process_group"
+                : "posix_detached_process_group",
+            ...processTreeCleanupNonClaim,
+          });
+          continue;
+        }
+      }
+      const ownedProcessGroupCleanupFailure =
+        error?.ownedProcessGroupCleanupFailure === true ||
+        String(error?.code ?? "").startsWith(
+          "META_KIM_WINDOWS_JOB_PROCESS_GROUP_",
+        ) ||
+        error?.code === "META_KIM_COMMAND_TIMEOUT_CLEANUP_FAILED";
+      const errorClass =
+        error?.code === "META_KIM_COMMAND_TIMEOUT"
+          ? "runtime_process_timeout"
+          : ownedProcessGroupCleanupFailure
+          ? "owned_process_group_cleanup_failure"
+          : "runtime_process_failure";
+      attemptEvidence.push({
+        attempt,
+        outcome: "runtime_process_error",
+        errorClass,
+        errorDigest: diagnosticSha256(error?.message ?? error),
+        ...processTreeCleanupNonClaim,
+        ...(ownedProcessGroupCleanupFailure
+          ? {
+              ownedProcessGroupCleanupVerified: false,
+              ownedProcessGroupCleanupReason:
+                error?.ownedProcessGroupCleanupReason ??
+                "cleanup_unverified",
+              ownedProcessGroupSurvivorCount: Number.isSafeInteger(
+                error?.ownedProcessGroupSurvivorCount,
+              )
+                ? error.ownedProcessGroupSurvivorCount
+                : null,
+              ownedProcessGroupScope:
+                error?.ownedProcessGroupScope ??
+                "windows_job_object_owned_process_group",
+            }
+          : {}),
+      });
+      if (ownedProcessGroupCleanupFailure) {
+        break;
+      }
+    }
+  }
+
+  const lastAttempt = attemptEvidence.at(-1) ?? null;
+  return {
+    status: "failed",
+    ok: false,
+    reason: "isolated_primary_runtime_probe_failed",
+    errorClass:
+      lastAttempt?.errorClass ?? "runtime_report_not_release_grade",
+    errorDigest: diagnosticSha256(JSON.stringify(attemptEvidence)),
+    primaryReleaseProcessIsolation: "runtime_subprocess",
+    primaryReleaseProcessAttempts: attemptEvidence.length,
+    attemptEvidence,
+    ...processTreeCleanupNonClaim,
+    ...(lastAttempt?.ownedProcessGroupCleanupVerified === false
+      ? {
+          ownedProcessGroupCleanupVerified: false,
+          ownedProcessGroupCleanupReason:
+            lastAttempt.ownedProcessGroupCleanupReason ??
+            "cleanup_unverified",
+          ownedProcessGroupSurvivorCount:
+            lastAttempt.ownedProcessGroupSurvivorCount ?? null,
+          ownedProcessGroupScope:
+            lastAttempt.ownedProcessGroupScope ??
+            "windows_job_object_owned_process_group",
+        }
+      : {}),
+  };
+}
+
 async function main() {
-  installSignalCleanup();
+  installSignalCleanup({ log: logProgress });
+  if (primaryReleaseFuse && (runtimeArg || agentArg)) {
+    throw new Error(
+      "--primary-release-fuse fixes runtime scope to claude,codex and forbids --runtime/--agent filters.",
+    );
+  }
+  if (
+    primaryReleaseFuse &&
+    (shouldForceCodexLiveTimeoutFixture() ||
+      shouldForceCodexLiveNonzeroFixture() ||
+      shouldForceCodexLiveWeakNormalFixture())
+  ) {
+    throw new Error(
+      "--primary-release-fuse forbids Codex live failure fixtures.",
+    );
+  }
   for (const runtimeName of selectedRuntimes) {
     if (!["claude", "codex", "openclaw", "cursor"].includes(runtimeName)) {
       throw new Error(`Unknown runtime filter: ${runtimeName}`);
@@ -4033,9 +4774,13 @@ async function main() {
     throw new Error(`Unknown agent filter(s): ${unknownAgentIds.join(", ")}`);
   }
   const agentIds = filterSelectedAgentIds(allAgentIds);
+  const representativeAgentId = allAgentIds.includes("meta-prism")
+    ? "meta-prism"
+    : allAgentIds[0];
   const report = {
     timestamp: new Date().toISOString(),
     mode: evalMode,
+    primaryReleaseFuse,
     requestedRuntimes: [...selectedRuntimes],
     requestedAgents: selectedAgentIds.size > 0 ? [...selectedAgentIds] : "all",
     claude: null,
@@ -4049,7 +4794,10 @@ async function main() {
       try {
         report.claude =
           evalMode === "live"
-            ? await runClaudeLive(agentIds)
+            ? await runClaudeLive(
+                primaryReleaseFuse ? allAgentIds : agentIds,
+                primaryReleaseFuse ? [representativeAgentId] : agentIds,
+              )
             : await runClaudeSmoke(agentIds);
       } catch (error) {
         report.claude = isOptionalRuntimeUnavailable(error.message)
@@ -4059,11 +4807,13 @@ async function main() {
               retryable: true,
               reason: "claude_runtime_unavailable",
               error: error.message,
+              ...publicProcessFailureEvidence(error),
             }
           : {
               status: "failed",
               ok: false,
               error: error.message,
+              ...publicProcessFailureEvidence(error),
             };
       }
 
@@ -4073,7 +4823,14 @@ async function main() {
     if (isRuntimeSelected("codex")) {
       try {
         report.codex =
-          evalMode === "live" ? await runCodexLive() : await runCodexSmoke();
+          primaryReleaseFuse
+            ? await runPrimaryReleaseRuntimeIsolated("codex")
+            : evalMode === "live"
+            ? await runCodexLive(
+                agentIds,
+                representativeAgentId,
+              )
+            : await runCodexSmoke(agentIds);
       } catch (error) {
         report.codex = isOptionalRuntimeUnavailable(error.message)
           ? {
@@ -4168,7 +4925,7 @@ async function main() {
     blocked: runtimeStatuses
       .filter((item) => !["passed", "skipped", "failed"].includes(item.status))
       .map((item) => item.runtime),
-    strictRuntimesRequired: requireAllRuntimes,
+    strictRuntimesRequired: requireAllRuntimes || primaryReleaseFuse,
     releaseGrade: report.runtimeEvidencePacket.summary.releaseGrade,
     failureClasses: report.runtimeEvidencePacket.failureClasses,
   };
@@ -4176,7 +4933,12 @@ async function main() {
   const overallOk =
     report.summary.failed.length === 0 &&
     report.summary.blocked.length === 0 &&
-    (!requireAllRuntimes || report.summary.skipped.length === 0);
+    (!requireAllRuntimes || report.summary.skipped.length === 0) &&
+    (!primaryReleaseFuse ||
+      (report.requestedRuntimes.length === 2 &&
+        report.requestedRuntimes.includes("claude") &&
+        report.requestedRuntimes.includes("codex") &&
+        report.runtimeEvidencePacket.summary.releaseGrade === true));
 
   console.log(JSON.stringify(report, null, 2));
   if (!overallOk) {

@@ -12,10 +12,10 @@
 </p>
 
 <p>
-  <img alt="Projection tiers" src="https://img.shields.io/badge/default-Claude%20Code%20%7C%20Codex%20%2B%20compat-OpenClaw%20%7C%20Cursor-111827"/>
-  <img alt="Candidate compatibility probes" src="https://img.shields.io/badge/candidate-Qoder%20%7C%20Trae%20%7C%20Kiro%20%7C%20Cascade%20%7C%20Cline%20%7C%20Roo%20%7C%20Continue-475569"/>
-  <img alt="Stars" src="https://img.shields.io/github/stars/KimYx0207/Meta_Kim?style=flat&logo=github"/>
-  <img alt="License" src="https://img.shields.io/badge/license-Apache--2.0-green"/>
+  <a href="config/runtime-compatibility-catalog.json"><img alt="Projection tiers" src="https://img.shields.io/badge/default-Claude%20Code%20%7C%20Codex%20%2B%20compat--OpenClaw%20%7C%20Cursor-111827"/></a>
+  <a href="config/runtime-compatibility-catalog.json"><img alt="Candidate compatibility probes" src="https://img.shields.io/badge/candidate-Qoder%20%7C%20Trae%20%7C%20Kiro%20%7C%20Cascade%20%7C%20Cline%20%7C%20Roo%20%7C%20Continue-475569"/></a>
+  <a href="https://github.com/KimYx0207/Meta_Kim/stargazers"><img alt="Stars" src="https://img.shields.io/github/stars/KimYx0207/Meta_Kim?style=flat&logo=github"/></a>
+  <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-Apache--2.0-green"/></a>
 </p>
 
 <p>
@@ -49,6 +49,36 @@ This is not a new concept. Mature engineering teams already do this. Meta_Kim tu
 | Passing commands get mistaken for success | Evidence is checked against the user's real goal |
 | Good fixes disappear into chat history | Reusable lessons become governed skills, agents, scripts, contracts, or run-scoped tasks |
 
+### What 3.0 changes
+
+Meta_Kim 3.0 makes the governance system easier to trust: advice, durable truth, user-facing views, installation state, and knowledge evolution no longer blur into one another.
+
+| Architecture outcome | What it means for a user |
+| --- | --- |
+| **A01 - Evidence transition** | A worker saying “done” is not enough; evidence is independently assessed, and uncertain or contradictory material stays blocked or in doubt. |
+| **A02 - Continue / wait / stop / escalate** | Resumption advice is explicit and bound to the same durable run snapshot; it cannot resume work by itself. |
+| **A03 - Dependency-safe progress** | Meta_Kim can identify work that is safe to consider next without turning a Todo item into execution authority. |
+| **A04 - Scheduler reuse** | Ready work goes through the existing scheduler rules; 3.0 does not create a competing scheduler. |
+| **A05 - Lease / claim visibility** | Active ownership and conflicts are projected from the existing durable authority, never minted from a candidate. |
+| **A06 - Runtime health** | Health is a point-in-time observation, not proof of liveness, installation, persistence, or permission to execute. |
+| **A07 - Quota / usage** | Retry and elapsed-time observations are separated from unknown cost, progress, and provider quota; the projection cannot stop or retry work. |
+| **A08 - Read-only run surfaces** | Native panel, Kanban, Markdown, and HTML show the same digest-bound run without becoming another source of truth. |
+| **A09 - Durable repository unification** | Events, CAS, transactions, leases, fences, and checkpoints share one execution repository model; analytics and host-event stores remain non-execution data. |
+| **A10 - Safer setup boundary** | Setup remains the CLI facade, while stable package materialization and runtime writes are isolated and independently checked. |
+| **A11 - Knowledge lifecycle hygiene** | A generated evolution suggestion has zero write/delete authority until exact Warden approval; rollback, source drift, tombstones, and user state are protected. |
+| **A12 - Documentation and release truth** | Public claims must match contracts, runtime evidence, package contents, and the release gate; deferred work stays visibly deferred. |
+
+The implementation follows an inward dependency rule:
+
+| Layer | Responsibility | Explicit boundary |
+| --- | --- | --- |
+| **Domain** | Pure decision semantics and invariants | No filesystem, database, network, runtime, templates, or execution side effects |
+| **Application** | Use-case orchestration and ports | Composes Domain and adapters; does not own SQL, filesystem algorithms, or host authority |
+| **Data / Infrastructure** | SQLite, transactions, package storage, runtime process and filesystem adapters | Implements declared ports; cannot change Domain decisions or mint authorization |
+| **Presentation** | Native panel, Kanban, Markdown, and HTML rendering | Reads one validated model; cannot write, dispatch, complete, claim, lease, or move a cursor |
+
+This layering is intentionally incremental: existing script entrypoints remain compatibility facades where needed, while new stable logic lives behind the layered boundaries.
+
 ### 3-minute proof
 
 Meta_Kim is easiest to understand by watching one governed run, not by reading every rule.
@@ -60,6 +90,9 @@ npm run meta:theory:report -- --run-id latest
 npm run meta:delivery:bundle
 ```
 
+`meta:run-status:latest` is a minimal redacted status summary. Use the explicit
+`meta:theory:report -- --run-id latest` readback to inspect report content.
+
 The proof path shows five things:
 
 - a fuzzy request is turned into an explicit intent and success standard
@@ -69,6 +102,8 @@ The proof path shows five things:
 - compatibility evidence stays tiered, so smoke evidence is never promoted to native live proof
 
 The executable core-loop contract is `config/contracts/core-loop-contract.json`; it binds the default path to `npm run meta:theory:run -- "<task>"` and keeps Critical -> Fetch -> Thinking -> Execution -> Review -> Meta-Review -> Verification -> Evolution testable. `npm run meta:theory:demo` is the zero-argument replay entry for the 3-minute proof.
+
+Real stage execution is opt-in and read-only. Use `npm run meta:theory:run -- --execute-stage-dag --stage-runner-runtime codex "<task>"` or replace `codex` with `claude`; resume the exact interrupted run with `--resume-stage-dag --run-id <id> --task "<same task>"`. Both runtimes consume the same `coreLoop.stageDagPacket`, record native session/tool/timing evidence, persist completed nodes through the durable kernel, and merge locally. The default remains planned-only. Ready sets use native concurrency by default; maintainers may explicitly install the currently tested `@langchain/langgraph@1.4.8` and add `--stage-runner-orchestrator langgraph` to use its Functional API as an execution wrapper. LangGraph does not own topology or checkpoints, and this mode still does not execute writes or external side effects.
 
 For a guided walk-through, start with [examples/first-run/README.md](examples/first-run/README.md).
 
@@ -89,7 +124,7 @@ npm install
 node setup.mjs
 ```
 
-> 💡 **After install**: `setup.mjs` prints where every artifact lives. To revisit that summary anytime (or diff vs. the previous install), run `npm run meta:status` in the directory where you installed.
+> 💡 **After install**: `setup.mjs` prints where every artifact lives. A global install can use `meta-kim status` from any directory; an npx install can repeat `npx --yes github:KimYx0207/Meta_Kim meta-kim status`. An npx launch remains a supported entrypoint: before install or update writes persistent Claude Code or Codex projections, Meta_Kim fixes the exact package into an immutable store under the user home, keyed by package version and packed-package SHA-256, so Commands, Hooks, and merged settings never depend on the disposable npm cache. Repository maintainers may also use `npm run meta:status`.
 
 At a fresh clone, Meta_Kim intentionally separates source files, generated projections, and local state:
 
@@ -106,6 +141,10 @@ The default Enter path is **global reusable capabilities**. Agents, commands, MC
 If you explicitly choose **Project directory updates**, setup asks which project directories to update and writes the target-selected project runtime projection there, including project hooks/config where that runtime supports them. This path does not install global reusable capabilities and does not run project cleanup.
 
 Project files are still allowed, but they are not the default reusable capability store. Confirmed project bootstrap writes only project context/config/state plus proven project-specific overrides, preserving existing user config through managed blocks, add-only writes, protected JSON merge, backups, and manifests. Every applied project bootstrap records `.meta-kim/` state and backup files.
+
+Update also treats third-party installers as untrusted configuration producers. For Codex, Meta_Kim restores the user's pre-install configuration and applies only its narrowly owned native controls. This prevents an upstream installer from resurrecting a third-party MCP server the user deleted, silently adopting a new server, or persisting known Meta_Kim benchmark/test project registrations. User-owned MCP servers, projects, hooks, agents, and unrelated settings remain intact.
+
+Codex agent fan-out has a bounded default of two threads and one nested level. Explicit user limits are preserved; only an absent value or Meta_Kim's former default of six threads is migrated.
 
 If you plan to maintain the repository, edit the canonical sources first: `canonical/agents/`, `canonical/skills/meta-theory/`, `config/contracts/`, and `config/capability-index/`. Then run (requires Node.js >= 22.13.0):
 
@@ -596,6 +635,8 @@ You can keep adding platform mappings over time, but the upgrade path is gated: 
 
 The four tool targets are first-class Meta_Kim projection families, but their native surfaces and evidence levels differ. Claude Code and Codex are the default selected primary path. OpenClaw and Cursor are available non-default compatibility projections: use them with maintainer handshake, and treat runtime changes as incomplete until strict contributor-owned self-test evidence from that tool passes review. Projection smoke, fixture validation, and generated reports are useful evidence, but they are not the same thing as native-live runtime proof.
 
+The decision-authority boundary is narrower than projection support. Current Codex app-server and Claude SDK/CLI callbacks can provide exactly correlated, non-authorizing observations, but public host surfaces do not prove Codex Desktop UI, human identity, or a human answer. That trusted-host authority remains parked. Legacy governance-gate parity and cutover are separately deferred, so 3.0 does not claim that shadow/read-only results have replaced production gates. OpenClaw still lacks a Meta_Kim typed-plugin enforcement adapter for tool blocking, and Cursor arbitrary native-choice popup authority remains unverified.
+
 | Capability surface | Claude Code | Codex | OpenClaw | Cursor |
 | --- | --- | --- | --- | --- |
 | **Agents** | Native agents/subagents, mature at both project and user scope | Strong custom agents/subagents | Workspace-style agents, supports agent-to-agent | Official subagents under `.cursor/agents` with project-rule compatible governance context |
@@ -700,6 +741,7 @@ Each layer has different activation requirements:
 - **Responsibility**: project-level code knowledge graph
 - **Storage**: `graphify-out/graph.json` (NetworkX node-link format); humans and agents use it through query/path/explain slices, with `graphify-out/GRAPH_REPORT.md` reserved for broad architecture orientation
 - **Mechanism (data)**: `node setup.mjs` (optional Python step) installs graphify and **idempotently** runs `python -m graphify claude install` and `python -m graphify hook install` even if graphify was already installed via pip; git hooks rebuild the graph on commit/checkout in the **current repo**. `npm run meta:graphify:install` does the same (including hooks).
+- **Windows migration**: if an existing Claude project still reports `C:Users...graphify.EXE: command not found`, run `meta-kim doctor hooks --fix` from that project. It backs up `.claude/settings.json` and repairs only the known unsafe Graphify Hook form; use `--all` only when you also intend to inspect user-level settings.
 - **Mechanism (usage)**: synced meta-theory `dev-governance.md` Fetch **Step 0.5** defines how the model should detect and use the graph — not a background service. Claude Code subagents get a **short hint** via `subagent-context.mjs`, not automatic embedding of `graph.json`. Focused work should call `graphify query`, `graphify path`, or `graphify explain` to get candidate file anchors, then verify route-changing claims against source files. Codex / OpenClaw / Cursor share the same reference after `meta:sync` but have no SubagentStart hook; optional `python -m graphify codex install` or `python -m graphify claw install` in a **target repo** patches that repo’s docs per graphify CLI (`python -m graphify --help`).
 - **Core value**:
   - Make memory increasingly familiar with the project - not by remembering raw code, but by understanding structure and relationships
@@ -835,7 +877,7 @@ Interactive update flow:
 | Command | Purpose |
 | --- | --- |
 | `npm run meta:sync` | Sync from canonical sources to all four runtimes |
-| `npm run meta:check:runtimes` | Check whether the four runtimes are in sync |
+| `npm run meta:check:runtimes` | Check the configured project projection mode; pass explicit runtime targets only when intentionally validating full project mirrors |
 | `npm run meta:validate` | Validate repository integrity |
 | `npm run meta:verify:all` | Full validation, including runtime smoke checks |
 
@@ -907,13 +949,17 @@ More advanced commands (`meta:validate:run`, `meta:eval:agents`, `meta:eval:agen
 
 ### Q: I installed via `npx`, where are my files?
 
-Meta_Kim writes to 3 places:
+Meta_Kim uses two distinct scopes; a normal global install does not populate the current project with durable runtime mirrors:
 
-1. **Current directory** — `.claude/`, `.codex/`, `.cursor/`, `openclaw/` runtime projections for THIS project
-2. **Your home** — `~/.claude/skills/meta-theory/` (plus `.codex / .cursor / .openclaw`) for global skills shared across all projects
-3. **Manifest** — `~/.meta-kim/install-manifest.json` tracks everything for safe rollback
+1. **Your home** — `~/.claude/`, `~/.codex/`, `~/.cursor/`, and `~/.openclaw/` hold globally reusable assets selected for those runtimes.
+2. **Global manifest** — `~/.meta-kim/install-manifest.json` tracks managed global files for safe update and rollback.
+3. **Stable execution package** — a global-writing install/update first stores the exact package under `~/.meta-kim/runtime/projection-packages/<package>/<version>/<packed-sha256>/`. Claude Code and Codex Commands, Hook registrations, and merged settings/config reference this stable root instead of an npx cache or temporary extraction directory.
 
-Run `npm run meta:status` (or `node setup.mjs --check`) in the directory where you ran `npx` to see the full footprint. Use `npm run meta:uninstall` for a safe rollback.
+Project runtime mirrors are created by an explicit project install/bootstrap or by governed runtime sedimentation. In `global_only`, installation itself may retain only the minimal project Hook dependency closure required by the host contract. If a later governed run creates or iterates an Agent, Skill, or Command, Meta_Kim copies it into the current project with independent ownership so dependency updates cannot replace that project version.
+
+One exception is intentional: if a global install/update detects a project that already has a valid Meta_Kim bootstrap manifest, it refreshes that existing project with the project's own saved runtime targets and merge/delta policy while also updating the global installation. It does not create a new project projection, and it preserves runtime-sedimented capabilities and user-owned files.
+
+From a global install, run `meta-kim status` from any directory to see the full footprint. With npx, repeat `npx --yes github:KimYx0207/Meta_Kim meta-kim status` and replace `status` with `check`, `doctor`, `update`, or `uninstall` as needed. These commands resolve scripts from the package rather than the current directory. Help, status, and doctor remain query/diagnostic entrypoints and do not create the immutable package store merely because they were invoked; check is read-only and validates the current version's manifest-bound package authority. Install/update may materialize the stable package before writing global projections. Uninstall removes a stored bundle only when the manifest proves exact Meta_Kim ownership and the bundle has not drifted; unknown, changed, and user-owned content is preserved. Repository maintainers can keep using the equivalent `npm run meta:*` commands.
 
 ### Q: What is different about Meta_Kim compared with a normal AI coding assistant?
 
@@ -1014,7 +1060,9 @@ Meta_Kim itself is licensed under Apache License 2.0. The following optional ski
 | [OthmanAdi/planning-with-files](https://github.com/OthmanAdi/planning-with-files) | MIT |
 | [HKUDS/CLI-Anything](https://github.com/HKUDS/CLI-Anything) | Apache 2.0 |
 | [garrytan/gstack](https://github.com/garrytan/gstack) | MIT |
-| [anthropics/skills](https://github.com/anthropics/skills) | No license declared (© Anthropic, PBC) |
+| [KimYx0207/meta-skill-creator](https://github.com/KimYx0207/meta-skill-creator) | MIT |
+
+`meta-skill-creator` is installed only for its currently declared targets: Claude Code at `~/.claude/skills/meta-skill-creator`, and Codex at `~/.agents/skills/meta-skill-creator` with a synchronized compatibility copy at `~/.codex/skills/meta-skill-creator`. Cursor and OpenClaw are not current installation targets for this skill.
 
 ### Optional pip Packages
 

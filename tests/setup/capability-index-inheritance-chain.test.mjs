@@ -1,13 +1,23 @@
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { promises as fs } from "node:fs";
+import os from "node:os";
 import path from "node:path";
 
 import {
+  buildGlobalCapabilityInventory,
+  checkCanonicalCapabilityIndex,
+  deriveCapabilityIndexMirrorTargets,
   formatTableOutput,
+  mergeCanonicalHookSources,
   preserveGeneratedAtWhenUnchanged,
+  updateGlobalCapabilityInventory,
+  writeCanonicalCapabilityIndex,
 } from "../../scripts/discover-global-capabilities.mjs";
 import {
+  loadSyncManifest,
   repoRoot,
   resolveRuntimeProjection,
 } from "../../scripts/meta-kim-sync-config.mjs";
@@ -19,12 +29,27 @@ const canonicalIndexPath = path.join(
   "meta-kim-capabilities.json",
 );
 
-const mirrorIndexPaths = [
-  ".claude/capability-index/meta-kim-capabilities.json",
-  ".codex/capability-index/meta-kim-capabilities.json",
-  "openclaw/capability-index/meta-kim-capabilities.json",
-  ".cursor/capability-index/meta-kim-capabilities.json",
-].map((relativePath) => path.join(repoRoot, relativePath));
+function sha256(content) {
+  return createHash("sha256").update(content).digest("hex");
+}
+
+function platformScan(platformId, agentIds) {
+  return {
+    platformId,
+    capabilities: {
+      agents: agentIds.map((id) => ({ id, platformId })),
+      skills: [],
+      hooks: [],
+      mcpServers: [],
+      mcpTools: [],
+      plugins: [],
+      commands: [],
+      rules: [],
+      prompts: [],
+    },
+    errors: [],
+  };
+}
 
 async function readJson(relativePath) {
   return JSON.parse(await fs.readFile(path.join(repoRoot, relativePath), "utf8"));
@@ -56,6 +81,122 @@ async function listCanonicalSkillIds() {
 }
 
 describe("capability index inheritance chain", () => {
+  test("global discovery help is read-only and does not create runtime inventory", async () => {
+    const tempRoot = await fs.mkdtemp(
+      path.join(os.tmpdir(), "meta-kim-discovery-help-"),
+    );
+    const isolatedHome = path.join(tempRoot, "home");
+    const runtimeInventoryPath = path.join(
+      isolatedHome,
+      ".meta-kim",
+      "state",
+      "help-regression",
+      "capability-index",
+      "global-capabilities.json",
+    );
+    await fs.mkdir(isolatedHome, { recursive: true });
+
+    try {
+      const canonicalBefore = await fs.readFile(canonicalIndexPath);
+      const canonicalStatBefore = await fs.stat(canonicalIndexPath, {
+        bigint: true,
+      });
+      const result = spawnSync(
+        process.execPath,
+        [path.join(repoRoot, "scripts", "discover-global-capabilities.mjs"), "--help"],
+        {
+          cwd: repoRoot,
+          encoding: "utf8",
+          env: {
+            ...process.env,
+            HOME: isolatedHome,
+            USERPROFILE: isolatedHome,
+            META_KIM_LANG: "en",
+            META_KIM_PROFILE: "help-regression",
+          },
+        },
+      );
+      const canonicalAfter = await fs.readFile(canonicalIndexPath);
+      const canonicalStatAfter = await fs.stat(canonicalIndexPath, {
+        bigint: true,
+      });
+      const output = `${result.stdout ?? ""}\n${result.stderr ?? ""}`;
+
+      assert.equal(result.error, undefined);
+      assert.equal(result.signal, null);
+      assert.equal(result.status, 0, output);
+      assert.match(output, /usage:/iu);
+      assert.deepEqual(
+        canonicalAfter,
+        canonicalBefore,
+        "--help must preserve every byte of the canonical capability index",
+      );
+      assert.equal(sha256(canonicalAfter), sha256(canonicalBefore));
+      assert.equal(
+        canonicalStatAfter.mtimeNs,
+        canonicalStatBefore.mtimeNs,
+        "--help must not rewrite the canonical capability index with identical content",
+      );
+      await assert.rejects(
+        fs.access(runtimeInventoryPath),
+        (error) => error?.code === "ENOENT",
+        "--help must not write the runtime capability inventory",
+      );
+      assert.deepEqual(
+        await fs.readdir(isolatedHome),
+        [],
+        "--help must not create runtime state anywhere under the isolated home",
+      );
+    } finally {
+      await fs.rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("same-name Claude Hook adapter cannot overwrite shared canonical source", () => {
+    const shared = [
+      {
+        id: "spine-state.mjs",
+        path: "/repo/canonical/runtime-assets/shared/hooks/spine-state.mjs",
+      },
+    ];
+    const claude = [
+      {
+        id: "spine-state.mjs",
+        path: "/repo/canonical/runtime-assets/claude/hooks/spine-state.mjs",
+      },
+      {
+        id: "claude-only.mjs",
+        path: "/repo/canonical/runtime-assets/claude/hooks/claude-only.mjs",
+      },
+    ];
+
+    assert.deepEqual(
+      mergeCanonicalHookSources(shared, claude, [], {
+        verifiedThinAdapterIds: new Set(["spine-state.mjs"]),
+      }),
+      [
+        {
+          ...shared[0],
+          adapterPath: claude[0].path,
+        },
+        claude[1],
+      ],
+    );
+  });
+
+  test("unverified Claude and same-name OpenClaw Hooks cannot overwrite shared truth", () => {
+    const shared = [{ id: "same.mjs", path: "/shared/same.mjs" }];
+    const claude = [{ id: "same.mjs", path: "/claude/same.mjs" }];
+    const openclaw = [{ id: "same.mjs", path: "/openclaw/same.mjs" }];
+    const merged = mergeCanonicalHookSources(shared, claude, openclaw);
+
+    assert.deepEqual(merged, [
+      shared[0],
+      { ...claude[0], namespace: "canonical-claude-hooks" },
+      { ...openclaw[0], namespace: "canonical-openclaw-hooks" },
+    ]);
+  });
+
   test("global discovery table defaults to category stats instead of dumping every capability", () => {
     const index = {
       byPlatform: {
@@ -179,12 +320,260 @@ describe("capability index inheritance chain", () => {
     assert.match(source, /runtimeInventoryOnly/);
     assert.match(source, /writeRepoIndex = !runtimeInventoryOnly/);
     assert.match(source, /HOME_GLOBAL_INVENTORY/);
-    assert.match(source, /\.meta-kim-legacy-backup\//);
+    assert.match(source, /const nonLiveHookDirectoryNames = new Set\(\[/u);
+    assert.match(source, /"\.meta-kim-hook-package-backup"/u);
+    assert.match(source, /"\.meta-kim-legacy-backup"/u);
+    assert.match(source, /walkDir\(dir, 3, nonLiveHookDirectoryNames\)/u);
     assert.doesNotMatch(
       source,
       /const platformsToScan = filterPlatform/,
       "global discovery must not use the old single-platform-only filter path",
     );
+  });
+
+  test("targeted global discovery refresh preserves unselected runtime inventories", async () => {
+    const initial = await buildGlobalCapabilityInventory(
+      [platformScan("claudeCode", ["claude-worker"])],
+      "default",
+    );
+    const withCodex = await buildGlobalCapabilityInventory(
+      [platformScan("codexApp", ["codex-worker"])],
+      "default",
+      initial,
+    );
+
+    assert.deepEqual(Object.keys(withCodex.byPlatform).sort(), ["claudeCode", "codexApp"]);
+    assert.ok(withCodex.byCapabilityType.agents["claudeCode:claude-worker"]);
+    assert.ok(withCodex.byCapabilityType.agents["codexApp:codex-worker"]);
+
+    const refreshedClaude = await buildGlobalCapabilityInventory(
+      [platformScan("claudeCode", ["claude-worker-v2"])],
+      "default",
+      withCodex,
+    );
+    assert.equal(refreshedClaude.byCapabilityType.agents["claudeCode:claude-worker"], undefined);
+    assert.ok(refreshedClaude.byCapabilityType.agents["claudeCode:claude-worker-v2"]);
+    assert.ok(refreshedClaude.byCapabilityType.agents["codexApp:codex-worker"]);
+  });
+
+  test("source-aware inventory selects a stable skill winner and preserves every source", async () => {
+    const sourceCandidates = [
+      {
+        id: "same-skill",
+        platformId: "codex",
+        path: "/project/.agents/skills/same-skill/SKILL.md",
+        sourceClass: "project",
+        sourceRoot: "/project/.agents/skills",
+        sourceRef: ".agents/skills/same-skill/SKILL.md",
+        contentDigest: "1".repeat(64),
+      },
+      {
+        id: "same-skill",
+        platformId: "codex",
+        path: "/home/user/.codex/skills/same-skill/SKILL.md",
+        sourceClass: "personal",
+        sourceRoot: "/home/user/.codex/skills",
+        sourceRef: "~/.codex/skills/same-skill/SKILL.md",
+        contentDigest: "2".repeat(64),
+      },
+      {
+        id: "same-skill",
+        platformId: "codex",
+        path: "/home/user/.agents/skills/same-skill/SKILL.md",
+        sourceClass: "shared",
+        sourceRoot: "/home/user/.agents/skills",
+        sourceRef: "~/.agents/skills/same-skill/SKILL.md",
+        contentDigest: "3".repeat(64),
+      },
+      {
+        id: "same-skill",
+        platformId: "codex",
+        path: "/home/user/legacy/same-skill/SKILL.md",
+        sourceClass: "legacy",
+        sourceRoot: "/home/user/legacy",
+        sourceRef: "legacy/same-skill/SKILL.md",
+        contentDigest: "4".repeat(64),
+      },
+    ];
+    const scan = {
+      platformId: "codex",
+      capabilities: {
+        agents: [],
+        skills: sourceCandidates,
+        hooks: [],
+        mcpServers: [],
+        mcpTools: [],
+        plugins: [],
+        commands: [],
+        rules: [],
+        prompts: [],
+      },
+      errors: [],
+    };
+
+    const forward = await buildGlobalCapabilityInventory([scan], "source-aware");
+    const reverse = await buildGlobalCapabilityInventory(
+      [{ ...scan, capabilities: { ...scan.capabilities, skills: [...sourceCandidates].reverse() } }],
+      "source-aware",
+    );
+    const winner = forward.byCapabilityType.skills["codex:same-skill"];
+    const reverseWinner = reverse.byCapabilityType.skills["codex:same-skill"];
+
+    assert.equal(winner.sourceClass, "project");
+    assert.equal(winner.sourcePriority, 400);
+    assert.equal(winner.nativeIdentity, "same-skill");
+    assert.equal(winner.contentDigest, "1".repeat(64));
+    assert.equal(winner.sourceKey, reverseWinner.sourceKey);
+    assert.equal(winner.collision.kind, "conflicting_definitions");
+    assert.equal(winner.collision.routeEligible, true);
+    assert.equal(winner.provenance.length, 4);
+    assert.deepEqual(
+      winner.provenance.map((entry) => entry.sourceClass),
+      ["project", "personal", "shared", "legacy"],
+    );
+    assert.equal(forward.byPlatform.codex.capabilities.skills.length, 4);
+    assert.ok(
+      forward.byPlatform.codex.capabilities.skills.every(
+        (entry) => entry.provenance.length === 4 && entry.collision.candidateCount === 4,
+      ),
+      "raw platform evidence must retain the full collision provenance",
+    );
+  });
+
+  test("published global inventory omits raw absolute paths and workspace metadata", async () => {
+    const tempRoot = await fs.mkdtemp(
+      path.join(os.tmpdir(), "meta-kim-private-inventory-"),
+    );
+    const skillPath = path.join(tempRoot, "skills", "private-skill", "SKILL.md");
+    await fs.mkdir(path.dirname(skillPath), { recursive: true });
+    await fs.writeFile(skillPath, "# Private skill\n", "utf8");
+    try {
+      const inventory = await buildGlobalCapabilityInventory(
+        [{
+          platform: "Codex",
+          platformId: "codex",
+          baseDir: tempRoot,
+          capabilities: {
+            agents: [],
+            skills: [{
+              id: "private-skill",
+              type: "skills",
+              platform: "Codex",
+              platformId: "codex",
+              path: skillPath,
+              relativePath: path.join("private-skill", "SKILL.md"),
+              metadata: {
+                name: "private-skill",
+                description: `Loaded from ${skillPath} and \\\\private-server\\private-share\\secret`,
+                workspace: tempRoot,
+              },
+            }],
+            hooks: [],
+            mcpServers: [{
+              id: "private-mcp",
+              type: "mcpServers",
+              platform: "Codex",
+              platformId: "codex",
+              relativePath: "../private-mcp.json",
+              command: "node",
+              args: [
+                "server.mjs",
+                "--token",
+                "private-token-value",
+                "--api-key=private-key-value",
+                "--header",
+                "Authorization: Bearer private-bearer-value",
+                "--client-secret",
+                "private-client-secret",
+                "--access-token=private-access-token",
+                "AWS_SECRET_ACCESS_KEY=private-aws-secret",
+                "https://user:pass@example.test/mcp?access_token=private-query-value&safe=visible",
+              ],
+              metadata: {
+                name: "private-mcp",
+                providerKind: "mcp-server",
+                args: "server.mjs --header=X-Api-Key: private-inline-header --http-header Cookie: private-cookie --safe visible",
+              },
+            }],
+            mcpTools: [],
+            plugins: [],
+            commands: [],
+            rules: [],
+            prompts: [],
+          },
+          errors: [`Platform directory not found: ${tempRoot}`],
+        }],
+        "privacy-test",
+      );
+      const serialized = JSON.stringify(inventory);
+      const skill = inventory.byCapabilityType.skills["codex:private-skill"];
+      const mcp = inventory.byCapabilityType.mcpServers["codex:private-mcp"];
+
+      assert.equal("path" in skill, false);
+      assert.equal("workspace" in (skill.metadata ?? {}), false);
+      assert.equal("baseDir" in inventory.byPlatform.codex, false);
+      assert.equal(serialized.includes(tempRoot), false);
+      assert.equal(serialized.includes(tempRoot.replace(/\\/gu, "/")), false);
+      assert.equal(serialized.includes(repoRoot), false);
+      assert.equal(serialized.includes(repoRoot.replace(/\\/gu, "/")), false);
+      assert.equal(serialized.includes("private-server"), false);
+      assert.equal(serialized.includes("private-share"), false);
+      assert.match(skill.sourceRef, /^(?:~\/|external\/)/u);
+      assert.match(skill.contentDigest, /^[a-f0-9]{64}$/u);
+      assert.deepEqual(mcp.args.slice(0, 6), [
+        "server.mjs",
+        "--token",
+        "[REDACTED_ARGUMENT]",
+        "--api-key=[REDACTED_ARGUMENT]",
+        "--header",
+        "[REDACTED_ARGUMENT]",
+      ]);
+      assert.deepEqual(mcp.args.slice(6, 10), [
+        "--client-secret",
+        "[REDACTED_ARGUMENT]",
+        "--access-token=[REDACTED_ARGUMENT]",
+        "AWS_SECRET_ACCESS_KEY=[REDACTED_ARGUMENT]",
+      ]);
+      const urlArg = mcp.args.at(-1);
+      assert.equal(urlArg.includes("user:pass"), false);
+      assert.equal(urlArg.includes("private-query-value"), false);
+      assert.match(urlArg, /REDACTED/);
+      assert.equal("relativePath" in mcp, false);
+      assert.equal(JSON.stringify(mcp.metadata).includes("private-token-value"), false);
+      assert.equal(JSON.stringify(mcp.metadata).includes("private-key-value"), false);
+      assert.equal(JSON.stringify(mcp.metadata).includes("private-inline-header"), false);
+      assert.equal(JSON.stringify(mcp.metadata).includes("private-cookie"), false);
+    } finally {
+      await fs.rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("concurrent targeted refreshes publish complete JSON without losing another runtime", async () => {
+    const tempRoot = await fs.mkdtemp(
+      path.join(os.tmpdir(), "meta-kim-capability-inventory-race-"),
+    );
+    const inventoryPath = path.join(tempRoot, "global-capabilities.json");
+    try {
+      await Promise.all([
+        updateGlobalCapabilityInventory({
+          scannedResults: [platformScan("claudeCode", ["claude-worker"])],
+          profile: "concurrency-test",
+          localInventoryPath: inventoryPath,
+        }),
+        updateGlobalCapabilityInventory({
+          scannedResults: [platformScan("codexApp", ["codex-worker"])],
+          profile: "concurrency-test",
+          localInventoryPath: inventoryPath,
+        }),
+      ]);
+
+      const inventory = JSON.parse(await fs.readFile(inventoryPath, "utf8"));
+      assert.deepEqual(Object.keys(inventory.byPlatform).sort(), ["claudeCode", "codexApp"]);
+      assert.ok(inventory.byCapabilityType.agents["claudeCode:claude-worker"]);
+      assert.ok(inventory.byCapabilityType.agents["codexApp:codex-worker"]);
+    } finally {
+      await fs.rm(tempRoot, { recursive: true, force: true });
+    }
   });
 
   test("repo MCP discovery uses canonical runtime asset instead of project projection", async () => {
@@ -215,6 +604,10 @@ describe("capability index inheritance chain", () => {
       return;
     }
 
+    const index = await readJson("config/capability-index/meta-kim-capabilities.json");
+    const mirrorIndexPaths = (index.mirroredTo ?? []).map((relativePath) =>
+      path.join(repoRoot, relativePath),
+    );
     const canonical = await fs.readFile(canonicalIndexPath, "utf8");
     for (const mirrorPath of mirrorIndexPaths) {
       try {
@@ -228,6 +621,115 @@ describe("capability index inheritance chain", () => {
         `${path.relative(repoRoot, mirrorPath).replace(/\\/g, "/")} must exactly mirror the canonical capability index`,
       );
     }
+  });
+
+  test("capability mirror metadata is derived from the sync manifest runtime layouts", async () => {
+    const manifest = await loadSyncManifest();
+    const actual = await deriveCapabilityIndexMirrorTargets({ manifest });
+    const fileName = path.basename(canonicalIndexPath);
+    const expected = manifest.supportedTargets.map((runtimeId) => {
+      const projection = resolveRuntimeProjection(runtimeId, "project");
+      return path
+        .relative(
+          repoRoot,
+          path.join(projection.capabilityIndexDir, fileName),
+        )
+        .replace(/\\/g, "/");
+    });
+
+    assert.deepEqual(actual, expected);
+    assert.equal(new Set(actual).size, actual.length);
+  });
+
+  test("discovery canonical writes never create, rewrite, or delete runtime mirrors", async () => {
+    const tempRoot = await fs.mkdtemp(
+      path.join(os.tmpdir(), "meta-kim-capability-discovery-"),
+    );
+    try {
+      const manifest = await loadSyncManifest();
+      const mirroredTo = await deriveCapabilityIndexMirrorTargets({
+        projectRoot: tempRoot,
+        manifest,
+      });
+      const canonicalPath = path.join(
+        tempRoot,
+        "config",
+        "capability-index",
+        path.basename(canonicalIndexPath),
+      );
+      const sentinelMirrors = mirroredTo.filter((_, index) => index % 2 === 0);
+      const absentMirrors = mirroredTo.filter((_, index) => index % 2 === 1);
+
+      for (const relativePath of sentinelMirrors) {
+        const mirrorPath = path.join(tempRoot, relativePath);
+        await fs.mkdir(path.dirname(mirrorPath), { recursive: true });
+        await fs.writeFile(mirrorPath, `user-owned:${relativePath}\n`, "utf8");
+      }
+
+      const index = {
+        registryName: "test-capability-index",
+        mirroredTo,
+        byCapabilityType: {},
+      };
+      await writeCanonicalCapabilityIndex(canonicalPath, index);
+
+      assert.deepEqual(
+        JSON.parse(await fs.readFile(canonicalPath, "utf8")),
+        index,
+      );
+      for (const relativePath of sentinelMirrors) {
+        assert.equal(
+          await fs.readFile(path.join(tempRoot, relativePath), "utf8"),
+          `user-owned:${relativePath}\n`,
+        );
+      }
+      for (const relativePath of absentMirrors) {
+        await assert.rejects(
+          fs.access(path.join(tempRoot, relativePath)),
+          (error) => error?.code === "ENOENT",
+        );
+      }
+    } finally {
+      await fs.rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("canonical discovery check is read-only and detects stale content", async () => {
+    const tempRoot = await fs.mkdtemp(
+      path.join(os.tmpdir(), "meta-kim-capability-check-"),
+    );
+    try {
+      const canonicalPath = path.join(tempRoot, "meta-kim-capabilities.json");
+      const current = {
+        generatedAt: "2026-07-14T00:00:00.000Z",
+        registryName: "test-capability-index",
+        mirroredTo: [],
+      };
+      await writeCanonicalCapabilityIndex(canonicalPath, current);
+
+      const matching = await checkCanonicalCapabilityIndex(canonicalPath, current);
+      assert.equal(matching.ok, true);
+
+      const staleExpected = { ...current, registryName: "changed-capability-index" };
+      const before = await fs.readFile(canonicalPath, "utf8");
+      const stale = await checkCanonicalCapabilityIndex(canonicalPath, staleExpected);
+      const after = await fs.readFile(canonicalPath, "utf8");
+      assert.equal(stale.ok, false);
+      assert.equal(after, before, "--check semantics must not rewrite canonical source");
+    } finally {
+      await fs.rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("global discovery leaves runtime mirror convergence to sync", async () => {
+    const source = await fs.readFile(
+      path.join(repoRoot, "scripts", "discover-global-capabilities.mjs"),
+      "utf8",
+    );
+
+    assert.match(source, /Project mirrors are generated by sync-runtimes\.mjs/);
+    assert.doesNotMatch(source, /platformIndexDirs/);
+    assert.doesNotMatch(source, /canonicalIndexMirrored\(/);
   });
 
   test("capability index covers every canonical agent and root skill", async () => {
@@ -256,6 +758,20 @@ describe("capability index inheritance chain", () => {
       skillPaths.filter((skillPath) => !indexedSkillPaths.has(skillPath)),
       [],
       "every canonical skill SKILL.md must be represented in byCapabilityType.skills",
+    );
+  });
+
+  test("capability index includes the shared spine gate dependency", async () => {
+    const index = await readJson("config/capability-index/meta-kim-capabilities.json");
+    const entry =
+      index.byCapabilityType?.hooks?.[
+        "repo:canonical-runtime-assets:spine-state-gates.mjs"
+      ];
+
+    assert.equal(
+      entry?.path,
+      "canonical/runtime-assets/shared/hooks/spine-state-gates.mjs",
+      "shared spine gate policy must remain discoverable from the canonical capability index",
     );
   });
 
@@ -371,17 +887,20 @@ describe("capability index inheritance chain", () => {
     );
   });
 
-  test("release verification refreshes global capability discovery before checks while live eval stays live-only", async () => {
+  test("release verification checks canonical discovery read-only before mirror sync", async () => {
     const pkg = await readJson("package.json");
     const releaseScript = await fs.readFile(
       path.join(repoRoot, "scripts", "run-verify-all.mjs"),
       "utf8",
     );
     assert.match(pkg.scripts?.["meta:verify:all"] ?? "", /run-verify-all\.mjs/);
-    assert.match(releaseScript, /npm run discover:global/);
+    assert.match(releaseScript, /npm run discover:global -- --check/u);
+    assert.match(releaseScript, /npm run meta:sync/u);
     assert.ok(
-      releaseScript.indexOf("npm run discover:global") < releaseScript.indexOf("npm run meta:check"),
-      "meta:verify:all must refresh capability indexes before validation checks",
+      releaseScript.indexOf("npm run discover:global -- --check") <
+        releaseScript.indexOf("npm run meta:sync") &&
+        releaseScript.indexOf("npm run meta:sync") < releaseScript.indexOf("npm run meta:check"),
+      "meta:verify:all must check canonical source read-only, sync mirrors, then validate",
     );
 
     const liveScript = pkg.scripts?.["meta:verify:all:live"] ?? "";
@@ -401,7 +920,7 @@ describe("capability index inheritance chain", () => {
     assert.match(setupSource, /function refreshGlobalCapabilityInventory\(activeTargets = \[\]\)/);
     assert.match(
       setupSource,
-      /runNodeScript\("scripts\/discover-global-capabilities\.mjs", targetArgs, \{\s*META_KIM_LANG: currentLangCode,\s*\}\)/,
+      /runNodeScript\(SETUP_NODE_CHILD\.CAPABILITY_DISCOVERY, targetArgs, \{\s*META_KIM_LANG: currentLangCode,\s*\}\)/,
       "setup.mjs must run global discovery directly for the selected runtime targets",
     );
     assert.match(
@@ -421,7 +940,7 @@ describe("capability index inheritance chain", () => {
     );
     assert.match(
       setupSource,
-      /await refreshGlobalCapabilityInventory\(activeTargets\);\s*\n\s*}\s*\n\s*\/\/ ── 6\. checkSync/,
+      /await refreshGlobalCapabilityInventory\(activeTargets\);\s*\n\s*}\s*\n\s*\/\/ Copy runtime files before validating their final target state/,
       "update flow must refresh the global capability inventory before final sync checks",
     );
 

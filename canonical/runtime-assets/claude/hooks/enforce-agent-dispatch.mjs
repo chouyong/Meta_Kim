@@ -98,7 +98,6 @@ import {
   isReadOnlyTool,
   recordDispatch,
   writeSpineState,
-  checkStageRequirements,
   checkChoiceSurfaceGate,
   isHookObservedState,
   STAGE_META_AGENT_MAP,
@@ -106,7 +105,6 @@ import {
   recordSkippedHook,
   getGovernanceFlow,
   evaluateFanoutGate,
-  validateDegradedDeclaration,
 } from "./spine-state.mjs";
 import {
   getSkipRule,
@@ -126,22 +124,22 @@ const SPINE_STATE_DIR =
   process.env.META_KIM_SPINE_STATE_DIR || ".meta-kim/state/default/spine";
 const targetPath = extractFilePath(payload) || "";
 const PLANNING_FILES = ["task_plan.md", "findings.md", "progress.md"];
-const PASSIVE_CONTROL_PLANE_TOOLS = new Set([
-  "EnterPlanMode",
-  "ExitPlanMode",
+const READ_ONLY_CONTROL_PLANE_TOOLS = new Set([
   "TaskList",
   "TaskGet",
   "TaskOutput",
-  "TaskStop",
 ]);
-const TASK_BOOKKEEPING_TOOLS = new Set([
+const MUTATING_CONTROL_PLANE_TOOLS = new Set([
+  "EnterPlanMode",
+  "ExitPlanMode",
+  "TaskStop",
   "TaskCreate",
   "TaskUpdate",
   "TodoWrite",
 ]);
 const CONTROL_PLANE_TOOLS = new Set([
-  ...PASSIVE_CONTROL_PLANE_TOOLS,
-  ...TASK_BOOKKEEPING_TOOLS,
+  ...READ_ONLY_CONTROL_PLANE_TOOLS,
+  ...MUTATING_CONTROL_PLANE_TOOLS,
 ]);
 
 function normalizeHookPath(value) {
@@ -445,75 +443,6 @@ function isPlanningFileWriteSegment(segment) {
   );
 }
 
-function formatDesignStageMutationDeny(label, req, state) {
-  const missing = req?.missing?.length
-    ? ` Missing: ${req.missing.join(", ")}.`
-    : "";
-  const reason = req?.reason ? ` ${req.reason}` : "";
-  return (
-    `Stage "${label}" is a design-time stage; business mutation is blocked until Execution.` +
-    `${missing}${reason} Critical, Fetch, and Thinking can be completed by the main thread; ` +
-    "Agent dispatch is not required before Execution. Allowed next actions: continue " +
-    "read/search Fetch evidence, capability discovery, a brief visible chat status, " +
-    "planning-file updates when already useful, or spine-state packet writes. Do not start " +
-    "Fetch by creating or updating a task/todo board before evidence is collected. " +
-    `Dispatch chain so far: ${JSON.stringify(state.dispatchChain || {})}`
-  );
-}
-
-function hasFetchEvidenceForTaskBookkeeping(state) {
-  const fetchRecord = state?.fetchRecord;
-  if (!fetchRecord || typeof fetchRecord !== "object") return false;
-  if (fetchRecord.repairOnly || fetchRecord.status === "repair_only_fetch_record") {
-    return false;
-  }
-  return (
-    fetchRecord.capabilitySearchPerformed === true ||
-    (Array.isArray(fetchRecord.evidence) && fetchRecord.evidence.length > 0) ||
-    (Array.isArray(fetchRecord.capabilityMatches) && fetchRecord.capabilityMatches.length > 0)
-  );
-}
-
-function shouldDelayTaskBookkeeping(state) {
-  const stage = String(state?.currentStage || "").toLowerCase();
-  const dispatchMode = state?.stageRuntimeControl?.dispatchMode;
-  const dispatched = Array.isArray(state?.dispatchedAgents)
-    ? state.dispatchedAgents.length
-    : 0;
-  if (
-    ["fanout_eligible", "fan_out_ready", "fan_out_in_progress"].includes(dispatchMode) &&
-    dispatched === 0
-  ) return true;
-  if (stage === "critical") return true;
-  if (stage === "fetch" && !hasFetchEvidenceForTaskBookkeeping(state)) return true;
-  return false;
-}
-
-function formatTaskBookkeepingDelayDeny(toolName, state) {
-  const stage = state?.currentStage || "current design stage";
-  return (
-    `Task/todo bookkeeping via "${toolName}" is delayed during ${stage}. ` +
-    "For fan-out-eligible governed work, TaskCreate/TaskUpdate/TodoWrite cannot replace native Agent dispatch; " +
-    "dispatch at least one selected worker through Agent/Task before opening a bookkeeping board. " +
-    "Otherwise continue until Fetch evidence and Thinking owner bindings exist. " +
-    "Continue Fetch with read/search/capability discovery and a brief visible chat status; " +
-    "write spine-state or planning files only when needed. Do not start by creating or updating " +
-    "a task list before evidence is collected."
-  );
-}
-
-function formatPostExecutionStageDeny(label, req, state) {
-  const missing = req?.missing?.length
-    ? ` Missing: ${req.missing.join(", ")}.`
-    : "";
-  const reason = req?.reason ? ` ${req.reason}` : "";
-  return (
-    `Stage "${label}" requirements are not met.${missing}${reason} ` +
-    "Return to the responsible stage and record the missing evidence before continuing. " +
-    `Dispatch chain: ${JSON.stringify(state.dispatchChain || {})}`
-  );
-}
-
 function matchesStageReadOnlyCommand(command, prefixes) {
   const segments = bashReadonlyInternals
     .splitSegments(command)
@@ -763,25 +692,205 @@ function observedModeNotice(state) {
   );
 }
 
-async function allowObservedModeExecution(state) {
-  const control = state?.stageRuntimeControl || {};
-  if (!control.observedNoticeEmittedAt) {
-    process.stderr.write(`${observedModeNotice(state)}\n`);
-    const nextState = {
-      ...state,
-      stageRuntimeControl: {
-        ...control,
-        observedNoticeEmittedAt: new Date().toISOString(),
-        observedNoticePolicy: "emit_once_per_active_state",
-      },
-    };
-    await writeSpineState(cwd, nextState);
-  }
-  process.exit(0);
-}
+const EXACT_AGENT_DISPATCH_TOOLS = Object.freeze({
+  claude: new Set(["Agent", "Task"]),
+  codex: new Set([
+    "Agent",
+    "spawn_agent",
+    "followup_task",
+    "collaboration.spawn_agent",
+    "collaboration.followup_task",
+  ]),
+  cursor: new Set(["Agent", "Task", "spawn_agent"]),
+});
 
 function isAgentDispatchTool(name) {
-  return name === "Agent" || name === "Task" || name === "spawn_agent";
+  const runtime = detectHookRuntime();
+  const trustedTools = EXACT_AGENT_DISPATCH_TOOLS[runtime];
+  return trustedTools?.has(String(name ?? "")) === true;
+}
+
+function normalizedDispatchToolName(name) {
+  return String(name ?? "").split(/[.:/]/u).at(-1);
+}
+
+const CODEX_OWNER_BINDING_MODES = new Set([
+  "native_custom_agent",
+  "run_scoped_owner_contract",
+]);
+
+function boundedCodexIdentity(value) {
+  return typeof value === "string" &&
+    value.trim().length > 0 &&
+    value.trim().length <= 128 &&
+    !/[\u0000-\u001f\u007f]/u.test(value)
+    ? value.trim()
+    : null;
+}
+
+function codexOwnerBindingClaim(envelope) {
+  const modeCandidates = [envelope?.ownerBindingMode].filter((value) => value != null);
+  const agentTypeCandidates = [envelope?.nativeAgentType].filter((value) => value != null);
+  const normalizedModes = [...new Set(modeCandidates.map((value) => String(value).trim()))];
+  const normalizedAgentTypes = [
+    ...new Set(agentTypeCandidates.map((value) => boundedCodexIdentity(value))),
+  ];
+  if (
+    normalizedModes.length !== 1 ||
+    normalizedModes.length > 1 ||
+    normalizedModes.some((mode) => !CODEX_OWNER_BINDING_MODES.has(mode)) ||
+    normalizedAgentTypes.includes(null) ||
+    normalizedAgentTypes.length > 1
+  ) {
+    return { valid: false, mode: null, nativeAgentType: null };
+  }
+  return {
+    valid: true,
+    mode: normalizedModes[0] ?? null,
+    nativeAgentType: normalizedAgentTypes[0] ?? null,
+  };
+}
+
+function codexOwnerBindingFromHostInput(input, envelope) {
+  const hasAgentType = Object.prototype.hasOwnProperty.call(input ?? {}, "agent_type");
+  const nativeAgentType = hasAgentType ? boundedCodexIdentity(input.agent_type) : null;
+  if (hasAgentType && !nativeAgentType) {
+    return {
+      met: false,
+      mode: null,
+      nativeAgentType: null,
+      missing: ["valid host agent_type when the field is present"],
+    };
+  }
+  const mode = nativeAgentType ? "native_custom_agent" : "run_scoped_owner_contract";
+  const claim = codexOwnerBindingClaim(envelope);
+  const missing = [];
+  if (!claim.valid) missing.push("valid and unambiguous owner binding mode claim");
+  if (!claim.mode) missing.push("explicit ownerBindingMode");
+  if (claim.mode && claim.mode !== mode) {
+    missing.push(`claimed owner binding mode matching actual host schema (${mode})`);
+  }
+  if (claim.nativeAgentType && claim.nativeAgentType !== nativeAgentType) {
+    missing.push("claimed nativeAgentType matching the actual host agent_type");
+  }
+  if (claim.nativeAgentType && mode !== "native_custom_agent") {
+    missing.push("nativeAgentType claim only when host agent_type is present");
+  }
+  if (mode === "native_custom_agent" && envelope?.ownerAgent !== nativeAgentType) {
+    missing.push("ownerAgent matching the actual host agent_type");
+  }
+  if (mode === "native_custom_agent") {
+    const ownerDefinition = envelope?.ownerDefinition;
+    if (
+      ownerDefinition?.format !== "codex_custom_agent_toml" ||
+      ownerDefinition?.nativeCustomAgentEligible !== true ||
+      ownerDefinition?.nativeAgentName !== nativeAgentType
+    ) {
+      missing.push("validated Codex TOML ownerDefinition matching agent_type");
+    }
+    if (!/\.toml$/iu.test(String(envelope?.ownerSource ?? ownerDefinition?.sourceRef ?? ""))) {
+      missing.push("Codex TOML ownerSource for native_custom_agent");
+    }
+  }
+  if (mode === "run_scoped_owner_contract" && claim.nativeAgentType) {
+    missing.push("nativeAgentType omitted for run_scoped_owner_contract");
+  }
+  return {
+    met: missing.length === 0,
+    mode,
+    nativeAgentType,
+    claimedMode: claim.mode,
+    missing,
+  };
+}
+
+function validateMetaKimBinding(candidate, envelope) {
+  const fields = [
+    "runId", "family", "providerId", "bindingRef", "taskPacketId",
+    "roleInstanceId", "occurredAt", "evidenceKind",
+  ];
+  if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) return false;
+  if (Object.keys(candidate).sort().join("|") !== fields.sort().join("|")) return false;
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u.test(candidate.runId ?? "")) return false;
+  if (candidate.family !== "agent_subagent" || candidate.evidenceKind !== "spawn_agent_result") return false;
+  if (
+    !candidate.providerId ||
+    !candidate.bindingRef ||
+    !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?Z$/u.test(candidate.occurredAt ?? "") ||
+    !Number.isFinite(Date.parse(candidate.occurredAt))
+  ) return false;
+  if (!String(candidate.bindingRef).includes(`${candidate.runId}:agent_subagent:${candidate.providerId}`)) return false;
+  return candidate.taskPacketId === envelope.taskPacketId &&
+    candidate.roleInstanceId === envelope.roleInstanceId &&
+    String(candidate.providerId).endsWith(`:${envelope.ownerAgent}`);
+}
+
+function checkCodexWorkerInvocationEnvelope(input, tool) {
+  const normalizedTool = normalizedDispatchToolName(tool);
+  if (!new Set(["spawn_agent", "followup_task"]).has(normalizedTool)) {
+    return { met: true, missing: [] };
+  }
+  if (normalizedTool === "followup_task" && (typeof input?.target !== "string" || !input.target.trim())) {
+    return { met: false, missing: ["followup_task target runtime instance id"] };
+  }
+  const raw = input?.message;
+  if (typeof raw !== "string" || !raw.trim()) {
+    return { met: false, missing: ["clear-text Codex worker invocation envelope"] };
+  }
+  if (/^gAAAAA[A-Za-z0-9_-]{20,}={0,2}$/u.test(raw.trim())) {
+    return { met: false, missing: ["verifiable owner binding; encrypted message cannot be inspected by the hook"] };
+  }
+  let envelope;
+  try {
+    envelope = JSON.parse(raw);
+  } catch {
+    return { met: false, missing: ["valid JSON Codex worker invocation envelope"] };
+  }
+  const missing = [];
+  if (envelope?.schemaVersion !== "codex-native-worker-invocation-v0.2") missing.push("schemaVersion v0.2");
+  for (const field of ["taskPacketId", "roleDisplayName", "roleInstanceId", "ownerAgent", "ownerSource"]) {
+    if (typeof envelope?.[field] !== "string" || !envelope[field].trim()) missing.push(field);
+  }
+  if (envelope?.ownerKind !== "agent") missing.push("ownerKind=agent");
+  if (!envelope?.capabilityLoadout || typeof envelope.capabilityLoadout !== "object" || Array.isArray(envelope.capabilityLoadout)) {
+    missing.push("capabilityLoadout");
+  }
+  if (!envelope?.coordination || typeof envelope.coordination !== "object" || !envelope.coordination.mergeOwner) {
+    missing.push("coordination.mergeOwner");
+  }
+  if (!validateMetaKimBinding(envelope?.metaKimBinding, envelope)) missing.push("strict metaKimBinding");
+  const ownerBinding = codexOwnerBindingFromHostInput(input, envelope);
+  missing.push(...ownerBinding.missing);
+  return { met: missing.length === 0, missing, envelope, ownerBinding };
+}
+
+function checkCodexEnvelopeAgainstState(envelope, state, ownerBinding = null) {
+  const packets = Array.isArray(state?.workerTaskPackets) ? state.workerTaskPackets : [];
+  const packet = packets.find((candidate) => candidate?.taskPacketId === envelope?.taskPacketId);
+  if (!packet) return { met: false, missing: ["matching state workerTaskPacket"] };
+  const missing = [];
+  const expectedOwnerSource = packet.ownerSource ?? packet.codexSpawnBinding?.ownerSource ?? null;
+  if (packet.ownerAgent !== envelope.ownerAgent) missing.push("ownerAgent matching workerTaskPacket");
+  if (packet.roleInstanceId !== envelope.roleInstanceId) missing.push("roleInstanceId matching workerTaskPacket");
+  if (packet.roleDisplayName !== envelope.roleDisplayName) missing.push("roleDisplayName matching workerTaskPacket");
+  if (!expectedOwnerSource || expectedOwnerSource !== envelope.ownerSource) missing.push("ownerSource matching discovered provider");
+  if (packet.mergeOwner !== envelope.coordination?.mergeOwner) missing.push("mergeOwner matching workerTaskPacket");
+  if ((packet.parallelGroup ?? null) !== (envelope.coordination?.parallelGroup ?? null)) {
+    missing.push("parallelGroup matching workerTaskPacket");
+  }
+  if ((packet.weapon ?? null) !== (envelope.capabilityLoadout?.weapon ?? null)) {
+    missing.push("weapon matching workerTaskPacket");
+  }
+  if ((packet.dependency ?? null) !== (envelope.capabilityLoadout?.dependency ?? null)) {
+    missing.push("dependency matching workerTaskPacket");
+  }
+  if (
+    ownerBinding?.mode === "native_custom_agent" &&
+    packet.ownerAgent !== ownerBinding.nativeAgentType
+  ) {
+    missing.push("native host agent_type matching workerTaskPacket ownerAgent");
+  }
+  return { met: missing.length === 0, missing };
 }
 
 function dispatchIntentText(input) {
@@ -789,7 +898,6 @@ function dispatchIntentText(input) {
     input?.description,
     input?.prompt,
     input?.message,
-    input?.task_name,
     input?.agent_type,
     input?.subagent_type,
     JSON.stringify(input?.items || []),
@@ -924,41 +1032,17 @@ function warnMetaAgentExecution(agentName, stage) {
 }
 
 /**
- * Infer the caller's identity (which agent is making the current tool call).
- * Priority order:
- *   1. CLAUDE_SUBAGENT_TYPE environment variable (runtime-injected).
- *   2. Latest entry in spine state's dispatchChain (most recently dispatched
- *      owner for the current stage).
- *   3. Conservative fallback: null. The caller treats null as "unknown" and
- *      degrades to warn-mode so that legitimate user activity is not blocked
- *      by a parsing miss.
+ * Infer the caller's identity only from runtime-injected evidence.
+ * dispatchChain is historical governance state, not proof that the latest
+ * dispatched owner is making the current tool call. Using it as caller identity
+ * can falsely warn or block the main thread's ordinary project changes.
  *
- * @param {object|null} state
  * @returns {{ name: string|null, source: string }}
  */
-function inferCallerIdentity(state) {
+function inferCallerIdentity() {
   const envHint = process.env.CLAUDE_SUBAGENT_TYPE;
   if (envHint && typeof envHint === "string" && envHint.trim()) {
     return { name: envHint.trim(), source: "env" };
-  }
-
-  const chain = state?.dispatchChain;
-  const stage = state?.currentStage;
-  if (chain && stage && Array.isArray(chain[stage]) && chain[stage].length) {
-    // The most recently appended entry is the active owner for this stage.
-    const latest = chain[stage][chain[stage].length - 1];
-    if (latest) return { name: latest, source: "spine_chain" };
-  }
-
-  // Walk back through all stages, newest first, as a secondary signal.
-  if (chain && typeof chain === "object") {
-    const stages = Object.keys(chain);
-    for (let i = stages.length - 1; i >= 0; i--) {
-      const list = chain[stages[i]];
-      if (Array.isArray(list) && list.length) {
-        return { name: list[list.length - 1], source: "spine_chain_walk" };
-      }
-    }
   }
 
   return { name: null, source: "unknown" };
@@ -1241,7 +1325,7 @@ if (state && state.active) {
 // restriction would evaporate as soon as the spine deactivated.
 if (!state || !state.active) {
   if (isExecutionTool(toolName)) {
-    const caller = inferCallerIdentity(state);
+    const caller = inferCallerIdentity();
     if (caller.name && isMetaAgent(caller.name)) {
       enforceMetaReadonly(toolName, toolInput, state, caller);
       // If enforceMetaReadonly chose warn-mode, fall through to exit(0) below.
@@ -1262,7 +1346,7 @@ if (isAgentDispatchTool(toolName)) {
     "unknown";
   const metaName = extractMetaAgentName(
     toolInput?.description,
-    [toolInput?.prompt, toolInput?.message, toolInput?.task_name, toolInput?.agent_type]
+    [toolInput?.prompt, toolInput?.message, toolInput?.agent_type]
       .filter(Boolean)
       .join(" "),
   );
@@ -1282,10 +1366,12 @@ if (isAgentDispatchTool(toolName)) {
     process.exit(0);
   }
 
+  const executionDispatchIntent = isExecutionDispatchIntent(toolInput, metaName);
+
   if (
     !state.queryBypass &&
     ["critical", "fetch", "thinking"].includes(state.currentStage) &&
-    isExecutionDispatchIntent(toolInput, metaName)
+    executionDispatchIntent
   ) {
     const independentLaneGate = checkThinkingIndependentLanes(state);
     if (!independentLaneGate.met) {
@@ -1380,6 +1466,15 @@ if (isAgentDispatchTool(toolName)) {
         }
       }
 
+      if (executionDispatchIntent) {
+        const choiceSurfaceGate = checkChoiceSurfaceGate(state);
+        if (!choiceSurfaceGate.met) {
+          exitAfterDeny(
+            `${choiceSurfaceGate.reason} Missing: ${choiceSurfaceGate.missing.join(", ")}.`,
+          );
+        }
+      }
+
       const readinessGate = checkPreExecutionReadiness(state);
       if (!readinessGate.met) {
         exitAfterDeny(
@@ -1401,7 +1496,6 @@ if (isAgentDispatchTool(toolName)) {
         toolInput?.prompt,
         toolInput?.description,
         toolInput?.message,
-        toolInput?.task_name,
         toolInput?.agent_type,
         toolInput?.subagent_type,
         JSON.stringify(toolInput?.items || []),
@@ -1443,23 +1537,47 @@ if (isAgentDispatchTool(toolName)) {
     }
   }
 
+  if (detectHookRuntime() === "codex" && !state.queryBypass) {
+    const envelopeGate = checkCodexWorkerInvocationEnvelope(toolInput, toolName);
+    if (!envelopeGate.met) {
+      exitAfterDeny(
+        `Codex owner-binding evidence is malformed or unverifiable; dispatch stays blocked until inspectable binding evidence is supplied. ` +
+          `Missing: ${envelopeGate.missing.join(", ")}. task_name and followup target are runtime instance labels, not owner identity.`,
+      );
+    }
+    if (envelopeGate.envelope) {
+      const stateBindingGate = checkCodexEnvelopeAgainstState(
+        envelopeGate.envelope,
+        state,
+        envelopeGate.ownerBinding,
+      );
+      if (!stateBindingGate.met) {
+        exitAfterDeny(
+          `Codex owner-binding evidence does not match the Thinking worker packet. ` +
+            `Missing: ${stateBindingGate.missing.join(", ")}.`,
+        );
+      }
+    }
+  }
+
   const updated = recordDispatch(state, agentDesc, metaName, toolInput);
   await writeSpineState(cwd, updated);
   process.exit(0);
 }
 
-// Passive control-plane tools remain allowed. Task/todo bookkeeping is delayed
-// during Critical and pre-evidence Fetch because Claude Code can otherwise
-// churn on native task-list maintenance instead of continuing visible Fetch.
-if (TASK_BOOKKEEPING_TOOLS.has(toolName)) {
-  if (shouldDelayTaskBookkeeping(state)) {
-    exitAfterDeny(formatTaskBookkeepingDelayDeny(toolName, state));
-  }
-  process.exit(0);
+// queryBypass is a pure read-only route. Mutating host control-plane tools must
+// cross that boundary before the general control-plane allow; TaskList,
+// TaskGet, and TaskOutput remain available as read-only inspection surfaces.
+if (state.queryBypass && MUTATING_CONTROL_PLANE_TOOLS.has(toolName)) {
+  exitAfterDeny(
+    "queryBypass is limited to pure read-only inspection; mutating control-plane tools are denied.",
+  );
 }
 
-// Other control-plane tools are allowed. The fuse is about business mutation
-// and external side effects, not passive native planning surfaces.
+// Passive control-plane tools, including task/todo bookkeeping, are allowed.
+// Bookkeeping never records an Agent dispatch and therefore cannot satisfy or
+// bypass the separate Agent-dispatch gates above; sequencing quality belongs
+// to the dispatcher, Review, and validators rather than a repeated Hook deny.
 if (CONTROL_PLANE_TOOLS.has(toolName)) {
   process.exit(0);
 }
@@ -1493,7 +1611,9 @@ if (state.queryBypass) {
   );
 }
 
-// Execution tools: enforce dispatch chain
+// Local execution tools are not stage drivers. Critical / Fetch / Thinking and
+// later stage evidence still govern Agent dispatch and public-ready claims, but
+// they must never block or warn on ordinary project edits or local commands.
 if (isExecutionTool(toolName)) {
   if (isSpineStateWrite()) {
     process.exit(0);
@@ -1503,167 +1623,12 @@ if (isExecutionTool(toolName)) {
   // This runs before the planning-file exemption so that a meta-* caller cannot,
   // for example, push hand-crafted Bash through the planning-file shortcut.
   // Spine-state writes are the deadlock breaker and stay exempt above.
-  const caller = inferCallerIdentity(state);
+  const caller = inferCallerIdentity();
   if (caller.name && isMetaAgent(caller.name)) {
     enforceMetaReadonly(toolName, toolInput, state, caller);
     // warn-mode falls through; block-mode already exited.
   }
-
-  if (isPlanningFile()) {
-    process.exit(0);
-  }
-
-  const stage = state.currentStage;
-  const stageOrder = [
-    "critical",
-    "fetch",
-    "thinking",
-    "execution",
-    "review",
-    "meta-review",
-    "verification",
-    "evolution",
-  ];
-  const currentIdx = stageOrder.indexOf(stage);
-  const execIdx = stageOrder.indexOf("execution");
-
-  // Read-only inspection must remain available even when execution readiness is
-  // incomplete; otherwise the operator cannot inspect state to return upstream.
-  if (
-    toolName === "Bash" &&
-    !state.queryBypass
-  ) {
-    const stageConfig = STAGE_META_AGENT_MAP[stage];
-    const cmd = (toolInput?.command || "").trim();
-    const stageWhitelist = [
-      ...(stageConfig?.readOnlyVerifierCommands || []),
-      ...(stageConfig?.readOnlyInspectionCommands || []),
-    ];
-    const allowedByStage = matchesStageReadOnlyCommand(cmd, stageWhitelist);
-    if (allowedByStage || isReadOnlyBash(cmd)) {
-      process.exit(0);
-    }
-  }
-
-  if (isHookObservedState(state)) {
-    await allowObservedModeExecution(state);
-  }
-
-  const choiceSurfaceGate = checkChoiceSurfaceGate(state);
-  if (!choiceSurfaceGate.met) {
-    exitAfterDeny(
-      `${choiceSurfaceGate.reason} Missing: ${choiceSurfaceGate.missing.join(", ")}.`,
-    );
-  }
-
-  if (
-    currentIdx >= execIdx &&
-    !state.queryBypass
-  ) {
-    const nodeBindingGate = checkCapabilityNodeBindings(state);
-    if (!nodeBindingGate.met) {
-      exitAfterDeny(
-        `Capability node binding violation: ${nodeBindingGate.reason} ` +
-          `Missing: ${nodeBindingGate.missing.join(", ")}.`,
-      );
-    }
-  }
-
-
-  // Pre-execution stages: block + check meta-agent requirements
-  // Exception: critical stage is for setup (spine state + planning files), defer checks
-  if (currentIdx < execIdx && stage !== "critical") {
-    if (stage === "fetch" && !isSpineStateWrite() && !isPlanningFile()) {
-      exitAfterDeny(
-        "Current stage: Fetch. Write fetchRecord in spine state before " +
-          "any business mutation. Use repo-inspection / capability-scan to " +
-          "continue read/search Fetch evidence. Agent dispatch is not " +
-          "required before Execution. business-file mutations and package " +
-          "installs must wait until the run commits Fetch and advances to " +
-          "Execution.",
-      );
-    }
-    const req = checkStageRequirements(state);
-    const stageInfo = STAGE_META_AGENT_MAP[stage];
-    const label = stageInfo?.label || stage;
-
-    if (!req.met) {
-      exitAfterDeny(formatDesignStageMutationDeny(label, req, state));
-    }
-  }
-
-  // Critical stage: allow only spine-state/planning-file writes and read-only
-  // inspection. Warden is an escalation owner, not a mandatory setup dispatch.
-  // Skip ALL checks if spine is inactive AND the deactivation was a clean
-  // session_stop (allows normal work after the previous run ended).
-  if (stage === "critical" && currentIdx < execIdx) {
-    if (isSpineStateWrite() || isPlanningFile()) {
-      process.exit(0); // Allow spine state and planning file writes during critical
-    }
-    // Inactive spine: bypass critical requirements ONLY when the previous run
-    // was cleanly stopped by the stop hook. Any other deactivation reason
-    // (manual override, malformed state, missing reason) keeps the gate
-    // closed and forces a new governed run to be opened.
-    if (!state.active && state.deactivationReason === "session_stop") {
-      process.exit(0);
-    }
-    // For other execution tools in critical with active spine, check requirements
-    const req = checkStageRequirements(state);
-    if (!req.met) {
-      const stageInfo = STAGE_META_AGENT_MAP[stage];
-      exitAfterDeny(
-        formatDesignStageMutationDeny(stageInfo?.label || stage, req, state),
-      );
-    }
-    exitAfterDeny(
-      "Current stage: Critical. This stage is for understanding the request and reading project evidence. " +
-        "Use repo-inspection commands to enter Fetch, then run baseline verification from Fetch. " +
-        "Allowed now: visible chat status, planning files when already useful, spine state writes, and read-only inspection. " +
-        "Do not create or update task/todo boards before evidence is collected. " +
-        `Dispatch chain so far: ${JSON.stringify(state.dispatchChain || {})}`,
-    );
-  }
-
-  // Degraded declaration guard (Phase 3, native-handoff refactor).
-  // Fan-out gate removed: host-native Agent/spawn_agent is the orchestrator
-  // (see docs/goals/meta-kim-native-handoff.md). The boundary check against
-  // unsupported degraded claims stays independent so a run cannot silently
-  // claim degraded without capability-search evidence.
-  if (state?.degradedMode === true) {
-    const degradationCheck = validateDegradedDeclaration(state);
-    if (!degradationCheck.valid) {
-      const guardModeRaw = (process.env.META_KIM_FANOUT_GATE || "progressive")
-        .trim()
-        .toLowerCase();
-      const guardOff =
-        guardModeRaw === "off" ||
-        guardModeRaw === "0" ||
-        guardModeRaw === "false";
-      const guardEffective = guardOff
-        ? "off"
-        : resolveGracedMode(
-            guardModeRaw,
-            "META_KIM_FANOUT_GATE_GRACE_DAYS",
-            7,
-            state,
-          );
-      if (guardEffective !== "off") {
-        exitAfterDeny(
-          `[Meta_Kim degraded-guard] ${degradationCheck.reason} ` +
-            `mode: "${guardEffective}".`,
-        );
-      }
-    }
-  }
-
-  // Post-execution stages: require correct meta-agent
-  if (currentIdx >= execIdx && stage !== "execution") {
-    const req = checkStageRequirements(state);
-    if (!req.met) {
-      const stageInfo = STAGE_META_AGENT_MAP[stage];
-      exitAfterDeny(formatPostExecutionStageDeny(stageInfo?.label || stage, req, state));
-    }
-  }
+  process.exit(0);
 }
 
 process.exit(0);

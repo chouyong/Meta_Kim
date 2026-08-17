@@ -34,7 +34,10 @@ describe("50 — Parallel execution lanes (engineering fan-out)", () => {
       ...result.ownerDiscoveryPacket.projectRuntimeCapabilityProviders,
       ...result.ownerDiscoveryPacket.localGlobalCapabilityProviders,
     ];
-    const nonAgentIds = new Set(nonAgentProviders.map((p) => p.id));
+    const nonAgentIds = new Set([
+      ...nonAgentProviders.map((p) => p.id),
+      ...result.ownerDiscoveryPacket.candidateReusableCapabilityProviders,
+    ]);
     for (const draft of result.workerTaskPacketDrafts) {
       const kind = draft.ownerKind ?? "agent";
       const pool = kind === "agent" ? agentAvailable : nonAgentIds;
@@ -56,7 +59,10 @@ describe("50 — Parallel execution lanes (engineering fan-out)", () => {
       ...result.ownerDiscoveryPacket.projectRuntimeCapabilityProviders,
       ...result.ownerDiscoveryPacket.localGlobalCapabilityProviders,
     ];
-    const nonAgentIds = new Set(nonAgentProviders.map((p) => p.id));
+    const nonAgentIds = new Set([
+      ...nonAgentProviders.map((p) => p.id),
+      ...result.ownerDiscoveryPacket.candidateReusableCapabilityProviders,
+    ]);
     for (const lane of lanes) {
       const kind = lane.ownerKind ?? "agent";
       const pool = kind === "agent" ? agentAvailable : nonAgentIds;
@@ -119,14 +125,17 @@ describe("50 — Parallel execution lanes (engineering fan-out)", () => {
     const drafts = result.workerTaskPacketDrafts;
     const available = new Set(result.ownerDiscoveryPacket.candidateExistingExecutionOwners);
 
-    assert.equal(result.entryClassification.subagentAuthorizationSource, "meta_theory_trigger_request");
+    assert.equal(Object.hasOwn(result.entryClassification, "subagentAuthorizationSource"), false);
+    assert.equal(result.entryClassification.signals.structuredGovernanceChainRequest, true);
     assert.ok(lanes.length >= 2, `expected whitespace capability anchors to produce >=2 lanes, got ${lanes.length}`);
     assert.ok(drafts.length >= 2, `expected >=2 worker drafts, got ${drafts.length}`);
     for (const draft of drafts) {
       assert.equal(draft.ownerKind, "agent");
       assert.ok(available.has(draft.ownerAgent), `worker owner "${draft.ownerAgent}" must be an existing discovered owner`);
       assert.equal(draft.codexSpawnBinding?.hostSurface, "spawn_agent");
-      assert.equal(draft.codexSpawnBinding?.spawnMode, "native_task");
+      assert.equal(draft.codexSpawnBinding?.ownerBindingMode, "run_scoped_owner_contract");
+      assert.equal(draft.codexSpawnBinding?.nativeAgentType, null);
+      assert.equal(draft.codexSpawnBinding?.ownerSelectorField, null);
       assert.equal(draft.codexSpawnBinding?.ownerAgent, draft.ownerAgent);
       assert.match(draft.codexSpawnBinding?.task_name ?? "", /^[a-z0-9_]+$/);
       assert.equal(draft.codexSpawnBinding?.fork_turns, "none");

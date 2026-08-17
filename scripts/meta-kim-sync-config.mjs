@@ -1,4 +1,4 @@
-import { promises as fs } from "node:fs";
+import { promises as fs, realpathSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
@@ -30,8 +30,11 @@ export const canonicalCapabilityIndexDir = path.join(
   "capability-index",
 );
 export const syncManifestPath = path.join(repoRoot, "config", "sync.json");
+export const localStateRoot = process.env.META_KIM_CALLER_CWD
+  ? path.resolve(process.env.META_KIM_CALLER_CWD)
+  : path.resolve(process.cwd());
 export const localOverridesPath = path.join(
-  repoRoot,
+  localStateRoot,
   ".meta-kim",
   "local.overrides.json",
 );
@@ -49,6 +52,16 @@ export const supportedTargetIds = [
   "joycode",
   "qoder",
 ];
+
+export const GLOBAL_AGENT_MIGRATION_NONE = "none";
+export const GLOBAL_AGENT_MIGRATION_HISTORICAL_CATALOG =
+  "historical_fingerprint_catalog";
+export const GLOBAL_PROJECTION_OWNER_SYNC_GLOBAL = "sync-global-meta-theory";
+export const GLOBAL_PROJECTION_OWNER_SYNC_RUNTIMES = "sync-runtimes";
+export const GLOBAL_PROJECTION_OWNERS = Object.freeze([
+  GLOBAL_PROJECTION_OWNER_SYNC_GLOBAL,
+  GLOBAL_PROJECTION_OWNER_SYNC_RUNTIMES,
+]);
 
 const runtimeProfileCatalog = {
   claude: {
@@ -76,6 +89,23 @@ const runtimeProfileCatalog = {
         settingsFile: ".claude/settings.json",
         mcpFile: ".mcp.json",
         capabilityIndexDir: ".claude/capability-index",
+      },
+      globalAgentProjection: {
+        supported: true,
+        format: "markdown_frontmatter",
+        renderer: "canonical_markdown",
+        agentsDir: "agents",
+        fileExtension: ".md",
+        migrationSupport: GLOBAL_AGENT_MIGRATION_HISTORICAL_CATALOG,
+      },
+      globalAssetOwners: {
+        agents: GLOBAL_PROJECTION_OWNER_SYNC_GLOBAL,
+        skills: GLOBAL_PROJECTION_OWNER_SYNC_GLOBAL,
+        hooks: GLOBAL_PROJECTION_OWNER_SYNC_GLOBAL,
+        commands: GLOBAL_PROJECTION_OWNER_SYNC_GLOBAL,
+        config: GLOBAL_PROJECTION_OWNER_SYNC_GLOBAL,
+        mcp: GLOBAL_PROJECTION_OWNER_SYNC_GLOBAL,
+        capabilityIndex: GLOBAL_PROJECTION_OWNER_SYNC_RUNTIMES,
       },
     },
     activation: {
@@ -113,6 +143,23 @@ const runtimeProfileCatalog = {
         configExampleFile: "codex/config.toml.example",
         capabilityIndexDir: ".codex/capability-index",
       },
+      globalAgentProjection: {
+        supported: true,
+        format: "codex_toml",
+        renderer: "codex_toml",
+        agentsDir: "agents",
+        fileExtension: ".toml",
+        migrationSupport: GLOBAL_AGENT_MIGRATION_HISTORICAL_CATALOG,
+      },
+      globalAssetOwners: {
+        agents: GLOBAL_PROJECTION_OWNER_SYNC_GLOBAL,
+        skills: GLOBAL_PROJECTION_OWNER_SYNC_GLOBAL,
+        hooks: GLOBAL_PROJECTION_OWNER_SYNC_GLOBAL,
+        commands: GLOBAL_PROJECTION_OWNER_SYNC_GLOBAL,
+        config: GLOBAL_PROJECTION_OWNER_SYNC_GLOBAL,
+        mcp: GLOBAL_PROJECTION_OWNER_SYNC_GLOBAL,
+        capabilityIndex: GLOBAL_PROJECTION_OWNER_SYNC_RUNTIMES,
+      },
     },
     activation: {
       supportsGlobalSkillSync: true,
@@ -144,6 +191,22 @@ const runtimeProfileCatalog = {
         templateConfigFile: "openclaw/openclaw.template.json",
         capabilityIndexDir: "openclaw/capability-index",
       },
+      globalAgentProjection: {
+        supported: false,
+        format: "openclaw_workspace_bundle",
+        renderer: "openclaw_workspace_bundle",
+        agentsDir: null,
+        fileExtension: null,
+        migrationSupport: GLOBAL_AGENT_MIGRATION_NONE,
+      },
+      globalAssetOwners: {
+        workspaces: GLOBAL_PROJECTION_OWNER_SYNC_RUNTIMES,
+        skills: GLOBAL_PROJECTION_OWNER_SYNC_GLOBAL,
+        hooks: GLOBAL_PROJECTION_OWNER_SYNC_RUNTIMES,
+        config: GLOBAL_PROJECTION_OWNER_SYNC_RUNTIMES,
+        mcp: GLOBAL_PROJECTION_OWNER_SYNC_RUNTIMES,
+        capabilityIndex: GLOBAL_PROJECTION_OWNER_SYNC_RUNTIMES,
+      },
     },
     activation: {
       supportsGlobalSkillSync: true,
@@ -170,6 +233,22 @@ const runtimeProfileCatalog = {
         mcpFile: ".cursor/mcp.json",
         capabilityIndexDir: ".cursor/capability-index",
         rulesDir: ".cursor/rules",
+      },
+      globalAgentProjection: {
+        supported: true,
+        format: "cursor_markdown",
+        renderer: "cursor_markdown",
+        agentsDir: "agents",
+        fileExtension: ".md",
+        migrationSupport: GLOBAL_AGENT_MIGRATION_HISTORICAL_CATALOG,
+      },
+      globalAssetOwners: {
+        agents: GLOBAL_PROJECTION_OWNER_SYNC_GLOBAL,
+        skills: GLOBAL_PROJECTION_OWNER_SYNC_GLOBAL,
+        hooks: GLOBAL_PROJECTION_OWNER_SYNC_RUNTIMES,
+        mcp: GLOBAL_PROJECTION_OWNER_SYNC_RUNTIMES,
+        capabilityIndex: GLOBAL_PROJECTION_OWNER_SYNC_RUNTIMES,
+        rules: GLOBAL_PROJECTION_OWNER_SYNC_RUNTIMES,
       },
     },
     activation: {
@@ -287,8 +366,8 @@ function cloneRuntimeProfile(profile) {
   return JSON.parse(JSON.stringify(profile));
 }
 
-export async function loadRuntimeProfiles(manifest = null) {
-  const resolvedManifest = manifest ?? (await loadSyncManifest());
+export function resolveRuntimeProfilesFromManifest(resolvedManifest) {
+  validateSyncManifest(resolvedManifest);
   const declaredTargets =
     resolvedManifest.supportedTargets?.length > 0
       ? normalizeTargets(resolvedManifest.supportedTargets)
@@ -306,6 +385,75 @@ export async function loadRuntimeProfiles(manifest = null) {
   }
 
   return profiles;
+}
+
+export async function loadRuntimeProfiles(manifest = null) {
+  const resolvedManifest = manifest ?? (await loadSyncManifest());
+  return resolveRuntimeProfilesFromManifest(resolvedManifest);
+}
+
+export function resolveGlobalAgentProjectionTargets(
+  profiles,
+  targetIds = Object.keys(profiles ?? {}),
+  { requireMigrationSupport = false } = {},
+) {
+  if (!profiles || typeof profiles !== "object" || Array.isArray(profiles)) {
+    throw new Error("runtime profiles are required for global Agent projection discovery");
+  }
+  const targets = [];
+  for (const targetId of [...new Set(targetIds)]) {
+    const profile = profiles[targetId];
+    if (!profile) {
+      throw new Error(`Missing runtime profile for global Agent target: ${targetId}`);
+    }
+    const projection = profile.projection.globalAgentProjection;
+    if (!projection.supported) continue;
+    if (
+      requireMigrationSupport &&
+      projection.migrationSupport === GLOBAL_AGENT_MIGRATION_NONE
+    ) {
+      continue;
+    }
+    targets.push({
+      targetId,
+      label: profile.label,
+      ...projection,
+    });
+  }
+  return targets;
+}
+
+export function globalProjectionOwner(profile, assetType) {
+  if (!profile || typeof profile !== "object") {
+    throw new Error("A runtime profile is required for global projection ownership");
+  }
+  if (typeof assetType !== "string" || !assetType.trim()) {
+    throw new Error("A global projection asset type is required");
+  }
+  const owner = profile.projection?.globalAssetOwners?.[assetType];
+  if (!GLOBAL_PROJECTION_OWNERS.includes(owner)) {
+    throw new Error(
+      `Runtime profile ${profile.id ?? "unknown"} has no valid global owner for ${assetType}`,
+    );
+  }
+  return owner;
+}
+
+export function globalProjectionIsOwnedBy(profile, assetType, owner) {
+  if (!GLOBAL_PROJECTION_OWNERS.includes(owner)) {
+    throw new Error(`Unknown global projection owner: ${owner}`);
+  }
+  return globalProjectionOwner(profile, assetType) === owner;
+}
+
+export function globalAgentProjectionFileName(projection, agentId) {
+  if (!projection?.supported || typeof projection.fileExtension !== "string") {
+    throw new Error("A supported global Agent projection is required");
+  }
+  if (typeof agentId !== "string" || !/^[a-z0-9][a-z0-9-]*$/u.test(agentId)) {
+    throw new Error(`Invalid global Agent id: ${agentId}`);
+  }
+  return `${agentId}${projection.fileExtension}`;
 }
 
 export async function loadSyncManifest() {
@@ -451,6 +599,7 @@ const runtimeProjectionLayouts = {
       agentsDir: ["agents"],
       skillsDir: ["skills"],
       skillRoot: ["skills", "meta-theory"],
+      hooksRoot: ["hooks"],
       hooksDir: ["hooks", "meta-kim"],
       commandsDir: ["commands"],
       settingsFile: ["settings.json"],
@@ -477,6 +626,7 @@ const runtimeProjectionLayouts = {
       agentsDir: ["agents"],
       skillsDir: ["skills"],
       skillRoot: ["skills", "meta-theory"],
+      hooksRoot: ["hooks"],
       hooksDir: ["hooks", "meta-kim"],
       hooksFile: ["hooks.json"],
       commandsDir: ["commands"],
@@ -520,6 +670,7 @@ const runtimeProjectionLayouts = {
       agentsDir: ["agents"],
       skillsDir: ["skills"],
       skillRoot: ["skills", "meta-theory"],
+      hooksRoot: ["hooks"],
       hooksDir: ["hooks", "meta-kim"],
       hooksFile: ["hooks.json"],
       mcpFile: ["mcp.json"],
@@ -692,6 +843,49 @@ export function assertHomeBound(targetPath, allowedRoots) {
       `Refusing to write outside configured runtime homes: ${resolved}`,
     );
   }
+  const projectedRealPath = (candidate) => {
+    let cursor = path.resolve(candidate);
+    const missing = [];
+    while (true) {
+      try {
+        return path.join(realpathSync.native(cursor), ...missing.reverse());
+      } catch (error) {
+        if (error?.code !== "ENOENT" && error?.code !== "ENOTDIR") throw error;
+        const parent = path.dirname(cursor);
+        if (parent === cursor) throw error;
+        missing.push(path.basename(cursor));
+        cursor = parent;
+      }
+    }
+  };
+  const pathAtOrWithin = (root, candidate) => {
+    const rel = path.relative(root, candidate);
+    return rel === "" || (
+      rel !== ".." &&
+      !rel.startsWith(`..${path.sep}`) &&
+      !path.isAbsolute(rel)
+    );
+  };
+  const realTarget = projectedRealPath(resolved);
+  const realAllowed = allowedRoots.some((root) =>
+    pathAtOrWithin(projectedRealPath(root), realTarget)
+  );
+  if (!realAllowed) {
+    throw new Error(
+      `Refusing to follow a symlink or junction outside configured runtime homes: ${resolved}`,
+    );
+  }
+  const projectionStoreRoot = projectedRealPath(path.join(
+    os.homedir(),
+    ".meta-kim",
+    "runtime",
+    "projection-packages",
+  ));
+  if (pathAtOrWithin(projectionStoreRoot, realTarget)) {
+    throw new Error(
+      `Refusing to write a runtime projection into the immutable package store: ${resolved}`,
+    );
+  }
 }
 
 // ── Manifest & runtime target validation ──────────────────────────
@@ -768,6 +962,99 @@ export function validateRuntimeProfile(profile, sourceName = "<unknown>") {
   ) {
     throw new Error(
       `runtime profile ${sourceName} must declare projection.outputPaths`,
+    );
+  }
+  const globalAgentProjection = profile.projection.globalAgentProjection;
+  if (!globalAgentProjection || typeof globalAgentProjection !== "object") {
+    throw new Error(
+      `runtime profile ${sourceName} must declare projection.globalAgentProjection`,
+    );
+  }
+  for (const field of ["format", "renderer", "migrationSupport"]) {
+    if (
+      typeof globalAgentProjection[field] !== "string" ||
+      !globalAgentProjection[field].trim()
+    ) {
+      throw new Error(
+        `runtime profile ${sourceName} global Agent projection must declare ${field}`,
+      );
+    }
+  }
+  if (typeof globalAgentProjection.supported !== "boolean") {
+    throw new Error(
+      `runtime profile ${sourceName} global Agent projection must declare supported`,
+    );
+  }
+  if (globalAgentProjection.supported) {
+    if (!profile.projection.assetTypes.includes("agents")) {
+      throw new Error(
+        `runtime profile ${sourceName} supports global Agents but does not declare the agents asset type`,
+      );
+    }
+    if (
+      typeof globalAgentProjection.agentsDir !== "string" ||
+      !globalAgentProjection.agentsDir.trim() ||
+      path.isAbsolute(globalAgentProjection.agentsDir) ||
+      globalAgentProjection.agentsDir.split(/[\\/]/u).includes("..")
+    ) {
+      throw new Error(
+        `runtime profile ${sourceName} global Agent agentsDir must be a safe relative directory`,
+      );
+    }
+    if (
+      typeof globalAgentProjection.fileExtension !== "string" ||
+      !/^\.[a-z0-9]+$/u.test(globalAgentProjection.fileExtension)
+    ) {
+      throw new Error(
+        `runtime profile ${sourceName} global Agent fileExtension must be a simple extension`,
+      );
+    }
+  } else if (
+    globalAgentProjection.agentsDir !== null ||
+    globalAgentProjection.fileExtension !== null ||
+    globalAgentProjection.migrationSupport !== GLOBAL_AGENT_MIGRATION_NONE
+  ) {
+    throw new Error(
+      `runtime profile ${sourceName} unsupported global Agent projection must use null paths and migrationSupport=none`,
+    );
+  }
+  const globalAssetOwners = profile.projection.globalAssetOwners;
+  if (
+    !globalAssetOwners ||
+    typeof globalAssetOwners !== "object" ||
+    Array.isArray(globalAssetOwners)
+  ) {
+    throw new Error(
+      `runtime profile ${sourceName} must declare projection.globalAssetOwners`,
+    );
+  }
+  const declaredAssetTypes = new Set(profile.projection.assetTypes);
+  const ownerAssetTypes = Object.keys(globalAssetOwners);
+  for (const assetType of declaredAssetTypes) {
+    if (!ownerAssetTypes.includes(assetType)) {
+      throw new Error(
+        `runtime profile ${sourceName} must declare a global owner for ${assetType}`,
+      );
+    }
+  }
+  for (const [assetType, owner] of Object.entries(globalAssetOwners)) {
+    if (!declaredAssetTypes.has(assetType)) {
+      throw new Error(
+        `runtime profile ${sourceName} declares global owner for unknown asset ${assetType}`,
+      );
+    }
+    if (!GLOBAL_PROJECTION_OWNERS.includes(owner)) {
+      throw new Error(
+        `runtime profile ${sourceName} declares unsupported global owner ${owner} for ${assetType}`,
+      );
+    }
+  }
+  if (
+    globalAgentProjection.supported &&
+    globalAssetOwners.agents !== GLOBAL_PROJECTION_OWNER_SYNC_GLOBAL
+  ) {
+    throw new Error(
+      `runtime profile ${sourceName} must assign supported global Agent projections to ${GLOBAL_PROJECTION_OWNER_SYNC_GLOBAL}`,
     );
   }
   if (!profile.activation || typeof profile.activation !== "object") {

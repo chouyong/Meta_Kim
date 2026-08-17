@@ -14,6 +14,7 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { enrichMetaKimGraph } from "../../scripts/graphify-enrichment.mjs";
+import { applyGraphNodeIdentityProof } from "../../scripts/graphify-node-identity.mjs";
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), "../..");
 
@@ -44,16 +45,35 @@ describe("graphify idempotent wiring (contract)", () => {
     assert.notEqual(claudeIdx, -1);
     assert.notEqual(hookIdx, -1);
     assert.ok(hookIdx > claudeIdx, "hook install must follow claude install");
+    assert.match(src, /sanitizeGraphifyHookSettings\(resolveGraphifyExecutable\(python\)\)/);
+    assert.match(src, /path\.join\(homedir\(\), "\.claude", "settings\.json"\)/);
+    assert.match(src, /sanitizeGraphifyWindowsHooks\(target, \{ graphifyExecutable \}\)/);
   });
 
-  test("graphify-cli.mjs has a rebuild command that uses graphify update", () => {
+  test("graphify-cli.mjs uses full extract for identity migration and update afterwards", () => {
     const src = readFileSync(
       path.join(root, "scripts/graphify-cli.mjs"),
       "utf8",
     );
 
     assert.match(src, /function runRebuild\(\)/);
-    assert.match(src, /const graphifyArgs = \["update", "\."\]/);
+    assert.match(
+      src,
+      /\[\s*"extract",\s*"\.",\s*"--force",\s*\.\.\.migrationBackendArgs,?\s*\]/,
+    );
+    assert.match(src, /\["update", "\."\]/);
+    assert.match(src, /graphIdentityMigrationPlan\(/);
+    assert.match(src, /GRAPHIFY_MIGRATION_STATE_SCHEMA/);
+    assert.match(src, /\["--backend", "claude-cli"\]/);
+    assert.match(src, /META_KIM_GRAPHIFY_MIGRATION_BACKEND/);
+    assert.match(src, /\[\s*"cluster-only",\s*"\.",\s*\.\.\.migrationBackendArgs\]/);
+    assert.match(src, /disambiguateGraphFileNodeLabels\(graph, \{/);
+    assert.match(src, /finalGraphStats\.nodes\.toLocaleString\("en-US"\)/);
+    const prepareIdx = src.lastIndexOf("writeMigrationState(plan.paths, plan.repository, \"extract_complete\")");
+    const clusterIdx = src.lastIndexOf('"cluster-only", ".", ...migrationBackendArgs');
+    const stampIdx = src.lastIndexOf("if (!stampGraphFreshness(");
+    assert.ok(prepareIdx > 0 && prepareIdx < clusterIdx);
+    assert.ok(clusterIdx < stampIdx);
     assert.match(src, /spawnSync\(launcher\.command, \[\.\.\.launcher\.args, \.\.\.graphifyArgs\]/);
     assert.match(src, /\["-m", "graphify", \.\.\.graphifyArgs\]/);
     assert.match(src, /case "rebuild":/);
@@ -96,6 +116,9 @@ import path from "node:path";
 const args = process.argv.slice(2);
 const statePath = path.join(process.cwd(), ".fake-graphify-state");
 const forced = args.includes("--force");
+if (args[0] === "cluster-only" && args[1] === ".") {
+  process.exit(0);
+}
 if (args[0] !== "update" || args[1] !== ".") {
   process.exit(9);
 }
@@ -108,11 +131,23 @@ mkdirSync(path.join(process.cwd(), "graphify-out"), { recursive: true });
 const head = readFileSync(path.join(process.cwd(), ".git", "HEAD"), "utf8").trim();
 writeFileSync(
   path.join(process.cwd(), "graphify-out", "GRAPH_REPORT.md"),
-  "# Graph Report\\n\\n## Graph Freshness\\n- Built from commit: \`0000000\`\\n",
+  "# Graph Report\\n\\n## Summary\\n- 1 nodes · 0 edges · 0 communities\\n\\n## Graph Freshness\\n- Built from commit: \`0000000\`\\n",
 );
 writeFileSync(
   path.join(process.cwd(), "graphify-out", "graph.json"),
-  JSON.stringify({ nodes: [], links: [], built_at_commit: head }) + "\\n",
+  JSON.stringify({
+    nodes: [{
+      id: "tracked_txt",
+      label: "tracked.txt",
+      source_file: "tracked.txt",
+      source_location: "L1",
+      file_type: "document",
+      type: "document",
+      _origin: "ast",
+    }],
+    links: [],
+    built_at_commit: head,
+  }) + "\\n",
 );
 console.log("forced rebuild ok");
 `;
@@ -127,9 +162,10 @@ console.log("forced rebuild ok");
       const result = spawnSync("git", args, { cwd: repo, encoding: "utf8" });
       assert.equal(result.status, 0, result.stderr);
     }
+    writeFileSync(path.join(repo, ".gitignore"), "graphify-out/\n.fake-graphify-state\n");
     writeFileSync(path.join(repo, "tracked.txt"), "fresh head\n");
     for (const args of [
-      ["add", "tracked.txt"],
+      ["add", ".gitignore", "tracked.txt"],
       ["commit", "-m", "seed"],
     ]) {
       const result = spawnSync("git", args, { cwd: repo, encoding: "utf8" });
@@ -137,15 +173,32 @@ console.log("forced rebuild ok");
     }
     writeFileSync(
       path.join(repo, "graphify-out", "GRAPH_REPORT.md"),
-      "# Graph Report\n\n## Graph Freshness\n- Built from commit: `aaaaaaaa`\n",
+      "# Graph Report\n\n## Summary\n- 1 nodes · 0 edges · 0 communities\n\n## Graph Freshness\n- Built from commit: `aaaaaaaa`\n",
     );
+    const initialGraph = {
+      nodes: [{
+        id: "tracked_txt",
+        label: "tracked.txt",
+        source_file: "tracked.txt",
+        source_location: "L1",
+        file_type: "document",
+        type: "document",
+        _origin: "ast",
+      }],
+      links: [],
+      built_at_commit: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    };
+    const head = spawnSync("git", ["rev-parse", "HEAD"], {
+      cwd: repo,
+      encoding: "utf8",
+    }).stdout.trim();
+    applyGraphNodeIdentityProof(initialGraph, {
+      trackedFiles: [".gitignore", "tracked.txt"],
+      builtCommit: head,
+    });
     writeFileSync(
       path.join(repo, "graphify-out", "graph.json"),
-      JSON.stringify({
-        nodes: [{ id: "old" }],
-        links: [],
-        built_at_commit: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-      }),
+      JSON.stringify(initialGraph),
     );
 
     try {
@@ -194,13 +247,16 @@ console.log("forced rebuild ok");
     );
     const rebuildIdx = src.indexOf("function runRebuild()");
     assert.notEqual(rebuildIdx, -1);
-    const rebuildBody = src.slice(rebuildIdx, rebuildIdx + 1200);
+    const rebuildBody = src.slice(rebuildIdx);
 
     assert.match(src, /function stampGraphFreshness\(/);
-    assert.match(src, /graph\.built_at_commit = currentHead/);
+    assert.match(src, /graph\.built_at_commit = repository\.currentHead/);
     assert.match(src, /enrichMetaKimGraph\(graph\)/);
     assert.ok(src.includes("Built from commit:\\s*`?([0-9a-f]{7,40})`?"));
-    assert.match(rebuildBody, /stampGraphFreshness\(\)/);
+    assert.match(
+      rebuildBody,
+      /stampGraphFreshness\(\s*plan\.repository\.repoRoot,/u,
+    );
   });
 
   test("graphify enrichment adds Meta_Kim agent governance edges and node type aliases", () => {
@@ -303,7 +359,7 @@ console.log("forced rebuild ok");
     );
     assert.match(src, /const graphifyDir = resolve\(targetDir\)/);
     assert.match(src, /join\(graphifyDir, "\.git"\)/);
-    assert.match(src, /guideAlreadyHasGraphifySection\(platform, graphifyDir\)/);
+    assert.doesNotMatch(src, /guideAlreadyHasGraphifySection\(platform, graphifyDir\)/);
     assert.match(
       src,
       /runPythonModule\(\s*python,\s*\["-m", "graphify", "hook", "install"\],[\s\S]*?\{ cwd: graphifyDir, stdio: "pipe" \}/,
@@ -332,15 +388,15 @@ console.log("forced rebuild ok");
     const applyBody = src.slice(applyStart, applyEnd);
 
     assert.match(body, /applyProjectBootstrapToDir\(activeTargets, targetDir\)/);
+    assert.match(body, /sanitizeGraphifyWindowsHooks\([\s\S]*?join\(targetDir, "\.claude", "settings\.json"\)/);
     assert.doesNotMatch(applyBody, /writePostCopyBootstrap\(targetDir, activeTargets\)/);
-    assert.match(applyBody, /writeProjectBootstrapManifest\(targetDir, plan, backup, cleanup\)/);
+    assert.match(applyBody, /projectBootstrapTransactionalPlan\(plan, targetDir, backup\)/);
+    assert.match(applyBody, /executeSafeManagedFileTransaction\(\{/);
+    assert.match(applyBody, /transactionLabel: "project-bootstrap-apply"/);
     assert.match(body, /printPostCopyBootstrapHint\(\)/);
     assert.doesNotMatch(body, /installGraphify/);
     assert.doesNotMatch(body, /installPythonTools\(activeTargets, false, targetDir\)/);
-    assert.ok(
-        applyBody.includes("deployPlatformFiles(platformId, targetDir)"),
-      "the project bootstrap apply path must still copy runtime entry/config files",
-    );
+    assert.match(src, /function collectProjectDeployPlan\(activeTargets, targetDir\)/);
   });
 
   test("install and update deploy exports do not treat the staging directory as the final graphify root", () => {
@@ -383,10 +439,11 @@ console.log("forced rebuild ok");
       "utf8",
     );
 
-    assert.match(body, /const rootDir = resolveProjectRoot\(\)/);
+    assert.match(body, /const rootDir = resolveProjectRoot\(\{/);
     assert.match(body, /\["-m", "pip", "show", "graphifyy"\]/);
     assert.match(body, /\["-m", "pip", "install", "graphifyy"\]/);
     assert.match(body, /\["-m", "graphify", "hook", "install"\]/);
+    assert.match(body, /sanitizeGraphifyWindowsHooks\([\s\S]*?join\(rootDir, "\.claude", "settings\.json"\)/);
     assert.match(body, /\["-m", "graphify", platform, "install"\]/);
     assert.match(body, /\["-m", "graphify", "update", "\."\]/);
     assert.match(body, /process\.argv\.includes\("--auto"\)/);
@@ -395,7 +452,9 @@ console.log("forced rebuild ok");
     assert.match(body, /spawn\(process\.execPath, \[scriptPath, "--auto-worker"\]/);
     assert.match(body, /detached: true/);
     assert.match(body, /failedRetryMs/);
-    assert.doesNotMatch(body, /PROJECT_DIR/);
+    // CLAUDE_PROJECT_DIR (the runtime's project env) is allowed; this only
+    // guards against setup.mjs's PROJECT_DIR staging global.
+    assert.doesNotMatch(body, /(?<![A-Za-z0-9_])PROJECT_DIR\b/);
   });
 
   test("meta-theory activation hook starts post-copy auto-init without blocking startup", () => {
@@ -410,7 +469,7 @@ console.log("forced rebuild ok");
 
     assert.match(src, /project-post-copy-init\.mjs/);
     assert.match(src, /--package-root/);
-    assert.match(src, /spawnSync\(process\.execPath, \[scriptPath, "--auto"\]/);
+    assert.match(src, /spawnSync\(process\.execPath, \[scriptPath, "--auto", "--project-root", root\]/);
     assert.match(src, /timeout: 4000/);
     assert.match(src, /stdio: "ignore"/);
     assert.match(src, /META_KIM_POST_COPY_AUTO === "off"/);
@@ -433,8 +492,8 @@ console.log("forced rebuild ok");
     const tempDir = mkdtempSync(path.join(os.tmpdir(), "meta-kim-post-copy-auto-"));
     const packageRoot = mkdtempSync(path.join(os.tmpdir(), "meta-kim-package-root-"));
     try {
-      // P1: a real session runs the hook from a project root; mark tempDir so
-      // the project-root gate activates here instead of skipping a bare temp dir.
+      // A real session runs the hook from a project root; mark tempDir so the
+      // project-root gate activates here instead of skipping a bare temp dir.
       mkdirSync(path.join(tempDir, ".git"), { recursive: true });
       const globalScript = path.join(packageRoot, "scripts", "project-post-copy-init.mjs");
       mkdirSync(path.dirname(globalScript), { recursive: true });
@@ -443,9 +502,12 @@ console.log("forced rebuild ok");
         [
           'import { mkdirSync, writeFileSync } from "node:fs";',
           'import { join } from "node:path";',
-          'const stateDir = join(process.cwd(), ".meta-kim", "state", "default");',
+          'const rootArg = process.argv.indexOf("--project-root");',
+          'const declaredRoot = rootArg >= 0 ? process.argv[rootArg + 1] : null;',
+          'if (!declaredRoot) process.exit(2);',
+          'const stateDir = join(declaredRoot, ".meta-kim", "state", "default");',
           'mkdirSync(stateDir, { recursive: true });',
-          'writeFileSync(join(stateDir, "post-copy-init.json"), JSON.stringify({ status: "stubbed" }) + "\\n");',
+          'writeFileSync(join(stateDir, "post-copy-init.json"), JSON.stringify({ status: "stubbed", declaredRoot }) + "\\n");',
         ].join("\n"),
         "utf8",
       );
@@ -469,6 +531,13 @@ console.log("forced rebuild ok");
         existsSync(path.join(tempDir, ".meta-kim", "state", "default", "post-copy-init.json")),
         true,
       );
+      const marker = JSON.parse(
+        readFileSync(
+          path.join(tempDir, ".meta-kim", "state", "default", "post-copy-init.json"),
+          "utf8",
+        ),
+      );
+      assert.equal(path.resolve(marker.declaredRoot), path.resolve(tempDir));
     } finally {
       rmSync(tempDir, { recursive: true, force: true });
       rmSync(packageRoot, { recursive: true, force: true });
@@ -478,7 +547,7 @@ console.log("forced rebuild ok");
   test("meta-theory activation hook starts spine without project bootstrap automation", () => {
     const tempDir = mkdtempSync(path.join(os.tmpdir(), "meta-kim-activation-no-write-"));
     try {
-      // P1: mark tempDir a project root so the spine activates here (this test
+      // Mark tempDir a project root so the spine activates here (this test
       // asserts spine-state is written but no project-bootstrap.json).
       mkdirSync(path.join(tempDir, ".git"), { recursive: true });
       const hookPath = path.join(
@@ -520,7 +589,7 @@ console.log("forced rebuild ok");
     const tempDir = mkdtempSync(path.join(os.tmpdir(), "meta-kim-probe-off-spine-"));
     const globalStateDir = mkdtempSync(path.join(os.tmpdir(), "meta-kim-probe-off-state-"));
     try {
-      // P1: mark tempDir a project root so prompt-entry spine activation writes
+      // Mark tempDir a project root so prompt-entry spine activation writes
       // spine-state here (probe-off must not suppress legitimate activation).
       mkdirSync(path.join(tempDir, ".git"), { recursive: true });
       const hookPath = path.join(
@@ -587,29 +656,36 @@ console.log("forced rebuild ok");
     }
   });
 
-  test("setup.mjs skips guide-mutating graphify platform install when guide section exists", () => {
+  test("setup.mjs always lets upstream platform install refresh its Graphify hook", () => {
     const src = readFileSync(path.join(root, "setup.mjs"), "utf8");
 
-    assert.match(src, /const GRAPHIFY_GUIDE_TARGETS = \{/);
-    assert.match(
-      src,
-      /function guideAlreadyHasGraphifySection\(platform, baseDir = PROJECT_DIR\)/,
-    );
-    assert.match(src, /\^##\\s\+graphify\\b\/im/);
-    assert.match(src, /if \(guideAlreadyHasGraphifySection\(platform, graphifyDir\)\)/);
-    assert.match(src, /continue;/);
+    assert.doesNotMatch(src, /guideAlreadyHasGraphifySection/);
+    assert.match(src, /\["-m", "graphify", platform, "install"\]/);
   });
 
-  test("install uses scoped validation and release validation keeps graphify check", () => {
+  test("install validates deployed artifacts while release validation keeps graphify check", () => {
     const setupSrc = readFileSync(path.join(root, "setup.mjs"), "utf8");
+    const childContractSrc = readFileSync(
+      path.join(root, "scripts", "node-spawn-config.mjs"),
+      "utf8",
+    );
     const verifyRunner = readFileSync(
       path.join(root, "scripts", "run-verify-all.mjs"),
       "utf8",
     );
 
+    assert.match(setupSrc, /async function validateInstalledArtifacts/);
+    assert.match(setupSrc, /SETUP_NODE_CHILD\.GLOBAL_META_THEORY_SYNC/);
+    assert.doesNotMatch(
+      setupSrc.slice(
+        setupSrc.indexOf("async function validateInstalledArtifacts"),
+        setupSrc.indexOf("function printInstallResult"),
+      ),
+      /SETUP_NODE_CHILD\.PROJECT_VALIDATION/,
+    );
     assert.match(
-      setupSrc,
-      /"scripts\/validate-project\.mjs"[\s\S]*\["--context", "install"\]/,
+      childContractSrc,
+      /\[SETUP_NODE_CHILD\.PROJECT_VALIDATION\][\s\S]*scriptRelative: "scripts\/validate-project\.mjs"[\s\S]*languageOption: true/,
     );
     assert.match(verifyRunner, /meta:graphify:check/);
   });
@@ -739,7 +815,7 @@ process.exit(1);
 
     writeFileSync(
       path.join(repo, "graphify-out", "GRAPH_REPORT.md"),
-      "# Graph Report\n\n## Graph Freshness\n- Built from commit: `aaaaaaaa`\n",
+      "# Graph Report\n\n## Graph Freshness\n- Built from commit: `aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa`\n",
     );
     writeFileSync(
       path.join(repo, "graphify-out", "graph.json"),
@@ -766,7 +842,7 @@ process.exit(1);
       );
 
       assert.notEqual(result.status, 0);
-      assert.match(result.stderr, /GRAPH_REPORT\.md is stale/);
+      assert.match(result.stderr, /Graphify graph\/report is stale or inconsistent/);
       assert.match(result.stderr, /npm run meta:graphify:rebuild/);
     } finally {
       rmSync(tmp, { recursive: true, force: true });

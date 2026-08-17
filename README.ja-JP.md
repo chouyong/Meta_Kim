@@ -12,10 +12,10 @@
 </p>
 
 <p>
-  <img alt="Projection tiers" src="https://img.shields.io/badge/default-Claude%20Code%20%7C%20Codex%20%2B%20compat-OpenClaw%20%7C%20Cursor-111827"/>
-  <img alt="Candidate compatibility probes" src="https://img.shields.io/badge/candidate-Qoder%20%7C%20Trae%20%7C%20Kiro%20%7C%20Cascade%20%7C%20Cline%20%7C%20Roo%20%7C%20Continue-475569"/>
-  <img alt="Stars" src="https://img.shields.io/github/stars/KimYx0207/Meta_Kim?style=flat&logo=github"/>
-  <img alt="License" src="https://img.shields.io/badge/license-Apache--2.0-green"/>
+  <a href="config/runtime-compatibility-catalog.json"><img alt="Projection tiers" src="https://img.shields.io/badge/default-Claude%20Code%20%7C%20Codex%20%2B%20compat--OpenClaw%20%7C%20Cursor-111827"/></a>
+  <a href="config/runtime-compatibility-catalog.json"><img alt="Candidate compatibility probes" src="https://img.shields.io/badge/candidate-Qoder%20%7C%20Trae%20%7C%20Kiro%20%7C%20Cascade%20%7C%20Cline%20%7C%20Roo%20%7C%20Continue-475569"/></a>
+  <a href="https://github.com/KimYx0207/Meta_Kim/stargazers"><img alt="Stars" src="https://img.shields.io/github/stars/KimYx0207/Meta_Kim?style=flat&logo=github"/></a>
+  <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-Apache--2.0-green"/></a>
 </p>
 
 </div>
@@ -72,7 +72,7 @@ npm run meta:validate
 
 1. このファイル `README.ja-JP.md`
 2. `AGENTS.md`
-3. `docs/runtime-capability-matrix.md`
+3. `config/runtime-capability-matrix.json`
 
 ### プラットフォーム対応の層
 
@@ -627,6 +627,7 @@ Meta_Kim の記憶は一枚岩ではありません。3 層に分かれ、各層
 - **何を担うか**: プロジェクト単位のコード知識グラフ
 - **保存先**: `graphify-out/graph.json`（NetworkX のノードリンク形式）。深く読む場合は同ディレクトリの `GRAPH_REPORT.md` を優先
 - **動き（データ）**: `node setup.mjs` のオプション Python 手順は graphify を入れ、**冪等に** `python -m graphify claude install` と `python -m graphify hook install` を実行（pip で既に入っていても hook を補完）。git hook は **現在のリポジトリ** で commit/checkout 時に再構築。`npm run meta:graphify:install` も同様（hook 含む）。
+- **Windows の既存プロジェクト移行**: Claude プロジェクトで `C:Users...graphify.EXE: command not found` が残る場合、そのプロジェクト内で `meta-kim doctor hooks --fix` を実行します。`.claude/settings.json` をバックアップし、既知の危険な Graphify Hook 形式だけを修復します。ユーザー設定も確認する場合のみ `--all` を使います。
 - **動き（利用）**: 同期済み meta-theory の `dev-governance.md` Fetch **Step 0.5** がモデル側の検出・利用ルール。バックグラウンド常駐ではない。Claude Code 子エージェントは `subagent-context.mjs` で**短いヒント**のみ。Codex / OpenClaw / Cursor は SubagentStart hook がないが `sync:runtimes` 後は同じ参照を共有。他ランタイムは**対象リポジトリ**で `python -m graphify codex install` や `claw install` を任意で（`python -m graphify --help`）。
 - **価値**:
   - ただのコード文字列ではなく、構造と関係を理解できます
@@ -785,13 +786,15 @@ flowchart TB
 
 ### Q: `npx` でインストールしましたが、ファイルはどこにありますか?
 
-Meta_Kim は 3 ヶ所に書き込みます：
+Meta_Kim はインストール範囲と実行時のプロジェクト定着を分けて扱います：
 
-1. **現在のディレクトリ** — `.claude/`、`.codex/`、`.cursor/`、`openclaw/` このプロジェクト用のランタイム投影
-2. **ホームディレクトリ** — `~/.claude/skills/meta-theory/`（および `.codex / .cursor / .openclaw`）プロジェクト間で共有されるグローバルスキル
-3. **マニフェスト** — `~/.meta-kim/install-manifest.json` がすべての変更を追跡し、安全なロールバックを可能にします
+1. **グローバルを選択** — ホームディレクトリの `~/.claude/`、`~/.codex/`、`~/.cursor/`、`~/.openclaw/` に共有能力を配置します。
+2. **プロジェクトを選択** — 明示的に選んだ現在のプロジェクトへランタイム投影を配置します。
+3. **実行時の能力定着** — 後の governed run が Agent、Skill、Command を新規作成または反復する場合、プロジェクト内へ独立コピーを作り、依存関係の更新で上書きされない ownership を記録します。
 
-`npx` を実行したディレクトリで `npm run meta:status`（または `node setup.mjs --check`）を実行して完全なフットプリントを確認できます。ロールバックしたい場合は `npm run meta:uninstall` を実行してください。
+意図的な例外があります。グローバルのインストール／更新時に、有効な Meta_Kim bootstrap manifest を持つ既存プロジェクトが見つかった場合は、グローバル環境を更新しながら、そのプロジェクト自身に保存されたランタイム対象と merge/delta 方針で既存投影も更新します。新しいプロジェクト投影は作成せず、プロジェクトに定着した能力やユーザーファイルは上書きしません。
+
+グローバルインストール後は任意のディレクトリで `meta-kim status` を実行して完全なフットプリントを確認できます。
 
 ### Q: Meta_Kim と普通の AI コーディング支援の違いは何ですか?
 
@@ -863,7 +866,7 @@ Meta_Kim は MCP（Model Context Protocol）を使って agent の能力境界�
 - [README.md](README.md)
 - [AGENTS.md](AGENTS.md)
 - [config/contracts/workflow-contract.json](config/contracts/workflow-contract.json)
-- [docs/runtime-capability-matrix.md](docs/runtime-capability-matrix.md)
+- [config/runtime-capability-matrix.json](config/runtime-capability-matrix.json)
 
 ---
 

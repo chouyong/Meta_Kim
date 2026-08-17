@@ -1,15 +1,20 @@
 import process from "node:process";
-import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
-import { join, dirname, resolve } from "node:path";
+import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { readJsonFromStdin } from "./utils.mjs";
 import {
+  projectRootCandidatesFromPayload,
+  resolveProjectRoot,
+} from "./project-root.mjs";
+import {
   readSpineState,
   readSpineStateIncludingInactive,
-  writeSpineState,
+  activateSpineState,
   createInitialState,
+  createProjectTaskIdentity,
+  readExistingTaskIdentityBinding,
 } from "./spine-state.mjs";
 
 const cwd = process.cwd();
@@ -17,7 +22,7 @@ const payload = await readJsonFromStdin();
 const toolName = payload?.tool_name ?? "";
 const toolInput = payload?.tool_input ?? {};
 
-// 开源场景：sync/setup 把 canonical 模板 __REPO_ROOT__ 渲染成绝对路径，写到
+// 开源场景：sync/setup 曾把 canonical 仓库根占位标记渲染成绝对路径，写到
 // 全局/项目 settings 后跨机器即死路径。candidate 在用户机器不存在时，从脚本
 // 自身位置往上找含 scripts/project-post-copy-init.mjs 的仓根。
 function resolvePackageRoot(candidate) {
@@ -41,51 +46,6 @@ const rawPackageRoot =
     : process.env.META_KIM_PACKAGE_ROOT || null;
 const packageRoot = resolvePackageRoot(rawPackageRoot);
 
-// P1 fix: never bootstrap/project spine + post-copy state into an arbitrary
-// cwd (e.g. a temp dir a stray hook invocation happens to run in). Resolve a
-// legitimate project root first; if none is found, the caller skips all
-// projection. Resolution order:
-//   1. explicit workspace declarations the runtime gave us (CLAUDE_PROJECT_DIR
-//      or a payload workspace-root field) — trusted when they point at a real
-//      existing directory;
-//   2. otherwise walk up from cwd for a strong project marker (.git or the
-//      meta-kim project-bootstrap manifest);
-//   3. otherwise null. process.cwd() itself is deliberately NOT a trusted
-//      marker — trusting a bare cwd is exactly the P1 defect.
-function resolveProjectRoot() {
-  const declared = [
-    process.env.CLAUDE_PROJECT_DIR,
-    payload?.workspace_root,
-    payload?.workspaceRoot,
-    payload?.project_dir,
-    payload?.projectDir,
-    payload?.project_root,
-    payload?.projectRoot,
-  ];
-  for (const candidate of declared) {
-    if (typeof candidate !== "string" || !candidate.trim()) continue;
-    try {
-      const resolved = resolve(candidate.trim());
-      if (existsSync(resolved) && statSync(resolved).isDirectory()) return resolved;
-    } catch {
-      // Unusable declaration; fall through to the project-marker walk-up.
-    }
-  }
-  let dir = resolve(cwd);
-  for (let i = 0; i < 40; i++) {
-    if (
-      existsSync(join(dir, ".git")) ||
-      existsSync(join(dir, ".meta-kim", "state", "default", "project-bootstrap.json"))
-    ) {
-      return dir;
-    }
-    const parent = dirname(dir);
-    if (parent === dir) break;
-    dir = parent;
-  }
-  return null;
-}
-
 // 多 agent / 军团 / fan-out 触发词只说明任务可能适合拆分。它不能证明
 // capability discovery 已执行，也不能替 Critical/Fetch/Thinking 推进阶段。
 const MULTI_AGENT_TRIGGER_RE =
@@ -108,7 +68,7 @@ const DURABLE_OUTPUT_RE =
 const FILE_OR_MUTATION_RE =
   /\b(?:file|code|repo|repository|project|app|page|component|test|config|contract|script|hook|runtime|release|version)\b|(?:文件|代码|仓库|项目|页面|组件|测试|配置|合同|脚本|钩子|运行时|发布|版本)/iu;
 const PRODUCT_BUILD_OBJECT_RE =
-  /\b(?:app|web app|dashboard|platform|tool|saas|automation|publisher|scheduler|workflow)\b|(?:系统|平台|工具|应用|网站|面板|看板|自动发布器|发布器|营销.*器|自动化|工作流|小红书)/iu;
+  /\b(?:app|web app|dashboard|platform|tool|saas|automation|publisher|scheduler|workflow)\b|(?:系统|平台|工具|应用|网站|面板|看板|自动发布器|发布器|营销.*器|自动化|工作流)/iu;
 const PROJECT_UNDERSTANDING_RE =
   /\b(?:project|repo|repository|codebase|architecture|commerciali[sz]e|market|competitor|business model|strategy|roadmap)\b|(?:项目|仓库|代码库|架构|怎么玩|干啥|做什么|商业化|市场|竞品|商业模式|发展|路线图|战略)/iu;
 const SUBJECTIVE_QUALITY_RE =
@@ -223,9 +183,18 @@ function detectPromptLanguage(promptText) {
   return "en";
 }
 
-function fingerprintPrompt(promptText) {
-  if (!promptText) return null;
-  return createHash("sha256").update(promptText, "utf8").digest("hex").slice(0, 16);
+function reportTaskIdentityRecoveryBoundary(status, promptText) {
+  const language = detectPromptLanguage(promptText);
+  const reason = status === "existing_key_invalid" ? "invalid" : "missing";
+  const messages = {
+    "zh-CN": `现有运行的任务身份密钥${reason === "invalid" ? "已损坏" : "缺失"}；为避免错误替换，已保持原运行不变。请显式恢复原密钥，或在确认放弃现有运行后重置当前 profile 的治理状态。`,
+    "ja-JP": `既存実行のタスク識別キーが${reason === "invalid" ? "破損しています" : "見つかりません"}。誤った置換を防ぐため既存実行は変更していません。元のキーを明示的に復元するか、既存実行を破棄すると確認した後で現在の profile のガバナンス状態をリセットしてください。`,
+    "ko-KR": `기존 실행의 작업 식별 키가 ${reason === "invalid" ? "손상되었습니다" : "없습니다"}. 잘못된 교체를 막기 위해 기존 실행을 변경하지 않았습니다. 원래 키를 명시적으로 복구하거나 기존 실행을 포기한 뒤 현재 profile의 거버넌스 상태를 재설정하세요.`,
+    en: `The existing run's task identity key is ${reason}. The run was left unchanged to prevent an incorrect replacement. Explicitly restore the original key, or reset this profile's governance state only after confirming that the existing run may be abandoned.`,
+  };
+  process.stderr.write(
+    `[meta-theory][task-identity-key-${reason}] ${messages[language] || messages.en}\n`,
+  );
 }
 
 function staleMinutes() {
@@ -324,7 +293,7 @@ function startPostCopyAutoInit(root) {
   if (!existsSync(scriptPath)) return;
 
   try {
-    spawnSync(process.execPath, [scriptPath, "--auto"], {
+    spawnSync(process.execPath, [scriptPath, "--auto", "--project-root", root], {
       cwd: root,
       stdio: "ignore",
       timeout: 4000,
@@ -345,10 +314,14 @@ if (!activation.triggered) {
   process.exit(0);
 }
 
-const projectRoot = resolveProjectRoot();
+const projectRoot = resolveProjectRoot({
+  cwd,
+  explicitDeclarations: [process.env.CLAUDE_PROJECT_DIR],
+  runtimeCandidates: projectRootCandidatesFromPayload(payload),
+});
 if (!projectRoot) {
-  // P1 fix: no legitimate project root (e.g. hook invoked from a temp dir with
-  // no .git / project-bootstrap manifest and no CLAUDE_PROJECT_DIR). Never
+  // No legitimate project root (e.g. hook invoked from a temp dir with no
+  // .git / project-bootstrap manifest and no valid explicit declaration). Never
   // bootstrap an arbitrary cwd — skip spine-state + post-copy projection.
   process.exit(0);
 }
@@ -356,10 +329,29 @@ if (!projectRoot) {
 startPostCopyAutoInit(projectRoot);
 
 const rawPromptText = getRawPromptText();
-const promptFingerprint = fingerprintPrompt(rawPromptText);
 const rawExisting = await readSpineStateIncludingInactive(projectRoot);
 const existing = rawExisting?.active === false ? null : rawExisting || (await readSpineState(projectRoot));
+const identityBinding = await readExistingTaskIdentityBinding(projectRoot);
+const taskIdentity = await createProjectTaskIdentity(projectRoot, rawPromptText, {
+  profile: identityBinding.profile,
+  requireExisting: identityBinding.hmacBound,
+});
+if (["existing_key_missing", "existing_key_invalid"].includes(taskIdentity.status)) {
+  reportTaskIdentityRecoveryBoundary(taskIdentity.status, rawPromptText);
+  process.exit(0);
+}
+const promptFingerprint = taskIdentity.taskFingerprint;
 if (existing && existing.active && !shouldReplaceActiveState(existing, promptFingerprint)) {
+  const existingFingerprint =
+    existing?.stageRuntimeControl?.promptFingerprint ||
+    existing?.promptFingerprint ||
+    null;
+  if (existingFingerprint && existingFingerprint === promptFingerprint) {
+    await activateSpineState(projectRoot, existing, {
+      expectedRunId: existing.runId || null,
+      refreshExisting: true,
+    });
+  }
   process.exit(0);
 }
 
@@ -370,6 +362,8 @@ const state = createInitialState({
   driverMode: "hook_observed",
   hookGateMode: "advisory",
   promptFingerprint,
+  taskFingerprint: taskIdentity.taskFingerprint,
+  taskIdentitySource: taskIdentity.taskIdentitySource,
   latestUserInputLanguage: detectPromptLanguage(rawPromptText),
   factGatePolicy: "managed_gate_required_for_public_ready",
   executionLeasePolicy: "advisory_until_managed_stage_driver",
@@ -417,7 +411,10 @@ if (isFanoutActivation) {
         : "meta_theory_trigger_request";
 }
 
-await writeSpineState(projectRoot, state);
+await activateSpineState(projectRoot, state, {
+  replaceActive: existing?.active === true,
+  expectedRunId: existing?.runId || null,
+});
 
 // ── multi-agent helpers ───────────────────────────────────────────────────────
 // 1) runAutoCapabilitySearch：扫 canonical/agents/ + agent-eligibility.json，

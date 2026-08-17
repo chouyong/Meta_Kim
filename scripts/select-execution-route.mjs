@@ -1,11 +1,30 @@
 #!/usr/bin/env node
 import { promises as fs } from "node:fs";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import path from "node:path";
-import { GOVERNANCE_OWNERS, OS_TARGETS, RUNTIMES, classifyTaskShape, exists, readJson, repoPath, scoreRoute, stateDir, supportScore, toPosix } from "./governance-lib.mjs";
+import { GOVERNANCE_OWNERS, OS_TARGETS, RUNTIMES, annotateCrossScopeAgentCollisions, classifyTaskShape, exists, readJson, repoPath, scoreRoute, stateDir, supportScore, toPosix } from "./governance-lib.mjs";
 import { CAPABILITY_GAP_DECISION_CONTRACT, decideCapabilityGap } from "./capability-gap-mvp.mjs";
 import { classifyMetaTheoryEntry } from "./meta-theory-entry-classifier.mjs";
 import { selectReportProviderBudget } from "./report-provider-budget.mjs";
+import { loadRuntimeProfiles, resolveRuntimeProjection } from "./meta-kim-sync-config.mjs";
+import {
+  evaluateChoiceRequirement,
+  resolveNativeChoiceSurface,
+} from "./governed-execution/choice-policy.mjs";
+import {
+  resolveRuntimeCapabilityClaim,
+  runtimeCapabilityNameForTool,
+  runtimeSupportForCapability,
+} from "./runtime-capability-claims.mjs";
+import { loadEffectiveRuntimeCapabilityClaims } from "./effective-runtime-capability-claims.mjs";
+import { evaluateRouteExecutionGate } from "./runtime-execution-gate.mjs";
+import {
+  sanitizeCapabilityPublicationText,
+  sanitizeCapabilityPublicationValue,
+} from "./capability-publication-sanitizer.mjs";
+import {
+  getGlobalProfilePaths,
+} from "./meta-kim-local-state.mjs";
 
 function argValue(name, fallback = null) {
   const index = process.argv.indexOf(name);
@@ -17,33 +36,81 @@ async function readStateJson(name, fallback) {
   return (await exists(file)) ? JSON.parse(await fs.readFile(file, "utf8")) : fallback;
 }
 
+async function readGlobalInventoryJson(fallback) {
+  const profileState = getGlobalProfilePaths();
+  const relativeInventoryPath = path.join("capability-index", "global-capabilities.json");
+  const candidates = [
+    {
+      path: path.join(profileState.profileDir, relativeInventoryPath),
+      sourceRef: `~/.meta-kim/state/${profileState.profile}/capability-index/global-capabilities.json`,
+    },
+    {
+      path: path.join(stateDir, relativeInventoryPath),
+      sourceRef: null,
+    },
+  ];
+  for (const candidate of candidates) {
+    if (!(await exists(candidate.path))) continue;
+    return {
+      value: JSON.parse(await fs.readFile(candidate.path, "utf8")),
+      sourceRef: candidate.sourceRef,
+    };
+  }
+  return { value: fallback, sourceRef: candidates[0].sourceRef };
+}
+
 const task = argValue("--task", "");
+const requestedRouteRunId = argValue("--run-id", null);
 const runtimeArg = argValue("--runtime", "auto");
 const osArg = argValue("--os", "auto");
+const requestedOwnerSourceKey = argValue("--owner-source", null);
+const requestedOwnerSourceRef = argValue("--owner-source-ref", null);
+const requestedOwnerContentDigest = String(
+  argValue("--owner-content-digest", null) ?? "",
+).replace(/^sha256:/iu, "").toLowerCase() || null;
 const json = process.argv.includes("--json");
+const rejectedCodexHostToolSchemaRaw =
+  argValue("--codex-host-tool-schema", null) ??
+  process.env.META_KIM_CODEX_HOST_TOOL_SCHEMA ??
+  null;
 const runtime = runtimeArg === "auto" ? "codex" : runtimeArg;
 const osTarget = osArg === "auto" ? "windows" : osArg;
 const taskShape = classifyTaskShape(task);
 const taskText = String(task ?? "").toLowerCase();
 const entryClassification = classifyMetaTheoryEntry(task);
-const choicePolicy = entryClassification.ambiguityPacket?.choicePolicy ?? "no_choice_needed";
-const subjectiveRouteChoice = entryClassification.triggerReason === "subjective_quality_ambiguous";
+const choiceSurfacePolicy = await readJson("config/governance/choice-surface-policy.json");
+
+// An offline CLI process cannot attest the active Codex host's top-level tool
+// schema. Caller-supplied JSON/env is retained only as rejected evidence; the
+// interactive host must perform native binding from its own live tool surface.
+const codexHostToolSchema = {
+  status: "not_observed_in_offline_route_process",
+  hostSurface: "spawn_agent",
+  inputProperties: [],
+  ownerSelectorField: null,
+  evidenceSource: null,
+  suppliedArtifactRejected: Boolean(rejectedCodexHostToolSchemaRaw),
+  rejectedReason: rejectedCodexHostToolSchemaRaw
+    ? "caller_supplied_host_schema_is_not_current_host_attestation"
+    : null,
+};
+const entrySignals = entryClassification.signals ?? {};
+const routeChangingDimensionSignals = entrySignals.routeChangingDimensionSignals ?? [];
+const subjectiveRouteChoice = entrySignals.subjectiveQualitySignal === true;
+const runtimeChoiceSurface = resolveNativeChoiceSurface(choiceSurfacePolicy, runtime);
+const stateDirRef = toPosix(path.relative(repoPath("."), stateDir));
 const GOVERNANCE_CHAIN_PREFIX_RE =
   /^critical(?:\s+thinking)?(?:\s*(?:->|=>|→|,|，|、|;|；|and)?\s+)fetch(?:\s*(?:->|=>|→|,|，|、|;|；|and)?\s+)(?:deep\s+)?thinking(?:\s*(?:->|=>|→|,|，|、|;|；|and)?\s+)review\s*/iu;
-const autoFanoutDispatchRequested =
-  entryClassification.fanoutEligible === true &&
-  [
-    "direct_parallel_agent_request",
-    "meta_theory_trigger_request",
-    "structured_governance_chain_request",
-  ].includes(
-    entryClassification.subagentAuthorizationSource,
-  );
+const concurrentDispatchIntentPresent =
+  entrySignals.directParallelRequest === true ||
+  entrySignals.structuredGovernanceChainRequest === true ||
+  entrySignals.explicitMetaTheory === true ||
+  entrySignals.productBuildIntent === true;
 const nativeChoiceEvidenceRaw =
   argValue("--native-choice-evidence", null) ??
   process.env.META_KIM_NATIVE_CHOICE_EVIDENCE ??
   null;
-function normalizeNativeChoiceEvidence(raw) {
+function normalizeNativeChoiceEvidence(raw, expectedSurface) {
   const base = {
     completedStages: [],
   };
@@ -84,13 +151,9 @@ function normalizeNativeChoiceEvidence(raw) {
       status: answerRecorded ? "completed" : (parsed.status ?? parsed.state ?? "present"),
       surface,
       answerRecorded,
-      trusted:
-        answerRecorded &&
-        completedStages.length > 0 &&
-        evidenceRefs.length > 0 &&
-        ["request_user_input", "AskUserQuestion", "native_choice"].includes(
-          surface,
-        ),
+      trusted: false,
+      trustBoundary: "reference_only_cli_or_environment",
+      expectedSurface,
       evidenceRef: parsed.evidenceRef ?? parsed.answerRef ?? null,
       evidenceRefs,
       completedStages,
@@ -105,23 +168,44 @@ function normalizeNativeChoiceEvidence(raw) {
     };
   }
 }
-const nativeChoiceEvidence = normalizeNativeChoiceEvidence(nativeChoiceEvidenceRaw);
+const nativeChoiceEvidence = normalizeNativeChoiceEvidence(
+  nativeChoiceEvidenceRaw,
+  runtimeChoiceSurface.surface,
+);
 function hasChoiceStage(stage) {
   return nativeChoiceEvidence.trusted === true && nativeChoiceEvidence.completedStages.includes(stage);
 }
-const criticalChoiceBlocksExecution = choicePolicy === "must_ask" && !hasChoiceStage("Critical");
-const subjectiveThinkingChoiceRequired = subjectiveRouteChoice;
-const thinkingChoiceBlocksExecution = subjectiveThinkingChoiceRequired && !hasChoiceStage("Thinking");
-
 const weapons = (await readJson("config/capability-index/weapon-registry.json")).weapons ?? [];
 const registryDependencies = (await readJson("config/capability-index/dependency-project-registry.json")).projects ?? [];
 const repoCapabilityIndex = await readJson("config/capability-index/meta-kim-capabilities.json");
 const workflowContract = await readJson("config/contracts/workflow-contract.json");
 const capabilityInventory = await readStateJson("capability-inventory.json", { capabilities: [] });
-const globalCapabilityInventory = await readStateJson(path.join("capability-index", "global-capabilities.json"), { byCapabilityType: { agents: {} }, byPlatform: {} });
+const globalCapabilityInventoryRecord = await readGlobalInventoryJson({
+  byCapabilityType: { agents: {} },
+  byPlatform: {},
+});
+const globalCapabilityInventory = globalCapabilityInventoryRecord.value;
+const globalCapabilityInventoryRef = globalCapabilityInventoryRecord.sourceRef ??
+  `${stateDirRef}/capability-index/global-capabilities.json`;
 const dependencyIndex = await readStateJson("dependency-capability-index.json", { discoveredDependencyProjects: [] });
-const choiceSurfacePolicy = await readJson("config/governance/choice-surface-policy.json");
 const intentContract = await readJson("config/governance/intent-amplification-contract.json");
+const runtimeCapabilityState = loadEffectiveRuntimeCapabilityClaims({
+  projectRoot: process.env.META_KIM_CALLER_CWD || repoPath("."),
+});
+const runtimeMatrix = runtimeCapabilityState.effectiveMatrix;
+function activeRuntimeSupport() {
+  const platform = runtimeMatrix.platforms?.find((entry) => entry.platform === runtime);
+  const claims = (platform?.capabilities ?? []).map((capability) =>
+    resolveRuntimeCapabilityClaim(runtimeMatrix, {
+      runtime,
+      capability: capability.capability,
+      mode: "interactive_host",
+    }));
+  if (claims.some((claim) => claim.executable && claim.hostSupport === "native")) return "native";
+  if (claims.some((claim) => claim.executable)) return "partial";
+  if (claims.some((claim) => ["native", "partial"].includes(claim.hostSupport))) return "partial";
+  return claims.some((claim) => claim.hostSupport === "unsupported") ? "unsupported" : "unknown";
+}
 const localOverrides = (await exists(repoPath(".meta-kim/local.overrides.json")))
   ? await readJson(".meta-kim/local.overrides.json")
   : {};
@@ -228,10 +312,17 @@ function explicitCapabilityGapRequested() {
 }
 
 function taskTerms() {
+  if (taskShape === "goal_contract") return ["goal prompt", "loop prompt", "goal contract", "intent amplification", "goalpro", "目标契约", "目标合同", "意图放大"];
   if (taskShape === "strategy_product_decision") return ["strategy", "product", "decision", "monetization", "策略", "产品", "商业化", "变现"];
   if (taskShape === "platform_governance") return ["runtime", "platform", "hook", "os", "codex", "cursor", "openclaw", "claude", "平台", "钩子"];
   if (taskShape === "engineering_execution") return ["code", "test", "refactor", "engineering", "代码", "测试", "重构"];
   return ["governance", "capability", "workflow", "治理", "能力"];
+}
+
+function decisionAdjustmentRequested() {
+  if (taskShape !== "strategy_product_decision") return false;
+  if (productBuildExecutionRequested()) return false;
+  return /decision|judge|判断|决策|选择|取舍|pass.?kill|要不要|值不值得|怎么改|怎么做|路径|方案|策略|高流量|标题|文案|封面/.test(taskText);
 }
 
 function fitsTask(entry) {
@@ -242,6 +333,23 @@ function fitsTask(entry) {
 
 function capabilityEntries(index, type) {
   return Object.values(index?.byCapabilityType?.[type] ?? {});
+}
+
+function rawPlatformCapabilityEntries(index, type) {
+  return Object.values(index?.byPlatform ?? {}).flatMap(
+    (platform) => platform?.capabilities?.[type] ?? [],
+  );
+}
+
+function exactOwnerSourceSelected(entry) {
+  if (!requestedOwnerSourceKey || !requestedOwnerContentDigest) return false;
+  const sourceKeyMatches = String(entry?.sourceKey ?? "") === requestedOwnerSourceKey;
+  const digestMatches = String(entry?.contentDigest ?? "")
+    .replace(/^sha256:/iu, "")
+    .toLowerCase() === requestedOwnerContentDigest;
+  const sourceRefMatches = !requestedOwnerSourceRef ||
+    toPosix(String(entry?.sourceRef ?? "")) === toPosix(String(requestedOwnerSourceRef));
+  return sourceKeyMatches && digestMatches && sourceRefMatches;
 }
 
 function uniqueById(items) {
@@ -259,20 +367,51 @@ function uniqueStrings(items) {
   return [...new Set(items.filter(Boolean).map((item) => String(item)))];
 }
 
+function compactProviderMetadata(value) {
+  if (Array.isArray(value)) return value.map(compactProviderMetadata);
+  if (!value || typeof value !== "object") {
+    if (typeof value !== "string") return value;
+    return sanitizeCapabilityPublicationText(value, {
+      repoRoot: repoPath("."),
+      homeDir: process.env.USERPROFILE ?? process.env.HOME ?? "",
+    });
+  }
+  return Object.fromEntries(
+    Object.entries(value)
+      .filter(([key]) => !["path", "workspace", "baseDir"].includes(key))
+      .map(([key, nested]) => [key, compactProviderMetadata(nested)]),
+  );
+}
+
 function compactAgent(entry, source) {
   const layer = entry.layer ?? (String(entry.id ?? "").startsWith("meta-") ? "meta" : "execution");
-  const sourceRef = entry.sourcePath ?? entry.relativePath ?? (entry.platformId ? `${entry.platformId}:${entry.id}` : entry.id);
+  const sourceRef = entry.sourceRef ?? entry.sourcePath ?? entry.relativePath ?? (entry.platformId ? `${entry.platformId}:${entry.id}` : entry.id);
   return {
     id: entry.id,
     layer,
     source,
     platformId: entry.platformId ?? null,
-    sourceRef: toPosix(sourceRef),
+    sourceRef: compactProviderMetadata(toPosix(sourceRef)),
     executionBlock: entry.executionBlock ?? layer === "meta",
-    description: entry.description ?? null,
-    own: entry.own ?? null,
-    boundary: entry.boundary ?? null,
-    trigger: entry.trigger ?? null,
+    description: compactProviderMetadata(entry.description ?? null),
+    own: compactProviderMetadata(entry.own ?? null),
+    boundary: compactProviderMetadata(entry.boundary ?? null),
+    trigger: compactProviderMetadata(entry.trigger ?? null),
+    metadata: compactProviderMetadata(entry.metadata ?? null),
+    validCustomAgentDefinition: entry.validCustomAgentDefinition ?? entry.metadata?.validCustomAgentDefinition ?? null,
+    customAgentDefinitionErrors: entry.customAgentDefinitionErrors ?? entry.metadata?.customAgentDefinitionErrors ?? [],
+    sourceClass: entry.sourceClass ?? null,
+    sourceRoot: compactProviderMetadata(entry.sourceRoot ?? null),
+    sourceKey: compactProviderMetadata(entry.sourceKey ?? null),
+    sourcePriority: entry.sourcePriority ?? null,
+    contentDigest: entry.contentDigest ?? null,
+    nativeIdentity: entry.nativeIdentity ?? entry.nativeAgentName ?? entry.metadata?.nativeAgentName ?? entry.metadata?.name ?? entry.id,
+    provenance: compactProviderMetadata(entry.provenance ?? []),
+    collision: compactProviderMetadata(entry.collision ?? null),
+    routeEligible: entry.routeEligible ?? true,
+    sourceSelectedExplicitly: entry.sourceSelectedExplicitly === true,
+    cacheEvidence: compactProviderMetadata(entry.cacheEvidence ?? null),
+    cacheEvidenceOnly: entry.cacheEvidenceOnly === true,
   };
 }
 
@@ -283,7 +422,16 @@ function compactCapabilityProvider(entry, source, type = entry.type ?? "skills")
     type,
     source,
     platformId: entry.platformId ?? null,
-    sourceRef: toPosix(sourceRef),
+    sourceRef: compactProviderMetadata(toPosix(sourceRef)),
+    sourceClass: entry.sourceClass ?? null,
+    sourceRoot: compactProviderMetadata(entry.sourceRoot ?? null),
+    sourceKey: compactProviderMetadata(entry.sourceKey ?? null),
+    sourcePriority: entry.sourcePriority ?? null,
+    contentDigest: entry.contentDigest ?? null,
+    nativeIdentity: entry.nativeIdentity ?? entry.id,
+    provenance: compactProviderMetadata(entry.provenance ?? []),
+    collision: compactProviderMetadata(entry.collision ?? null),
+    routeEligible: entry.routeEligible ?? true,
   };
 }
 
@@ -331,8 +479,20 @@ async function projectRuntimeAgents() {
     const entries = await fs.readdir(absDir, { withFileTypes: true });
     for (const entry of entries) {
       if (!entry.isFile() || !entry.name.endsWith(extension)) continue;
-      const id = entry.name.slice(0, -extension.length);
+      const inventoryId = entry.name.slice(0, -extension.length);
+      let id = inventoryId;
       const layer = id.startsWith("meta-") ? "meta" : "execution";
+      let metadata = null;
+      let validCustomAgentDefinition = null;
+      let customAgentDefinitionErrors = [];
+      let contentDigest = null;
+      if (runtimeName === "codex") {
+        const content = await fs.readFile(path.join(absDir, entry.name), "utf8");
+        contentDigest = createHash("sha256").update(content).digest("hex");
+        ({ metadata, errors: customAgentDefinitionErrors } = parseCodexAgentDefinition(content));
+        validCustomAgentDefinition = customAgentDefinitionErrors.length === 0;
+        if (validCustomAgentDefinition) id = metadata.name;
+      }
       agents.push({
         id,
         layer,
@@ -340,6 +500,15 @@ async function projectRuntimeAgents() {
         runtime: runtimeName,
         sourceRef: toPosix(path.join(dir, entry.name)),
         executionBlock: layer === "meta",
+        metadata,
+        validCustomAgentDefinition,
+        customAgentDefinitionErrors,
+        inventoryId,
+        sourceClass: "project",
+        sourcePriority: 100,
+        nativeIdentity: id,
+        contentDigest,
+        sourceKey: `${runtimeName}:agents:${id}:project:${toPosix(path.join(dir, entry.name))}`,
       });
     }
   }
@@ -363,6 +532,139 @@ async function projectRuntimeAgents() {
     }
   }
   return agents;
+}
+
+function parseCodexAgentDefinition(content) {
+  const scalar = (key) => {
+    const triple = content.match(
+      new RegExp(`^${key}\\s*=\\s*(?:\"\"\"|''')([\\s\\S]*?)(?:\"\"\"|''')`, "mu"),
+    );
+    if (triple) return triple[1].trim();
+    const single = content.match(new RegExp(`^${key}\\s*=\\s*[\"']([^\"']+)[\"']`, "mu"));
+    return single?.[1]?.trim() ?? null;
+  };
+  const metadata = {
+    name: scalar("name"),
+    description: scalar("description"),
+    developer_instructions: scalar("developer_instructions"),
+  };
+  return {
+    metadata,
+    errors: [
+      ...(!metadata.name ? ["missing_name"] : []),
+      ...(!metadata.description ? ["missing_description"] : []),
+      ...(!metadata.developer_instructions ? ["missing_developer_instructions"] : []),
+    ],
+  };
+}
+
+async function globalRuntimeAgentProviders() {
+  const profileId = runtime === "claude_code" ? "claude" : runtime;
+  const profiles = await loadRuntimeProfiles();
+  const profile = profiles[profileId];
+  const agentProjection = profile?.projection?.globalAgentProjection;
+  if (!agentProjection?.supported) return [];
+
+  const projection = resolveRuntimeProjection(profileId, "global");
+  const agentsDir = projection.agentsDir;
+  if (!agentsDir || !(await exists(agentsDir))) return [];
+  const userHome = process.env.USERPROFILE ?? process.env.HOME ?? projection.baseDir;
+
+  const providers = [];
+  const entries = await fs.readdir(agentsDir, { withFileTypes: true });
+  for (const entry of entries) {
+    if (!entry.isFile() || !entry.name.endsWith(agentProjection.fileExtension)) continue;
+    const inventoryId = entry.name.slice(0, -agentProjection.fileExtension.length);
+    let id = inventoryId;
+    let metadata = null;
+    let customAgentDefinitionErrors = [];
+    let validCustomAgentDefinition = null;
+    const agentPath = path.join(agentsDir, entry.name);
+    const content = await fs.readFile(agentPath, "utf8");
+    if (agentProjection.format === "codex_toml") {
+      ({ metadata, errors: customAgentDefinitionErrors } = parseCodexAgentDefinition(content));
+      validCustomAgentDefinition = customAgentDefinitionErrors.length === 0;
+      if (validCustomAgentDefinition) id = metadata.name;
+    }
+    const layer = id.startsWith("meta-") ? "meta" : "execution";
+    const platformId = runtime === "claude_code" ? "claudeCode" : runtime;
+    const sourceRef = `~/${toPosix(path.relative(userHome, agentPath))}`;
+    const sourceRoot = `~/${toPosix(path.relative(userHome, agentsDir))}`;
+    const contentDigest = createHash("sha256").update(content).digest("hex");
+    providers.push({
+      id,
+      inventoryId,
+      layer,
+      source: "local_global_agent_inventory",
+      runtime,
+      platformId,
+      sourceClass: "personal",
+      sourceRoot,
+      sourceRef,
+      sourcePriority: 300,
+      nativeIdentity: id,
+      contentDigest,
+      sourceKey: `${platformId}:agents:${id}:personal:${sourceRef}`,
+      executionBlock: layer === "meta",
+      metadata,
+      validCustomAgentDefinition,
+      customAgentDefinitionErrors,
+    });
+  }
+  const byNativeIdentity = new Map();
+  for (const provider of providers) {
+    const group = byNativeIdentity.get(provider.nativeIdentity) ?? [];
+    group.push(provider);
+    byNativeIdentity.set(provider.nativeIdentity, group);
+  }
+  return [...byNativeIdentity.values()].map((group) => {
+    const candidates = [...group].sort((left, right) =>
+      String(left.sourceRef).localeCompare(String(right.sourceRef)));
+    const winner = candidates[0];
+    const distinctDigests = [...new Set(candidates.map((entry) => entry.contentDigest))];
+    const exactDuplicate = candidates.length > 1 && distinctDigests.length === 1;
+    const ambiguous = runtime === "codex" && candidates.length > 1 && !exactDuplicate;
+    const provenance = candidates.map((entry) => ({
+      id: entry.id,
+      inventoryId: entry.inventoryId,
+      sourceClass: entry.sourceClass,
+      sourceRoot: entry.sourceRoot,
+      sourceRef: entry.sourceRef,
+      contentDigest: entry.contentDigest,
+      nativeIdentity: entry.nativeIdentity,
+      sourcePriority: entry.sourcePriority,
+      sourceKey: entry.sourceKey,
+      sourceValid: entry.validCustomAgentDefinition !== false,
+    }));
+    const collision = {
+      detected: candidates.length > 1,
+      kind: candidates.length <= 1
+        ? "none"
+        : exactDuplicate
+          ? "exact_duplicate"
+          : "conflicting_definitions",
+      candidateCount: candidates.length,
+      distinctContentDigests: distinctDigests,
+      winnerSourceKey: winner.sourceKey,
+      winnerSourceRef: winner.sourceRef,
+      exactDuplicate,
+      ambiguous,
+      routeEligible: !ambiguous && winner.validCustomAgentDefinition !== false,
+      evidenceSource: "live_filesystem",
+    };
+    return {
+      ...winner,
+      sourceCandidates: candidates.map((entry) => ({
+        ...entry,
+        provenance,
+        collision,
+      })),
+      provenance,
+      collision,
+      routeEligible: !ambiguous && winner.validCustomAgentDefinition !== false,
+      ambiguousNativeIdentity: ambiguous,
+    };
+  });
 }
 
 async function projectSkillProviders() {
@@ -520,7 +822,71 @@ async function codexGlobalSkillProviders() {
 }
 
 const repoCanonicalAgents = capabilityEntries(repoCapabilityIndex, "agents").map((entry) => compactAgent(entry, "repo_canonical_capability_index"));
-const localGlobalAgents = capabilityEntries(globalCapabilityInventory, "agents").map((entry) => compactAgent(entry, "local_global_agent_inventory"));
+const filesystemRuntimeAgents = await globalRuntimeAgentProviders();
+const liveFilesystemAgentCandidates = filesystemRuntimeAgents.flatMap(
+  (agent) => agent.sourceCandidates ?? [agent],
+);
+const exactLiveSourceAgents = liveFilesystemAgentCandidates
+  .filter(exactOwnerSourceSelected)
+  .map((entry) => ({
+    ...entry,
+    sourceSelectedExplicitly: true,
+    routeEligible:
+      (entry.validCustomAgentDefinition ?? entry.metadata?.validCustomAgentDefinition) !== false,
+  }));
+const authoritativeFilesystemAgents = exactLiveSourceAgents.length > 0
+  ? exactLiveSourceAgents
+  : filesystemRuntimeAgents;
+const cachedInventoryAgentEntries = capabilityEntries(globalCapabilityInventory, "agents");
+function cacheEvidenceForLiveAgent(liveAgent) {
+  const cached = cachedInventoryAgentEntries.find((entry) => entry.id === liveAgent.id);
+  if (!cached) return { present: false, sourceAware: false, liveMatch: false };
+  const cachedSources = Array.isArray(cached.provenance) && cached.provenance.length > 0
+    ? cached.provenance
+    : [cached];
+  const sourceAware = cachedSources.every(
+    (entry) => entry?.sourceRef && entry?.sourceKey && /^[a-f0-9]{64}$/iu.test(
+      String(entry?.contentDigest ?? "").replace(/^sha256:/iu, ""),
+    ),
+  );
+  const liveMatch = sourceAware && cachedSources.some(
+    (entry) =>
+      toPosix(String(entry.sourceRef)) === toPosix(String(liveAgent.sourceRef)) &&
+      String(entry.contentDigest).replace(/^sha256:/iu, "").toLowerCase() ===
+        String(liveAgent.contentDigest).replace(/^sha256:/iu, "").toLowerCase(),
+  );
+  return {
+    present: true,
+    sourceAware,
+    liveMatch,
+    cachedSourceKey: cached.sourceKey ?? null,
+    cachedContentDigest: cached.contentDigest ?? null,
+    cachedCollision: cached.collision ?? null,
+    disposition: liveMatch
+      ? "cache_correlated_live_filesystem_authoritative"
+      : "cache_evidence_only_live_filesystem_authoritative",
+  };
+}
+const liveGlobalAgents = authoritativeFilesystemAgents.map((agent) => ({
+  ...agent,
+  cacheEvidence: cacheEvidenceForLiveAgent(agent),
+}));
+const liveGlobalAgentIds = new Set(liveGlobalAgents.map((agent) => agent.id));
+const cacheOnlyGlobalAgents = cachedInventoryAgentEntries
+  .filter((entry) => !liveGlobalAgentIds.has(entry.id))
+  .map((entry) => compactAgent({
+    ...entry,
+    routeEligible: false,
+    cacheEvidenceOnly: true,
+  }, "local_global_agent_inventory"));
+const localGlobalAgents = [];
+const localGlobalAgentKeys = new Set();
+for (const agent of [...liveGlobalAgents, ...cacheOnlyGlobalAgents]) {
+  const key = `${agent.runtime ?? agent.platformId ?? "shared"}:${agent.id}`;
+  if (localGlobalAgentKeys.has(key)) continue;
+  localGlobalAgentKeys.add(key);
+  localGlobalAgents.push(agent);
+}
 const projectRuntimeAgentCandidates = await projectRuntimeAgents();
 const repoCanonicalSkillProviders = capabilityEntries(repoCapabilityIndex, "skills").map((entry) => compactCapabilityProvider(entry, "repo_canonical_capability_index", "skills"));
 const projectRuntimeSkillProviders = await projectSkillProviders();
@@ -560,6 +926,28 @@ const localGlobalSkillProviders = localGlobalCapabilityProvidersAll
 const discoveredRuntimeToolProviders = (capabilityInventory.capabilities ?? [])
   .filter((capability) => capability.type === "runtime_tool")
   .map((entry) => compactCapabilityProvider(entry, "local_runtime_capability_inventory", "runtimeTools"));
+function bindRuntimeToolClaim(provider) {
+  const matrixCapability = runtimeCapabilityNameForTool(provider.id);
+  const claim = resolveRuntimeCapabilityClaim(runtimeMatrix, {
+    runtime,
+    capability: matrixCapability,
+    mode: "interactive_host",
+  });
+  return {
+    ...provider,
+    runtimeSupport: runtimeSupportForCapability(runtimeMatrix, matrixCapability),
+    runtimeCapability: matrixCapability,
+    runtimeMode: "interactive_host",
+    executionEligible: claim.executable,
+    routeEligibility: claim.executable ? "callable" : "reference",
+    capabilityClaim: {
+      hostSupport: claim.hostSupport,
+      hostConfidence: claim.hostConfidence,
+      acceptanceState: claim.acceptanceState,
+    },
+  };
+}
+
 const runtimeToolProviders = uniqueById([
   ...discoveredRuntimeToolProviders,
   ...[
@@ -585,7 +973,7 @@ const runtimeToolProviders = uniqueById([
       sourceRef: `${runtime}:filesystem`,
     },
   ],
-]);
+]).map(bindRuntimeToolClaim);
 const capabilityProviderCoverage = {
   repoCanonical: Object.fromEntries(["skills", "commands", "hooks", "mcpServers", "mcpTools", "plugins", "rules", "prompts", "runtimeTools"].map((type) => [type, capabilityEntries(repoCapabilityIndex, type).length])),
   projectRuntimeLightScan: Object.fromEntries(["skills", "commands", "hooks", "mcpServers", "rules", "prompts", "runtimeTools"].map((type) => [type, type === "runtimeTools" ? runtimeToolProviders.length : projectRuntimeCapabilityProviders.filter((provider) => provider.type === type).length])),
@@ -746,14 +1134,24 @@ function platformMatchesRuntime(agent) {
   return false;
 }
 
-const runtimeScopedProjectExecutionAgents = projectRuntimeAgentCandidates
-  .filter((agent) => agent.runtime === runtime || agent.runtime === "shared");
-const runtimeScopedLocalGlobalAgents = localGlobalAgents.filter(platformMatchesRuntime);
+const runtimeScopedAgents = annotateCrossScopeAgentCollisions([
+  ...projectRuntimeAgentCandidates.filter((agent) => agent.runtime === runtime || agent.runtime === "shared"),
+  ...localGlobalAgents.filter(platformMatchesRuntime),
+], runtime);
+const runtimeScopedProjectExecutionAgents = runtimeScopedAgents
+  .filter((agent) => agent.source === "project_runtime_agent_inventory");
+const runtimeScopedLocalGlobalAgents = runtimeScopedAgents
+  .filter((agent) => agent.source !== "project_runtime_agent_inventory");
 const candidateExecutionAgents = [
   ...runtimeScopedProjectExecutionAgents,
   ...runtimeScopedLocalGlobalAgents,
 ]
-  .filter((agent) => agent.layer !== "meta" && agent.executionBlock !== true);
+  .filter(
+    (agent) =>
+      agent.layer !== "meta" &&
+      agent.executionBlock !== true &&
+      agent.routeEligible !== false,
+  );
 const candidateExistingExecutionOwners = candidateExecutionAgents.map((agent) => agent.id);
 const ownerDiscoveryPacket = {
   discoveryPrinciple: "canonical_index_first_capability_discovery_owner_last_binding",
@@ -794,7 +1192,7 @@ const ownerDiscoveryPacket = {
     { source: "codex_project_inventory", checked: true, sourceRef: ".codex/agents; .agents/skills; .codex/commands; .codex/hooks; .codex/hooks.json; .codex/config.toml; .mcp.json; package.json scripts" },
     { source: "cursor_project_inventory", checked: true, sourceRef: ".cursor/agents; .cursor/skills; .cursor/rules; .cursor/prompts; .cursor/hooks; .cursor/hooks.json; .cursor/mcp.json" },
     { source: "openclaw_project_inventory", checked: true, sourceRef: "openclaw/workspaces; openclaw/skills; openclaw/hooks; openclaw/openclaw.template.json" },
-    { source: "local_global_inventory_cache", checked: true, sourceRef: ".meta-kim/state/default/capability-index/global-capabilities.json" },
+    { source: "local_global_inventory_cache", checked: true, sourceRef: globalCapabilityInventoryRef },
     { source: "claude_global_inventory", checked: true, sourceRef: "~/.claude/agents; ~/.claude/skills; ~/.claude/commands; ~/.claude/hooks; ~/.claude/settings.json" },
     { source: "codex_global_inventory", checked: true, sourceRef: "~/.codex/agents; ~/.codex/skills; ~/.codex/commands; ~/.codex/hooks; ~/.codex/hooks.json; ~/.codex/config.toml; ~/.agents/skills" },
     { source: "codex_global_skill_filesystem_light_scan", checked: true, sourceRef: "~/.codex/skills; ~/.codex/plugins/cache" },
@@ -836,7 +1234,7 @@ const ownerDiscoveryPacket = {
     "openclaw/workspaces",
     "openclaw/openclaw.template.json",
     "config/runtime-capability-matrix.json",
-    ".meta-kim/state/default/capability-inventory.json",
+    `${stateDirRef}/capability-inventory.json`,
     ".mcp.json",
     "package.json",
     "scripts",
@@ -863,7 +1261,7 @@ const ownerDiscoveryPacket = {
     "~/.openclaw/workspace-*",
     "~/.openclaw/skills",
     "~/.openclaw/hooks",
-    ".meta-kim/state/default/capability-index/global-capabilities.json",
+    globalCapabilityInventoryRef,
     "config/contracts/workflow-contract.json",
   ],
 };
@@ -903,9 +1301,32 @@ const candidateFoundationalCapabilities = (capabilityInventory.capabilities ?? [
   .slice(0, 20)
   .map((cap) => cap.id);
 
-function routeForWeapon(weapon) {
+function dependencyTaskFitScore(dep) {
+  const terms = taskTerms();
+  const depText = JSON.stringify(dep).toLowerCase();
+  let score = dep.reuseScore ?? 50;
+  if (terms.some((term) => depText.includes(term))) score += 25;
+  if (taskShape === "goal_contract" && dep.id === "goalpro") score += 50;
+  if (taskShape === "strategy_product_decision" && dep.id === "kim-decision") score += 20;
+  if (dependencyExecutable(dep)) score += 30;
+  else score -= 120;
+  return score;
+}
+
+function selectDependencyForWeapon(weapon) {
   const dependencyIds = weapon.dependencyProjects ?? [];
-  const dep = dependencyIds.length ? candidateDependencies.find((candidate) => dependencyIds.includes(candidate.id)) ?? null : null;
+  if (!dependencyIds.length) return null;
+  const matches = candidateDependencies.filter((candidate) =>
+    dependencyIds.includes(candidate.id),
+  );
+  const executableMatches = matches.filter(dependencyExecutable);
+  const pool = executableMatches.length ? executableMatches : [];
+  return pool
+    .sort((a, b) => dependencyTaskFitScore(b) - dependencyTaskFitScore(a))[0] ?? null;
+}
+
+function routeForWeapon(weapon) {
+  const dep = selectDependencyForWeapon(weapon);
   const runtimeValue = weapon.runtimeSupport?.[runtime] ?? "unknown";
   const osValue = weapon.osSupport?.[osTarget] ?? "unknown";
   const available = new Set([
@@ -929,6 +1350,9 @@ function routeForWeapon(weapon) {
   if (weapon.ownerCandidates?.some((owner) => owner === "general-purpose")) blockedReasons.push("general-purpose fallback");
   if (weapon.ownerCandidates?.some((owner) => /runtimeInstanceAlias|nickname/i.test(owner))) blockedReasons.push("runtime alias as durable owner");
   if (taskShape === "engineering_execution" && selectedOwner && GOVERNANCE_OWNERS.includes(selectedOwner)) blockedReasons.push("governance agent as implementation worker");
+  if (productBuildExecutionRequested() && weapon.id === "meta-kim-decision-patterns") {
+    blockedReasons.push("product build requires multi-lane orchestration; decision patterns remain a lens inside Thinking");
+  }
   if (dep && !dependencyExecutable(dep)) {
     if (dep.routeEligibility === "reference_only" || dep.invokeAs === "reference") blockedReasons.push("dependency reference_only");
     if (!dep.invocationPath) blockedReasons.push("dependency missing invocationPath");
@@ -1051,8 +1475,15 @@ const reusableProviders = uniqueById(sortProvidersForRuntime([
   ...runtimeToolProviders,
 ]));
 
+function providerEligibleForRoute(provider) {
+  return provider?.routeEligible !== false &&
+    (provider?.type !== "runtimeTools" || provider?.executionEligible === true);
+}
+
 function selectProvider(type, preferredIds = []) {
-  const providers = sortProvidersForRuntime(reusableProviders.filter((provider) => provider.type === type));
+  const providers = sortProvidersForRuntime(reusableProviders.filter((provider) =>
+    provider.type === type &&
+    providerEligibleForRoute(provider)));
   for (const preferredId of preferredIds) {
     const match = providers.find((provider) => provider.id === preferredId) ??
       providers.find((provider) => provider.id?.includes(preferredId));
@@ -1066,7 +1497,7 @@ function selectAnyProvider(preferredIds = [], allowedTypes = null) {
     allowedTypes
       ? reusableProviders.filter((provider) => allowedTypes.includes(provider.type))
       : reusableProviders,
-  );
+  ).filter(providerEligibleForRoute);
   for (const preferredId of preferredIds) {
     const match = providers.find((provider) => provider.id === preferredId) ??
       providers.find((provider) => provider.id?.includes(preferredId));
@@ -1150,8 +1581,9 @@ function scoreProviderForCapabilityNeed(provider, capabilityNeed = []) {
 function candidateProvidersForCapabilityNeed(capabilityNeed = [], allowedTypes = null, limit = 6) {
   const pool = sortProvidersForRuntime(
     allowedTypes
-      ? reusableProviders.filter((provider) => allowedTypes.includes(provider.type))
-      : reusableProviders,
+      ? reusableProviders.filter((provider) =>
+          allowedTypes.includes(provider.type) && providerEligibleForRoute(provider))
+      : reusableProviders.filter(providerEligibleForRoute),
   );
   const scored = pool
     .map((provider) => scoreProviderForCapabilityNeed(provider, capabilityNeed))
@@ -1246,7 +1678,7 @@ const PRODUCT_BUILD_INTENT_SIGNALS = {
   ],
   currentResearch: [
     /market|research|competitor|policy|platform|rule|current/i,
-    /市场|研究|竞品|平台|规则|最新|调研|小红书|抖音|公众号|视频号/,
+    /市场|研究|竞品|平台|规则|最新|调研|内容渠道|外部服务|第三方/,
   ],
   interface: [
     /app|web|site|dashboard|frontend|ui|ux|interface|page|tool|product|mvp/i,
@@ -1315,6 +1747,11 @@ function productBuildLaneEvidence() {
     verification,
     contentOnly,
   };
+}
+
+function productBuildExecutionRequested() {
+  const evidence = productBuildLaneEvidence();
+  return evidence.implementation || evidence.automationIntegration || (evidence.interfaceNeeded && evidence.dataState);
 }
 
 function productRouteDecisionRequested() {
@@ -1420,7 +1857,10 @@ function buildCapabilityTeamBlueprint(lanes, omittedLanesWithReason, evidence) {
         runtime === "codex" &&
         (lane.codexSpawnBinding ??
           codexSpawnBindingForOwner(lane.ownerAgent, lane.ownerKind, lane.laneId))
-          ? "Codex native spawn_agent task with owner contract carried in the bounded message"
+          ? (lane.codexSpawnBinding ?? codexSpawnBindingForOwner(lane.ownerAgent, lane.ownerKind, lane.laneId))
+              ?.ownerBindingMode === "native_custom_agent"
+            ? "Codex native custom-agent request using the schema-confirmed agent_type owner selector"
+            : "Codex run-scoped worker request carrying the selected owner contract in the bounded message"
           : lanes.length >= 2
             ? "host subagent/custom-agent when available; otherwise workerTaskPacket"
           : "single workerTaskPacket",
@@ -1445,19 +1885,146 @@ function normalizeCodexTaskName(value) {
   return `${base}_${digest}`;
 }
 
-function buildCodexWorkerMessage(ownerId, ownerKind, roleInstanceId, taskPacket = null) {
+function resolveRouteRunId(value) {
+  if (value != null) {
+    const normalized = String(value).trim();
+    if (
+      !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u.test(normalized) ||
+      normalized === "." ||
+      normalized === ".."
+    ) {
+      throw new Error("Invalid --run-id: expected a safe 1-128 character run identifier.");
+    }
+    return normalized;
+  }
+  return `route-${Date.now().toString(36)}-${randomUUID().replaceAll("-", "").slice(0, 16)}`;
+}
+
+const routeRunId = resolveRouteRunId(requestedRouteRunId);
+const routeOccurredAt = new Date().toISOString();
+
+function codexProviderId(provider, ownerId) {
+  const scope = provider?.source === "local_global_agent_inventory"
+    ? "global"
+    : provider?.source === "project_runtime_agent_inventory"
+      ? "project"
+      : provider?.source ?? "runtime";
+  return `${scope}:${ownerId}`;
+}
+
+function codexOwnerSource(provider) {
+  if (!provider) return null;
+  if (provider.source !== "local_global_agent_inventory") return provider.sourceRef ?? null;
+  const sourceRef = String(provider.sourceRef ?? "").replace(/\\/g, "/");
+  if (sourceRef.startsWith("~/")) return sourceRef;
+  const platform = String(provider.platformId ?? "").toLowerCase();
+  if (platform === "codex" || platform === "codexapp") return `~/.codex/agents/${sourceRef}`;
+  if (platform === "claudecode" || platform === "claude_code") return `~/.claude/agents/${sourceRef}`;
+  if (platform === "cursor") return `~/.cursor/agents/${sourceRef}`;
+  return `global-agent:${sourceRef}`;
+}
+
+function codexOwnerDefinition(provider) {
+  const sourceRef = String(provider?.sourceRef ?? "").replace(/\\/g, "/");
+  const isCodexRuntimeProvider =
+    provider?.runtime === "codex" ||
+    ["codex", "codexapp"].includes(String(provider?.platformId ?? "").toLowerCase());
+  const isToml = /(?:^|\/)agents\/[^/]+\.toml$/iu.test(sourceRef) || /\.toml$/iu.test(sourceRef);
+  const metadata = provider?.metadata ?? {};
+  const requiredMetadataPresent = ["name", "description", "developer_instructions"].every(
+    (field) => typeof metadata?.[field] === "string" && metadata[field].trim().length > 0,
+  );
+  const nativeNameMatchesInventory = metadata?.name === provider?.id;
+  const sourceRouteEligible =
+    provider?.routeEligible !== false || provider?.sourceSelectedExplicitly === true;
+  const sourceCanBeBoundByNativeHost = !(
+    provider?.collision?.ambiguous === true ||
+    provider?.collision?.kind === "conflicting_definitions"
+  );
+  const definitionValidated = provider?.validCustomAgentDefinition === true ||
+    (requiredMetadataPresent && nativeNameMatchesInventory);
+  const nativeCustomAgentEligible = Boolean(
+    isCodexRuntimeProvider &&
+      isToml &&
+      definitionValidated &&
+      nativeNameMatchesInventory &&
+      sourceRouteEligible &&
+      sourceCanBeBoundByNativeHost,
+  );
+  return {
+    format: nativeCustomAgentEligible ? "codex_custom_agent_toml" : "non_native_owner_definition",
+    sourceRef: codexOwnerSource(provider),
+    nativeAgentName: requiredMetadataPresent ? metadata.name : null,
+    nativeCustomAgentEligible,
+    sourceSelectedExplicitly: provider?.sourceSelectedExplicitly === true,
+    sourceKey: provider?.sourceKey ?? null,
+    contentDigest: provider?.contentDigest ?? null,
+    provenance: provider?.provenance ?? [],
+    collision: provider?.collision ?? null,
+    cacheEvidence: provider?.cacheEvidence ?? null,
+    routeEligible: sourceRouteEligible,
+    sourceCanBeBoundByNativeHost,
+    validationErrors: [
+      ...(provider?.customAgentDefinitionErrors ?? []),
+      ...(!isToml ? ["owner_source_is_not_toml"] : []),
+      ...(!requiredMetadataPresent ? ["required_codex_agent_fields_missing"] : []),
+      ...(metadata?.name && !nativeNameMatchesInventory ? ["native_name_does_not_match_selected_owner"] : []),
+      ...(!sourceRouteEligible ? ["ambiguous_native_owner_source"] : []),
+      ...(!sourceCanBeBoundByNativeHost ? ["native_host_cannot_bind_conflicting_source_definition"] : []),
+    ],
+    reason: nativeCustomAgentEligible
+      ? "Owner was discovered from a Codex TOML custom-agent definition; native binding still requires an active host owner selector and a successful invocation."
+      : "Owner is not backed by a validated Codex TOML custom-agent definition whose declared name matches the selected owner identity, so it can only bind through the run-scoped owner contract.",
+  };
+}
+
+function roleDisplayNameForOwner(ownerId) {
+  const owner = String(ownerId ?? "").toLowerCase();
+  if (/test|qa|verify/.test(owner)) return "test";
+  if (/backend|security|api|server/.test(owner)) return "backend";
+  if (/frontend|react|ui|accessibility/.test(owner)) return "frontend";
+  if (/review|architect/.test(owner)) return "review";
+  if (/search|analysis|explor/.test(owner)) return "analysis";
+  if (/docs?|content/.test(owner)) return "docs";
+  return "worker";
+}
+
+function buildCodexWorkerMessage(ownerId, ownerKind, roleInstanceId, taskPacket = null, provider = null) {
   const taskPacketId = taskPacket?.taskPacketId ?? `worker-task:${roleInstanceId ?? ownerId}`;
-  return JSON.stringify({
-    schemaVersion: "codex-native-worker-message-v0.1",
+  const resolvedRoleInstanceId = taskPacket?.roleInstanceId ?? roleInstanceId ?? ownerId;
+  const roleDisplayName = taskPacket?.roleDisplayName ?? ownerId;
+  const ownerSource = taskPacket?.ownerSource ?? codexOwnerSource(provider);
+  const capabilityLoadout = taskPacket?.capabilityLoadout ?? {
+    weapon: taskPacket?.weapon ?? null,
+    dependency: taskPacket?.dependency ?? null,
+  };
+  const ownerDefinition = codexOwnerDefinition(provider);
+  const ownerBindingMode = taskPacket?.ownerBindingMode ?? "run_scoped_owner_contract";
+  const nativeAgentType = ownerBindingMode === "native_custom_agent"
+    ? taskPacket?.nativeAgentType ?? ownerId
+    : null;
+  const metaKimBinding = {
+    runId: routeRunId,
+    family: "agent_subagent",
+    providerId: codexProviderId(provider, ownerId),
+    bindingRef: `${routeRunId}:agent_subagent:${codexProviderId(provider, ownerId)}:${taskPacketId}`,
     taskPacketId,
-    roleInstanceId: taskPacket?.roleInstanceId ?? roleInstanceId ?? ownerId,
+    roleInstanceId: resolvedRoleInstanceId,
+    occurredAt: routeOccurredAt,
+    evidenceKind: "spawn_agent_result",
+  };
+  return JSON.stringify({
+    schemaVersion: "codex-native-worker-invocation-v0.2",
+    taskPacketId,
+    roleDisplayName,
+    roleInstanceId: resolvedRoleInstanceId,
     ownerAgent: ownerId,
     ownerKind,
-    ownerSource: taskPacket?.ownerSource ?? null,
-    capabilityLoadout: {
-      weapon: taskPacket?.weapon ?? null,
-      dependency: taskPacket?.dependency ?? null,
-    },
+    ownerSource,
+    ownerBindingMode,
+    nativeAgentType,
+    ownerDefinition,
+    capabilityLoadout,
     scope: {
       purpose: taskPacket?.purpose ?? `Execute the bounded worker task owned by ${ownerId}.`,
       decisionImpact: taskPacket?.decisionImpact ?? null,
@@ -1477,35 +2044,78 @@ function buildCodexWorkerMessage(ownerId, ownerKind, roleInstanceId, taskPacket 
       verificationOwner: taskPacket?.verificationOwner ?? "meta-prism",
       verification: taskPacket?.verification ?? "Run the lane-specific checks named by the work order.",
     },
+    metaKimBinding,
   });
 }
 
 function codexSpawnBindingForOwner(ownerId, ownerKind = "agent", roleInstanceId = null, taskPacket = null) {
   if (runtime !== "codex" || ownerKind !== "agent" || !ownerId) return null;
-  const provider = [
-    ...runtimeScopedProjectExecutionAgents,
-    ...runtimeScopedLocalGlobalAgents,
-  ].find((agent) => agent.id === ownerId);
+  const provider = candidateExecutionAgents.find((agent) => agent.id === ownerId);
   if (!provider) return null;
-  return {
+  const ownerSource = codexOwnerSource(provider);
+  const ownerDefinition = codexOwnerDefinition(provider);
+  const ownerSelectorField = codexHostToolSchema.ownerSelectorField;
+  const ownerBindingMode =
+    ownerDefinition.nativeCustomAgentEligible && ownerSelectorField
+      ? "native_custom_agent"
+      : "run_scoped_owner_contract";
+  const nativeAgentType = ownerBindingMode === "native_custom_agent" ? ownerId : null;
+  const message = buildCodexWorkerMessage(ownerId, ownerKind, roleInstanceId, {
+    ...taskPacket,
+    ownerSource,
+    ownerBindingMode,
+    nativeAgentType,
+  }, provider);
+  const followupMessage = buildCodexWorkerMessage(ownerId, ownerKind, roleInstanceId, {
+    ...taskPacket,
+    ownerSource,
+    ownerBindingMode: "run_scoped_owner_contract",
+    nativeAgentType: null,
+  }, provider);
+  const binding = {
     hostSurface: "spawn_agent",
-    spawnMode: "native_task",
+    supportedHostSurfaces: ["spawn_agent", "followup_task"],
     task_name: normalizeCodexTaskName(taskPacket?.taskPacketId ?? roleInstanceId ?? ownerId),
     fork_turns: "none",
-    message: buildCodexWorkerMessage(ownerId, ownerKind, roleInstanceId, {
-      ...taskPacket,
-      ownerSource: provider.source,
-    }),
+    message,
+    followupTaskTemplate: {
+      hostSurface: "followup_task",
+      target: null,
+      targetPolicy: "existing_runtime_instance_id_only_not_owner_identity",
+      message: followupMessage,
+      ownerBindingMode: "run_scoped_owner_contract",
+      nativeAgentType: null,
+    },
     ownerAgent: ownerId,
     ownerKind,
-    ownerSource: provider.source,
+    ownerSource,
+    ownerBindingMode,
+    nativeAgentType,
+    ownerSelectorField,
+    ownerDefinition,
+    nativeCustomAgentCandidate: {
+      eligibleOwnerDefinition: ownerDefinition.nativeCustomAgentEligible,
+      requiredHostSelector: "agent_type_or_equivalent",
+      requiredInvocationResult: "successful_before_invoked_or_completed_presentation",
+      promotionRule:
+        "Schema-confirmed agent_type plus a Codex TOML owner may select the native request mode; only a successful host result may mark that request invoked or completed.",
+    },
     sourceRef: provider.sourceRef,
     runtimeInstanceAlias: null,
     visibleBindingRequired: true,
     hostSurfaceProbeRequired: true,
-    invocationReadiness: "requires_current_host_spawn_agent_surface",
+    hostToolSchemaEvidence: codexHostToolSchema,
+    invocationReadiness: ownerBindingMode === "native_custom_agent"
+      ? "native_custom_agent_request_ready_success_still_requires_host_result"
+      : ownerDefinition.nativeCustomAgentEligible
+        ? "run_scoped_ready_native_custom_agent_requires_host_schema"
+      : "run_scoped_ready_owner_is_not_codex_toml",
     unavailablePolicy: "block_or_declare_degraded_without_legacy_fallback",
   };
+  if (ownerBindingMode === "native_custom_agent") {
+    binding[ownerSelectorField] = ownerId;
+  }
+  return binding;
 }
 
 function selectExecutionOwner() {
@@ -1526,7 +2136,14 @@ function selectExecutionOwner() {
     }
     return null;
   };
+  const implementationMutationRequested =
+    productBuildExecutionRequested() ||
+    /\b(?:fix|implement|build|refactor|rebuild|migrate|write|edit|update|repair|code)\b|修复|实现|构建|重构|迁移|写入|编辑|更新|改代码|搞定/iu.test(taskText);
   const preferenceGroups = [
+    ...(implementationMutationRequested ? [{
+      terms: ["security", "backend", "hook", "routing", "runtime", "code", "安全", "后端", "钩子", "路由", "运行时", "修复", "实现"],
+      owners: ["backend-security-coder", "backend", "build-error-resolver", "code-reviewer", "worker"],
+    }] : []),
     {
       terms: ["agent", "subagent", "owner", "search", "discover", "find", "智能体", "代理", "搜索", "寻找", "发现"],
       owners: ["codebase-search", "search-specialist", "analysis", "worker", "backend"],
@@ -1582,11 +2199,11 @@ function capabilityDiscoveryTaskRequested() {
   const discoveryVerb = /find|discover|search|match|route|寻找|找|发现|搜索|检索|匹配|路由/.test(taskText);
   const discoveryTarget = /agent|subagent|owner|skill|provider|capability|mcp|tool|智能体|代理|技能|能力|工具/.test(taskText);
   const executionFanoutDiscovery =
-    autoFanoutDispatchRequested && (
+    concurrentDispatchIntentPresent && (
       taskShape === "engineering_execution" ||
-      entryClassification.subagentAuthorizationSource === "direct_parallel_agent_request" ||
-      entryClassification.triggerReason === "explicit_meta_theory" ||
-      entryClassification.triggerReason === "critical_fetch_thinking_review_requested"
+      entrySignals.directParallelRequest === true ||
+      entrySignals.explicitMetaTheory === true ||
+      entrySignals.structuredGovernanceChainRequest === true
     );
   return (discoveryVerb && discoveryTarget) || agentProviderReuseConcernRequested() || executionFanoutDiscovery;
 }
@@ -1651,6 +2268,7 @@ function resolveProvider({ kind, terms, runtime: runtimeName = runtime }) {
   const poolFn = PROVIDER_POOL_SOURCES[kind];
   if (!poolFn) return null;
   const pool = poolFn().filter((p) => {
+    if (!providerEligibleForRoute(p)) return false;
     if (kind === "agent") return declared.has(p.id);
     return true;
   });
@@ -1741,9 +2359,10 @@ function buildParallelExecutionLanes() {
 
   // 4. 无显式标点时，用能力锚点拆 lane。很多真实任务会写成
   // “平台 key adapter 注册 能力账本 路由 上传证据”，入口分类已能识别
-  // 多 lane，但句子分段会只得到一整句。这里只在 fan-out 已授权时启用，
-  // 避免把普通单句小任务误拆。
-  if (autoFanoutDispatchRequested) {
+  // 多 lane，但句子分段会只得到一整句。这里只在文本已表达并行/治理/
+  // 产品多线意图时构造候选 lane；真正的 fan-out 仍由后面的 Thinking
+  // worker packets、DAG 与碰撞边界裁决。
+  if (concurrentDispatchIntentPresent) {
     const anchorPatterns = [
       {
         key: "meta-theory-rules",
@@ -1810,7 +2429,7 @@ function buildParallelExecutionLanes() {
   for (const [, segment] of laneSegments) {
     let provider = null;
     let capabilityProvider = null;
-    if (autoFanoutDispatchRequested) {
+    if (concurrentDispatchIntentPresent) {
       provider = resolveProvider({ kind: "agent", terms: segment.terms });
       if (!provider) {
         const fallbackOwner = selectExecutionOwner();
@@ -1831,7 +2450,7 @@ function buildParallelExecutionLanes() {
     const safetyEvidence = deriveLaneSafetyEvidence(segment, laneId);
     lanes.push({
       laneId,
-      roleDisplayName: segment.laneHint,
+      roleDisplayName: roleDisplayNameForOwner(provider.id),
       ownerKind: provider.kind,
       ownerAgent: provider.id,
       codexSpawnBinding: codexSpawnBindingForOwner(provider.id, provider.kind, laneId),
@@ -1892,13 +2511,13 @@ function executionCapabilityDiscoveryRoute() {
   const wantsDiscovery = explicitDiscoveryRoute || /find|discover|search|寻找|发现/.test(taskText);
   const wantsCreation = /create|scaffold|generate|创建|生成/.test(taskText);
   const selectedSkillDiscovery = selectProvider("skills", ["findskill", "skill-scout", "skill-stocktake"]);
-  const selectedSkillCreation = selectProvider("skills", ["skill-creator", "create-agent", "agent-teams-playbook"]);
+  const selectedSkillCreation = selectProvider("skills", ["meta-skill-creator", "create-agent", "agent-teams-playbook"]);
   const selectedSkill = wantsDiscovery
     ? selectedSkillDiscovery ?? selectedSkillCreation
     : wantsCreation
       ? selectedSkillCreation ?? selectedSkillDiscovery
       : selectProvider("skills", ["tdd-workflow", "verification-loop", "meta-theory"]);
-  const selectedAgentCreation = selectProvider("skills", ["create-agent", "agent-teams-playbook", "skill-creator"]);
+  const selectedAgentCreation = selectProvider("skills", ["create-agent", "agent-teams-playbook", "meta-skill-creator"]);
   const selectedMcpServer = selectProvider("mcpServers", ["meta-kim-runtime", "repo-mcp", "codex-config-mcp"]);
   const selectedMcpTool = selectProvider("mcpTools", ["get_meta_runtime_capabilities", "list_meta_agents", "get_meta_agent"]);
   const selectedCommand = selectProvider("commands", ["meta-theory", "save-progress"]);
@@ -1907,6 +2526,8 @@ function executionCapabilityDiscoveryRoute() {
   if (!selectedOwner) blockedReasons.push("execution owner missing");
   if (!selectedSkill) blockedReasons.push("skill provider missing");
   if (!selectedMcpServer && !selectedMcpTool) blockedReasons.push("MCP provider missing");
+  // Missing accepted runtime-tool evidence blocks Execution in the independent
+  // capability gate below; it must not erase the correct design-time route.
   const routeScore = blockedReasons.length ? 49 : explicitDiscoveryRoute ? 92 : 88;
   return {
     id: `execution-capability-discovery:${runtime}:${osTarget}`,
@@ -1934,7 +2555,7 @@ function executionCapabilityDiscoveryRoute() {
       osSupportWeight: 10,
       verificationStrengthWeight: 10,
       riskRollbackClarityWeight: 5,
-      runtimeSupport: "native",
+      runtimeSupport: activeRuntimeSupport(),
       osSupport: "supported",
       dependencyFit: selectedSkill ? 85 : 0,
     },
@@ -1960,6 +2581,154 @@ function executionCapabilityDiscoveryRoute() {
       runtimeTool: selectedRuntimeTool,
     },
     parallelExecutionLanes,
+    blockedReasons,
+  };
+}
+
+function goalProContractRoute() {
+  if (taskShape !== "goal_contract") return null;
+  const selectedSkill = selectProvider("skills", ["goalpro"]);
+  const dependency = dependencyRecords.find((dep) => dep.id === "goalpro") ?? null;
+  const blockedReasons = [];
+  if (!selectedSkill) blockedReasons.push("goalpro skill provider missing");
+  if (!dependency) blockedReasons.push("goalpro dependency project missing");
+  if (dependency && !dependencyExecutable(dependency)) blockedReasons.push("goalpro dependency not executable");
+  const score = blockedReasons.length ? 49 : 92;
+  return {
+    id: `goalpro-contract:${runtime}:${osTarget}`,
+    owner: "meta-conductor",
+    weapon: "goalpro",
+    dependency: selectedSkill?.id ?? "goalpro",
+    dependencyProject: "goalpro",
+    runtime,
+    os: osTarget,
+    verificationOwner: "meta-prism",
+    verificationMethod: "npm run meta:deps:compat",
+    verification: {
+      command: "npm run meta:deps:compat",
+      artifact: "config/skills.json; config/capability-index/dependency-project-registry.json",
+      passCondition: "GoalPro is registered as a prompt-only dependency skill for Goal Prompt / Loop Prompt / intent-amplification work.",
+    },
+    score,
+    scoreBand: score >= 85 ? "execute" : "blocked",
+    routeScoreBreakdown: {
+      intentFitWeight: 20,
+      ownerFitWeight: 15,
+      weaponFitWeight: 15,
+      dependencyFitWeight: 15,
+      runtimeSupportWeight: 10,
+      osSupportWeight: 10,
+      verificationStrengthWeight: 10,
+      riskRollbackClarityWeight: 5,
+      runtimeSupport: activeRuntimeSupport(),
+      osSupport: "supported",
+      dependencyFit: dependency ? 95 : 0,
+    },
+    ownerBinding: {
+      selectedOwner: "meta-conductor",
+      source: "goal_contract_task_shape",
+      existingOwnerMatched: true,
+      bindingStage: "Thinking",
+      providerEvidenceRef: "candidateDependencyProjects.goalpro",
+      ownerDiscoveryRef: "ownerDiscoveryPacket",
+    },
+    selectedCapabilityProviders: selectedSkill ? [selectedSkill] : [],
+    boundary: {
+      invokeAs: "skill",
+      executionMode: "prompt_only",
+      notExecutor: true,
+      notAutomationScheduler: true,
+    },
+    blockedReasons,
+  };
+}
+
+function kimDecisionExperienceRoute() {
+  if (!decisionAdjustmentRequested()) return null;
+  const selectedSkill = selectProvider("skills", ["kim-decision"]);
+  const dependency = dependencyRecords.find((dep) => dep.id === "kim-decision") ?? null;
+  const blockedReasons = [];
+  if (!selectedSkill) blockedReasons.push("kim-decision skill provider missing");
+  if (!dependency) blockedReasons.push("kim-decision dependency project missing");
+  const score = blockedReasons.length ? 49 : 93;
+  return {
+    id: `kim-decision-lens:${runtime}:${osTarget}`,
+    owner: "meta-warden",
+    weapon: "meta-kim-decision-patterns",
+    dependency: null,
+    dependencyProject: null,
+    decisionLensProvider: selectedSkill?.id ?? "kim-decision",
+    runtime,
+    os: osTarget,
+    verificationOwner: "meta-prism",
+    verificationMethod: "npm run meta:route:validate",
+    verification: {
+      command: "npm run meta:route:validate",
+      artifact: "route JSON",
+      passCondition: "Decision tasks expose a Kim_Decision decision lens without promoting it to code executor, then offer GoalPro only after the decision is ready to become a goal.",
+    },
+    score,
+    scoreBand: score >= 85 ? "execute" : "blocked",
+    routeScoreBreakdown: {
+      intentFitWeight: 20,
+      ownerFitWeight: 15,
+      weaponFitWeight: 15,
+      dependencyFitWeight: 15,
+      runtimeSupportWeight: 10,
+      osSupportWeight: 10,
+      verificationStrengthWeight: 10,
+      riskRollbackClarityWeight: 5,
+      runtimeSupport: activeRuntimeSupport(),
+      osSupport: "supported",
+      dependencyFit: dependency ? 90 : 0,
+    },
+    ownerBinding: {
+      selectedOwner: "meta-warden",
+      source: "decision_adjustment_task_shape",
+      existingOwnerMatched: true,
+      bindingStage: "Thinking",
+      providerEvidenceRef: "candidateDependencyProjects.kim-decision",
+      ownerDiscoveryRef: "ownerDiscoveryPacket",
+    },
+    selectedCapabilityProviders: selectedSkill ? [selectedSkill] : [],
+    boundary: {
+      invokeAs: "decision_lens",
+      executionMode: "model_context",
+      notExecutor: true,
+      notImplementationWorker: true,
+      notAutomationScheduler: true,
+    },
+    decisionExperiencePlan: {
+      userVisibleActivation: "Kim_Decision decision lens",
+      scope:
+        "Decision support only during Critical, Fetch, and Thinking. It does not create a Goal, run execution, schedule automation, or start a Loop.",
+      sequence: [
+        {
+          step: "critical_decision",
+          provider: "kim-decision",
+          stage: "Critical",
+          purpose: "锁定真问题、成功标准、非目标、关键取舍和 pass/kill 判断，不急着写执行目标。",
+        },
+        {
+          step: "fetch_evidence_decision",
+          provider: "kim-decision",
+          stage: "Fetch",
+          purpose: "判断哪些证据会改变路线，哪些外部/本地事实必须先查，避免拍脑袋决策。",
+        },
+        {
+          step: "thinking_path_decision",
+          provider: "kim-decision",
+          stage: "Thinking",
+          purpose: "比较候选路径，选择最小 MVP / 最小验证 / 执行路线，并记录为什么不走其他路。",
+        },
+      ],
+      goalProBoundary:
+        "GoalPro is not triggered by this route. It is selected only when the user explicitly asks for Goal Prompt, Loop Prompt, goal contract, or prompt-only goal packaging.",
+      loopBoundary:
+        "Loop belongs after a Goal has produced a result and the user wants a next-round review/continuation prompt; it is not part of Critical, Fetch, Thinking, or Evolution writeback.",
+      evolutionBoundary:
+        "Evolution records Meta_Kim system writeback or none-with-reason; it is not the place that creates user Goals.",
+    },
     blockedReasons,
   };
 }
@@ -2072,7 +2841,7 @@ function subjectiveUiDesignRoute() {
       osSupportWeight: 10,
       verificationStrengthWeight: 10,
       riskRollbackClarityWeight: 5,
-      runtimeSupport: "native",
+      runtimeSupport: activeRuntimeSupport(),
       osSupport: "supported",
       dependencyFit: missing.length ? 60 : 92,
     },
@@ -2131,7 +2900,7 @@ function subjectiveUiDesignRoute() {
 function productBuildOrchestrationRoute() {
   if (
     entryClassification.triggerReason !== "natural_language_product_build" &&
-    !entryClassification.fanoutSignals?.includes("product_build_has_multiple_execution_lanes")
+    entrySignals.productBuildIntent !== true
   ) {
     return null;
   }
@@ -2374,7 +3143,7 @@ function productBuildOrchestrationRoute() {
       osSupportWeight: 10,
       verificationStrengthWeight: 10,
       riskRollbackClarityWeight: 5,
-      runtimeSupport: "native",
+      runtimeSupport: activeRuntimeSupport(),
       osSupport: "supported",
       dependencyFit: missing.length ? 60 : 90,
     },
@@ -2418,11 +3187,42 @@ function productBuildOrchestrationRoute() {
 }
 
 const syntheticRoutes = [
+  goalProContractRoute(),
+  kimDecisionExperienceRoute(),
   productBuildOrchestrationRoute(),
   subjectiveUiDesignRoute(),
   executionCapabilityDiscoveryRoute(),
 ].filter(Boolean);
-const rankedRoutes = [...candidateWeapons.map(routeForWeapon), ...syntheticRoutes].sort((a, b) => b.score - a.score);
+const independentTaskShape = subjectiveRouteChoice
+  ? "governed_dispatch"
+  : entryClassification.path === "fast_path"
+    ? "fast_path"
+  : entrySignals.productBuildIntent === true
+    ? "product_build"
+    : taskShape === "engineering_execution"
+      ? "engineering_execution"
+      : entrySignals.explicitMetaTheory === true
+        ? "governed_dispatch"
+        : "default_executable";
+const rankedRoutes = [...candidateWeapons.map(routeForWeapon), ...syntheticRoutes]
+  .map((route) => {
+    const executionCapabilityGate = evaluateRouteExecutionGate({
+      route,
+      runtime,
+      taskShape: independentTaskShape,
+      choiceRequired: subjectiveRouteChoice,
+      effectiveMatrix: runtimeMatrix,
+    });
+    return {
+      ...route,
+      requiredRuntimeCapabilities: executionCapabilityGate.requirements,
+      executionCapabilityGate: { ...executionCapabilityGate, applies: independentTaskShape !== "fast_path" },
+      executionPolicy: independentTaskShape,
+      executionEligible: false,
+      hostHandoffEligible: independentTaskShape !== "fast_path" && executionCapabilityGate.routeCompatible,
+    };
+  })
+  .sort((a, b) => b.score - a.score);
 const recommendedRoute = rankedRoutes.find((route) => route.score >= 85) ?? rankedRoutes.find((route) => route.score >= 70) ?? null;
 const capabilityGapPacket = recommendedRoute ? null : {
   gap: "No route has enough owner + weapon + dependency + runtime + OS + verification support.",
@@ -2540,6 +3340,54 @@ const decisionCard = userChoiceNeeded ? {
   }))
 } : null;
 
+const criticalChoiceDecision = evaluateChoiceRequirement(choiceSurfacePolicy, {
+  runtime,
+  stage: "Critical",
+  routeChangingDimensions: routeChangingDimensionSignals,
+  materialBranch: subjectiveRouteChoice,
+  highRiskOperation:
+    entrySignals.destructiveOrProductionIntent === true &&
+    entrySignals.queryPreambleSignal !== true,
+  destructiveOrProductionOperation:
+    entrySignals.destructiveOrProductionTermSignal === true &&
+    (entrySignals.actionIntent === true || entrySignals.destructiveOrProductionIntent === true) &&
+    entrySignals.queryPreambleSignal !== true,
+});
+const thinkingChoiceDimensions = [
+  ...(subjectiveRouteChoice ? ["scope", "acceptance"] : []),
+  ...(decisionCard ? ["scope", "owner", "runtime_or_os", "dependency", "acceptance"] : []),
+];
+const thinkingChoiceDecision = evaluateChoiceRequirement(choiceSurfacePolicy, {
+  runtime,
+  stage: "Thinking",
+  routeChangingDimensions: thinkingChoiceDimensions,
+  materialBranch: subjectiveRouteChoice || Boolean(decisionCard),
+  decisionCardOptionCount: decisionCard?.options?.length ?? 0,
+});
+const entryChoiceDecision = {
+  schemaVersion: "entry-choice-decision-v1",
+  policySource: "config/governance/choice-surface-policy.json",
+  lifecycleOwner: "meta-conductor/spine",
+  choicePolicy:
+    criticalChoiceDecision.required || thinkingChoiceDecision.required
+      ? "must_ask"
+      : "no_choice_needed",
+  critical: criticalChoiceDecision,
+  thinking: thinkingChoiceDecision,
+};
+const choicePolicy = entryChoiceDecision.choicePolicy;
+const criticalChoiceBlocksExecution =
+  criticalChoiceDecision.required && !hasChoiceStage("Critical");
+const thinkingChoiceBlocksExecution =
+  thinkingChoiceDecision.required && !hasChoiceStage("Thinking");
+const routeScoreReady =
+  Boolean(recommendedRoute?.score >= 85) ||
+  Boolean(
+    recommendedRoute?.score >= 70 &&
+    decisionCard &&
+    hasChoiceStage("Thinking"),
+  );
+
 const selectedWorkerLanes =
   recommendedRoute?.subjectiveUiCapabilityAmplification?.lanes ??
   recommendedRoute?.parallelExecutionLanes ??
@@ -2571,14 +3419,16 @@ const workerTaskPacketDrafts = selectedWorkerLanes
         purpose: lane.purpose,
         decisionImpact: lane.decisionImpact,
       };
+      const codexSpawnBinding = codexSpawnBindingForOwner(
+        lane.ownerAgent,
+        lane.ownerKind ?? "agent",
+        lane.laneId,
+        taskPacket,
+      );
       return {
         ...taskPacket,
-        codexSpawnBinding: codexSpawnBindingForOwner(
-          lane.ownerAgent,
-          lane.ownerKind ?? "agent",
-          lane.laneId,
-          taskPacket,
-        ),
+        ownerSource: codexSpawnBinding?.ownerSource ?? null,
+        codexSpawnBinding,
       };
     })
   : recommendedRoute
@@ -2591,7 +3441,7 @@ const workerTaskPacketDrafts = selectedWorkerLanes
           taskPacketId: `worker-task:${roleInstanceId}:1`,
           ownerKind: "agent",
           ownerAgent: selectedOwner,
-          roleDisplayName: selectedOwner?.replace(/^meta-/, "") ?? "unknown",
+          roleDisplayName: roleDisplayNameForOwner(selectedOwner),
           roleInstanceId,
           weapon: recommendedRoute.weapon,
           dependency: recommendedRoute.dependency,
@@ -2610,14 +3460,16 @@ const workerTaskPacketDrafts = selectedWorkerLanes
           purpose: `Execute route ${recommendedRoute.id} within its declared scope.`,
           decisionImpact: "Single-worker route selected by Thinking.",
         };
+        const codexSpawnBinding = codexSpawnBindingForOwner(
+          selectedOwner,
+          "agent",
+          roleInstanceId,
+          taskPacket,
+        );
         return [{
           ...taskPacket,
-          codexSpawnBinding: codexSpawnBindingForOwner(
-            selectedOwner,
-            "agent",
-            roleInstanceId,
-            taskPacket,
-          ),
+          ownerSource: codexSpawnBinding?.ownerSource ?? null,
+          codexSpawnBinding,
         }];
       })()
     : [];
@@ -2668,24 +3520,63 @@ const safeFanoutReady =
       packet.workspaceIsolation !== "unproven",
   ) &&
   scopesArePairwiseDisjoint(workerTaskPacketDrafts);
-
+const unprovenMultiLaneExecution =
+  Array.isArray(recommendedRoute?.parallelExecutionLanes) &&
+  recommendedRoute.parallelExecutionLanes.length >= 2 &&
+  !safeFanoutReady;
+const nativeChoicePending = criticalChoiceBlocksExecution || thinkingChoiceBlocksExecution;
+const fastPathNativeChoicePending =
+  entryClassification.path === "fast_path" && nativeChoicePending;
+const executionGateApplies = entryClassification.path !== "fast_path" || fastPathNativeChoicePending;
+const routeCompatibilityBlocked =
+  executionGateApplies &&
+  recommendedRoute &&
+  recommendedRoute.executionCapabilityGate?.routeCompatible !== true;
+const routePreparationBlocked =
+  !recommendedRoute ||
+  !routeScoreReady ||
+  globalInventoryFreshness.refreshRequiredBeforeExecution ||
+  capabilityGapBlocksExecution ||
+  unprovenMultiLaneExecution;
+const handoffStatus = !executionGateApplies
+  ? "not_applicable"
+  : fastPathNativeChoicePending
+    ? "awaiting_native_choice"
+  : routeCompatibilityBlocked || routePreparationBlocked
+    ? "blocked"
+    : nativeChoicePending
+      ? "awaiting_native_choice"
+      : "ready_for_host_handoff";
+const hostAction = handoffStatus === "ready_for_host_handoff"
+  ? "host_action_required"
+  : handoffStatus === "awaiting_native_choice"
+    ? "invoke_native_choice_surface"
+    : "none";
 const routeExecutionGate = {
+  applies: executionGateApplies,
   canPreviewRoute: true,
-  canEnterExecution:
-    Boolean(recommendedRoute?.score >= 85) &&
-    !globalInventoryFreshness.refreshRequiredBeforeExecution &&
-    !capabilityGapBlocksExecution &&
-    !criticalChoiceBlocksExecution &&
-    !thinkingChoiceBlocksExecution,
+  routeCompatible: !routeCompatibilityBlocked,
+  handoffStatus,
+  hostAction,
+  canHandoffToHost: ["ready_for_host_handoff", "awaiting_native_choice"].includes(handoffStatus),
+  canEnterExecution: false,
+  canEnterExecutionMeaning: "host_native_execution_has_not_occurred",
+  executionAuthorized: false,
+  authorizationOwner: "current_host_native_surfaces_and_permissions",
+  persistentAcceptanceAuthorizesExecution: false,
   blockedBy: [
     ...(!recommendedRoute ? ["missing_recommended_route"] : []),
-    ...(recommendedRoute && recommendedRoute.score < 85 ? ["route_requires_confirmation_or_more_fetch"] : []),
+    ...(recommendedRoute && !routeScoreReady ? ["route_requires_confirmation_or_more_fetch"] : []),
     ...(globalInventoryFreshness.refreshRequiredBeforeExecution ? ["global_capability_inventory_refresh_required"] : []),
     ...(capabilityGapBlocksExecution ? ["capability_gap_decision_blocks_execution"] : []),
     ...(criticalChoiceBlocksExecution ? ["native_choice_surface_required_before_execution"] : []),
     ...(thinkingChoiceBlocksExecution ? ["thinking_route_choice_required_before_execution"] : []),
+    ...(unprovenMultiLaneExecution ? ["parallel_lane_safety_not_proven"] : []),
+    ...(routeCompatibilityBlocked ? ["runtime_capability_known_unsupported"] : []),
   ],
-  returnToStage: !recommendedRoute
+  returnToStage: !executionGateApplies
+    ? null
+    : !recommendedRoute
     ? "Thinking"
     : capabilityGapBlocksExecution
       ? "Thinking"
@@ -2693,13 +3584,19 @@ const routeExecutionGate = {
       ? "Critical"
     : thinkingChoiceBlocksExecution
       ? "Thinking"
-    : recommendedRoute.score < 85 || globalInventoryFreshness.refreshRequiredBeforeExecution
+      : unprovenMultiLaneExecution
+      ? "Thinking"
+    : routeCompatibilityBlocked
+      ? "Verification"
+    : !routeScoreReady || globalInventoryFreshness.refreshRequiredBeforeExecution
       ? "Fetch"
       : null,
   refreshCommand: globalInventoryFreshness.refreshRequiredBeforeExecution ? globalInventoryFreshness.refreshCommand : null,
-  reason: !recommendedRoute
+  reason: !executionGateApplies
+    ? "Pure read-only fast-path query does not enter Execution and therefore does not require a runtime execution capability gate."
+    : !recommendedRoute
     ? "No executable route is available; Execution must not start until owner, provider, runtime, OS, and verification binding are resolved."
-    : recommendedRoute.score < 85
+    : !routeScoreReady
       ? "Route preview is available, but Execution needs confirmation or stronger provider evidence before starting."
       : capabilityGapBlocksExecution
         ? "Capability-gap decision requires approval, stronger evidence, or return to Thinking before Execution."
@@ -2707,23 +3604,39 @@ const routeExecutionGate = {
         ? "The input has a route-changing ambiguity and requires a trusted native choice-surface answer before Execution."
       : thinkingChoiceBlocksExecution
         ? "The user intent is calibrated, but the fetched capability route still has multiple product/design execution paths; Thinking needs a trusted native route choice before Execution."
+      : unprovenMultiLaneExecution
+        ? "Multiple execution lanes were drafted, but shard scope, workspace isolation, or collision boundaries are still unproven; return to Thinking instead of presenting the route as execution-ready."
       : globalInventoryFreshness.refreshRequiredBeforeExecution
         ? "Cached provider evidence is missing or older than 14 days; route preview is allowed, but Execution must refresh capability discovery first."
-        : "Cached provider evidence is fresh enough and the route has execution-grade owner/provider/verification binding.",
+      : routeCompatibilityBlocked
+        ? `Route design is available, but current ${runtime} has a known unsupported runtime capability: ${recommendedRoute?.executionCapabilityGate?.blockers?.join("; ") ?? "required runtime capabilities"}.`
+      : nativeChoicePending
+        ? `Route compatibility is ready; the ${runtime} host must invoke its native choice surface before execution.`
+        : "Route compatibility is ready; the current host must perform the selected native tool/Agent actions under its own permissions.",
   entryClassification,
+  entryChoiceDecision,
   choicePolicy,
   typeFirstPolicyRef: "typeFirstRoutePolicy",
   typeFirstDisposition: routeTypeClassification.overallDisposition,
   nativeChoiceSurface: {
-    required: choicePolicy === "must_ask",
-    primarySurface: "request_user_input",
+    required: criticalChoiceDecision.required,
+    primarySurface: runtimeChoiceSurface.surface,
+    policyRef: runtimeChoiceSurface.source,
     evidence: nativeChoiceEvidence,
     rule:
       "Branch-changing choices must be answered through the native host surface before Execution; artifact-only cards or chat text do not satisfy this gate.",
   },
+  runtimeCapabilityEvidence: {
+    profile: runtimeCapabilityState.overlayStatus.profile,
+    state: runtimeCapabilityState.overlayStatus.state,
+    applied: runtimeCapabilityState.overlayStatus.applied,
+    rejected: runtimeCapabilityState.overlayStatus.rejected,
+    issues: runtimeCapabilityState.issues,
+  },
   thinkingChoiceSurface: {
-    required: subjectiveThinkingChoiceRequired,
-    primarySurface: "request_user_input",
+    required: thinkingChoiceDecision.required,
+    primarySurface: runtimeChoiceSurface.surface,
+    policyRef: runtimeChoiceSurface.source,
     evidenceTrusted: hasChoiceStage("Thinking"),
     rule:
       "Subjective product/design work needs a second route choice after Fetch/Thinking when implementation paths have different scope, cost, and verification impact.",
@@ -2738,6 +3651,7 @@ const output = {
     reason: "Route may change based on real intent, success criteria, and userGoalDone evidence.",
   },
   entryClassification,
+  entryChoiceDecision,
   typeFirstRoutePolicy,
   routeTypeClassification,
   ownerDiscoveryPacket,
@@ -2754,6 +3668,7 @@ const output = {
   osFilterResult: { requested: osArg, applied: osTarget, unsupported: !OS_TARGETS.includes(osTarget) },
   rankedRoutes,
   recommendedRoute,
+  decisionExperiencePlan: recommendedRoute?.decisionExperiencePlan ?? null,
   subjectiveUiCapabilityAmplification: recommendedRoute?.subjectiveUiCapabilityAmplification ?? null,
   decisionCheckpoints: recommendedRoute?.subjectiveUiCapabilityAmplification?.decisionCheckpoints ?? [],
   capabilityGapDetected,
@@ -2771,7 +3686,7 @@ const output = {
         ? "fanout_eligible"
         : "single_worker_ready",
     fanoutReadiness: {
-      eligibleAtEntry: entryClassification.fanoutEligible === true,
+      entryConcurrencyHintPresent: concurrentDispatchIntentPresent,
       thinkingApproved: safeFanoutReady,
       workerCount: workerTaskPacketDrafts.length,
       independentLanes: safeFanoutReady,
@@ -2813,6 +3728,19 @@ function compactProvider(provider) {
       ["providerType", provider.providerType],
       ["source", provider.source],
       ["sourceRef", provider.sourceRef],
+      ["sourceClass", provider.sourceClass],
+      ["sourceRoot", provider.sourceRoot],
+      ["sourceKey", provider.sourceKey],
+      ["sourcePriority", provider.sourcePriority],
+      ["contentDigest", provider.contentDigest],
+      ["nativeIdentity", provider.nativeIdentity],
+      ["provenance", provider.provenance],
+      ["metadata", provider.metadata],
+      ["collision", provider.collision],
+      ["routeEligible", provider.routeEligible],
+      ["sourceSelectedExplicitly", provider.sourceSelectedExplicitly],
+      ["cacheEvidence", provider.cacheEvidence],
+      ["cacheEvidenceOnly", provider.cacheEvidenceOnly],
       ["platformId", provider.platformId],
       ["runtime", provider.runtime],
       ["score", provider.score],
@@ -2820,7 +3748,9 @@ function compactProvider(provider) {
       ["selected", provider.selected],
       ["reason", provider.reason],
       ["coverageStatus", provider.coverageStatus],
-    ].filter(([, value]) => value !== undefined)
+    ]
+      .filter(([, value]) => value !== undefined)
+      .map(([key, value]) => [key, compactProviderMetadata(value)])
   );
 }
 
@@ -2914,15 +3844,37 @@ function compactOwnerDiscoveryPacket(packet) {
     governanceStages: packet.governanceStages,
     evidenceRefs: (packet.evidenceRefs ?? []).slice(0, 80),
     repoCanonicalAgents: compactProviderCollection(packet.repoCanonicalAgents ?? [], 20),
+    projectRuntimeAgents: compactProviderCollection(packet.projectRuntimeAgents ?? [], 30),
+    localGlobalAgents: compactProviderCollection(packet.localGlobalAgents ?? [], 30),
     repoCanonicalSkillProviders: compactProviderCollection(
       packet.repoCanonicalSkillProviders ?? [],
       30,
     ),
-    projectRuntimeCapabilityProviders: compactProviderCollection(
-      packet.projectRuntimeCapabilityProviders ?? [],
+    projectRuntimeSkillProviders: compactProviderCollection(
+      packet.projectRuntimeSkillProviders ?? [],
       30,
     ),
+    localGlobalSkillProviders: compactProviderCollection(
+      packet.localGlobalSkillProviders ?? [],
+      40,
+    ),
+    repoCanonicalCapabilityProviders: compactProviderCollection(
+      packet.repoCanonicalCapabilityProviders ?? [],
+      40,
+    ),
+    projectRuntimeCapabilityProviders: compactProviderCollection(
+      selectReportProviderBudget(packet.projectRuntimeCapabilityProviders ?? [], 30),
+      30,
+    ),
+    localGlobalCapabilityProviders: compactProviderCollection(
+      packet.localGlobalCapabilityProviders ?? [],
+      40,
+    ),
     runtimeToolProviders: compactProviderCollection(packet.runtimeToolProviders ?? [], 20),
+    capabilityProviderCoverage: packet.capabilityProviderCoverage,
+    projectProjectionPolicy: packet.projectProjectionPolicy,
+    globalInventoryFreshness: packet.globalInventoryFreshness,
+    capabilityDiscoverySearchLog: (packet.capabilityDiscoverySearchLog ?? []).slice(0, 80),
     candidateExistingExecutionOwners: (
       packet.candidateExistingExecutionOwners ?? []
     ).slice(0, 80),
@@ -2967,10 +3919,16 @@ function compactRouteOutput(raw) {
   };
 }
 
-const printableOutput =
-  process.argv.includes("--runner-compact") || process.argv.includes("--compact-json")
+const outputForPublication =
+  json ||
+  process.argv.includes("--runner-compact") ||
+  process.argv.includes("--compact-json")
     ? compactRouteOutput(output)
     : output;
+const printableOutput = sanitizeCapabilityPublicationValue(outputForPublication, {
+  repoRoot: repoPath("."),
+  homeDir: process.env.USERPROFILE ?? process.env.HOME ?? "",
+});
 
-if (json) console.log(JSON.stringify(printableOutput, null, 2));
+if (json) console.log(JSON.stringify(printableOutput));
 else console.log(JSON.stringify(printableOutput, null, 2));

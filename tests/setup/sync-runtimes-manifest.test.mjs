@@ -14,8 +14,14 @@ import {
   buildCursorProjectHooksJson,
   buildCodexGraphifyContextHook,
   buildCodexProjectHooksJson,
+  GLOBAL_ONLY_DURABLE_PROJECTION_ROOTS,
+  GLOBAL_ONLY_WHOLE_FILE_PROJECTIONS,
+  collectRuntimeSedimentedProjectPaths,
   inferProjectCategory,
   inferProjectPurpose,
+  inferProjectRuntimeTarget,
+  inspectProjectProjectionOwnership,
+  isRuntimeSedimentedProjectPath,
 } from "../../scripts/sync-runtimes.mjs";
 import { mergeRepoClaudeSettings } from "../../scripts/claude-settings-merge.mjs";
 import { CATEGORIES } from "../../scripts/install-manifest.mjs";
@@ -50,6 +56,114 @@ describe("sync-runtimes / target selection", () => {
       source,
       /const selectedTargets = cliTargets\.length > 0 \? cliTargets : supportedTargets;/,
     );
+  });
+
+  test("global_only keeps only the project Hook dependency closure as install projection", async () => {
+    const source = await readFsFile("scripts/sync-runtimes.mjs", "utf8");
+    assert.deepEqual(
+      GLOBAL_ONLY_WHOLE_FILE_PROJECTIONS,
+      [".codex/hooks.json", ".cursor/hooks.json"],
+    );
+    for (const forbiddenRoot of [
+      ".claude/agents",
+      ".claude/skills",
+      ".codex/agents",
+      ".agents/skills",
+      ".cursor/agents",
+      "codex",
+      "openclaw",
+    ]) {
+      assert.ok(GLOBAL_ONLY_DURABLE_PROJECTION_ROOTS.includes(forbiddenRoot));
+    }
+    assert.equal(GLOBAL_ONLY_DURABLE_PROJECTION_ROOTS.includes(".claude/hooks"), false);
+    assert.equal(GLOBAL_ONLY_DURABLE_PROJECTION_ROOTS.includes(".codex/hooks"), false);
+    assert.equal(GLOBAL_ONLY_DURABLE_PROJECTION_ROOTS.includes(".cursor/hooks"), false);
+    assert.match(source, /manifestFileEntryMatches\(entry, filePath\)/);
+    assert.match(source, /entry\.source === "sync-runtimes"/);
+    assert.match(source, /await enforceGlobalOnlyProjectShape\(changedFiles\)/);
+    assert.match(source, /mcp_servers\.meta-kim-runtime/);
+    assert.match(source, /mcp_servers\.meta_kim_runtime/);
+    assert.doesNotMatch(source, /replaceSources:\s*\["sync-runtimes"\]/);
+  });
+
+  test("runtime-sedimented project copy wins over matching install-manifest ownership", () => {
+    const relPath = ".agents/skills/custom-project-skill/SKILL.md";
+    const absolutePath = p(...relPath.split("/"));
+    const protectedPaths = collectRuntimeSedimentedProjectPaths(
+      {
+        schemaVersion: "meta-kim-project-capabilities-v0.1",
+        capabilities: [
+          {
+            type: "skill",
+            ownershipClass: "runtime_sedimented_project_copy",
+            policy: "copy_to_project_for_modification",
+            detachedFromDependencyUpdates: true,
+            dependencyUpdatePolicy: "preserve_project_copy",
+            files: [{ relPath }],
+          },
+        ],
+      },
+      REPO,
+      process.cwd(),
+    );
+    assert.equal(
+      isRuntimeSedimentedProjectPath(absolutePath, protectedPaths),
+      true,
+    );
+    const descendantPath = p(".agents", "skills", "custom-project-skill", "references", "user-note.md");
+    assert.equal(
+      isRuntimeSedimentedProjectPath(descendantPath, protectedPaths),
+      true,
+      "sync writes must preserve every descendant of a runtime-sedimented Skill root",
+    );
+    const ownership = inspectProjectProjectionOwnership(
+      absolutePath,
+      {
+        entries: [
+          {
+            path: absolutePath,
+            source: "sync-runtimes",
+            kind: "file",
+            sha256: "still-equal-to-old-install-hash",
+            size: 42,
+          },
+        ],
+      },
+      protectedPaths,
+    );
+    assert.deepEqual(ownership, {
+      preserve: true,
+      reason: "runtime_sedimented_project_copy",
+      entry: null,
+    });
+    assert.deepEqual(
+      inspectProjectProjectionOwnership(
+        descendantPath,
+        { entries: [{ path: descendantPath, source: "sync-runtimes", kind: "file", sha256: "old" }] },
+        protectedPaths,
+      ),
+      { preserve: true, reason: "runtime_sedimented_project_copy", entry: null },
+      "global_only deletion must preserve Skill descendant files even with old install ownership",
+    );
+  });
+
+  test("direct global reuse never creates a protected project path", () => {
+    const protectedPaths = collectRuntimeSedimentedProjectPaths(
+      {
+        schemaVersion: "meta-kim-project-capabilities-v0.1",
+        capabilities: [
+          {
+            type: "skill",
+            ownershipClass: "global_reuse_reference",
+            policy: "use_global_directly",
+            files: [{ relPath: ".agents/skills/global-only/SKILL.md" }],
+          },
+        ],
+      },
+      REPO,
+      process.cwd(),
+    );
+    assert.equal(protectedPaths.size, 0);
   });
 });
 
@@ -238,7 +352,34 @@ describe("sync-runtimes / inferProjectPurpose", () => {
   });
 });
 
+describe("sync-runtimes / install projection ownership", () => {
+  test("classifies runtime target independently from ownership class", () => {
+    assert.equal(inferProjectRuntimeTarget(p(".claude/agents/meta-warden.md"), REPO), "claude");
+    assert.equal(inferProjectRuntimeTarget(p(".agents/skills/meta-theory/SKILL.md"), REPO), "codex");
+    assert.equal(inferProjectRuntimeTarget(p(".cursor/rules/meta.mdc"), REPO), "cursor");
+    assert.equal(inferProjectRuntimeTarget(p("openclaw/workspaces/meta-warden/SOUL.md"), REPO), "openclaw");
+  });
+});
+
 describe("sync-runtimes / Codex project hooks", () => {
+  test("fresh Codex project config does not auto-register a per-session stdio MCP", () => {
+    const configExample = [
+      'approval_policy = "on-request"',
+      "[features]",
+      "default_mode_request_user_input = true",
+      "[agents]",
+      "max_threads = 2",
+      "max_depth = 1",
+      "",
+    ].join("\n");
+    const out = buildCodexProjectConfig("", configExample, {
+      platformName: "linux",
+      codexHome: "/tmp/codex-home",
+    });
+    assert.doesNotMatch(out, /\[mcp_servers\./);
+    assert.match(out, /max_threads = 2/);
+  });
+
   test("project Codex config preserves local MCP while enabling native choice surface", () => {
     const existingProjectConfig = [
       "[mcp_servers.meta-kim-runtime]",
@@ -254,7 +395,7 @@ describe("sync-runtimes / Codex project hooks", () => {
       "default_mode_request_user_input = true",
       "",
       "[agents]",
-      "max_threads = 6",
+      "max_threads = 2",
       "max_depth = 1",
       "",
     ].join("\n");
@@ -378,12 +519,12 @@ describe("sync-runtimes / Codex project hooks", () => {
     assert.match(source, /else \{[\s\S]*mergeGlobalMetaKimHooksIntoSettings/);
   });
 
-  test("project Codex hooks leave global-only packages out", () => {
+  test("project Codex hooks wire memory before lifecycle cleanup without global-only adapters", () => {
     const config = buildCodexProjectHooksJson({ packageRoot: "D:/Meta_Kim" });
 
-    // Memory and prompt-adapter wiring stay global-only. Project-scope
-    // SessionStart/UserPromptSubmit/Stop blocks may still exist for the
-    // medusa AI-context surface hook, but must carry no memory/adapter hooks.
+    // Prompt-adapter wiring stays global-only. Project-scope hook blocks carry
+    // the 3.0 memory lifecycle plus the Medusa AI-context surface hook.
+    assert.ok(Array.isArray(config.hooks.SessionStart));
     assert.ok(
       config.hooks.SessionStart?.[0]?.hooks?.some((hook) =>
         hook.command.includes("medusa-findings-surface.mjs"),
@@ -398,10 +539,18 @@ describe("sync-runtimes / Codex project hooks", () => {
     );
     assert.ok(Array.isArray(config.hooks.Stop));
     assert.match(JSON.stringify(config.hooks.Stop), /stop-compaction\.mjs/);
+    const stopCommands = config.hooks.Stop.flatMap((entry) => entry.hooks ?? [])
+      .map((hook) => hook.command);
+    assert.equal(stopCommands.filter((command) => command.includes("meta-kim-memory-save.mjs")).length, 1);
+    assert.equal(stopCommands.filter((command) => command.includes("stop-spine-cleanup.mjs")).length, 1);
+    assert.ok(
+      stopCommands.findIndex((command) => command.includes("meta-kim-memory-save.mjs")) <
+      stopCommands.findIndex((command) => command.includes("stop-spine-cleanup.mjs")),
+    );
     const allCommands = JSON.stringify(config);
     assert.match(allCommands, /--package-root/);
     assert.match(allCommands, /D:\/Meta_Kim/);
-    assert.doesNotMatch(allCommands, /meta-kim-memory-save\.mjs/);
+    assert.match(allCommands, /meta-kim-memory-save\.mjs/);
     assert.doesNotMatch(allCommands, /stop-save-progress\.mjs/);
     assert.doesNotMatch(allCommands, /hookprompt-adapter\.mjs/);
     assert.doesNotMatch(allCommands, /planning-with-files-adapter\.mjs/);
@@ -420,7 +569,8 @@ describe("sync-runtimes / Codex project hooks", () => {
     assert.match(source, /buildCursorProjectHooksJson\(\{[\s\S]*packageRoot: repoRoot/);
 
     const codexProjectConfig = buildCodexProjectHooksJson({ packageRoot: "D:/Meta_Kim" });
-    assert.doesNotMatch(JSON.stringify(codexProjectConfig), /hookprompt-adapter\.mjs|meta-kim-memory-save\.mjs/);
+    assert.doesNotMatch(JSON.stringify(codexProjectConfig), /hookprompt-adapter\.mjs/);
+    assert.match(JSON.stringify(codexProjectConfig), /meta-kim-memory-save\.mjs/);
 
     const codexGlobalConfig = buildCodexProjectHooksJson({
       hookPromptAdapterPath: "~/.codex/hooks/hookprompt-adapter.mjs",

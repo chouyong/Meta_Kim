@@ -8,6 +8,8 @@
  *   node setup.mjs --update     # Update installed skills
  *   node setup.mjs --check      # Environment check only
  *   node setup.mjs --silent     # Non-interactive (CI / scripts)
+ *   node setup.mjs --scope global|project
+ *                                # Explicit install/update destination
  *   node setup.mjs --skills a,b # Limit global skill repos (non-interactive / CI)
  *   node setup.mjs --with-global-hooks
  *                                # Opt in to global hook wiring for selected runtimes
@@ -23,34 +25,78 @@
  */
 
 import { execSync, spawnSync, spawn } from "node:child_process";
-import http from "node:http";
+import { createHash } from "node:crypto";
 import {
+  appendFileSync,
+  chmodSync,
+  closeSync,
   existsSync,
   mkdirSync,
+  openSync,
   rmSync,
   readdirSync,
   cpSync,
   statSync,
+  lstatSync,
+  realpathSync,
   readFileSync,
   writeFileSync,
+  renameSync,
+  unlinkSync,
 } from "node:fs";
 import { join, dirname, resolve, isAbsolute, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { homedir, platform, tmpdir } from "node:os";
 import { createInterface } from "node:readline";
 import {
-  ensureProfileState,
+  getProfilePaths,
+  readProfileMetadata,
+  resolveProfileName,
   toRepoRelative,
 } from "./scripts/meta-kim-local-state.mjs";
+import {
+  recordSetupRuntimeExecutableBindings,
+  resolveSetupRuntimeLaunchInventoryRoots,
+} from "./scripts/runtime-executable-binding.mjs";
+import {
+  adoptHistoricalWindowsMcpMemoryBootArtifactOwnership,
+  isExactMcpMemoryBootManifestIdentity,
+  repairOrphanMcpMemoryBootLaunchers,
+  recordMcpMemoryBootArtifactOwnership,
+  renderCurrentWindowsMcpMemoryCommandBytes,
+  renderCurrentWindowsMcpMemoryPowerShellBytes,
+  renderCurrentWindowsMcpMemoryStartupVbsBytes,
+  resolveMcpMemoryBootArtifactDescriptors,
+} from "./scripts/mcp-memory-boot-artifacts.mjs";
+import {
+  manifestFileEntryMatches,
+  manifestPathFor,
+  readManifest,
+} from "./scripts/install-manifest.mjs";
 import {
   detectPython310,
   extractPipShowVersion,
   readProcessText,
   runPythonModule,
   checkNetworkx,
+  resolveGraphifyExecutable,
 } from "./scripts/graphify-runtime.mjs";
+import {
+  reconcileExistingGraphifyWindowsHooks,
+  sanitizeGraphifyWindowsHooks,
+} from "./scripts/graphify-hook-sanitize.mjs";
 import { resolveManifestSkillSubdir } from "./scripts/install-platform-config.mjs";
-import { buildNodeScriptSpawn } from "./scripts/node-spawn-config.mjs";
+import {
+  SETUP_NODE_CHILD,
+  buildGlobalMetaTheorySyncArgs,
+  buildGlobalSkillsInstallerArgs,
+  buildNodeScriptSpawn,
+  buildSetupNodeChildSpawn,
+} from "./scripts/node-spawn-config.mjs";
+import {
+  assertProjectionPackageWriteBoundary,
+  projectionPackageWriteBoundaryFindings,
+} from "./scripts/global-projection-package-store.mjs";
 import {
   CODEX_BUSINESS_ROLE_AGENT_IDS,
   CODEX_RUNTIME_ADAPTER_AGENT_IDS,
@@ -65,33 +111,155 @@ import {
 import {
   buildCodexHooksJson,
   buildCursorHooksJson,
+  runtimeHookSourceOwner,
   stripProjectMetaKimHooksFromHookConfig,
 } from "./scripts/runtime-hook-mapping.mjs";
 import {
+  GLOBAL_PROJECTION_OWNER_SYNC_RUNTIMES,
+  globalProjectionIsOwnedBy,
   loadLocalOverrides,
+  localOverridesPath,
   normalizeTargets,
   parseSkillsArg,
   resolveTargetContext,
+  resolveRuntimeProfilesFromManifest,
   resolveRuntimeHomeDir,
-  writeLocalOverrides,
+  writeLocalOverrides as persistLocalOverrides,
 } from "./scripts/meta-kim-sync-config.mjs";
 import {
   MIN_NODE_VERSION,
   isSupportedNodeVersion,
 } from "./scripts/node-runtime-requirements.mjs";
+import { runRuntimeLaunchRebind } from "./scripts/runtime-launch-rebind.mjs";
+import {
+  memoryServiceEnv,
+  memoryServerHttpArgs,
+  resolveMemoryEndpoint,
+} from "./scripts/memory-endpoint.mjs";
+import {
+  PYTHON_MEMORY_HEALTH_PROBE,
+  buildBootMemoryServiceEnv,
+  buildInitialMemoryServiceEnv,
+  acquireEndpointStartLock,
+  endpointStartLockName,
+  executeMcpMemoryReconciliation,
+  firstStartLogPaths,
+  observeMemoryServiceChild,
+  planMcpMemoryReconciliation,
+  probeMcpMemoryHealth,
+  repairWindowsCandidateOnnxRuntime,
+  releaseEndpointStartLock,
+  withEndpointStartLock,
+  waitForMcpMemoryHealth,
+  verifyPrivateRecoveryRoot,
+} from "./scripts/mcp-memory-service-lifecycle.mjs";
+import {
+  inspectEndpointListener,
+  isEndpointNotListening,
+  resolveWindowsVenvProcessExpectation,
+  stopVerifiedEndpointProcess,
+  verifyMcpMemoryRuntimeAuthority,
+  verifyMemoryListenerIdentity,
+} from "./scripts/mcp-memory-process-control.mjs";
+import {
+  cleanupExpiredMcpMemoryRecoveryArtifacts,
+  preparePrivateTransactionRoot,
+  runCandidateOnnxSentinel,
+  runMcpMemoryRecoveryProtocol,
+  runMcpMemoryUpgradeTransaction,
+  sqliteBackupWithQuickCheck,
+  sqliteQuickCheck,
+  sqliteRestoreWithQuickCheck,
+  MCP_MEMORY_NO_DATABASE_DIGEST,
+  MCP_MEMORY_SUBPROCESS_TIMEOUT_MS,
+  MCP_MEMORY_TRANSACTION_ID_PATTERN,
+  validateMcpMemoryRecoveryMaterial,
+  writeJsonAtomic,
+} from "./scripts/mcp-memory-upgrade-transaction.mjs";
+import {
+  executeSafeManagedFileTransaction,
+  withSafeManagedFileLock,
+} from "./scripts/safe-managed-file-operations.mjs";
+import {
+  ensureSafeProjectDirectory,
+  isPathInsideDir,
+  mergeProjectCleanupResults,
+  projectCleanupRetryableIssues,
+  projectCleanupStatus,
+  projectFileHash,
+  projectPathDigest,
+  projectRemovalProofForManifestEntry,
+  projectRemovalUnprovenReasonForManifestEntry,
+  safeProjectPathInfo,
+  summarizeProjectAssetCleanup,
+} from "./scripts/project-bootstrap-file-safety.mjs";
+import {
+  normalizeSetupCliArgs,
+  validateSetupCliArgs,
+} from "./scripts/setup-cli-policy.mjs";
+import {
+  ensureStableGlobalProjectionPackage,
+} from "./src/application/installer/ensure-stable-global-projection-package.mjs";
+import {
+  createProjectionPackageBoundary,
+} from "./src/infrastructure/installer/projection-package-boundary.mjs";
+import {
+  INSTALL_STEP_CLASSIFICATION,
+  INSTALL_STEP_OUTCOME,
+  installStep,
+  summarizeInstallStatus,
+} from "./scripts/install-status-semantics.mjs";
+import {
+  MCP_MEMORY_INSTALL_OUTCOME,
+  mcpMemoryInstallStep,
+} from "./scripts/mcp-memory-install-outcome.mjs";
+import {
+  MCP_MEMORY_SETUP_ACTION,
+  MCP_MEMORY_SETUP_REASON,
+  resolveMcpMemorySetupPolicy,
+} from "./scripts/setup-memory-policy.mjs";
+import {
+  MetaKimConfigError,
+  loadMetaKimConfig,
+} from "./scripts/meta-kim-config-loader.mjs";
+import {
+  isProtectedProjectCapabilityPath,
+  loadProtectedProjectCapabilityPaths,
+  protectedProjectCapabilityIntersects,
+} from "./scripts/project-capability-ownership.mjs";
+import {
+  classifyProjectProjectionUpdate,
+} from "./scripts/project-bootstrap-update-policy.mjs";
+import {
+  joinProjectRegistry,
+  listJoinedProjectRegistryEntries,
+} from "./scripts/project-registry.mjs";
+import { resolveExistingManagedProjectCandidates } from "./scripts/existing-managed-projects.mjs";
 
 // ── Config ──────────────────────────────────────────────
 
 const PROJECT_DIR = resolve(import.meta.dirname || ".");
+const PROJECT_PLAN_CONTENT = Symbol("projectPlanContent");
+const CALLER_CWD = resolve(process.env.META_KIM_CALLER_CWD || process.cwd());
 const SKILLS_DIR = join(resolveRuntimeHomeDir("claude"), "skills");
 const PROXY = process.env.HTTPS_PROXY || process.env.HTTP_PROXY || "";
 const isWin = platform() === "win32";
-const args = process.argv.slice(2);
+const args = normalizeSetupCliArgs(process.argv.slice(2));
+try {
+  validateSetupCliArgs(args);
+} catch (error) {
+  console.error(`meta-kim setup: ${error.message}`);
+  if (error.showHelp) {
+    console.error("Run 'meta-kim --help' for supported commands and options.");
+  }
+  process.exit(2);
+}
 const updateMode = args.includes("--update") || args.includes("-u");
 const checkOnly = args.includes("--check");
 const projectBootstrapMode = args.includes("--project-bootstrap");
 const projectCleanupMode =
   args.includes("--cleanup-projects") || args.includes("--project-cleanup");
+const rebindRuntimeLaunchMode = args.includes("--rebind-runtime-launch");
 const projectBootstrapDryRun = args.includes("--dry-run");
 const projectBootstrapApply = args.includes("--apply");
 const jsonOutputMode = args.includes("--json");
@@ -99,30 +267,15 @@ const silentMode = args.includes("--silent") || !process.stdout.isTTY;
 const useSavedProjectDirsMode =
   args.includes("--all-projects") || args.includes("--update-projects");
 const saveProjectDirsMode = args.includes("--save-project-dirs");
-// Global hook projection policy:
-//   - Fresh install (`npx meta-kim`, `node setup.mjs` without --update):
-//     install global hooks by default so first-time users get the full
-//     governance surface (enforce-agent-dispatch, stop-completion-guard,
-//     fan-out gate, etc.) without needing to know an opt-in flag.
-//   - Update (`--update` / `-u`): keep opt-in to avoid silently
-//     overwriting a user-local hook that was hand-edited between releases.
-//   - Explicit overrides win: `--with-global-hooks` (force on, including
-//     during update) or `--without-global-hooks` (force off, including
-//     during install).
+// Global hook projection policy: always opt-in. Installation and update may
+// only change user-level runtime hook settings after an explicit CLI/env
+// request. `--without-global-hooks` remains a compatibility no-op.
 const setupWithGlobalHooks =
   args.includes("--with-global-hooks") ||
-  process.env.META_KIM_WITH_GLOBAL_HOOKS === "1" ||
-  (!args.includes("--without-global-hooks") && !updateMode);
-
-function writeUtf8BomFileSync(path, content) {
-  writeFileSync(
-    path,
-    Buffer.concat([
-      Buffer.from([0xef, 0xbb, 0xbf]),
-      Buffer.from(content, "utf8"),
-    ]),
-  );
-}
+  process.env.META_KIM_WITH_GLOBAL_HOOKS === "1";
+const skipOptionalTools = process.env.META_KIM_SKIP_OPTIONAL_TOOLS === "1";
+const preferLocalDependencies =
+  process.env.META_KIM_PREFER_LOCAL_DEPENDENCIES === "1";
 
 /** Interactive extras (default off): proxy prompts stay opt-in; install scope is always shown in TTY. */
 const promptProxy =
@@ -149,19 +302,18 @@ const langIdx = args.indexOf("--lang");
 const langArg = langIdx >= 0 && args[langIdx + 1] ? args[langIdx + 1] : null;
 let currentLangCode = langArg ? normalizeLangCliArg(langArg) : "en";
 
-const RUNTIME_CHOICES = [
-  { id: "claude", label: "Claude Code" },
-  { id: "codex", label: "Codex" },
-  { id: "openclaw", label: "OpenClaw" },
-  { id: "cursor", label: "Cursor" },
-];
-
 function normalizeProjectDeployDir(rawDir) {
   const raw = String(rawDir || "").trim();
   if (!raw) return null;
   if (raw.startsWith("~/")) return join(homedir(), raw.slice(2));
   if (raw.startsWith("~\\")) return join(homedir(), raw.slice(2));
-  return resolve(raw);
+  return isAbsolute(raw) ? resolve(raw) : resolve(CALLER_CWD, raw);
+}
+
+function projectDeploymentTargetDir(deployment, fallback = CALLER_CWD) {
+  return normalizeProjectDeployDir(
+    typeof deployment === "string" ? deployment : deployment?.targetDir,
+  ) ?? fallback;
 }
 
 function uniqueProjectDeployDirs(dirs) {
@@ -200,47 +352,44 @@ function parseProjectDeployDirArgs(argv = args) {
 
 const cliProjectDeployDirs = parseProjectDeployDirArgs(args);
 
-/** Load skills manifest from shared config (single source of truth) */
-function loadSkillsManifest() {
-  const manifestPath = join(PROJECT_DIR, "config", "skills.json");
-  try {
-    const raw = readFileSync(manifestPath, "utf8");
-    const manifest = JSON.parse(raw);
-
-    // Allow env var override
-    const skillOwner =
-      process.env.META_KIM_SKILL_OWNER || manifest.skillOwner || "KimYx0207";
-
-    // Transform manifest to legacy format for compatibility
-    return {
-      skillOwner,
-      externalUrls: manifest.externalUrls || {},
-      skills: manifest.skills.map((skill) => {
-        const repo = skill.repo.replace("${skillOwner}", skillOwner);
-        const subdir = resolveManifestSkillSubdir(skill, platform(), {
-          fallbackToFindskillPack: true,
-        });
-
-        return {
-          name: skill.id,
-          repo,
-          subdir,
-          claudePlugin: skill.claudePlugin,
-          defaultSelected: skill.defaultSelected ?? true,
-          targets: skill.targets || ["claude", "codex", "openclaw"],
-        };
-      }),
-    };
-  } catch (err) {
-    warn(t.warnManifestLoadFail(err.message));
-    return { skillOwner: "KimYx0207", externalUrls: {}, skills: [] };
-  }
+let metaKimConfig;
+try {
+  metaKimConfig = loadMetaKimConfig({ repoRoot: PROJECT_DIR });
+} catch (error) {
+  const prefix =
+    error instanceof MetaKimConfigError
+      ? `Meta_Kim configuration error [${error.code}]`
+      : "Meta_Kim configuration error";
+  console.error(`${prefix}: ${error.message}`);
+  process.exit(2);
 }
+const setupRuntimeProfiles = resolveRuntimeProfilesFromManifest(
+  metaKimConfig.syncConfig,
+);
+const RUNTIME_CHOICES = Object.freeze(
+  metaKimConfig.syncConfig.supportedTargets.map((id) => Object.freeze({
+    id,
+    label: setupRuntimeProfiles[id].label,
+  })),
+);
 
-const skillsManifest = loadSkillsManifest();
+const skillsManifest = {
+  skillOwner: metaKimConfig.skills.skillOwner,
+  skills: metaKimConfig.skills.skills.map((skill) => ({
+    name: skill.id,
+    repo: skill.repository.source,
+    repoUrl: skill.repository.cloneUrl,
+    subdir: resolveManifestSkillSubdir(skill, platform(), {
+      fallbackToFindskillPack: true,
+    }),
+    claudePlugin: skill.claudePlugin,
+    defaultSelected: skill.defaultSelected ?? true,
+    targets: skill.targets,
+  })),
+};
 const SKILL_OWNER = skillsManifest.skillOwner;
 const SKILLS = skillsManifest.skills;
-const EXTERNAL_URLS = skillsManifest.externalUrls;
+const DISTRIBUTION = metaKimConfig.distribution;
 
 function getDefaultSkillIds() {
   return SKILLS.filter((s) => s.defaultSelected).map((s) => s.name);
@@ -282,7 +431,10 @@ const LANGUAGES = [
 
 // i18n strings live in config/i18n/setup-strings.mjs to keep setup.mjs small.
 // buildI18N is a closure so the (v) => ... functions can reference MIN_NODE_VERSION.
-import { buildI18N } from "./config/i18n/setup-strings.mjs";
+import {
+  buildI18N,
+  PROJECT_BOOTSTRAP_CHOICE_COPY,
+} from "./config/i18n/setup-strings.mjs";
 const I18N = buildI18N({ MIN_NODE_VERSION });
 
 let t = I18N.en; // default, overwritten by selectLanguage()
@@ -292,6 +444,10 @@ let quickDeployDirs = []; // set by quick deploy / project deploy exports
 function detectNpxMode() {
   const normalized = PROJECT_DIR.replace(/\\/g, "/").toLowerCase();
   return normalized.includes("_npx") || normalized.includes("npm-cache");
+}
+
+function isSourceCheckout() {
+  return existsSync(join(PROJECT_DIR, ".git"));
 }
 
 if (langArg) {
@@ -892,8 +1048,7 @@ async function withProgress(label, fn) {
   console.log(`${C.dim}→${C.reset} ${label}`);
 
   try {
-    await fn();
-    return true;
+    return await fn();
   } catch (err) {
     console.log(`${C.red}✗${C.reset}`);
     throw err;
@@ -1048,6 +1203,12 @@ function instructionRelsForTargets(activeTargets) {
 }
 
 const GLOBAL_HOOK_PACKAGE_FILES_LIST = [
+  "project-root.mjs",
+  "utils.mjs",
+  "skip-reminder.mjs",
+  "spine-state-utils.mjs",
+  "spine-state-gates.mjs",
+  "spine-state.mjs",
   "activate-meta-theory-spine.mjs",
   "bash-readonly-whitelist.mjs",
   "block-dangerous-bash.mjs",
@@ -1058,7 +1219,6 @@ const GLOBAL_HOOK_PACKAGE_FILES_LIST = [
   "post-console-log-warn.mjs",
   "post-format.mjs",
   "post-typecheck.mjs",
-  "skip-reminder.mjs",
   "stop-compaction.mjs",
   "stop-completion-guard.mjs",
   "stop-console-log-audit.mjs",
@@ -1066,7 +1226,6 @@ const GLOBAL_HOOK_PACKAGE_FILES_LIST = [
   "stop-save-progress.mjs",
   "stop-spine-cleanup.mjs",
   "subagent-context.mjs",
-  "utils.mjs",
 ];
 
 // medusa 项目 hook:被 canonical settings.json / capability-index 引用,但不在
@@ -1078,6 +1237,12 @@ const MEDUSA_PROJECT_HOOK_FILES = [
   "medusa-worker.mjs", // shared/scripts(被前两者 spawn)
   "medusa_batch_scan.py", // shared/scripts
 ];
+const MEDUSA_PROJECT_HOOK_SOURCE_PARTS = new Map([
+  ["medusa-postscan-enqueue.mjs", ["claude", "hooks", "medusa-postscan-enqueue.mjs"]],
+  ["medusa-findings-surface.mjs", ["shared", "hooks", "medusa-findings-surface.mjs"]],
+  ["medusa-worker.mjs", ["shared", "scripts", "medusa-worker.mjs"]],
+  ["medusa_batch_scan.py", ["shared", "scripts", "medusa_batch_scan.py"]],
+]);
 
 const PROJECT_LOCAL_CAPABILITY_PREFIXES = [
   ".claude/agents/",
@@ -1132,28 +1297,37 @@ const PROJECT_HOOK_REL_DIRS_BY_PLATFORM = {
 const PROJECT_HOOK_SOURCE_CANDIDATES = {
   claude: [
     ...GLOBAL_HOOK_PACKAGE_FILES_LIST,
-    "spine-state.mjs",
     ...MEDUSA_PROJECT_HOOK_FILES,
   ],
   codex: [
+    "project-root.mjs",
+    "utils.mjs",
+    "skip-reminder.mjs",
+    "spine-state-utils.mjs",
+    "spine-state-gates.mjs",
+    "spine-state.mjs",
     "activate-meta-theory-spine.mjs",
     "bash-readonly-whitelist.mjs",
     "enforce-agent-dispatch.mjs",
     "graphify-context.mjs",
+    "meta-kim-memory-save.mjs",
     "post-console-log-warn.mjs",
     "post-format.mjs",
     "post-typecheck.mjs",
-    "skip-reminder.mjs",
-    "spine-state.mjs",
-    "spine-state-utils.mjs",
     "stop-compaction.mjs",
     "stop-completion-guard.mjs",
     "stop-console-log-audit.mjs",
     "stop-spine-cleanup.mjs",
     "subagent-context.mjs",
-    "utils.mjs",
+    ...MEDUSA_PROJECT_HOOK_FILES,
   ],
   cursor: [
+    "project-root.mjs",
+    "utils.mjs",
+    "skip-reminder.mjs",
+    "spine-state-utils.mjs",
+    "spine-state-gates.mjs",
+    "spine-state.mjs",
     "activate-meta-theory-spine.mjs",
     "bash-readonly-whitelist.mjs",
     "enforce-agent-dispatch.mjs",
@@ -1161,15 +1335,12 @@ const PROJECT_HOOK_SOURCE_CANDIDATES = {
     "post-console-log-warn.mjs",
     "post-format.mjs",
     "post-typecheck.mjs",
-    "skip-reminder.mjs",
-    "spine-state.mjs",
-    "spine-state-utils.mjs",
     "stop-compaction.mjs",
     "stop-completion-guard.mjs",
     "stop-console-log-audit.mjs",
     "stop-spine-cleanup.mjs",
     "subagent-context.mjs",
-    "utils.mjs",
+    ...MEDUSA_PROJECT_HOOK_FILES,
   ],
   openclaw: [
     "stop-save-progress.mjs",
@@ -1183,26 +1354,43 @@ function readProjectHookSource(platformId, hookName) {
   ) {
     return buildCodexGraphifyContextHookSource();
   }
-  const candidates = [];
-  if (platformId === "claude") {
-    candidates.push(
-      join(PROJECT_DIR, "canonical", "runtime-assets", "claude", "hooks", hookName),
+  const medusaSourceParts = MEDUSA_PROJECT_HOOK_SOURCE_PARTS.get(hookName);
+  if (medusaSourceParts) {
+    const sourcePath = join(PROJECT_DIR, "canonical", "runtime-assets", ...medusaSourceParts);
+    if (!existsSync(sourcePath)) {
+      throw new Error(`Missing canonical Medusa asset for ${platformId}:${hookName}`);
+    }
+    return readFileSync(sourcePath, "utf8");
+  }
+  const owner = runtimeHookSourceOwner(platformId, hookName);
+  if (!owner) {
+    throw new Error(
+      `No canonical Hook source owner for ${platformId}:${hookName}`,
     );
   }
-  candidates.push(
-    join(PROJECT_DIR, "canonical", "runtime-assets", "shared", "hooks", hookName),
+  const sharedPath = join(
+    PROJECT_DIR,
+    "canonical",
+    "runtime-assets",
+    "shared",
+    "hooks",
+    hookName,
   );
-  candidates.push(
-    join(PROJECT_DIR, "canonical", "runtime-assets", "shared", "scripts", hookName),
+  const claudePath = join(
+    PROJECT_DIR,
+    "canonical",
+    "runtime-assets",
+    "claude",
+    "hooks",
+    hookName,
   );
-  candidates.push(
-    join(PROJECT_DIR, "canonical", "runtime-assets", "claude", "hooks", hookName),
-  );
-  for (const candidate of candidates) {
-    if (!existsSync(candidate)) continue;
-    return readFileSync(candidate, "utf8");
+  const sourcePath = owner === "shared" ? sharedPath : claudePath;
+  if (!existsSync(sourcePath)) {
+    throw new Error(
+      `Missing canonical Hook source for ${platformId}:${hookName} (owner=${owner})`,
+    );
   }
-  return null;
+  return readFileSync(sourcePath, "utf8");
 }
 
 function buildCodexGraphifyContextHookSource() {
@@ -1501,7 +1689,7 @@ ${teammates || "- None"}
 `;
 }
 
-function buildOpenClawWorkspacePlans(targetDir) {
+function buildOpenClawWorkspacePlans(targetDir, protectedPaths) {
   const agents = loadSetupAgents();
   const teamDirectory = buildSetupOpenClawTeamDirectory(agents);
   const builders = {
@@ -1523,12 +1711,13 @@ function buildOpenClawWorkspacePlans(targetDir) {
         builders[fileName](agent),
         targetDir,
         `generated:openclaw-workspace:${agent.id}:${fileName}`,
+        protectedPaths,
       ),
     ),
   );
 }
 
-function projectHookGeneratedPlans(platformId, targetDir) {
+function projectHookGeneratedPlans(platformId, targetDir, protectedPaths) {
   // "all" is a public quick-install choice but has no entry in
   // PROJECT_HOOK_REL_DIRS_BY_PLATFORM / PROJECT_HOOK_SOURCE_CANDIDATES, so it
   // must expand to each concrete platform (mirroring projectDeployRootsForPlatform
@@ -1536,7 +1725,7 @@ function projectHookGeneratedPlans(platformId, targetDir) {
   // generate zero hooks and leave settings.json referencing missing medusa files.
   if (platformId === "all") {
     return ["claude", "codex", "cursor", "openclaw"].flatMap((p) =>
-      projectHookGeneratedPlans(p, targetDir),
+      projectHookGeneratedPlans(p, targetDir, protectedPaths),
     );
   }
   const plans = [];
@@ -1551,19 +1740,21 @@ function projectHookGeneratedPlans(platformId, targetDir) {
         content,
         targetDir,
         `generated:project-hook:${platformId}:${hookName}`,
+        protectedPaths,
       ));
     }
   }
   if (platformId === "openclaw") {
-    plans.push(...buildOpenClawWorkspacePlans(targetDir));
+    plans.push(...buildOpenClawWorkspacePlans(targetDir, protectedPaths));
   }
   return plans;
 }
 
-function writeProjectGeneratedHooks(platformId, targetDir) {
+function writeProjectGeneratedHooks(platformId, targetDir, protectedPaths) {
   let count = 0;
-  for (const plan of projectHookGeneratedPlans(platformId, targetDir)) {
-    const content = plan.content;
+  for (const plan of projectHookGeneratedPlans(platformId, targetDir, protectedPaths)) {
+    if (plan.action === "skip") continue;
+    const content = plan[PROJECT_PLAN_CONTENT];
     if (!content) continue;
     const destPath = join(targetDir, plan.relPath);
     mkdirSync(dirname(destPath), { recursive: true });
@@ -1630,10 +1821,7 @@ function isMetaKimManagedHookRelPath(rel) {
   // 需显式认作 Meta_Kim 托管,否则 bootstrap/更新会误判为用户文件而冲突中止。
   if (MEDUSA_PROJECT_HOOK_FILES.includes(fileName)) return true;
   if (!fileName.endsWith(".mjs")) return false;
-  return (
-    GLOBAL_HOOK_PACKAGE_FILES_LIST.includes(fileName) ||
-    fileName === "spine-state.mjs" // legacy ghost file from older Meta_Kim installs
-  );
+  return GLOBAL_HOOK_PACKAGE_FILES_LIST.includes(fileName);
 }
 
 function isPlainObject(value) {
@@ -1927,44 +2115,40 @@ function prepareProjectDeployJson(relPath, srcPath, targetDir) {
   return parsed;
 }
 
-function backupBeforeMerge(destPath, label = "pre-merge") {
-  if (!destPath) return null;
-  if (!existsSync(destPath)) return null;
-  try {
-    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-    const backupRoot = join(
-      PROJECT_DIR,
-      ".meta-kim",
-      "backups",
-      `${label}-${stamp}`,
-    );
-    const safeBase = String(destPath).replace(/[\\/]+/g, "__");
-    const backupPath = join(backupRoot, safeBase);
-    mkdirSync(dirname(backupPath), { recursive: true });
-    cpSync(destPath, backupPath);
-    return backupPath;
-  } catch (err) {
-    warn(t?.warnBackupFailed?.(destPath, err.message) || `Backup failed for ${destPath}: ${err.message}`);
-    return null;
-  }
+function writeProjectManagedTransaction(targetDir, relPath, content, label) {
+  const destPath = join(targetDir, relPath);
+  return executeSafeManagedFileTransaction({
+    trustedRoot: targetDir,
+    backupRoot: join(targetDir, ".meta-kim", "backups"),
+    operations: [{
+      kind: "write",
+      relPath,
+      content,
+      expectedOldHash: projectFileHash(destPath),
+    }],
+    transactionLabel: label,
+  });
 }
 
 function mergeProtectedProjectDeployFile(srcPath, destPath, relPath, targetDir) {
-  backupBeforeMerge(destPath, "pre-merge");
-  writeJsonObject(
-    destPath,
-    plannedProtectedProjectDeployJson(srcPath, destPath, relPath, targetDir),
+  const result = writeProjectManagedTransaction(
+    targetDir,
+    relPath,
+    JSON.stringify(plannedProtectedProjectDeployJson(srcPath, destPath, relPath, targetDir), null, 2) + "\n",
+    "pre-merge",
   );
+  if (!result.ok) throw new Error(`Protected project JSON write blocked: ${String(result.reason).replaceAll("_", "-")}`);
   return 1;
 }
 
 function mergeProtectedProjectDeployTextFile(srcPath, destPath, relPath, targetDir) {
-  backupBeforeMerge(destPath, "pre-merge");
-  writeFileSync(
-    destPath,
+  const result = writeProjectManagedTransaction(
+    targetDir,
+    relPath,
     plannedProtectedProjectDeployText(srcPath, destPath, relPath, targetDir),
-    "utf8",
+    "pre-merge",
   );
+  if (!result.ok) throw new Error(`Protected project text write blocked: ${String(result.reason).replaceAll("_", "-")}`);
   return 1;
 }
 
@@ -2058,24 +2242,43 @@ function projectInstructionMergePolicy(policy) {
       : "managed_block_preserve_user_text";
 }
 
-// Plan entries for the instruction files across the active targets, shaped to
-// flow through the existing bootstrap plan/backup/manifest machinery. Emits an
-// entry only when there is something to write OR the file already exists (so the
-// dry-run surfaces it as unchanged). Under the default preserve policy on a
-// project with no managed block, no entry is produced and the file is untouched.
-// Following the existing protected-text convention, any pending instruction
-// write is reported as "merge" (a managed block is merged into the base, or a
-// stale block is stripped from it) rather than a raw create/replace.
+// Plan instruction updates through the same hash-bound transaction used by the
+// rest of project bootstrap. Default preserve leaves ordinary user files out of
+// both the write plan and managed manifest; it emits a plan only to remove a
+// previously injected Meta_Kim block.
 function collectProjectInstructionPlans(activeTargets, targetDir, policy) {
   const plans = [];
   for (const rel of instructionRelsForTargets(activeTargets)) {
+    const safeTarget = projectPlanningPathInfo(targetDir, rel);
+    if (!safeTarget) {
+      if (policy === "preserve") continue;
+      plans.push({
+        relPath: rel,
+        source: `project-instructions:${policy}`,
+        exists: true,
+        contentStatus: "unsafe",
+        ownership: "unsafe_path",
+        action: "conflict",
+        effectiveAction: "conflict",
+        mergePolicy: "unsafe_realpath_or_link_preserved",
+        instructionPolicy: policy,
+        conflictReason: "unsafe_realpath_or_link_preserved",
+        currentHash: null,
+        sourceHash: null,
+      });
+      continue;
+    }
     const info = planProjectInstruction(rel, targetDir, policy);
     const willWrite = info.changed && info.planned !== null;
-    if (!willWrite && !info.exists) continue;
+    if (policy === "preserve" && !willWrite) continue;
+    if (info.planned === null) continue;
+    const currentHash = info.exists ? projectFileHash(safeTarget.target) : null;
+    const sourceHash = createHash("sha256").update(info.planned).digest("hex");
     const effectiveAction = willWrite ? "merge" : "unchanged";
     plans.push({
       relPath: rel,
       source: `project-instructions:${policy}`,
+      [PROJECT_PLAN_CONTENT]: info.planned,
       exists: info.exists,
       contentStatus: willWrite ? "different" : "same",
       ownership: "shared_config_merge",
@@ -2083,6 +2286,9 @@ function collectProjectInstructionPlans(activeTargets, targetDir, policy) {
       effectiveAction,
       mergePolicy: projectInstructionMergePolicy(policy),
       instructionPolicy: policy,
+      conflictReason: null,
+      currentHash,
+      sourceHash,
     });
   }
   return plans;
@@ -2128,9 +2334,10 @@ function applyProjectInstructionsForPlatform(platformId, targetDir, policy) {
   return count;
 }
 
-function copyProjectDeployFile(srcPath, destPath, relPath, targetDir) {
+function copyProjectDeployFile(srcPath, destPath, relPath, targetDir, protectedPaths) {
   const rel = normalizeDeployRelPath(relPath);
   if (shouldSkipProjectDeployPath(rel)) return 0;
+  if (isProtectedProjectCapabilityPath(destPath, protectedPaths)) return 0;
   mkdirSync(dirname(destPath), { recursive: true });
   if (DEPLOY_PROTECTED_JSON_PATHS.has(rel)) {
     return mergeProtectedProjectDeployFile(srcPath, destPath, rel, targetDir);
@@ -2156,9 +2363,16 @@ function copyDirRecursive(src, dest, context = {}) {
       count += copyDirRecursive(srcPath, destPath, {
         sourceRoot,
         targetDir,
+        protectedPaths: context.protectedPaths,
       });
     } else {
-      count += copyProjectDeployFile(srcPath, destPath, relPath, targetDir);
+      count += copyProjectDeployFile(
+        srcPath,
+        destPath,
+        relPath,
+        targetDir,
+        context.protectedPaths,
+      );
     }
   }
   return count;
@@ -2240,7 +2454,9 @@ function collectDeployFilePlansFromRoot(srcRoot, destRoot, context = {}) {
           sourceRoot,
           targetDir,
           managedRelPaths: context.managedRelPaths,
+          managedFileMap: context.managedFileMap,
           destRelBase: context.destRelBase,
+          protectedPaths: context.protectedPaths,
         }),
       );
     } else {
@@ -2252,66 +2468,77 @@ function collectDeployFilePlansFromRoot(srcRoot, destRoot, context = {}) {
 
 function projectDeployFilePlan(srcPath, destPath, relPath, targetDir, context = {}) {
   const rel = normalizeDeployRelPath(relPath);
-  const skipped = shouldSkipProjectDeployPath(rel);
+  const protectedProjectCapability = isProtectedProjectCapabilityPath(
+    destPath,
+    context.protectedPaths,
+  );
+  const skipped = shouldSkipProjectDeployPath(rel) || protectedProjectCapability;
   const protectedJson = DEPLOY_PROTECTED_JSON_PATHS.has(rel);
   const protectedText = DEPLOY_PROTECTED_TEXT_PATHS.has(rel);
-  const exists = existsSync(destPath);
-  const contentStatus = projectDeployFileContentStatus(srcPath, destPath, rel, {
-    skipped,
-    protectedJson,
-    protectedText,
-    targetDir,
+  const safeTarget = projectPlanningPathInfo(targetDir, rel);
+  if (!safeTarget) {
+    return {
+      relPath: rel,
+      source: normalizeDeployRelPath(relative(PROJECT_DIR, srcPath)),
+      exists: true,
+      contentStatus: "unsafe",
+      ownership: "unsafe_path",
+      action: "conflict",
+      effectiveAction: "conflict",
+      mergePolicy: "unsafe_realpath_or_link_preserved",
+      skipReason: null,
+      conflictReason: "unsafe_realpath_or_link_preserved",
+    };
+  }
+  const exists = existsSync(safeTarget.target);
+  const plannedContent = protectedJson
+    ? `${JSON.stringify(plannedProtectedProjectDeployJson(srcPath, safeTarget.target, rel, targetDir), null, 2)}\n`
+    : protectedText
+      ? plannedProtectedProjectDeployText(srcPath, safeTarget.target, rel, targetDir)
+      : readFileSync(srcPath);
+  const sourceHash = createHash("sha256").update(plannedContent).digest("hex");
+  const currentHash = exists ? projectFileHash(safeTarget.target) : null;
+  const previousEntry = context.managedFileMap?.get(rel) ?? null;
+  const classification = classifyProjectProjectionUpdate({
+    exists,
+    currentHash,
+    sourceHash,
+    previousManifestEntry: previousEntry,
+    protectedProjectCapability,
+    mergeOwnedConfig: protectedJson || protectedText,
+    managedProjectionUpdate:
+      existingProjectProjectionUpdatePolicy().managedProjectionUpdate,
   });
-  const managedByManifest = context.managedRelPaths?.has(rel) === true;
-  const metaKimOwnedPath = isMetaKimNamespacedProjectPath(rel);
-  const unknownExistingConflict =
-    exists &&
-    contentStatus !== "same" &&
-    !skipped &&
-    !protectedJson &&
-    !protectedText &&
-    !managedByManifest &&
-    !metaKimOwnedPath;
+  const contentStatus = skipped
+    ? "skip"
+    : classification.action === "unchanged"
+      ? "same"
+      : "different";
   const mergePolicy = skipped
     ? "never_touch"
     : protectedJson
       ? "additive_preserve_user_state_json"
       : protectedText
         ? "managed_block_preserve_user_text"
-        : unknownExistingConflict
+        : classification.action === "conflict"
           ? "user_owned_existing_file_conflict"
-        : exists
-          ? managedByManifest
+          : classification.action === "replace"
             ? "manifest_managed_projection_replace"
-            : "meta_kim_namespaced_projection_replace"
-          : "generated_projection_create";
+            : "generated_projection_create";
   return {
     relPath: rel,
     source: normalizeDeployRelPath(relative(PROJECT_DIR, srcPath)),
+    [PROJECT_PLAN_CONTENT]: plannedContent,
     exists,
     contentStatus,
-    ownership: skipped
-      ? "local_state"
-      : protectedJson || protectedText
-        ? "shared_config_merge"
-        : managedByManifest
-          ? "manifest_managed"
-          : metaKimOwnedPath
-            ? "meta_kim_owned"
-            : exists
-              ? "unknown_existing"
-              : "new_file",
+    ownership: skipped && !protectedProjectCapability ? "local_state" : classification.ownership,
     action: skipped
       ? "skip"
       : protectedText
         ? "merge"
         : exists && protectedJson
         ? "merge"
-        : unknownExistingConflict
-          ? "conflict"
-        : exists
-          ? "replace"
-          : "create",
+      : classification.action,
     effectiveAction:
       skipped || contentStatus === "same"
         ? "unchanged"
@@ -2319,37 +2546,72 @@ function projectDeployFilePlan(srcPath, destPath, relPath, targetDir, context = 
           ? "merge"
           : exists && protectedJson
           ? "merge"
-          : unknownExistingConflict
-            ? "conflict"
-          : exists
-            ? "replace"
-            : "create",
-    mergePolicy,
+          : classification.action,
+    mergePolicy: protectedProjectCapability ? "preserve_project_copy" : mergePolicy,
+    skipReason: protectedProjectCapability
+      ? "protected_project_capability"
+      : skipped
+        ? "local_state_or_runtime_config"
+        : null,
+    conflictReason: classification.action === "conflict" ? classification.reason : null,
+    oldInstalledHash: classification.oldInstalledHash ?? null,
+    currentHash,
+    sourceHash,
   };
 }
 
-function projectGeneratedFilePlan(relPath, content, targetDir, source) {
+function projectGeneratedFilePlan(relPath, content, targetDir, source, protectedPaths) {
   const rel = normalizeDeployRelPath(relPath);
   const destPath = join(targetDir, rel);
-  const exists = existsSync(destPath);
-  const current = exists ? readFileSync(destPath, "utf8") : null;
-  const contentStatus = !exists ? "missing" : current === content ? "same" : "different";
+  const protectedProjectCapability = isProtectedProjectCapabilityPath(
+    destPath,
+    protectedPaths,
+  );
+  const safeTarget = projectPlanningPathInfo(targetDir, rel);
+  if (!safeTarget) {
+    return { relPath: rel, source, content, exists: true, contentStatus: "unsafe", ownership: "unsafe_path", action: "conflict", effectiveAction: "conflict", mergePolicy: "unsafe_realpath_or_link_preserved", skipReason: null, conflictReason: "unsafe_realpath_or_link_preserved" };
+  }
+  const exists = existsSync(safeTarget.target);
+  const currentHash = exists ? projectFileHash(safeTarget.target) : null;
+  const sourceHash = createHash("sha256").update(content).digest("hex");
+  const previousEntry = previousProjectManagedFileMap(targetDir).get(rel) ?? null;
+  const classification = classifyProjectProjectionUpdate({
+    exists,
+    currentHash,
+    sourceHash,
+    previousManifestEntry: previousEntry,
+    protectedProjectCapability,
+    managedProjectionUpdate:
+      existingProjectProjectionUpdatePolicy().managedProjectionUpdate,
+  });
+  const contentStatus = classification.action === "unchanged" ? "same" : exists ? "different" : "missing";
   return {
     relPath: rel,
     source,
-    content,
+    [PROJECT_PLAN_CONTENT]: content,
     exists,
     contentStatus,
-    ownership: isMetaKimNamespacedProjectPath(rel)
-      ? "meta_kim_owned"
-      : exists
-        ? "unknown_existing"
-        : "new_file",
-    action: exists ? "replace" : "create",
-    effectiveAction: contentStatus === "same" ? "unchanged" : exists ? "replace" : "create",
-    mergePolicy: exists
-      ? "meta_kim_namespaced_projection_replace"
-      : "generated_projection_create",
+    ownership: classification.ownership,
+    action: protectedProjectCapability
+      ? "skip"
+      : classification.action,
+    effectiveAction: protectedProjectCapability
+      ? "unchanged"
+      : contentStatus === "same"
+      ? "unchanged"
+      : classification.action,
+    mergePolicy: protectedProjectCapability
+      ? "preserve_project_copy"
+      : classification.action === "replace"
+        ? "manifest_managed_projection_replace"
+        : classification.action === "conflict"
+          ? "user_owned_existing_file_conflict"
+          : "generated_projection_create",
+    skipReason: protectedProjectCapability ? "protected_project_capability" : null,
+    conflictReason: classification.action === "conflict" ? classification.reason : null,
+    oldInstalledHash: classification.oldInstalledHash ?? null,
+    currentHash,
+    sourceHash,
   };
 }
 
@@ -2378,6 +2640,8 @@ function collectProjectDeployPlan(activeTargets, targetDir) {
   const plans = [];
   const seen = new Set();
   const managedRelPaths = previousProjectManagedRelPaths(targetDir);
+  const managedFileMap = previousProjectManagedFileMap(targetDir);
+  const protectedPaths = loadProtectedProjectCapabilityPaths(targetDir, PROJECT_DIR);
   for (const platformId of activeTargets) {
     for (const root of projectDeployRootsForPlatform(platformId)) {
       const src = join(PROJECT_DIR, root.srcRel);
@@ -2386,14 +2650,16 @@ function collectProjectDeployPlan(activeTargets, targetDir) {
         sourceRoot: root.destRel !== root.srcRel ? src : PROJECT_DIR,
         targetDir,
         managedRelPaths,
+        managedFileMap,
         destRelBase: root.destRel !== root.srcRel ? root.destRel : null,
+        protectedPaths,
       })) {
         if (seen.has(plan.relPath)) continue;
         seen.add(plan.relPath);
         plans.push(plan);
       }
     }
-    for (const plan of projectHookGeneratedPlans(platformId, targetDir)) {
+    for (const plan of projectHookGeneratedPlans(platformId, targetDir, protectedPaths)) {
       if (seen.has(plan.relPath)) continue;
       seen.add(plan.relPath);
       plans.push(plan);
@@ -2442,17 +2708,83 @@ function readSyncSourceChain() {
 }
 
 function projectBootstrapManifestPath(targetDir) {
-  return join(targetDir, ".meta-kim", "state", "default", "project-bootstrap.json");
+  const marker = existingProjectProjectionUpdatePolicy().managedStateMarker;
+  return join(targetDir, ...marker.split("/"));
+}
+
+function missingProjectTargetHasNoLinkedAncestor(targetDir) {
+  let current = resolve(targetDir);
+  while (!existsSync(current)) {
+    const parent = dirname(current);
+    if (parent === current) return false;
+    current = parent;
+  }
+  while (true) {
+    const stats = lstatSync(current);
+    if (stats.isSymbolicLink() || !stats.isDirectory()) return false;
+    const parent = dirname(current);
+    if (parent === current) return true;
+    current = parent;
+  }
+}
+
+function projectPlanningPathInfo(targetDir, relPath) {
+  if (existsSync(targetDir)) {
+    return safeProjectPathInfo(targetDir, relPath, { allowMissing: true });
+  }
+  if (!missingProjectTargetHasNoLinkedAncestor(targetDir)) return null;
+  const rel = normalizeDeployRelPath(relPath);
+  if (!rel || rel.split("/").some((part) => !part || part === "." || part === "..")) {
+    return null;
+  }
+  return {
+    root: resolve(targetDir),
+    rel,
+    target: join(resolve(targetDir), ...rel.split("/")),
+    missingAt: resolve(targetDir),
+  };
+}
+
+function existingProjectProjectionUpdatePolicy() {
+  const policy =
+    metaKimConfig.syncConfig?.projectMaterializationPolicy
+      ?.existingProjectProjectionUpdate;
+  const validDiscovery = new Set([
+    "explicit_project_dirs",
+    "saved_project_dirs",
+    "current_working_directory",
+  ]);
+  if (
+    !policy ||
+    !Array.isArray(policy.discoveryOrder) ||
+    policy.discoveryOrder.length === 0 ||
+    policy.discoveryOrder.some((item) => !validDiscovery.has(item)) ||
+    typeof policy.managedStateMarker !== "string" ||
+    !policy.managedStateMarker ||
+    policy.globalDistributionAction !== "update_existing_project_projection" ||
+    policy.projectUpdateStrategy !== "project_bootstrap_merge_delta" ||
+    policy.managedProjectionUpdate !== "replace_with_transaction_backup" ||
+    policy.noManagedProjectAction !== "do_not_materialize_project_projection" ||
+    policy.cleanupMode !== "explicit_only"
+  ) {
+    throw new Error("Invalid existing project projection update policy in config/sync.json");
+  }
+  return policy;
 }
 
 function readProjectBootstrapManifest(targetDir) {
-  const manifestPath = projectBootstrapManifestPath(targetDir);
-  if (!existsSync(manifestPath)) return null;
+  const marker = existingProjectProjectionUpdatePolicy().managedStateMarker;
+  if (!existsSync(targetDir)) return null;
+  const info = safeProjectPathInfo(targetDir, marker, { allowMissing: true });
+  if (!info) throw new Error("Unsafe project bootstrap manifest path");
+  if (!existsSync(info.target)) return null;
+  let parsed;
   try {
-    return JSON.parse(readFileSync(manifestPath, "utf8"));
+    parsed = JSON.parse(readFileSync(info.target, "utf8"));
   } catch {
     return null;
   }
+  return parsed;
 }
 
 function previousProjectManagedRelPaths(targetDir) {
@@ -2477,6 +2809,18 @@ function previousProjectManagedFileMap(targetDir) {
   return result;
 }
 
+function projectRemovalProof(targetDir, relPath) {
+  const rel = normalizeDeployRelPath(relPath);
+  const manifestEntry = previousProjectManagedFileMap(targetDir).get(rel);
+  return projectRemovalProofForManifestEntry(targetDir, rel, manifestEntry);
+}
+
+function projectRemovalUnprovenReason(targetDir, relPath, fallback) {
+  const rel = normalizeDeployRelPath(relPath);
+  const manifestEntry = previousProjectManagedFileMap(targetDir).get(rel);
+  return projectRemovalUnprovenReasonForManifestEntry(manifestEntry, fallback);
+}
+
 function isProjectLocalCapabilityAsset(relPath) {
   const rel = normalizeDeployRelPath(relPath);
   if (!rel || PROJECT_BOOTSTRAP_MERGED_CONFIG_PATHS.has(rel)) return false;
@@ -2485,7 +2829,7 @@ function isProjectLocalCapabilityAsset(relPath) {
 
 function projectInstructionRelPathsForTargets(activeTargets) {
   const targets = activeTargets.includes("all")
-    ? ["claude", "codex", "cursor", "openclaw"]
+    ? RUNTIME_CHOICES.map(({ id }) => id)
     : activeTargets;
   const rels = new Set();
   if (targets.includes("claude")) rels.add("CLAUDE.md");
@@ -2503,27 +2847,23 @@ function isRedundantProjectInstructionFile(targetDir, relPath) {
   const rel = normalizeDeployRelPath(relPath);
   const targetPath = join(targetDir, rel);
   const sourcePath = join(PROJECT_DIR, rel);
-  if (!existsSync(targetPath) || !existsSync(sourcePath)) return false;
+  if (!safeProjectPathInfo(targetDir, rel) || !existsSync(sourcePath)) return false;
   const stats = statSync(targetPath);
   if (!stats.isFile()) return false;
   const current = readFileSync(targetPath, "utf8");
   const generated = rewriteProjectDirRefs(readFileSync(sourcePath, "utf8"), targetDir);
   const userText = stripManagedTextBlock(current, rel);
-  const metaKimProjectionSignature =
-    (rel === "AGENTS.md" && userText.trimStart().startsWith("# Meta_Kim for Codex")) ||
-    (rel === "CLAUDE.md" &&
-      userText.trimStart().startsWith("# Meta_Kim for Claude Code"));
   return (
     equivalentText(current, generated) ||
     equivalentText(userText, "") ||
-    equivalentText(userText, generated) ||
-    metaKimProjectionSignature
+    equivalentText(userText, generated)
   );
 }
 
 function removeRedundantProjectInstructionFiles(targetDir, activeTargets) {
   const removed = [];
   const skipped = [];
+  const backups = [];
   const root = resolve(targetDir);
   for (const relPath of projectInstructionRelPathsForTargets(activeTargets)) {
     const rel = normalizeDeployRelPath(relPath);
@@ -2533,56 +2873,17 @@ function removeRedundantProjectInstructionFiles(targetDir, activeTargets) {
       continue;
     }
     if (!isRedundantProjectInstructionFile(targetDir, rel)) continue;
-    if (!removeUntrackedProjectPath(targetDir, rel, skipped, { recursive: false })) {
+    if (!removeUntrackedProjectPath(targetDir, rel, skipped, {
+      recursive: false,
+      backup: true,
+      backups,
+    })) {
       continue;
     }
     removed.push(rel);
     pruneEmptyProjectDirs(targetDir, rel);
   }
-  return { removed, skipped };
-}
-
-function projectAssetCleanupBucket(relPath) {
-  const rel = normalizeDeployRelPath(relPath);
-  const runtime = rel.startsWith(".claude/")
-    ? "Claude Code"
-    : rel.startsWith(".codex/") || rel.startsWith(".agents/")
-      ? "Codex"
-      : rel.startsWith(".cursor/")
-        ? "Cursor"
-        : rel.startsWith("openclaw/")
-          ? "OpenClaw"
-          : "Other";
-  const type = rel.includes("/agents/") || rel.startsWith("openclaw/workspaces/")
-    ? "agents"
-    : rel.includes("/skills/")
-      ? "skills"
-      : rel.includes("/commands/")
-        ? "Commands"
-        : rel.includes("/hooks/")
-          ? "hooks"
-          : rel.includes("/rules/")
-            ? "rules"
-            : rel.includes("/capability-index/")
-              ? "capability-index"
-              : "assets";
-  return `${runtime} ${type}`;
-}
-
-function summarizeProjectAssetCleanup(removed) {
-  const counts = new Map();
-  for (const relPath of removed) {
-    const bucket = projectAssetCleanupBucket(relPath);
-    counts.set(bucket, (counts.get(bucket) ?? 0) + 1);
-  }
-  return [...counts.entries()]
-    .sort(([left], [right]) => left.localeCompare(right))
-    .map(([bucket, count]) => `${bucket}: ${count}`);
-}
-
-function isPathInsideDir(absPath, absDir) {
-  const rel = relative(absDir, absPath);
-  return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
+  return { removed, skipped, backups };
 }
 
 function isGitTrackedProjectPath(targetDir, relPath) {
@@ -2600,8 +2901,14 @@ function removeUntrackedProjectPath(targetDir, relPath, skipped, options = {}) {
   const rel = normalizeDeployRelPath(relPath);
   const root = resolve(targetDir);
   const absPath = resolve(targetDir, rel);
-  if (!isPathInsideDir(absPath, root)) {
-    skipped.push({ relPath: rel, reason: "outside_target_dir" });
+  const protectedPaths = loadProtectedProjectCapabilityPaths(targetDir, PROJECT_DIR);
+  if (protectedProjectCapabilityIntersects(rel, protectedPaths)) {
+    skipped.push({ relPath: rel, reason: "protected_project_capability_preserved" });
+    return false;
+  }
+  const safePath = safeProjectPathInfo(targetDir, rel);
+  if (!safePath) {
+    skipped.push({ relPath: rel, reason: "unsafe_realpath_or_link_preserved" });
     return false;
   }
   if (!existsSync(absPath)) return false;
@@ -2609,14 +2916,79 @@ function removeUntrackedProjectPath(targetDir, relPath, skipped, options = {}) {
     skipped.push({ relPath: rel, reason: "git_tracked_preserved" });
     return false;
   }
+  const backup = backupProjectPathBeforeRemoval(targetDir, rel);
+  if (!backup) {
+    skipped.push({ relPath: rel, reason: "backup_failed_preserved" });
+    return false;
+  }
+  if (Array.isArray(options.backups)) {
+    options.backups.push({ relPath: rel, ...backup });
+  }
+  if (!safeProjectPathInfo(targetDir, rel)) {
+    skipped.push({ relPath: rel, reason: "unsafe_realpath_changed_preserved" });
+    return false;
+  }
   rmSync(absPath, { recursive: options.recursive !== false, force: true });
   return true;
+}
+
+function backupProjectPathBeforeRemoval(targetDir, relPath) {
+  const rel = normalizeDeployRelPath(relPath);
+  const source = resolve(targetDir, rel);
+  if (!safeProjectPathInfo(targetDir, rel)) return null;
+  try {
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+    const backupRoot = join(
+      targetDir,
+      ".meta-kim",
+      "backups",
+      "project-cleanup",
+      stamp,
+    );
+    const destination = join(backupRoot, rel);
+    if (!ensureSafeProjectDirectory(targetDir, dirname(destination))) return null;
+    cpSync(source, destination, { recursive: true });
+    const sourceHash = projectPathDigest(targetDir, rel);
+    const backupRelPath = normalizeDeployRelPath(relative(targetDir, destination));
+    const backupHash = projectPathDigest(targetDir, backupRelPath);
+    if (!sourceHash || sourceHash !== backupHash) {
+      rmSync(destination, { recursive: true, force: true });
+      return null;
+    }
+    return { backupRelPath, sourceHash, backupHash };
+  } catch {
+    return null;
+  }
+}
+
+function writeProjectFileWithVerifiedBackup(targetDir, relPath, content, backups = null) {
+  const rel = normalizeDeployRelPath(relPath);
+  const safePath = safeProjectPathInfo(targetDir, rel);
+  if (!safePath || !lstatSync(safePath.target).isFile()) return false;
+  const backup = backupProjectPathBeforeRemoval(targetDir, rel);
+  if (!backup) return false;
+  const tempPath = join(dirname(safePath.target), `.${Date.now()}-${process.pid}.meta-kim.tmp`);
+  try {
+    writeFileSync(tempPath, content);
+    if (!safeProjectPathInfo(targetDir, normalizeDeployRelPath(relative(targetDir, tempPath)))) {
+      unlinkSync(tempPath);
+      return false;
+    }
+    renameSync(tempPath, safePath.target);
+    if (Array.isArray(backups)) backups.push({ relPath: rel, ...backup });
+    return true;
+  } catch {
+    if (existsSync(tempPath)) unlinkSync(tempPath);
+    return false;
+  }
 }
 
 function pruneEmptyProjectDirs(targetDir, relPath, removedDirs = null) {
   let currentDir = dirname(join(targetDir, normalizeDeployRelPath(relPath)));
   const root = resolve(targetDir);
   while (currentDir !== root && isPathInsideDir(currentDir, root)) {
+    const currentRel = normalizeDeployRelPath(relative(targetDir, currentDir));
+    if (!safeProjectPathInfo(targetDir, currentRel)) return;
     let entries = [];
     try {
       entries = readdirSync(currentDir);
@@ -2640,12 +3012,20 @@ function removeStaleManagedProjectAssets(
   options = {},
 ) {
   const removeCurrentManaged = options.removeCurrentManaged === true;
+  const preserveRelPaths = new Set(
+    (options.preserveRelPaths ?? [])
+      .map((relPath) => normalizeDeployRelPath(relPath))
+      .filter(Boolean),
+  );
+  const protectedPaths = loadProtectedProjectCapabilityPaths(targetDir, PROJECT_DIR);
+  for (const relPath of protectedPaths.relativePaths) preserveRelPaths.add(relPath);
   const currentRelPaths = new Set(
     currentFilePlans.map((file) => normalizeDeployRelPath(file.relPath)).filter(Boolean),
   );
   const previousRelPaths = previousProjectManagedRelPaths(targetDir);
   const removed = [];
   const skipped = [];
+  const backups = [];
   const root = resolve(targetDir);
 
   // cleanupProjectRedundancyDirs (removeCurrentManaged) must delete every
@@ -2658,6 +3038,10 @@ function removeStaleManagedProjectAssets(
     ? Array.from(new Set([...previousRelPaths, ...currentRelPaths]))
     : Array.from(previousRelPaths);
   for (const relPath of cleanupSources) {
+    if (
+      preserveRelPaths.has(relPath) ||
+      protectedProjectCapabilityIntersects(relPath, protectedPaths)
+    ) continue;
     if (!removeCurrentManaged && currentRelPaths.has(relPath)) continue;
     if (!isProjectLocalCapabilityAsset(relPath)) continue;
     const absPath = resolve(targetDir, relPath);
@@ -2671,14 +3055,30 @@ function removeStaleManagedProjectAssets(
       skipped.push({ relPath, reason: "not_a_file" });
       continue;
     }
-    if (!removeUntrackedProjectPath(targetDir, relPath, skipped, { recursive: false })) {
+    const proof = projectRemovalProof(targetDir, relPath);
+    if (!proof) {
+      skipped.push({
+        relPath,
+        reason: projectRemovalUnprovenReason(
+          targetDir,
+          relPath,
+          "ownership_or_hash_unproven_preserved",
+        ),
+      });
+      continue;
+    }
+    if (!removeUntrackedProjectPath(targetDir, relPath, skipped, {
+      recursive: false,
+      backup: true,
+      backups,
+    })) {
       continue;
     }
     removed.push(relPath);
     pruneEmptyProjectDirs(targetDir, relPath);
   }
 
-  return { removed, skipped };
+  return { removed, skipped, backups };
 }
 
 const LEGACY_PROJECT_CAPABILITY_RELS_BY_PLATFORM = {
@@ -2701,13 +3101,6 @@ const LEGACY_PROJECT_CAPABILITY_RELS_BY_PLATFORM = {
   ],
 };
 
-function mergeProjectCleanupResults(...cleanups) {
-  return {
-    removed: cleanups.flatMap((cleanup) => cleanup?.removed ?? []),
-    skipped: cleanups.flatMap((cleanup) => cleanup?.skipped ?? []),
-  };
-}
-
 function legacyProjectCapabilityRelPaths(activeTargets) {
   const targets = activeTargets.includes("all")
     ? Object.keys(LEGACY_PROJECT_CAPABILITY_RELS_BY_PLATFORM)
@@ -2724,6 +3117,7 @@ function legacyProjectCapabilityRelPaths(activeTargets) {
 function removeLegacyProjectCapabilityEntrypoints(targetDir, activeTargets) {
   const removed = [];
   const skipped = [];
+  const backups = [];
   const root = resolve(targetDir);
 
   for (const relPath of legacyProjectCapabilityRelPaths(activeTargets)) {
@@ -2734,12 +3128,27 @@ function removeLegacyProjectCapabilityEntrypoints(targetDir, activeTargets) {
       continue;
     }
     if (!existsSync(absPath)) continue;
-    if (!removeUntrackedProjectPath(targetDir, rel, skipped)) continue;
+    const proof = projectRemovalProof(targetDir, rel);
+    if (!proof) {
+      skipped.push({
+        relPath: rel,
+        reason: projectRemovalUnprovenReason(
+          targetDir,
+          rel,
+          "legacy_ownership_unproven_preserved",
+        ),
+      });
+      continue;
+    }
+    if (!removeUntrackedProjectPath(targetDir, rel, skipped, {
+      backup: true,
+      backups,
+    })) continue;
     removed.push(rel);
     pruneEmptyProjectDirs(targetDir, rel);
   }
 
-  return { removed, skipped };
+  return { removed, skipped, backups };
 }
 
 const GLOBAL_CLEANUP_PROJECT_CAPABILITY_ROOTS_BY_PLATFORM = {
@@ -2783,6 +3192,16 @@ function removeGlobalProjectCapabilityRoots(targetDir, activeTargets) {
       continue;
     }
     if (!existsSync(absPath)) continue;
+    const entries = statSync(absPath).isDirectory() ? readdirSync(absPath) : [rel];
+    if (entries.length > 0) {
+      const hasManagedChildren = [...previousProjectManagedRelPaths(targetDir)].some(
+        (managedRel) => managedRel === rel || managedRel.startsWith(`${rel}/`),
+      );
+      if (!hasManagedChildren) {
+        skipped.push({ relPath: rel, reason: "unproven_same_name_content_preserved" });
+      }
+      continue;
+    }
     if (!removeUntrackedProjectPath(targetDir, rel, skipped)) continue;
     removed.push(rel);
     pruneEmptyProjectDirs(targetDir, rel);
@@ -2793,7 +3212,7 @@ function removeGlobalProjectCapabilityRoots(targetDir, activeTargets) {
 
 function expandedCleanupTargets(activeTargets) {
   return activeTargets.includes("all")
-    ? ["claude", "codex", "cursor", "openclaw"]
+    ? RUNTIME_CHOICES.map(({ id }) => id)
     : activeTargets;
 }
 
@@ -2821,14 +3240,46 @@ function isMetaKimGeneratedSkillDirectory(dirPath) {
   return markerRe.test(raw);
 }
 
+function projectDirectoryRemovalProof(targetDir, relPath) {
+  const rel = normalizeDeployRelPath(relPath);
+  const safePath = safeProjectPathInfo(targetDir, rel);
+  if (!safePath || !lstatSync(safePath.target).isDirectory()) return null;
+  const absPath = safePath.target;
+  const manifestRelPaths = [...previousProjectManagedRelPaths(targetDir)].filter(
+    (managedRel) => managedRel === rel || managedRel.startsWith(`${rel}/`),
+  );
+  const currentFiles = [];
+  const visit = (dirPath) => {
+    for (const entry of readdirSync(dirPath, { withFileTypes: true })) {
+      const entryPath = join(dirPath, entry.name);
+      const entryRel = normalizeDeployRelPath(relative(targetDir, entryPath));
+      if (entry.isSymbolicLink() || !safeProjectPathInfo(targetDir, entryRel)) {
+        currentFiles.push(null);
+      } else if (entry.isDirectory()) visit(entryPath);
+      else if (entry.isFile()) {
+        currentFiles.push(entryRel);
+      } else currentFiles.push(null);
+    }
+  };
+  visit(absPath);
+  if (manifestRelPaths.length === 0) return null;
+  if (currentFiles.some((fileRel) => !fileRel || !projectRemovalProof(targetDir, fileRel))) return null;
+  return {
+    source: "manifest_directory",
+    managedFileCount: manifestRelPaths.length,
+    currentFileCount: currentFiles.length,
+  };
+}
+
 function removeMetaKimGeneratedProjectSkillResidue(targetDir, activeTargets) {
   const removed = [];
   const skipped = [];
+  const backups = [];
   const root = resolve(targetDir);
   for (const relRoot of targetValuesForPlatforms(PROJECT_SKILL_ROOTS_BY_PLATFORM, activeTargets)) {
     const absRoot = resolve(targetDir, relRoot);
-    if (!isPathInsideDir(absRoot, root)) {
-      skipped.push({ relPath: normalizeDeployRelPath(relRoot), reason: "outside_target_dir" });
+    if (!safeProjectPathInfo(targetDir, relRoot)) {
+      if (existsSync(absRoot)) skipped.push({ relPath: normalizeDeployRelPath(relRoot), reason: "unsafe_realpath_or_link_preserved" });
       continue;
     }
     if (!existsSync(absRoot)) continue;
@@ -2837,12 +3288,26 @@ function removeMetaKimGeneratedProjectSkillResidue(targetDir, activeTargets) {
       const absPath = join(absRoot, entry.name);
       const relPath = normalizeDeployRelPath(relative(targetDir, absPath));
       if (!isMetaKimGeneratedSkillDirectory(absPath)) continue;
-      if (!removeUntrackedProjectPath(targetDir, relPath, skipped)) continue;
+      if (isGitTrackedProjectPath(targetDir, relPath)) {
+        skipped.push({ relPath, reason: "git_tracked_preserved" });
+        continue;
+      }
+      if (!projectDirectoryRemovalProof(targetDir, relPath)) {
+        skipped.push({
+          relPath,
+          reason: "signature_only_ownership_unproven_preserved",
+        });
+        continue;
+      }
+      if (!removeUntrackedProjectPath(targetDir, relPath, skipped, {
+        backup: true,
+        backups,
+      })) continue;
       removed.push(relPath);
       pruneEmptyProjectDirs(targetDir, relPath);
     }
   }
-  return { removed, skipped };
+  return { removed, skipped, backups };
 }
 
 function directoryContainsFiles(dirPath) {
@@ -2863,41 +3328,60 @@ function isMetaKimOpenClawHookDirectory(dirPath) {
 function removeMetaKimOpenClawDirectoryResidue(targetDir, activeTargets) {
   const removed = [];
   const skipped = [];
+  const backups = [];
   if (!expandedCleanupTargets(activeTargets).includes("openclaw")) {
     return { removed, skipped };
   }
   const root = resolve(targetDir);
   const hookRoot = resolve(targetDir, "openclaw/hooks");
-  if (isPathInsideDir(hookRoot, root) && existsSync(hookRoot)) {
+  if (safeProjectPathInfo(targetDir, "openclaw/hooks") && existsSync(hookRoot)) {
     for (const entry of readdirSync(hookRoot, { withFileTypes: true })) {
       if (!entry.isDirectory()) continue;
       const absPath = join(hookRoot, entry.name);
       const relPath = normalizeDeployRelPath(relative(targetDir, absPath));
       if (!isMetaKimOpenClawHookDirectory(absPath)) continue;
-      if (!removeUntrackedProjectPath(targetDir, relPath, skipped)) continue;
+      if (isGitTrackedProjectPath(targetDir, relPath)) {
+        skipped.push({ relPath, reason: "git_tracked_preserved" });
+        continue;
+      }
+      if (!projectDirectoryRemovalProof(targetDir, relPath)) {
+        skipped.push({
+          relPath,
+          reason: "signature_only_ownership_unproven_preserved",
+        });
+        continue;
+      }
+      if (!removeUntrackedProjectPath(targetDir, relPath, skipped, {
+        backup: true,
+        backups,
+      })) continue;
       removed.push(relPath);
       pruneEmptyProjectDirs(targetDir, relPath);
     }
-  } else if (!isPathInsideDir(hookRoot, root)) {
-    skipped.push({ relPath: "openclaw/hooks", reason: "outside_target_dir" });
+  } else if (existsSync(hookRoot)) {
+    skipped.push({ relPath: "openclaw/hooks", reason: "unsafe_realpath_or_link_preserved" });
   }
 
   const workspaceRoot = resolve(targetDir, "openclaw/workspaces");
-  if (isPathInsideDir(workspaceRoot, root) && existsSync(workspaceRoot)) {
+  if (safeProjectPathInfo(targetDir, "openclaw/workspaces") && existsSync(workspaceRoot)) {
     for (const entry of readdirSync(workspaceRoot, { withFileTypes: true })) {
       if (!entry.isDirectory() || !entry.name.startsWith("meta-")) continue;
       const absPath = join(workspaceRoot, entry.name);
       const relPath = normalizeDeployRelPath(relative(targetDir, absPath));
       if (directoryContainsFiles(absPath)) continue;
+      if (!projectDirectoryRemovalProof(targetDir, relPath)) {
+        skipped.push({ relPath, reason: "ownership_unproven_empty_dir_preserved" });
+        continue;
+      }
       if (!removeUntrackedProjectPath(targetDir, relPath, skipped)) continue;
       removed.push(relPath);
       pruneEmptyProjectDirs(targetDir, relPath);
     }
-  } else if (!isPathInsideDir(workspaceRoot, root)) {
-    skipped.push({ relPath: "openclaw/workspaces", reason: "outside_target_dir" });
+  } else if (existsSync(workspaceRoot)) {
+    skipped.push({ relPath: "openclaw/workspaces", reason: "unsafe_realpath_or_link_preserved" });
   }
 
-  return { removed, skipped };
+  return { removed, skipped, backups };
 }
 
 function stripMetaKimMcpServersFromConfig(config = {}) {
@@ -3000,30 +3484,54 @@ function isGeneratedOnlyProjectConfig(targetDir, relPath, config, currentFilePla
   });
 }
 
-function cleanupRedundantProjectConfigs(targetDir, activeTargets, currentFilePlans = []) {
+function cleanupRedundantProjectConfigs(
+  targetDir,
+  activeTargets,
+  currentFilePlans = [],
+  options = {},
+) {
   const removed = [];
   const skipped = [];
+  const backups = [];
   const root = resolve(targetDir);
+  const preserveRelPaths = new Set(
+    (options.preserveRelPaths ?? [])
+      .map((relPath) => normalizeDeployRelPath(relPath))
+      .filter(Boolean),
+  );
   const relPaths = targetValuesForPlatforms(
     PROJECT_META_KIM_CONFIG_RELS_BY_PLATFORM,
     activeTargets,
   );
   for (const relPath of relPaths) {
     const rel = normalizeDeployRelPath(relPath);
+    if (preserveRelPaths.has(rel)) continue;
     const absPath = resolve(targetDir, rel);
     if (!isPathInsideDir(absPath, root)) {
       skipped.push({ relPath: rel, reason: "outside_target_dir" });
       continue;
     }
     if (!existsSync(absPath)) continue;
+    if (!safeProjectPathInfo(targetDir, rel)) {
+      skipped.push({ relPath: rel, reason: "unsafe_realpath_or_link_preserved" });
+      continue;
+    }
     const current = readJsonObjectIfExists(absPath);
     if (!current) continue;
     const stripped = stripMetaKimProjectConfig(rel, current);
+    const ownershipProof = projectRemovalProof(targetDir, rel);
+    if (!ownershipProof) {
+      skipped.push({
+        relPath: rel,
+        reason: projectRemovalUnprovenReason(targetDir, rel, "config_ownership_unproven_preserved"),
+      });
+      continue;
+    }
     const shouldDelete =
       isEmptyProjectConfigShell(stripped) ||
       isGeneratedOnlyProjectConfig(targetDir, rel, stripped, currentFilePlans);
     if (shouldDelete) {
-      if (!removeUntrackedProjectPath(targetDir, rel, skipped, { recursive: false })) {
+      if (!removeUntrackedProjectPath(targetDir, rel, skipped, { recursive: false, backups })) {
         continue;
       }
       removed.push(rel);
@@ -3035,11 +3543,17 @@ function cleanupRedundantProjectConfigs(targetDir, activeTargets, currentFilePla
         skipped.push({ relPath: rel, reason: "git_tracked_preserved" });
         continue;
       }
-      backupBeforeMerge(absPath, "pre-strip");
-      writeJsonObject(absPath, stripped);
+      if (!writeProjectFileWithVerifiedBackup(
+        targetDir,
+        rel,
+        JSON.stringify(stripped, null, 2) + "\n",
+        backups,
+      )) {
+        skipped.push({ relPath: rel, reason: "backup_or_atomic_write_failed_preserved" });
+      }
     }
   }
-  return { removed, skipped };
+  return { removed, skipped, backups };
 }
 
 function isMetaKimProjectTaskState(filePath) {
@@ -3047,9 +3561,21 @@ function isMetaKimProjectTaskState(filePath) {
   return raw.includes("auto-save from Stop hook") && raw.includes("meta_kim");
 }
 
-function removeMetaKimProjectLocalState(targetDir) {
+function isValidatedProjectBootstrapManifest(targetDir) {
+  const rel = ".meta-kim/state/default/project-bootstrap.json";
+  if (!safeProjectPathInfo(targetDir, rel)) return false;
+  const manifest = readProjectBootstrapManifest(targetDir);
+  if (manifest?.schemaVersion !== "meta-kim-project-bootstrap-v0.1") return false;
+  if (!Array.isArray(manifest.managedFiles) || manifest.managedFiles.length === 0) return false;
+  return manifest.managedFiles.every((entry) =>
+    typeof entry?.relPath === "string" && /^[a-f0-9]{64}$/iu.test(entry?.contentHash ?? ""),
+  );
+}
+
+function removeMetaKimProjectLocalState(targetDir, options = {}) {
   const removed = [];
   const skipped = [];
+  const backups = [];
   const root = resolve(targetDir);
   for (const relPath of PROJECT_META_KIM_LOCAL_STATE_RELS) {
     const rel = normalizeDeployRelPath(relPath);
@@ -3059,52 +3585,52 @@ function removeMetaKimProjectLocalState(targetDir) {
       continue;
     }
     if (!existsSync(absPath)) continue;
-    if (rel === ".claude/project-task-state.json" && !isMetaKimProjectTaskState(absPath)) {
-      skipped.push({ relPath: rel, reason: "local_state_not_meta_kim_signed" });
+    if (!safeProjectPathInfo(targetDir, rel)) {
+      skipped.push({ relPath: rel, reason: "unsafe_realpath_or_link_preserved" });
       continue;
     }
-    if (!removeUntrackedProjectPath(targetDir, rel, skipped)) continue;
+    if (
+      rel === ".meta-kim/state/default/project-bootstrap.json" &&
+      options.preserveManifest === true
+    ) {
+      skipped.push({
+        relPath: rel,
+        reason: "retryable_cleanup_pending_manifest_preserved",
+      });
+      continue;
+    }
+    if (
+      rel === ".claude/project-task-state.json" &&
+      (!isMetaKimProjectTaskState(absPath) || !projectRemovalProof(targetDir, rel))
+    ) {
+      skipped.push({ relPath: rel, reason: "local_state_ownership_unproven_preserved" });
+      continue;
+    }
+    if (
+      rel === ".meta-kim/state/default/project-bootstrap.json" &&
+      !isValidatedProjectBootstrapManifest(targetDir)
+    ) {
+      skipped.push({ relPath: rel, reason: "invalid_or_user_manifest_preserved" });
+      continue;
+    }
+    if (
+      rel === ".meta-kim/meta-kim-post-copy.mjs" &&
+      !projectRemovalProof(targetDir, rel)
+    ) {
+      skipped.push({ relPath: rel, reason: "local_state_ownership_unproven_preserved" });
+      continue;
+    }
+    if (!removeUntrackedProjectPath(targetDir, rel, skipped, { backups })) continue;
     removed.push(rel);
     pruneEmptyProjectDirs(targetDir, rel, removed);
   }
-  return { removed, skipped };
-}
-
-function pruneEmptyDirsPostOrder(absDir, targetRoot, removed, targetDir) {
-  if (!existsSync(absDir) || !isPathInsideDir(absDir, targetRoot)) return;
-  for (const entry of readdirSync(absDir, { withFileTypes: true })) {
-    if (!entry.isDirectory()) continue;
-    pruneEmptyDirsPostOrder(join(absDir, entry.name), targetRoot, removed, targetDir);
-  }
-  if (absDir === targetRoot) return;
-  const entries = readdirSync(absDir);
-  if (entries.length > 0) return;
-  rmSync(absDir, { recursive: true, force: true });
-  removed.push(normalizeDeployRelPath(relative(targetDir, absDir)));
+  return { removed, skipped, backups };
 }
 
 function pruneEmptyProjectRuntimeDirs(targetDir, activeTargets) {
-  const removed = [];
-  const skipped = [];
-  const root = resolve(targetDir);
-  const roots = [
-    ...targetValuesForPlatforms(PROJECT_SKILL_ROOTS_BY_PLATFORM, activeTargets),
-    ".agents",
-    ".claude",
-    ".codex",
-    "openclaw",
-    ".cursor",
-  ];
-  for (const relRoot of [...new Set(roots)]) {
-    const absRoot = resolve(targetDir, relRoot);
-    if (!isPathInsideDir(absRoot, root)) {
-      skipped.push({ relPath: normalizeDeployRelPath(relRoot), reason: "outside_target_dir" });
-      continue;
-    }
-    if (!existsSync(absRoot)) continue;
-    pruneEmptyDirsPostOrder(absRoot, root, removed, targetDir);
-  }
-  return { removed, skipped };
+  void targetDir;
+  void activeTargets;
+  return { removed: [], skipped: [] };
 }
 
 function stripStaleProjectHookConfigs(targetDir, currentFilePlans) {
@@ -3129,9 +3655,13 @@ function stripStaleProjectHookConfigs(targetDir, currentFilePlans) {
     const stripped = stripProjectMetaKimHooksFromHookConfig(current);
     if (jsonEquivalent(current, stripped)) continue;
     if (isGitTrackedProjectPath(targetDir, relPath)) continue;
-    backupBeforeMerge(configPath, "pre-strip-hooks");
-    writeJsonObject(configPath, stripped);
-    changed.push(relPath);
+    const result = writeProjectManagedTransaction(
+      targetDir,
+      relPath,
+      JSON.stringify(stripped, null, 2) + "\n",
+      "pre-strip-hooks",
+    );
+    if (result.ok) changed.push(relPath);
   }
 
   return changed;
@@ -3206,19 +3736,8 @@ function projectBootstrapStatus(targetDir, activeTargets, filePlans) {
     status,
     requiresConfirmation: status !== "ready",
     confirmationReason:
-      status === "ready"
-        ? "Project bootstrap manifest and project-specific files are current; no project write is needed."
-        : status === "conflict"
-          ? "Existing project files overlap Meta_Kim generated paths but are not known to be Meta_Kim-owned; resolve conflicts before apply."
-          : status === "stale"
-          ? "Existing project bootstrap manifest uses a different Meta_Kim version."
-          : status === "target_scope_changed"
-            ? "Selected runtime targets differ from the previous project bootstrap manifest."
-          : status === "missing"
-            ? "Project context/config/state or confirmed overrides are missing one or more required files."
-            : status === "repair_required"
-              ? "Project bootstrap version is current, but managed files need repair, merge, or recreation."
-              : "Project has existing or equivalent config but still needs a confirmed bootstrap to record state or apply pending changes.",
+      t.projectBootstrapConfirmationReasons?.[status] ??
+      t.projectBootstrapConfirmationReasons.ready_with_existing_config,
     metaKimVersion: version,
     targetDir,
     activeTargets,
@@ -3306,23 +3825,26 @@ function projectBootstrapWritePreview(targetDir, filePlans, state) {
   };
 }
 
+function projectBootstrapChoiceCopy() {
+  return PROJECT_BOOTSTRAP_CHOICE_COPY[currentLangCode] ?? PROJECT_BOOTSTRAP_CHOICE_COPY.en;
+}
 function buildProjectBootstrapChoiceSurface(state, writePreview) {
+  const copy = projectBootstrapChoiceCopy();
   if (!state.requiresConfirmation) {
     return {
       required: false,
       trigger: "no_choice_needed_current",
-      header: "Project ready",
-      question:
-        "Meta_Kim project bootstrap is already current for the selected targets. No project-specific files need to be written, and no confirmation popup should be shown.",
+      header: copy.readyHeader,
+      question: copy.readyQuestion,
       recommendedOptionId: "continue",
       options: [
         {
           id: "continue",
-          label: "Continue",
-          expectedResult: "Proceed with the governed run without project-specific bootstrap writes.",
-          advantage: "Avoids repeated prompts and leaves the project untouched.",
-          risk: "None for the current selected targets.",
-          verificationImpact: "Dry-run shows status=ready, requiresConfirmation=false, and zero project writes.",
+          label: copy.continueLabel,
+          expectedResult: copy.continueExpected,
+          advantage: copy.continueAdvantage,
+          risk: copy.continueRisk,
+          verificationImpact: copy.continueVerify,
         },
       ],
     };
@@ -3336,48 +3858,39 @@ function buildProjectBootstrapChoiceSurface(state, writePreview) {
   return {
     required: true,
     trigger: "runtime_native_choice_required_before_apply",
-    runtimeRequirement:
-      "Claude Code must use AskUserQuestion and Codex must use request_user_input before --apply. Compatibility runtimes may show a labeled chat decision card.",
-    header: "Project bootstrap",
+    runtimeRequirement: copy.runtimeRequirement,
+    header: copy.bootstrapHeader,
     question: [
-      `AI understanding: this directory needs Meta_Kim project-specific context/config/state or confirmed overrides for ${targetText}.`,
-      `AI additions: dry-run found ${state.status}; ${reason}`,
-      "Capability route: reuse global runtime capabilities first, then apply only project-specific context/config/state or confirmed overrides.",
-      `Candidate paths: ${
-        hasConflicts
-          ? "inspect and resolve conflicts, skip this project for now, or apply only after conflicts are resolved"
-          : "apply now, inspect only, or skip this project for now"
-      }. Pending project writes: ${pendingCount}; conflicts: ${conflictCount}; global writes: ${writePreview.globalWrites.length}.`,
+      copy.understanding(targetText),
+      copy.additions(state.status, reason),
+      copy.route,
+      copy.candidates(hasConflicts, pendingCount, conflictCount, writePreview.globalWrites.length),
     ].join("\n"),
     recommendedOptionId: hasConflicts ? "inspect_dry_run_only" : "apply_project_bootstrap",
     options: [
       {
         id: "apply_project_bootstrap",
-        label: hasConflicts ? "Apply after resolving conflicts" : "Apply project bootstrap (Recommended)",
-        expectedResult:
-          "Create or update the selected project-specific context/config/state or confirmed overrides, then write the project bootstrap manifest.",
-        advantage: "The next meta-theory trigger can proceed without asking again when files remain current.",
-        risk: hasConflicts
-          ? "Blocked until writePreview.projectConflicts is empty; Meta_Kim will not overwrite unknown user-owned files."
-          : "Touches project files listed in writePreview.projectWrites after backup/merge policy.",
-        verificationImpact:
-          "After apply, a second dry-run must report status=ready, requiresConfirmation=false, pending=0, and projectWrites=0.",
+        label: hasConflicts ? copy.applyBlocked : copy.apply,
+        expectedResult: copy.applyExpected,
+        advantage: copy.applyAdvantage,
+        risk: hasConflicts ? copy.applyBlockedRisk : copy.applyRisk,
+        verificationImpact: copy.applyVerify,
       },
       {
         id: "inspect_dry_run_only",
-        label: "Inspect only",
-        expectedResult: "Do not write files; keep the dry-run plan for human review.",
-        advantage: "Safest when the project owner wants to inspect generated files first.",
-        risk: "Meta_Kim can still reuse global capabilities, but project-specific context/config/state may remain stale for this directory.",
-        verificationImpact: "No manifest update is written; the next trigger will ask again if state is unchanged.",
+        label: copy.inspect,
+        expectedResult: copy.inspectExpected,
+        advantage: copy.inspectAdvantage,
+        risk: copy.inspectRisk,
+        verificationImpact: copy.inspectVerify,
       },
       {
         id: "skip_this_project",
-        label: "Skip project-local writes",
-        expectedResult: "Continue without applying Meta_Kim project-specific files.",
-        advantage: "Avoids changing a directory that should rely on global reusable capabilities only.",
-        risk: "Only global reusable capabilities remain available; project-specific overrides/config/state are not enabled.",
-        verificationImpact: "The run must not claim project-governed readiness for this directory.",
+        label: copy.skip,
+        expectedResult: copy.skipExpected,
+        advantage: copy.skipAdvantage,
+        risk: copy.skipRisk,
+        verificationImpact: copy.skipVerify,
       },
     ],
   };
@@ -3415,67 +3928,21 @@ function assertNoProjectBootstrapConflicts(plan) {
   );
 }
 
-function createProjectBootstrapBackup(targetDir, filePlans) {
-  const existing = filePlans.filter(
-    (plan) =>
+function projectBootstrapTransactionBackupDescriptor(filePlans) {
+  const entries = filePlans
+    .filter((plan) =>
       plan.action !== "skip" &&
       plan.effectiveAction !== "unchanged" &&
       plan.effectiveAction !== "conflict" &&
-      existsSync(join(targetDir, plan.relPath)),
-  );
-  if (existing.length === 0) {
-    return { created: false, fileCount: 0, entries: [] };
-  }
-  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-  const backupRoot = join(targetDir, ".meta-kim", "backups", "project-bootstrap", stamp);
-  const entries = [];
-  for (const plan of existing) {
-    const from = join(targetDir, plan.relPath);
-    const to = join(backupRoot, plan.relPath);
-    mkdirSync(dirname(to), { recursive: true });
-    cpSync(from, to);
-    entries.push({
-      relPath: plan.relPath,
-      mergePolicy: plan.mergePolicy,
-      backupRelPath: normalizeDeployRelPath(relative(targetDir, to)),
-    });
-  }
-  const manifest = {
-    schemaVersion: "meta-kim-project-bootstrap-backup-v0.1",
-    createdAt: new Date().toISOString(),
-    targetDir,
-    entries,
-  };
-  writeJsonObject(join(backupRoot, "backup-manifest.json"), manifest);
+      plan.exists)
+    .map((plan) => ({ relPath: plan.relPath, mergePolicy: plan.mergePolicy }));
   return {
-    created: true,
-    backupRoot,
-    backupRelPath: normalizeDeployRelPath(relative(targetDir, backupRoot)),
+    created: entries.length > 0,
+    managedByTransaction: true,
+    backupRootPattern: ".meta-kim/backups/project-bootstrap-transaction/project-bootstrap-apply-*",
     fileCount: entries.length,
     entries,
   };
-}
-
-function writeProjectBootstrapManifest(targetDir, plan, backup, cleanup = null) {
-  const manifestPath = projectBootstrapManifestPath(targetDir);
-  const manifest = {
-    schemaVersion: "meta-kim-project-bootstrap-v0.1",
-    appliedAt: new Date().toISOString(),
-    metaKimVersion: readPackageVersion(),
-    activeTargets: plan.state.activeTargets,
-    sourceChain: plan.sourceChain,
-    stateBeforeApply: plan.state,
-    protectedMergeDecisions: plan.decisions,
-    backup,
-    cleanup,
-    managedFiles: plan.files.filter(
-      (file) => file.action !== "skip" && file.effectiveAction !== "conflict",
-    ),
-    skippedFiles: plan.files.filter((file) => file.action === "skip"),
-  };
-  mkdirSync(dirname(manifestPath), { recursive: true });
-  writeJsonObject(manifestPath, manifest);
-  return manifestPath;
 }
 
 // Per-platform project-level hook directories. Mirrors RUNTIME_HOOK_CAPABILITIES
@@ -3491,6 +3958,12 @@ const PROJECT_HOOK_DIRS_BY_PLATFORM = {
 // whitelist (user-authored) are preserved.
 const PROJECT_HOOK_FILE_WHITELIST_BY_PLATFORM = {
   claude: new Set([
+    "project-root.mjs",
+    "utils.mjs",
+    "skip-reminder.mjs",
+    "spine-state-utils.mjs",
+    "spine-state-gates.mjs",
+    "spine-state.mjs",
     "activate-meta-theory-spine.mjs",
     "bash-readonly-whitelist.mjs",
     "block-dangerous-bash.mjs",
@@ -3502,7 +3975,6 @@ const PROJECT_HOOK_FILE_WHITELIST_BY_PLATFORM = {
     "post-format.mjs",
     "post-typecheck.mjs",
     "post-console-log-warn.mjs",
-    "skip-reminder.mjs",
     "subagent-context.mjs",
     "stop-compaction.mjs",
     "stop-memory-save.mjs",
@@ -3510,11 +3982,14 @@ const PROJECT_HOOK_FILE_WHITELIST_BY_PLATFORM = {
     "stop-completion-guard.mjs",
     "stop-save-progress.mjs",
     "stop-spine-cleanup.mjs",
-    "utils.mjs",
-    "spine-state.mjs",
-    "spine-state-utils.mjs",
   ]),
   codex: new Set([
+    "project-root.mjs",
+    "utils.mjs",
+    "skip-reminder.mjs",
+    "spine-state-utils.mjs",
+    "spine-state-gates.mjs",
+    "spine-state.mjs",
     "activate-meta-theory-spine.mjs",
     "bash-readonly-whitelist.mjs",
     "codex_hook_adapter.py",
@@ -3541,17 +4016,19 @@ const PROJECT_HOOK_FILE_WHITELIST_BY_PLATFORM = {
     "user-prompt-submit.sh",
     "permission_request.py",
     "resolve-plan-dir.sh",
-    "skip-reminder.mjs",
-    "spine-state.mjs",
-    "spine-state-utils.mjs",
     "stop-compaction.mjs",
     "stop-console-log-audit.mjs",
     "stop-completion-guard.mjs",
     "stop-spine-cleanup.mjs",
     "subagent-context.mjs",
-    "utils.mjs",
   ]),
   cursor: new Set([
+    "project-root.mjs",
+    "utils.mjs",
+    "skip-reminder.mjs",
+    "spine-state-utils.mjs",
+    "spine-state-gates.mjs",
+    "spine-state.mjs",
     "activate-meta-theory-spine.mjs",
     "bash-readonly-whitelist.mjs",
     "enforce-agent-dispatch.mjs",
@@ -3571,15 +4048,11 @@ const PROJECT_HOOK_FILE_WHITELIST_BY_PLATFORM = {
     "stop.sh",
     "user-prompt-submit.ps1",
     "user-prompt-submit.sh",
-    "skip-reminder.mjs",
-    "spine-state.mjs",
-    "spine-state-utils.mjs",
     "stop-compaction.mjs",
     "stop-console-log-audit.mjs",
     "stop-completion-guard.mjs",
     "stop-spine-cleanup.mjs",
     "subagent-context.mjs",
-    "utils.mjs",
   ]),
   openclaw: new Set([
     "stop-save-progress.mjs",
@@ -3591,11 +4064,19 @@ const PROJECT_HOOK_FILE_WHITELIST_BY_PLATFORM = {
 // whitelist, and emits a 4-locale progress message.
 async function migrateProjectMetaKimHooksForBootstrap(activeTargets, targetDir) {
   const platforms = Array.isArray(activeTargets) ? activeTargets : [];
+  const cleanup = { removed: [], skipped: [], backups: [] };
   for (const platform of platforms) {
     const relDir = PROJECT_HOOK_DIRS_BY_PLATFORM[platform];
     const whitelist = PROJECT_HOOK_FILE_WHITELIST_BY_PLATFORM[platform];
     if (!relDir || !whitelist) continue;
     const hooksDir = join(targetDir, relDir);
+    if (existsSync(hooksDir) && !safeProjectPathInfo(targetDir, relDir)) {
+      cleanup.skipped.push({
+        relPath: normalizeDeployRelPath(relDir),
+        reason: "unsafe_realpath_or_link_preserved",
+      });
+      continue;
+    }
     let entries;
     try {
       entries = readdirSync(hooksDir);
@@ -3612,19 +4093,38 @@ async function migrateProjectMetaKimHooksForBootstrap(activeTargets, targetDir) 
       }
       const relPath = normalizeDeployRelPath(join(relDir, name));
       const skipped = [];
-      if (!removeUntrackedProjectPath(targetDir, relPath, skipped, { recursive: false })) {
+      if (!safeProjectPathInfo(targetDir, relPath)) {
+        cleanup.skipped.push({
+          relPath,
+          reason: "unsafe_realpath_or_link_preserved",
+        });
         kept.push(name);
         continue;
       }
-      try {
-        removed.push(name);
-      } catch (error) {
-        if (error.code !== "ENOENT") {
-          warn(
-            `[Meta_Kim] Failed to remove ${platform} hook ${name}: ${error.message}`,
-          );
-        }
+      const proof = projectRemovalProof(targetDir, relPath);
+      if (!proof) {
+        cleanup.skipped.push({
+          relPath,
+          reason: projectRemovalUnprovenReason(
+            targetDir,
+            relPath,
+            "hook_ownership_unproven_preserved",
+          ),
+        });
+        kept.push(name);
+        continue;
       }
+      if (!removeUntrackedProjectPath(targetDir, relPath, skipped, {
+        recursive: false,
+        backup: true,
+        backups: cleanup.backups,
+      })) {
+        cleanup.skipped.push(...skipped);
+        kept.push(name);
+        continue;
+      }
+      removed.push(name);
+      cleanup.removed.push(relPath);
     }
     if (removed.length > 0) {
       if (!jsonOutputMode) {
@@ -3646,53 +4146,181 @@ async function migrateProjectMetaKimHooksForBootstrap(activeTargets, targetDir) 
       }
     }
   }
+  return cleanup;
 }
 
+const PROJECT_MUTATION_SESSION_LOCK_KEY = "project-mutation-session";
 async function applyProjectBootstrapToDir(activeTargets, targetDir) {
-  const legacyCleanup = removeLegacyProjectCapabilityEntrypoints(targetDir, activeTargets);
-  let plan = buildProjectBootstrapPlan(activeTargets, targetDir);
-  const cleanup = mergeProjectCleanupResults(
-    legacyCleanup,
-    removeStaleManagedProjectAssets(targetDir, plan.files),
-  );
-  const strippedHookConfigs = stripStaleProjectHookConfigs(targetDir, plan.files);
-  cleanup.strippedHookConfigs = strippedHookConfigs;
-  reportProjectAssetCleanup(cleanup, { reason: "project_retarget" });
-  if (cleanup.removed.length > 0 || strippedHookConfigs.length > 0) {
-    plan = buildProjectBootstrapPlan(activeTargets, targetDir);
+  if (!existsSync(targetDir)) {
+    if (!missingProjectTargetHasNoLinkedAncestor(targetDir)) {
+      throw new Error("Project bootstrap blocked: target path has an unsafe linked ancestor");
+    }
+    mkdirSync(targetDir, { recursive: true });
   }
+  if (!safeProjectPathInfo(targetDir, ".meta-kim", { allowMissing: true })) {
+    throw new Error("Project bootstrap blocked: unsafe .meta-kim path or Junction");
+  }
+  const session = await withSafeManagedFileLock(
+    {
+      trustedRoot: targetDir,
+      lockKey: PROJECT_MUTATION_SESSION_LOCK_KEY,
+    },
+    () => runProjectBootstrapApplyUnlocked(activeTargets, targetDir),
+  );
+  if (!session.ok) {
+    const error = new Error(
+      `Project bootstrap session blocked: ${session.reason ?? session.status}`,
+    );
+    error.status = "blocked";
+    error.repairAction = session.nextAction ??
+      "Wait for the active project operation to finish, then rerun project bootstrap dry-run before apply.";
+    throw error;
+  }
+  await joinProjectRegistry({
+    repoPath: targetDir,
+    runtimeFamily: "shared",
+    sourceType: "project_bootstrap",
+    sourceRef: "setup-project-bootstrap",
+  });
+  return session.value;
+}
+
+function projectBootstrapTransactionalPlan(plan, targetDir, backup) {
+  const operations = [];
+  const cleanup = { removed: [], skipped: [], backups: [], strippedHookConfigs: [] };
+  const currentRelPaths = new Set(plan.files.map((file) => file.relPath));
+  const protectedPaths = loadProtectedProjectCapabilityPaths(targetDir, PROJECT_DIR);
+  const hookConfigPaths = new Set([".claude/settings.json", ".codex/hooks.json", ".cursor/hooks.json"]);
+
+  for (const [relPath, previousEntry] of previousProjectManagedFileMap(targetDir)) {
+    if (currentRelPaths.has(relPath) || protectedProjectCapabilityIntersects(relPath, protectedPaths)) continue;
+    const info = safeProjectPathInfo(targetDir, relPath, { allowMissing: true });
+    if (!info) {
+      cleanup.skipped.push({ relPath, reason: "unsafe_realpath_or_link_preserved" });
+      continue;
+    }
+    if (!existsSync(info.target)) continue;
+    const currentHash = projectFileHash(info.target);
+    if (currentHash !== previousEntry.contentHash) {
+      cleanup.skipped.push({ relPath, reason: "manifest_hash_mismatch_preserved" });
+      continue;
+    }
+    if (hookConfigPaths.has(relPath)) {
+      const current = readJsonObjectIfExists(info.target);
+      if (!current) {
+        cleanup.skipped.push({ relPath, reason: "invalid_managed_config_preserved" });
+        continue;
+      }
+      const stripped = `${JSON.stringify(stripProjectMetaKimHooksFromHookConfig(current), null, 2)}\n`;
+      if (createHash("sha256").update(stripped).digest("hex") !== currentHash) {
+        operations.push({ kind: "write", phase: "content", relPath, content: stripped, expectedOldHash: currentHash });
+        cleanup.strippedHookConfigs.push(relPath);
+      }
+      continue;
+    }
+    if (!isProjectLocalCapabilityAsset(relPath)) continue;
+    operations.push({ kind: "remove", phase: "content", relPath, expectedOldHash: currentHash });
+    cleanup.removed.push(relPath);
+  }
+
+  for (const file of plan.files) {
+    if (["skip", "unchanged", "conflict"].includes(file.effectiveAction) || file.action === "skip") continue;
+    operations.push({
+      kind: "write",
+      phase: "content",
+      relPath: file.relPath,
+      content: file[PROJECT_PLAN_CONTENT],
+      expectedOldHash: file.currentHash,
+      allowManagedMissingCreate: true,
+    });
+  }
+
+  const manifest = {
+    schemaVersion: "meta-kim-project-bootstrap-v0.1",
+    appliedAt: new Date().toISOString(),
+    metaKimVersion: readPackageVersion(),
+    activeTargets: plan.state.activeTargets,
+    sourceChain: plan.sourceChain,
+    stateBeforeApply: plan.state,
+    protectedMergeDecisions: plan.decisions,
+    backup,
+    cleanup,
+    managedFiles: plan.files
+      .filter((file) => file.action !== "skip" && file.effectiveAction !== "conflict")
+      .map((file) => ({ ...file, contentHash: file.sourceHash ?? file.currentHash })),
+    skippedFiles: plan.files.filter((file) => file.action === "skip").map((file) => ({ ...file })),
+  };
+  const manifestRelPath = existingProjectProjectionUpdatePolicy().managedStateMarker;
+  operations.push({
+    kind: "write",
+    phase: "manifest",
+    relPath: manifestRelPath,
+    content: `${JSON.stringify(manifest, null, 2)}\n`,
+    expectedOldHash: projectFileHash(projectBootstrapManifestPath(targetDir)),
+    allowManagedMissingCreate: true,
+  });
+  return { operations, cleanup, manifest };
+}
+
+async function runProjectBootstrapApplyUnlocked(activeTargets, targetDir) {
+  const plan = buildProjectBootstrapPlan(activeTargets, targetDir);
+  // This is the last read-only gate. No backup, cleanup, strip, projection, or
+  // manifest write may happen before every file conflict is known.
   assertNoProjectBootstrapConflicts(plan);
-  if (plan.state.status === "ready") {
+  const currentRelPaths = new Set(plan.files.map((file) => file.relPath));
+  const hasStaleManifestEntries = [...previousProjectManagedFileMap(targetDir).keys()]
+    .some((relPath) => !currentRelPaths.has(relPath));
+  if (plan.state.status === "ready" && !hasStaleManifestEntries) {
     return {
       ...plan,
       mode: "apply",
       applied: false,
       noOp: true,
       backup: { created: false, fileCount: 0, entries: [] },
-      cleanup,
+      cleanup: { removed: [], skipped: [], backups: [], strippedHookConfigs: [] },
       manifestPath: projectBootstrapManifestPath(targetDir),
     };
   }
-  const backup = createProjectBootstrapBackup(targetDir, plan.files);
-  if (!existsSync(targetDir)) {
-    mkdirSync(targetDir, { recursive: true });
+  // Backups are created by the same journaled transaction as content and
+  // manifest commits. This descriptor is write-free and safe to embed in the
+  // manifest before the transaction chooses its nonce-specific backup path.
+  const backup = projectBootstrapTransactionBackupDescriptor(plan.files);
+  const transactionPlan = projectBootstrapTransactionalPlan(plan, targetDir, backup);
+  const transaction = executeSafeManagedFileTransaction({
+    trustedRoot: targetDir,
+    backupRoot: join(targetDir, ".meta-kim", "backups", "project-bootstrap-transaction"),
+    operations: transactionPlan.operations,
+    transactionLabel: "project-bootstrap-apply",
+    lockKey: "project-bootstrap-apply",
+  });
+  if (!transaction.ok) {
+    const error = new Error(`Project bootstrap transaction blocked: ${transaction.reason ?? transaction.status}`);
+    error.status = transaction.status === "rolled_back" ? "failed" : "blocked";
+    error.repairAction = transaction.nextAction;
+    throw error;
   }
-  for (const platformId of activeTargets) {
-    deployPlatformFiles(platformId, targetDir);
+  transactionPlan.cleanup.backups.push(...(transaction.backups ?? []));
+  for (const relPath of transactionPlan.cleanup.removed) {
+    pruneEmptyProjectDirs(targetDir, relPath);
   }
-  const manifestPath = writeProjectBootstrapManifest(targetDir, plan, backup, cleanup);
+  reportProjectAssetCleanup(transactionPlan.cleanup, { reason: "project_retarget" });
+  const manifestPath = projectBootstrapManifestPath(targetDir);
   const afterPlan = buildProjectBootstrapPlan(activeTargets, targetDir);
   return {
     ...afterPlan,
     mode: "apply",
     applied: true,
     backup,
-    cleanup,
+    cleanup: transactionPlan.cleanup,
+    transaction,
     manifestPath,
   };
 }
 
 function classifyProjectBootstrapError(error) {
+  if (error?.status === "blocked" || error?.status === "failed") {
+    return error.status;
+  }
   const msg = error?.message || String(error);
   return /EACCES|EPERM|permission|read-only|readonly|access denied/i.test(msg)
     ? "blocked"
@@ -3714,7 +4342,7 @@ function projectBootstrapFailureResult(targetDir, activeTargets, error) {
       status: classifyProjectBootstrapError(error),
       message,
       returnToStage: "Fetch",
-      repairAction:
+      repairAction: error?.repairAction ??
         "Fix target permissions or resolve the conflicting project file, then rerun project bootstrap dry-run before apply.",
     },
   };
@@ -3723,6 +4351,7 @@ function projectBootstrapFailureResult(targetDir, activeTargets, error) {
 function deployPlatformFiles(platformId, targetDir) {
   let fileCount = 0;
   const targetIsRepo = resolve(targetDir) === resolve(PROJECT_DIR);
+  const protectedPaths = loadProtectedProjectCapabilityPaths(targetDir, PROJECT_DIR);
   const copyIfExists = (srcRel, destRel) => {
     const src = join(PROJECT_DIR, srcRel);
     const dest = join(targetDir, destRel);
@@ -3740,16 +4369,23 @@ function deployPlatformFiles(platformId, targetDir) {
       fileCount += copyDirRecursive(src, dest, {
         sourceRoot: PROJECT_DIR,
         targetDir,
+        protectedPaths,
       });
     } else {
-      fileCount += copyProjectDeployFile(src, dest, relPath, targetDir);
+      fileCount += copyProjectDeployFile(
+        src,
+        dest,
+        relPath,
+        targetDir,
+        protectedPaths,
+      );
     }
   };
 
   for (const root of projectDeployRootsForPlatform(platformId)) {
     copyIfExists(root.srcRel, root.destRel);
   }
-  fileCount += writeProjectGeneratedHooks(platformId, targetDir);
+  fileCount += writeProjectGeneratedHooks(platformId, targetDir, protectedPaths);
   // Instruction files are governed by the project instruction policy, never by
   // blind copy. Skip when the target IS the Meta_Kim source repo (its own
   // AGENTS.md / CLAUDE.md are the maintainer guide source, not a projection).
@@ -3771,17 +4407,88 @@ function savedProjectDeployDirsFrom(overrides) {
   return uniqueProjectDeployDirs(overrides?.projectDeployDirs || []);
 }
 
+function callerProjectOverrides() {
+  return readJsonObjectIfExists(
+    join(CALLER_CWD, ".meta-kim", "local.overrides.json"),
+  ) ?? {};
+}
+
+async function existingManagedProjectDeployDirs() {
+  const policy = existingProjectProjectionUpdatePolicy();
+  const packageOverrides = await loadLocalOverrides();
+  const savedDirs = uniqueProjectDeployDirs([
+    ...savedProjectDeployDirsFrom(packageOverrides),
+    ...savedProjectDeployDirsFrom(callerProjectOverrides()),
+  ]);
+  const registryDirs = (await listJoinedProjectRegistryEntries()).map((entry) => entry.repoRoot);
+  const candidatesBySource = {
+    explicit_project_dirs: cliProjectDeployDirs.map((targetDir) => ({ targetDir, source: "explicit_project_dirs" })),
+    saved_project_dirs: [
+      ...savedDirs.map((targetDir) => ({ targetDir, source: "saved_project_dirs" })),
+      ...registryDirs.map((targetDir) => ({ targetDir, source: "project_registry" })),
+    ],
+    current_working_directory: [{ targetDir: CALLER_CWD, source: "current_working_directory" }],
+  };
+  const candidates = [];
+  const seen = new Set();
+  for (const candidate of policy.discoveryOrder.flatMap((source) => candidatesBySource[source] ?? [])) {
+    const targetDir = resolve(candidate.targetDir);
+    const key = isWin ? targetDir.replace(/\\/gu, "/").toLowerCase() : targetDir;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    candidates.push({ ...candidate, targetDir });
+  }
+
+  const resolution = resolveExistingManagedProjectCandidates(candidates, {
+    manifestRelPath: policy.managedStateMarker,
+  });
+  for (const deployment of resolution.deployments) {
+    if (deployment.source === "saved_project_dirs") {
+      await joinProjectRegistry({ repoPath: deployment.targetDir, runtimeFamily: "shared", sourceType: "project_bootstrap", sourceRef: "legacy-local-overrides" });
+    }
+  }
+  return resolution;
+}
+
+async function existingManagedProjectDeployments() {
+  return existingManagedProjectDeployDirs();
+}
+
+function reportRejectedManagedProjectTargets(rejected) {
+  if (!Array.isArray(rejected) || rejected.length === 0 || jsonOutputMode) return;
+  warn(t.managedProjectRejectedHeading(rejected.length));
+  for (const item of rejected) {
+    console.log(`${C.yellow}  • ${item.targetDir}${C.reset}`);
+    const source = t.managedProjectRejectedSources?.[item.source] ?? item.source;
+    const reason = t.managedProjectRejectedReasons?.[item.reason] ?? item.reason;
+    console.log(`${C.dim}    ${t.managedProjectRejectedDetail(source, reason)}${C.reset}`);
+  }
+  console.log(`${C.dim}${t.managedProjectRejectedRepair}${C.reset}`);
+}
+
 function projectDeployConfigDisplayPath() {
   return ".meta-kim/local.overrides.json";
 }
 
 async function saveProjectDeployDirs(dirs) {
   const normalized = uniqueProjectDeployDirs(dirs);
+  await assertProjectPersistentWriteBoundary(
+    normalized,
+    "saved project registration",
+  );
   const localOverrides = await loadLocalOverrides();
   await writeLocalOverrides({
     ...localOverrides,
     projectDeployDirs: normalized,
   });
+  for (const targetDir of normalized) {
+    await joinProjectRegistry({
+      repoPath: targetDir,
+      runtimeFamily: "shared",
+      sourceType: "project_bootstrap",
+      sourceRef: "setup-save-project-dirs",
+    });
+  }
   info(t.projectDeploySavedTargets(normalized.length));
   console.log(
     `${C.dim}${t.projectDeploySavedPathHint(projectDeployConfigDisplayPath())}${C.reset}`,
@@ -3879,7 +4586,7 @@ async function askDeployDirectory() {
   }
 
   if (silentMode) {
-    return [];
+    return uniqueProjectDeployDirs([CALLER_CWD]);
   }
 
   console.log(`${C.dim}${t.projectDeployProtectionNote}${C.reset}`);
@@ -4023,10 +4730,13 @@ function printProjectCleanupSummary(results) {
   if (!results.length) return;
   console.log(`${C.bold}${t.projectCleanupSummary}${C.reset}`);
   for (const result of results) {
-    const label =
-      result.status === "ok"
-        ? `${C.green}${t.projectDeployStatusOk}${C.reset}`
-        : `${C.red}${t.projectDeployStatusFailed}${C.reset}`;
+    const label = result.status === "ok"
+      ? `${C.green}${t.projectDeployStatusOk}${C.reset}`
+      : result.status === "partial"
+        ? `${C.yellow}${t.projectDeployStatusPartial}${C.reset}`
+        : result.status === "blocked"
+          ? `${C.red}${t.projectDeployStatusBlocked}${C.reset}`
+          : `${C.red}${t.projectDeployStatusFailed}${C.reset}`;
     console.log(`${C.dim}- ${result.dir}:${C.reset} ${label}`);
   }
   console.log("");
@@ -4052,16 +4762,45 @@ function cleanupProjectHookConfigs(activeTargets, targetDir) {
   if (platforms.has("cursor")) relPaths.push(".cursor/hooks.json");
 
   const changed = [];
+  const cleanup = { removed: [], skipped: [], backups: [] };
   for (const relPath of relPaths) {
     const configPath = join(targetDir, relPath);
     if (!existsSync(configPath)) continue;
+    if (!safeProjectPathInfo(targetDir, relPath)) {
+      cleanup.skipped.push({
+        relPath,
+        reason: "unsafe_realpath_or_link_preserved",
+      });
+      continue;
+    }
+    if (!projectRemovalProof(targetDir, relPath)) {
+      cleanup.skipped.push({
+        relPath,
+        reason: projectRemovalUnprovenReason(
+          targetDir,
+          relPath,
+          "config_ownership_unproven_preserved",
+        ),
+      });
+      continue;
+    }
     const current = readJsonObjectIfExists(configPath);
     if (!current) continue;
     const stripped = stripProjectMetaKimHooksFromHookConfig(current);
     if (jsonEquivalent(current, stripped)) continue;
     if (isGitTrackedProjectPath(targetDir, relPath)) continue;
-    backupBeforeMerge(configPath, "pre-strip-hooks");
-    writeJsonObject(configPath, stripped);
+    if (!writeProjectFileWithVerifiedBackup(
+      targetDir,
+      relPath,
+      JSON.stringify(stripped, null, 2) + "\n",
+      cleanup.backups,
+    )) {
+      cleanup.skipped.push({
+        relPath,
+        reason: "backup_or_atomic_write_failed_preserved",
+      });
+      continue;
+    }
     changed.push(relPath);
   }
 
@@ -4073,7 +4812,7 @@ function cleanupProjectHookConfigs(activeTargets, targetDir) {
         : `Removed Meta_Kim project hook references from: ${changed.join(", ")}`;
     info(message);
   }
-  return changed;
+  return { changed, cleanup };
 }
 
 async function cleanupProjectRedundancyDirs(activeTargets, targetDirs) {
@@ -4090,47 +4829,113 @@ async function cleanupProjectRedundancyDirs(activeTargets, targetDirs) {
   const results = [];
   for (const targetDir of dirs) {
     try {
-      await migrateProjectMetaKimHooksForBootstrap(activeTargets, targetDir);
-      const strippedHookConfigs = cleanupProjectHookConfigs(activeTargets, targetDir);
-      const legacyCleanup = removeLegacyProjectCapabilityEntrypoints(targetDir, activeTargets);
-      const plan = buildProjectBootstrapPlan(activeTargets, targetDir);
-      const capabilityRootCleanup = removeGlobalProjectCapabilityRoots(targetDir, activeTargets);
-      const generatedSkillCleanup = removeMetaKimGeneratedProjectSkillResidue(
-        targetDir,
-        activeTargets,
-      );
-      const openClawDirectoryCleanup = removeMetaKimOpenClawDirectoryResidue(
-        targetDir,
-        activeTargets,
-      );
-      const configCleanup = cleanupRedundantProjectConfigs(
-        targetDir,
-        activeTargets,
-        plan.files,
-      );
-      const instructionCleanup = removeRedundantProjectInstructionFiles(
-        targetDir,
-        activeTargets,
-      );
-      const localStateCleanup = removeMetaKimProjectLocalState(targetDir);
-      const emptyDirCleanup = pruneEmptyProjectRuntimeDirs(targetDir, activeTargets);
-      const cleanup = mergeProjectCleanupResults(
-        legacyCleanup,
-        capabilityRootCleanup,
-        generatedSkillCleanup,
-        openClawDirectoryCleanup,
-        configCleanup,
-        instructionCleanup,
-        removeStaleManagedProjectAssets(targetDir, plan.files, {
-          removeCurrentManaged: true,
-        }),
-        localStateCleanup,
-        emptyDirCleanup,
-      );
-      if (!jsonOutputMode) {
-        reportProjectAssetCleanup(cleanup, { reason: "global_redundancy" });
+      if (!existsSync(targetDir)) {
+        results.push({
+          dir: targetDir,
+          status: "ok",
+          cleanup: mergeProjectCleanupResults(),
+          strippedHookConfigs: [],
+          retryableIssues: [],
+        });
+        continue;
       }
-      results.push({ dir: targetDir, status: "ok", cleanup, strippedHookConfigs });
+      const session = await withSafeManagedFileLock(
+        {
+          trustedRoot: targetDir,
+          lockKey: PROJECT_MUTATION_SESSION_LOCK_KEY,
+        },
+        async () => {
+          const hookMigrationCleanup = await migrateProjectMetaKimHooksForBootstrap(
+            activeTargets,
+            targetDir,
+          );
+          const hookConfigResult = cleanupProjectHookConfigs(activeTargets, targetDir);
+          const strippedHookConfigs = hookConfigResult.changed;
+          const legacyCleanup = removeLegacyProjectCapabilityEntrypoints(targetDir, activeTargets);
+          const plan = buildProjectBootstrapPlan(activeTargets, targetDir);
+          const capabilityRootCleanup = removeGlobalProjectCapabilityRoots(targetDir, activeTargets);
+          const generatedSkillCleanup = removeMetaKimGeneratedProjectSkillResidue(
+            targetDir,
+            activeTargets,
+          );
+          const openClawDirectoryCleanup = removeMetaKimOpenClawDirectoryResidue(
+            targetDir,
+            activeTargets,
+          );
+          const configCleanup = cleanupRedundantProjectConfigs(
+            targetDir,
+            activeTargets,
+            plan.files,
+            { preserveRelPaths: strippedHookConfigs },
+          );
+          const instructionCleanup = removeRedundantProjectInstructionFiles(
+            targetDir,
+            activeTargets,
+          );
+          const staleManagedCleanup = removeStaleManagedProjectAssets(
+            targetDir,
+            plan.files,
+            {
+              removeCurrentManaged: true,
+              preserveRelPaths: strippedHookConfigs,
+            },
+          );
+          const cleanupBeforeLocalState = mergeProjectCleanupResults(
+            hookMigrationCleanup,
+            hookConfigResult.cleanup,
+            legacyCleanup,
+            capabilityRootCleanup,
+            generatedSkillCleanup,
+            openClawDirectoryCleanup,
+            configCleanup,
+            instructionCleanup,
+            staleManagedCleanup,
+          );
+          const retryableBeforeLocalState = projectCleanupRetryableIssues(
+            cleanupBeforeLocalState,
+          );
+          const localStateCleanup = removeMetaKimProjectLocalState(targetDir, {
+            preserveManifest: retryableBeforeLocalState.length > 0,
+          });
+          const emptyDirCleanup = pruneEmptyProjectRuntimeDirs(targetDir, activeTargets);
+          const cleanup = mergeProjectCleanupResults(
+            cleanupBeforeLocalState,
+            localStateCleanup,
+            emptyDirCleanup,
+          );
+          const retryableIssues = projectCleanupRetryableIssues(cleanup);
+          const status = projectCleanupStatus(cleanup);
+          if (!jsonOutputMode) {
+            reportProjectAssetCleanup(cleanup, { reason: "global_redundancy" });
+          }
+          return {
+            dir: targetDir,
+            status,
+            cleanup,
+            strippedHookConfigs,
+            retryableIssues,
+          };
+        },
+      );
+      if (!session.ok) {
+        const message = `Project cleanup session blocked: ${session.reason ?? session.status}`;
+        if (!jsonOutputMode) {
+          warn(t.projectDeployFailed(targetDir, message));
+        }
+        results.push({
+          dir: targetDir,
+          status: "blocked",
+          message,
+          repairAction: session.nextAction ??
+            "Wait for the active project operation to finish, then retry cleanup.",
+          retryableIssues: [{
+            reason: session.reason ?? session.status,
+            status: "blocked",
+          }],
+        });
+        continue;
+      }
+      results.push(session.value);
     } catch (error) {
       const msg = error?.message || String(error);
       if (!jsonOutputMode) {
@@ -4146,17 +4951,41 @@ async function cleanupProjectRedundancyDirs(activeTargets, targetDirs) {
 }
 
 async function copyToDeployDirs(activeTargets, targetDirs) {
-  const dirs = uniqueProjectDeployDirs(targetDirs);
-  if (dirs.length === 0) return [];
+  const deployments = [];
+  const seen = new Set();
+  for (const candidate of targetDirs) {
+    const targetDir = resolve(typeof candidate === "string" ? candidate : candidate.targetDir);
+    const key = process.platform === "win32" ? targetDir.toLowerCase() : targetDir;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    deployments.push({
+      targetDir,
+      activeTargets: typeof candidate === "string"
+        ? activeTargets
+        : normalizeTargets(candidate.activeTargets),
+    });
+  }
+  if (deployments.length === 0) return [];
+  await assertProjectPersistentWriteBoundary(
+    deployments.map((deployment) => deployment.targetDir),
+    "project deployment",
+  );
 
-  heading(t.projectDeployBatchHeading(dirs.length));
+  heading(t.projectDeployBatchHeading(deployments.length));
   console.log(`${C.dim}${t.projectDeployProtectionNote}${C.reset}`);
 
   const results = [];
-  for (const targetDir of dirs) {
+  for (const deployment of deployments) {
+    const { targetDir } = deployment;
     try {
-      const result = await copyToDeployDir(activeTargets, targetDir);
-      results.push({ dir: targetDir, status: "ok", manifestPath: result.manifestPath });
+      const result = await copyToDeployDir(deployment.activeTargets, targetDir);
+      results.push({
+        dir: targetDir,
+        activeTargets: deployment.activeTargets,
+        status: "ok",
+        manifestPath: result.manifestPath,
+        stateStatus: result.state?.status ?? "unknown",
+      });
     } catch (error) {
       const msg = error?.message || String(error);
       warn(t.projectDeployFailed(targetDir, msg));
@@ -4177,6 +5006,20 @@ async function copyToDeployDir(activeTargets, targetDir) {
   console.log(`${C.dim}  ${t.npxQuickCreating} ${targetDir}${C.reset}`);
 
   const bootstrapResult = await applyProjectBootstrapToDir(activeTargets, targetDir);
+  const normalizedTargets = normalizeTargets(activeTargets);
+  let graphifyHookRepair = { changed: false, count: 0, path: null };
+  if (normalizedTargets.includes("claude") || normalizedTargets.includes("all")) {
+    graphifyHookRepair = sanitizeGraphifyWindowsHooks(
+      join(targetDir, ".claude", "settings.json"),
+    );
+    if (graphifyHookRepair.changed) {
+      ok(t.graphifyHooksRepaired(
+        graphifyHookRepair.count,
+        targetDir,
+        graphifyHookRepair.backup,
+      ));
+    }
+  }
   quickDeployDir = quickDeployDir || targetDir;
   quickDeployDirs = uniqueProjectDeployDirs([...quickDeployDirs, targetDir]);
 
@@ -4184,7 +5027,7 @@ async function copyToDeployDir(activeTargets, targetDir) {
   console.log(`${C.dim}  ${targetDir}${C.reset}`);
   printPostCopyBootstrapHint();
   console.log("");
-  return bootstrapResult;
+  return { ...bootstrapResult, graphifyHookRepair };
 }
 
 async function runQuickDeploy() {
@@ -4255,8 +5098,12 @@ async function runQuickDeploy() {
       : {};
     const targets = platformId === "all" ? "claude" : platformId;
     const installResult = runNodeScript(
-      "scripts/install-global-skills-all-runtimes.mjs",
-      ["--targets", targets, "--skills", ""],
+      SETUP_NODE_CHILD.GLOBAL_SKILLS_INSTALLER,
+      buildGlobalSkillsInstallerArgs({
+        targets,
+        skillIds: [],
+        preferLocalDependencies,
+      }),
       proxyEnv,
     );
     return installResult.status === 0;
@@ -4265,7 +5112,7 @@ async function runQuickDeploy() {
   await withProgress(t.progressSyncMeta, () => {
     const targets = platformId === "all" ? "claude" : platformId;
     const syncResult = runNodeScript(
-      "scripts/sync-global-meta-theory.mjs",
+      SETUP_NODE_CHILD.GLOBAL_META_THEORY_SYNC,
       metaTheoryGlobalSyncArgs(targets),
     );
     return syncResult.status === 0;
@@ -4277,7 +5124,7 @@ async function runQuickDeploy() {
   printPostCopyBootstrapHint();
   console.log("");
 
-  showNextSteps(runtimes);
+  showNextSteps(runtimes, platformId === "all" ? detectedTargetIds(runtimes) : [platformId]);
 }
 
 // ── Install scope selection ─────────────────────────────
@@ -4287,11 +5134,24 @@ async function runQuickDeploy() {
  * Returns: 'project' | 'global'
  */
 async function askInstallScope() {
-  if (silentMode) return "global";
+  const scopeArgIndex = args.indexOf("--scope");
+  const explicitScope = scopeArgIndex >= 0 ? args[scopeArgIndex + 1] : null;
+  const configuredDefault = silentMode
+    ? DISTRIBUTION.installDefaults.silentScope
+    : DISTRIBUTION.installDefaults.interactiveScope;
+  if (explicitScope || silentMode) {
+    const selected = explicitScope || configuredDefault;
+    const pickedLabel =
+      selected === "project"
+        ? t.installScopeProjectLabel
+        : t.installScopeGlobalLabel;
+    info(t.selectedScope(pickedLabel));
+    return selected;
+  }
 
   heading(t.installScopeHeading);
 
-  const scopes = [
+  const scopeDefinitions = [
     {
       id: "global",
       label: t.installScopeGlobalLabel,
@@ -4303,6 +5163,10 @@ async function askInstallScope() {
       desc: t.installScopeProjectDesc,
     },
   ];
+  const scopes = [
+    ...scopeDefinitions.filter((scope) => scope.id === configuredDefault),
+    ...scopeDefinitions.filter((scope) => scope.id !== configuredDefault),
+  ];
 
   const idx = await keyboardSelect(
     t.installScopePrompt,
@@ -4312,7 +5176,7 @@ async function askInstallScope() {
     })),
   );
 
-  const selected = scopes[idx]?.id || "global";
+  const selected = scopes[idx]?.id || configuredDefault;
   const pickedLabel =
     {
       project: t.installScopeProjectLabel,
@@ -4451,7 +5315,7 @@ function openclawWorkspaceMdComplete(wsPath) {
   return OPENCLAW_WORKSPACE_MD.every((name) => existsSync(join(wsPath, name)));
 }
 
-function metaKimRuntimeNotice(mcpPath) {
+function metaKimRuntimeNotice(mcpPath, projectRoot = PROJECT_DIR) {
   if (!existsSync(mcpPath)) return null;
   try {
     const config = JSON.parse(readFileSync(mcpPath, "utf8"));
@@ -4467,7 +5331,7 @@ function metaKimRuntimeNotice(mcpPath) {
     }
     const resolvedScript = isAbsolute(scriptPath)
       ? scriptPath
-      : join(PROJECT_DIR, scriptPath);
+      : join(projectRoot, scriptPath);
     if (!existsSync(resolvedScript)) return t.mcpRuntimeProjectOnly(mcpPath);
     return null;
   } catch {
@@ -4477,21 +5341,22 @@ function metaKimRuntimeNotice(mcpPath) {
 
 function checkSync(
   runtimes,
-  repoTargets = ["claude", "codex", "openclaw", "cursor"],
+  repoTargets = RUNTIME_CHOICES.map(({ id }) => id),
+  projectRoot = PROJECT_DIR,
 ) {
   heading(t.syncHeading);
   let allOk = true;
 
   // --- Claude Code ---
   if (repoTargets.includes("claude")) {
-    const claudeAgentsDir = join(PROJECT_DIR, ".claude", "agents");
+    const claudeAgentsDir = join(projectRoot, ".claude", "agents");
     if (existsSync(claudeAgentsDir)) {
       const summary = summarizeExpectedFiles(
         readdirSync(claudeAgentsDir).filter((f) => f.endsWith(".md")),
         expectedAgentProjectionFiles(".md"),
       );
       if (summary.missing.length === 0)
-        ok(t.syncClaudeAgents(summary.presentCount));
+        ok(t.syncClaudeAgents(summary.presentCount, META_AGENTS.length));
       else {
         warn(
           t.syncPartial(
@@ -4508,7 +5373,7 @@ function checkSync(
     }
 
     const claudeSkillPath = join(
-      PROJECT_DIR,
+      projectRoot,
       ".claude",
       "skills",
       "meta-theory",
@@ -4522,17 +5387,17 @@ function checkSync(
 
     ok(t.syncClaudeProjectHooksMigrated);
 
-    if (existsSync(join(PROJECT_DIR, ".claude", "settings.json")))
+    if (existsSync(join(projectRoot, ".claude", "settings.json")))
       ok(t.syncClaudeSettings);
     else {
       warn(t.syncMissing(".claude/settings.json"));
       allOk = false;
     }
 
-    const claudeMcp = join(PROJECT_DIR, ".mcp.json");
+    const claudeMcp = join(projectRoot, ".mcp.json");
     if (existsSync(claudeMcp)) {
       ok(t.syncClaudeMcp);
-      const notice = metaKimRuntimeNotice(claudeMcp);
+      const notice = metaKimRuntimeNotice(claudeMcp, projectRoot);
       if (notice) warn(notice);
     } else {
       warn(t.syncMissing(".mcp.json"));
@@ -4543,7 +5408,7 @@ function checkSync(
   // --- Codex ---
   if (repoTargets.includes("codex")) {
     console.log("");
-    const codexAgentsDir = join(PROJECT_DIR, ".codex", "agents");
+    const codexAgentsDir = join(projectRoot, ".codex", "agents");
     const expectedCodexAgentFiles = expectedAgentProjectionFiles(".toml", [
       ...META_AGENTS,
       ...CODEX_RUNTIME_ADAPTER_AGENT_IDS,
@@ -4572,7 +5437,7 @@ function checkSync(
     }
 
     const codexSkillPath = join(
-      PROJECT_DIR,
+      projectRoot,
       ".agents",
       "skills",
       "meta-theory",
@@ -4589,7 +5454,7 @@ function checkSync(
   // --- OpenClaw ---
   if (repoTargets.includes("openclaw")) {
     console.log("");
-    const workspacesRoot = join(PROJECT_DIR, "openclaw", "workspaces");
+    const workspacesRoot = join(projectRoot, "openclaw", "workspaces");
     const wsDirs = existsSync(workspacesRoot)
       ? readdirSync(workspacesRoot, { withFileTypes: true })
           .filter((d) => d.isDirectory())
@@ -4604,7 +5469,7 @@ function checkSync(
       wsCount === META_AGENTS.length &&
       completeAgents === META_AGENTS.length
     ) {
-      ok(t.syncOpenclawWorkspaces(wsCount));
+      ok(t.syncOpenclawWorkspaces(wsCount, META_AGENTS.length));
     } else {
       warn(
         t.syncPartial(
@@ -4622,14 +5487,14 @@ function checkSync(
   // --- Cursor ---
   if (repoTargets.includes("cursor")) {
     console.log("");
-    const cursorAgentsDir = join(PROJECT_DIR, ".cursor", "agents");
+    const cursorAgentsDir = join(projectRoot, ".cursor", "agents");
     if (existsSync(cursorAgentsDir)) {
       const summary = summarizeExpectedFiles(
         readdirSync(cursorAgentsDir).filter((f) => f.endsWith(".md")),
         expectedAgentProjectionFiles(".md"),
       );
       if (summary.missing.length === 0)
-        ok(t.syncCursorAgents(summary.presentCount));
+        ok(t.syncCursorAgents(summary.presentCount, META_AGENTS.length));
       else {
         warn(
           t.syncPartial(
@@ -4646,7 +5511,7 @@ function checkSync(
     }
 
     const cursorSkillPath = join(
-      PROJECT_DIR,
+      projectRoot,
       ".cursor",
       "skills",
       "meta-theory",
@@ -4658,10 +5523,10 @@ function checkSync(
       allOk = false;
     }
 
-    const cursorMcp = join(PROJECT_DIR, ".cursor", "mcp.json");
+    const cursorMcp = join(projectRoot, ".cursor", "mcp.json");
     if (existsSync(cursorMcp)) {
       ok(t.syncCursorMcp);
-      const notice = metaKimRuntimeNotice(cursorMcp);
+      const notice = metaKimRuntimeNotice(cursorMcp, projectRoot);
       if (notice) warn(notice);
     } else {
       warn(t.syncMissing(".cursor/mcp.json"));
@@ -4757,9 +5622,7 @@ async function detectRuntimes() {
     console.log(`${C.dim}${t.noRuntimeHint1}${C.reset}`);
     console.log(
       `${C.dim}${fmt(t.noRuntimeHint2, {
-        claudeCodeDocs:
-          EXTERNAL_URLS.claudeCodeDocs ||
-          "https://docs.anthropic.com/en/docs/claude-code",
+        claudeCodeDocs: DISTRIBUTION.documentation.claudeCode,
       })}${C.reset}`,
     );
     console.log("");
@@ -4803,51 +5666,113 @@ async function selectActiveTargets(runtimes) {
   });
   info(t.savedActiveTargets(chosenTargets.join(", ")));
 
-  // Platform capability transparency: warn if Claude Code is not selected
-  const hasClaude = chosenTargets.includes("claude");
-  if (!hasClaude) {
-    console.log(`
-⚠  平台能力提示:
-   您选择的平台暂不支持以下功能:
-   • Hook 自动化 (PreToolUse/PostToolUse)
-   • Layer 1 Memory 自动激活
-   • CLI 快速命令 (npm run meta:xxx)
-
-   推荐: Claude Code 提供最完整的 Meta_Kim 体验。
-         https://docs.anthropic.com/claude-code
-`);
+  if (!chosenTargets.includes("claude")) {
+    console.log("");
+    info(t.selectedRuntimeCapabilityHeading);
+    for (const target of chosenTargets) {
+      const capability = t.selectedRuntimeCapabilities[target];
+      if (capability) console.log(`${C.dim}  • ${capability}${C.reset}`);
+    }
+    console.log(`${C.dim}  ${t.selectedRuntimeCapabilityBoundary}${C.reset}`);
+    console.log("");
   }
 
   return chosenTargets;
 }
 
-async function rememberProjectProjectionMode(mode) {
-  const localOverrides = await loadLocalOverrides();
-  await writeLocalOverrides({
-    ...localOverrides,
-    projectProjectionMode: mode,
-  });
+function rememberProjectProjectionMode(targetDirs) {
+  let ok = true;
+  for (const targetDir of uniqueProjectDeployDirs(targetDirs)) {
+    const relPath = ".meta-kim/local.overrides.json";
+    const current = readJsonObjectIfExists(join(targetDir, relPath)) ?? {};
+    const result = writeProjectManagedTransaction(
+      targetDir,
+      relPath,
+      `${JSON.stringify({ ...current, projectProjectionMode: "project" }, null, 2)}\n`,
+      "project-projection-mode",
+    );
+    if (!result.ok) ok = false;
+  }
+  return ok;
 }
 
-function runNodeScript(scriptRelative, extraArgs = [], envOverrides = {}) {
-  // Automatically pass --lang to child scripts
-  const langArgs = currentLangCode ? ["--lang", currentLangCode] : [];
-  const spawnConfig = buildNodeScriptSpawn(
+function runNodeScript(
+  childId,
+  extraArgs = [],
+  envOverrides = {},
+) {
+  const spawnConfig = buildSetupNodeChildSpawn(
     process.execPath,
     PROJECT_DIR,
-    scriptRelative,
+    childId,
     extraArgs,
-    langArgs,
+    currentLangCode,
   );
   const mergedOptions = {
     ...spawnConfig.options,
     env: {
       ...process.env,
       ...envOverrides,
+      META_KIM_VERSION: readPackageVersion(),
     },
   };
   return spawnSync(spawnConfig.command, spawnConfig.args, mergedOptions);
 }
+
+let executingStableProjectionPackage = null;
+const projectionPackageBoundary = createProjectionPackageBoundary({
+  packageRoot: PROJECT_DIR,
+  callerCwd: CALLER_CWD,
+  homeRoot: homedir(),
+  env: process.env,
+  managedProjectManifestRelPath:
+    existingProjectProjectionUpdatePolicy().managedStateMarker,
+  normalizeTargets,
+});
+
+function projectionPackageWriteBoundary() {
+  return executingStableProjectionPackage ??
+    projectionPackageBoundary.storeBoundary;
+}
+
+function projectPersistentWriteTargets(targetDirs) {
+  return (targetDirs ?? []).flatMap((candidate) => {
+    const targetDir = resolve(
+      typeof candidate === "string" ? candidate : candidate?.targetDir,
+    );
+    return [
+      targetDir,
+      join(targetDir, ".meta-kim"),
+      join(targetDir, ".claude"),
+      join(targetDir, ".codex"),
+      join(targetDir, ".agents"),
+      join(targetDir, ".cursor"),
+      join(targetDir, "openclaw"),
+      join(targetDir, ".git"),
+      join(targetDir, "graphify-out"),
+    ];
+  });
+}
+
+async function assertProjectPersistentWriteBoundary(targetDirs, operation) {
+  return assertProjectionPackageWriteBoundary(
+    projectionPackageWriteBoundary(),
+    projectPersistentWriteTargets(targetDirs),
+    { operation },
+  );
+}
+
+async function writeLocalOverrides(nextOverrides) {
+  const findings = await projectionPackageWriteBoundaryFindings(
+    projectionPackageWriteBoundary(),
+    [localOverridesPath],
+  );
+  if (findings.length > 0) return false;
+  await persistLocalOverrides(nextOverrides);
+  return true;
+}
+
+let lastGlobalCapabilityInventoryResult = true;
 
 function refreshGlobalCapabilityInventory(activeTargets = []) {
   info(t.refreshGlobalCapabilityInventory);
@@ -4855,42 +5780,88 @@ function refreshGlobalCapabilityInventory(activeTargets = []) {
     Array.isArray(activeTargets) && activeTargets.length > 0
       ? ["--runtime-inventory-only", "--targets", activeTargets.join(",")]
       : ["--runtime-inventory-only"];
-  const result = runNodeScript("scripts/discover-global-capabilities.mjs", targetArgs, {
+  const result = runNodeScript(SETUP_NODE_CHILD.CAPABILITY_DISCOVERY, targetArgs, {
     META_KIM_LANG: currentLangCode,
   });
   if (result.status === 0) {
+    lastGlobalCapabilityInventoryResult = true;
     ok(t.globalCapabilityInventoryRefreshed);
     return true;
   }
+  lastGlobalCapabilityInventoryResult = false;
   warn(t.globalCapabilityInventoryFailed);
   return false;
 }
 
-function metaTheoryGlobalSyncArgs(targets, withGlobalHooks = false) {
-  const targetList = Array.isArray(targets) ? targets.join(",") : String(targets);
-  const syncArgs = ["--targets", targetList];
-  const hookTargets = targetList
-    .split(",")
-    .map((target) => target.trim())
-    .filter(Boolean);
-  if (
-    withGlobalHooks &&
-    hookTargets.some((target) => ["claude", "codex"].includes(target))
-  ) {
-    syncArgs.push("--with-global-hooks");
+async function refreshRuntimeExecutableBindings(activeTargets, installScope, deployDirs = []) {
+  const selected = activeTargets.filter((target) => ["claude", "codex"].includes(target));
+  if (selected.length === 0) return true;
+  try {
+    const roots = resolveSetupRuntimeLaunchInventoryRoots({
+      installScope,
+      deployments: deployDirs,
+      homeRoot: homedir(),
+      callerCwd: CALLER_CWD,
+    });
+    const profile = resolveProfileName(process.env.META_KIM_PROFILE);
+    await assertProjectionPackageWriteBoundary(
+      projectionPackageWriteBoundary(),
+      roots.map((root) => join(
+        root,
+        ".meta-kim",
+        "state",
+        profile,
+        "runtime-capability-producers",
+        "host-executable-bindings.json",
+      )),
+      { operation: "runtime executable inventory" },
+    );
+    recordSetupRuntimeExecutableBindings({
+      roots,
+      profile,
+      targets: selected,
+    });
+    return true;
+  } catch (error) {
+    warn(`Runtime executable binding failed: ${error.message}`);
+    return false;
   }
-  return syncArgs;
 }
 
-function nonClaudeGlobalRuntimeHookTargets(targets) {
-  const targetList = Array.isArray(targets)
-    ? targets
-    : String(targets || "")
-        .split(",")
-        .filter(Boolean);
-  return targetList.filter((target) =>
-    ["cursor", "openclaw"].includes(target),
-  );
+/**
+ * Re-record the setup runtime launch inventory on its own.
+ *
+ * A host CLI upgrade (`claude`, `codex`) changes the recorded executable
+ * identity, so `checkSelectedRuntimeLaunchInventories()` reports the binding as
+ * stale until it is re-recorded. Without this mode the only way to refresh it
+ * is a full install/update run, which also re-runs boot autostart projection —
+ * an unrelated system-level side effect. This mode writes the inventory and
+ * nothing else.
+ */
+async function runRebindRuntimeLaunchCli() {
+  return runRuntimeLaunchRebind({
+    argv: args,
+    nodeVersion: process.versions.node,
+    minimumNodeVersion: MIN_NODE_VERSION,
+    supportsNodeVersion: isSupportedNodeVersion,
+    refreshBindings: (targets, scope) =>
+      refreshRuntimeExecutableBindings(targets, scope, []),
+  });
+}
+
+function metaTheoryGlobalSyncArgs(targets, withGlobalHooks = false) {
+  return buildGlobalMetaTheorySyncArgs({ targets, withGlobalHooks });
+}
+
+function checkGlobalRuntimeSync(targets) {
+  const selectedTargets = [...new Set(targets)];
+  return runNodeScript(
+    SETUP_NODE_CHILD.GLOBAL_META_THEORY_SYNC,
+    [
+      ...metaTheoryGlobalSyncArgs(selectedTargets, setupWithGlobalHooks),
+      "--check",
+    ],
+  ).status === 0;
 }
 
 function formatRuntimeTargetLabels(targets) {
@@ -4898,15 +5869,42 @@ function formatRuntimeTargetLabels(targets) {
   return targets.map((target) => labels.get(target) || target).join(", ");
 }
 
-function syncNonClaudeGlobalRuntimeHooks(targets, withGlobalHooks = false) {
-  if (!withGlobalHooks) return true;
-  const hookTargets = nonClaudeGlobalRuntimeHookTargets(targets);
-  if (hookTargets.length === 0) return true;
-  const syncResult = runNodeScript("scripts/sync-runtimes.mjs", [
+function syncOwnedGlobalRuntimeAssets(
+  targets,
+  runtimeProfiles,
+  withGlobalHooks = false,
+) {
+  const selectedTargets = [];
+  const selectedAssetTypes = new Set();
+  for (const targetId of targets) {
+    const profile = runtimeProfiles[targetId];
+    if (!profile) {
+      throw new Error(`Missing runtime profile for selected target: ${targetId}`);
+    }
+    let targetSelected = false;
+    for (const assetType of profile.projection.assetTypes) {
+      if (assetType === "hooks" && !withGlobalHooks) continue;
+      if (
+        globalProjectionIsOwnedBy(
+          profile,
+          assetType,
+          GLOBAL_PROJECTION_OWNER_SYNC_RUNTIMES,
+        )
+      ) {
+        selectedAssetTypes.add(assetType);
+        targetSelected = true;
+      }
+    }
+    if (targetSelected) selectedTargets.push(targetId);
+  }
+  if (selectedTargets.length === 0 || selectedAssetTypes.size === 0) return true;
+  const syncResult = runNodeScript(SETUP_NODE_CHILD.RUNTIME_SYNC, [
     "--scope",
     "global",
     "--targets",
-    hookTargets.join(","),
+    selectedTargets.join(","),
+    "--global-assets",
+    [...selectedAssetTypes].sort().join(","),
   ]);
   return syncResult.status === 0;
 }
@@ -4942,8 +5940,7 @@ function checkGlobalHooksCompleteness(hooksDir) {
 }
 
 // Migrate the global Meta_Kim hooks dir: back up + remove files that no
-// longer match the canonical whitelist (e.g. legacy spine-state.mjs), and
-// user-authored files (anything not on the whitelist) are preserved.
+// longer match the canonical whitelist, while preserving user-authored files.
 async function migrateGlobalMetaKimHooksDir(hooksDir) {
   const result = { removed: [], kept: [], backupDir: null, status: "noop" };
   if (!existsSync(hooksDir)) return result;
@@ -5083,7 +6080,7 @@ async function autoConfigure(installScope = "project", activeTargets = []) {
   if (activeTargets.length > 0) {
     syncArgs.push("--targets", activeTargets.join(","));
   }
-  const syncResult = runNodeScript("scripts/sync-runtimes.mjs", syncArgs);
+  const syncResult = runNodeScript(SETUP_NODE_CHILD.RUNTIME_SYNC, syncArgs);
   if (syncResult.status === 0) {
     ok(t.okRepoSynced);
     return true;
@@ -5142,7 +6139,7 @@ function installSkill(skill) {
 
   if (skill.subdir) return installSkillFromSubdir(skill, target, proxy);
 
-  const url = `https://github.com/${skill.repo}.git`;
+  const url = skill.repoUrl;
   const cloneResult = run(
     `git ${proxy} clone --depth 1 "${url}" "${target}"`.trim(),
   );
@@ -5155,7 +6152,7 @@ function installSkill(skill) {
 }
 
 function installSkillFromSubdir(skill, target, proxy) {
-  const url = `https://github.com/${skill.repo}.git`;
+  const url = skill.repoUrl;
   const tmp = join(tmpdir(), `meta-kim-skill-${Date.now()}`);
   try {
     const cloneResult = run(
@@ -5226,26 +6223,6 @@ const GRAPHIFY_PLATFORM_MAP = {
   openclaw: "claw",
   cursor: "cursor",
 };
-
-const GRAPHIFY_GUIDE_TARGETS = {
-  claude: "CLAUDE.md",
-  codex: "AGENTS.md",
-  claw: "AGENTS.md",
-  opencode: "AGENTS.md",
-  aider: "AGENTS.md",
-  droid: "AGENTS.md",
-  trae: "AGENTS.md",
-  "trae-cn": "AGENTS.md",
-};
-
-function guideAlreadyHasGraphifySection(platform, baseDir = PROJECT_DIR) {
-  const target = GRAPHIFY_GUIDE_TARGETS[platform];
-  if (!target) return false;
-  const filePath = join(baseDir, target);
-  if (!existsSync(filePath)) return false;
-  const content = readFileSync(filePath, "utf8");
-  return /^##\s+graphify\b/im.test(content);
-}
 
 function expandGraphifyTargets(activeTargets) {
   const targets = Array.isArray(activeTargets) ? activeTargets : [activeTargets];
@@ -5340,6 +6317,15 @@ async function installPythonTools(
   heading(t.stepPythonTools);
   const projectWiring = options.projectWiring !== false;
   const graphifyDir = resolve(targetDir);
+  await assertProjectPersistentWriteBoundary(
+    [graphifyDir],
+    "Graphify project integration",
+  );
+  await assertProjectionPackageWriteBoundary(
+    projectionPackageWriteBoundary(),
+    [join(homedir(), ".claude", "settings.json")],
+    { operation: "Graphify user Hook reconciliation" },
+  );
   let python = checkPython310();
   if (!python) {
     python = await downloadAndInstallPython();
@@ -5397,10 +6383,33 @@ async function installPythonTools(
   // Ensure networkx >= 3.4 for louvain_communities(max_level) compatibility
   ensureNetworkxCompatibility(python);
 
+  // Relocate only Graphify hooks that already exist. This also repairs a
+  // stale user-level Claude hook during global-only install/update without
+  // creating a new global hook.
+  const graphifyExecutable = resolveGraphifyExecutable(python, spawnSync);
+  if (platform() === "win32" && graphifyExecutable) {
+    const reconciliation = reconcileExistingGraphifyWindowsHooks(
+      [
+        join(graphifyDir, ".claude", "settings.json"),
+        join(homedir(), ".claude", "settings.json"),
+      ],
+      graphifyExecutable,
+    );
+    for (const sanitized of reconciliation) {
+      if (sanitized.changed) {
+        ok(
+          `Rewrote ${sanitized.count} graphify hook command(s) to direct-spawn form (backup: ${sanitized.backup})`,
+        );
+      }
+    }
+  }
+
   if (!projectWiring) {
     skip(t.graphifyProjectWiringSkipped);
     return true;
   }
+
+  let wiringOk = true;
 
   // Idempotent wiring: register graphify skill for each active target + git hooks once.
   // git hooks are cross-platform (commit/checkout trigger), install once.
@@ -5421,6 +6430,7 @@ async function installPythonTools(
     if (hookResult.status === 0) {
       ok(t.graphifyHookInstalled);
     } else {
+      wiringOk = false;
       warn(t.graphifyHookFailed);
       const hookStdout = readProcessText(hookResult);
       const hookStderr = (hookResult.stderr || "").toString().trim();
@@ -5442,10 +6452,6 @@ async function installPythonTools(
   for (const target of expandGraphifyTargets(activeTargets)) {
     const platform = GRAPHIFY_PLATFORM_MAP[target];
     if (!platform) continue;
-    if (guideAlreadyHasGraphifySection(platform, graphifyDir)) {
-      skip(t.graphifySkillSkippedGuideExists(platform));
-      continue;
-    }
     info(t.graphifySkillRegistering(platform));
     const skillResult = runPythonModule(
       python,
@@ -5456,7 +6462,23 @@ async function installPythonTools(
     if (skillResult.status === 0) {
       ok(t.graphifySkillRegistered(platform));
     } else {
+      wiringOk = false;
       warn(t.graphifySkillFailed(platform));
+    }
+  }
+
+  // graphify's upstream installer writes Windows shell-form hook commands that
+  // Git Bash mangles; rewrite them to direct-spawn form after every graphify
+  // install/upgrade so the hook is executable on Windows.
+  if (platform() === "win32" && graphifyExecutable) {
+    const sanitized = sanitizeGraphifyWindowsHooks(
+      join(graphifyDir, ".claude", "settings.json"),
+      { graphifyExecutable },
+    );
+    if (sanitized.changed) {
+      ok(
+        `Rewrote ${sanitized.count} graphify hook command(s) to direct-spawn form (backup: ${sanitized.backup})`,
+      );
     }
   }
 
@@ -5468,7 +6490,7 @@ async function installPythonTools(
   );
   if (rebuildResult.status === 0) {
     ok(t.graphifyCodeGraphGenerated);
-    return true;
+    return wiringOk;
   } else {
     warn(t.graphifyCodeGraphGenerationFailed);
     const rebuildOutput = readProcessText(rebuildResult);
@@ -5504,6 +6526,8 @@ function probePythonLauncher(command, args, spawnFn = spawnSync) {
     const result = spawnFn(command, [...args, "--version"], {
       encoding: "utf8",
       shell: false,
+      windowsHide: true,
+      timeout: MCP_MEMORY_SUBPROCESS_TIMEOUT_MS,
     });
     if (result?.error || result?.status !== 0) return null;
     const versionText = readProcessText(result);
@@ -5566,7 +6590,13 @@ function createMemoryServiceVenv(sourceLauncher, venvDir, spawnFn = spawnSync) {
     const result = spawnFn(
       sourceLauncher.command,
       [...sourceLauncher.args, "-m", "venv", venvDir],
-      { encoding: "utf8", shell: false, stdio: "inherit" },
+      {
+        encoding: "utf8",
+        shell: false,
+        windowsHide: true,
+        timeout: MCP_MEMORY_SUBPROCESS_TIMEOUT_MS,
+        stdio: "inherit",
+      },
     );
     if (result.status !== 0) return null;
 
@@ -5631,7 +6661,10 @@ function resolvePythonForMemoryService(detectedPython) {
   return { python: venvLauncher, venvCreated: true, venvDir };
 }
 
-async function runMcpMemoryHookInstaller(activeTargets = DEFAULT_TARGETS.map((target) => target.id)) {
+async function runMcpMemoryHookInstaller(
+  activeTargets = RUNTIME_CHOICES.map(({ id }) => id),
+  { allowClaudeGlobalSettings = false } = {},
+) {
   const hookScript = join(
     PROJECT_DIR,
     "scripts",
@@ -5639,7 +6672,7 @@ async function runMcpMemoryHookInstaller(activeTargets = DEFAULT_TARGETS.map((ta
   );
   if (!existsSync(hookScript)) {
     warn(`Hook installer missing: ${hookScript}`);
-    return;
+    return false;
   }
 
   const spawnDesc = buildNodeScriptSpawn(
@@ -5648,28 +6681,42 @@ async function runMcpMemoryHookInstaller(activeTargets = DEFAULT_TARGETS.map((ta
     "scripts/install-mcp-memory-hooks.mjs",
     ["--targets", activeTargets.join(",")],
   );
+  const childEnv =
+    allowClaudeGlobalSettings && activeTargets.includes("claude")
+      ? { ...process.env, META_KIM_CONFIRM_GLOBAL: "1" }
+      : undefined;
   let result;
-  await withProgress(t.mcpMemoryHookInstalling, async () => {
+  await withProgress(
+    t.mcpMemoryHookInstalling(formatRuntimeTargetLabels(activeTargets)),
+    async () => {
     result = spawnSync(spawnDesc.command, spawnDesc.args, {
       ...spawnDesc.options,
       stdio: ["ignore", "pipe", "pipe"],
       encoding: "utf8",
+      ...(childEnv ? { env: childEnv } : {}),
     });
-  });
+    },
+  );
 
   if (result.status === 0) {
     ok(t.mcpMemoryHookInstalled);
+    return true;
   } else {
     warn(t.mcpMemoryHookWarnings);
+    const stdoutText = (result.stdout || "").trim();
     const stderrText = (result.stderr || "").trim();
+    if (stdoutText) {
+      console.log(`${C.dim}${stdoutText}${C.reset}`);
+    }
     if (stderrText) {
       console.log(`${C.dim}${stderrText}${C.reset}`);
     }
+    return false;
   }
 }
 
 function checkMcpMemoryService(python) {
-  const result = runPythonModule(python, [
+  const result = runMcpMemoryPython(python, [
     "-m",
     "pip",
     "show",
@@ -5685,21 +6732,112 @@ function checkMcpMemoryService(python) {
   };
 }
 
-function findMemoryBinPath(resolved) {
+function activeMemoryRuntimeStatePath() {
+  return join(homedir(), ".meta-kim", "mcp-memory-active-runtime.json");
+}
+
+function mcpMemoryRuntimeConfigPath() {
+  return join(homedir(), ".meta-kim", "mcp-memory-runtime-config.json");
+}
+
+function readActiveMemoryRuntimeState() {
+  try {
+    return JSON.parse(readFileSync(activeMemoryRuntimeStatePath(), "utf8"));
+  } catch {
+    return null;
+  }
+}
+
+function mcpMemoryAuthorityPathKey(value) {
+  if (typeof value !== "string" || !isAbsolute(value)) return null;
+  const normalized = resolve(value).replace(/\\/gu, "/");
+  return platform() === "win32" ? normalized.toLowerCase() : normalized;
+}
+
+function readMcpMemoryManifestAuthority() {
+  let manifestPath;
+  try {
+    manifestPath = manifestPathFor("global");
+    const manifest = readManifest(manifestPath);
+    if (!manifest || manifest.scope !== "global") {
+      return { verified: false, reason: "runtime_manifest_missing_or_invalid" };
+    }
+    const descriptors = resolveMcpMemoryBootArtifactDescriptors({
+      homeRoot: homedir(),
+      platformName: platform(),
+    });
+    const entries = Array.isArray(manifest.entries) ? manifest.entries : [];
+    const complete = descriptors.every((descriptor) => {
+      const entry = entries.find((candidate) => (
+        mcpMemoryAuthorityPathKey(candidate?.path) === mcpMemoryAuthorityPathKey(descriptor.path) &&
+        isExactMcpMemoryBootManifestIdentity(candidate, {
+          homeRoot: homedir(),
+          platformName: platform(),
+        })
+      ));
+      return Boolean(entry && manifestFileEntryMatches(entry, descriptor.path));
+    });
+    return complete
+      ? { verified: true, manifestPath, entries }
+      : {
+          verified: false,
+          reason: "runtime_manifest_boot_chain_unverified",
+          manifestPath,
+          entries,
+        };
+  } catch {
+    return {
+      verified: false,
+      reason: "runtime_manifest_authority_unreadable",
+      manifestPath,
+    };
+  }
+}
+
+function readMcpMemoryRuntimeAuthority() {
+  return {
+    manifest: readMcpMemoryManifestAuthority(),
+    activeState: readActiveMemoryRuntimeState(),
+  };
+}
+
+function runMcpMemoryPython(python, moduleArgs, options = {}) {
+  return runPythonModule(python, moduleArgs, spawnSync, {
+    timeout: MCP_MEMORY_SUBPROCESS_TIMEOUT_MS,
+    ...options,
+  });
+}
+
+function writeActiveMemoryRuntimeState({ resolved, memoryBin, databasePath }) {
+  writeJsonAtomic(activeMemoryRuntimeStatePath(), {
+    schemaVersion: "meta-kim-mcp-memory-active-runtime-v1",
+    runtimeDir: resolved.venvDir ?? dirname(dirname(memoryBin)),
+    pythonPath: resolved.python?.command ?? resolved.python,
+    memoryBin,
+    databasePath,
+    activatedAt: new Date().toISOString(),
+  });
+  return true;
+}
+
+function findMemoryBinPath(resolved, { preferActive = true } = {}) {
   const plat = platform();
   const binName = plat === "win32" ? "memory.exe" : "memory";
+
+  if (preferActive) {
+    const active = readActiveMemoryRuntimeState();
+    if (active?.memoryBin && isAbsolute(active.memoryBin) && existsSync(active.memoryBin)) {
+      try {
+        return realpathSync(active.memoryBin);
+      } catch {}
+    }
+  }
 
   // Strategy 0: prefer the dedicated meta-kim memory venv that setup provisions
   // for this service. Resolving via resolved.python can land on an unrelated
   // system interpreter whose memory build lacks required native extensions
   // (e.g. SQLite-vec loadable extension support), which then fails to start
   // under --http. Always try the purpose-built venv first.
-  const venvMemoryBin =
-    plat === "win32"
-      ? join(homedir(), ".meta-kim", "memory-venv", "Scripts", binName)
-      : join(homedir(), ".meta-kim", "memory-venv", "bin", binName);
-  if (existsSync(venvMemoryBin)) return venvMemoryBin;
-
   // Strategy 1: resolve python executable, then check nearby directories
   let pythonCmd = resolved.python.command || resolved.python;
   if (
@@ -5709,10 +6847,9 @@ function findMemoryBinPath(resolved) {
   ) {
     try {
       const launcher = resolved.python;
-      const result = spawnSync(
-        launcher.command,
-        [...launcher.args, "-c", "import sys; print(sys.executable)"],
-        { encoding: "utf8", shell: false },
+      const result = runMcpMemoryPython(
+        launcher,
+        ["-c", "import sys; print(sys.executable)"],
       );
       if (result.status === 0 && result.stdout.trim()) {
         pythonCmd = result.stdout.trim();
@@ -5732,11 +6869,20 @@ function findMemoryBinPath(resolved) {
   const binDir = join(pythonDir, "..", "bin", binName);
   if (existsSync(binDir)) return resolve(binDir);
 
+  const venvMemoryBin =
+    plat === "win32"
+      ? join(homedir(), ".meta-kim", "memory-venv", "Scripts", binName)
+      : join(homedir(), ".meta-kim", "memory-venv", "bin", binName);
+  if (existsSync(venvMemoryBin)) return venvMemoryBin;
+
   // Strategy 2: search system PATH (handles cross-install pip --user case)
   const whichCmd = plat === "win32" ? "where" : "which";
   try {
-    const result = spawnCliSync(whichCmd, [binName], {
+    const result = spawnSync(whichCmd, [binName], {
       encoding: "utf8",
+      shell: false,
+      windowsHide: true,
+      timeout: MCP_MEMORY_SUBPROCESS_TIMEOUT_MS,
     });
     if (result.status === 0 && result.stdout.trim()) {
       const found = result.stdout.trim().split(/\r?\n/)[0];
@@ -5747,18 +6893,31 @@ function findMemoryBinPath(resolved) {
   return null;
 }
 
-function buildMcpMemoryServerConfig(resolved) {
-  const memoryBin = findMemoryBinPath(resolved);
+function buildMcpMemoryServerConfig(
+  resolved,
+  {
+    memoryBinOverride = null,
+    preferActive = true,
+    databasePathOverride = null,
+  } = {},
+) {
+  const memoryBin = memoryBinOverride ?? findMemoryBinPath(resolved, { preferActive });
+  const databasePath = resolveMcpMemoryDatabasePathWithRuntime(resolved.python, {
+    preferredPath: databasePathOverride ?? readActiveMemoryRuntimeState()?.databasePath ?? null,
+  });
+  if (!databasePath) throw new Error("MCP Memory database path could not be runtime-verified");
   if (memoryBin) {
     return {
       command: memoryBin,
       args: ["server"],
+      env: { MCP_MEMORY_SQLITE_PATH: databasePath },
     };
   }
   const python = resolved.python;
   return {
     command: python.command,
     args: [...python.args, "-m", "mcp_memory_service.server"],
+    env: { MCP_MEMORY_SQLITE_PATH: databasePath },
   };
 }
 
@@ -5770,133 +6929,303 @@ function isLegacyMcpMemoryServerConfig(config) {
   );
 }
 
-function stopMcpMemoryService() {
-  const plat = platform();
+function registerMcpMemoryServer({
+  mcpPath,
+  memoryServerConfig,
+  fileExists = existsSync,
+  readText = readFileSync,
+  writeText = writeFileSync,
+  isLegacy = isLegacyMcpMemoryServerConfig,
+  onRegistered = () => {},
+  onExisting = () => {},
+  onFailure = () => {},
+}) {
   try {
-    if (plat === "win32") {
-      execSync("taskkill /F /IM memory.exe", { stdio: "pipe" });
-    } else if (plat === "darwin") {
-      try {
-        execSync(
-          "launchctl unload ~/Library/LaunchAgents/com.meta-kim.mcp-memory-service.plist 2>/dev/null",
-          { stdio: "pipe" },
-        );
-      } catch {}
-      execSync("pkill -f 'memory server --http'", { stdio: "pipe" });
-    } else {
-      execSync("pkill -f 'memory server --http'", { stdio: "pipe" });
+    if (fileExists(mcpPath)) {
+      const mcpConfig = JSON.parse(readText(mcpPath, "utf8"));
+      const existingMemoryConfig = mcpConfig.mcpServers?.["mcp-memory-service"];
+      if (
+        existingMemoryConfig &&
+        !isLegacy(existingMemoryConfig) &&
+        JSON.stringify(existingMemoryConfig) === JSON.stringify(memoryServerConfig)
+      ) {
+        onExisting();
+        return true;
+      }
+      const nextConfig = {
+        ...mcpConfig,
+        mcpServers: {
+          ...(mcpConfig.mcpServers ?? {}),
+          "mcp-memory-service": memoryServerConfig,
+        },
+      };
+      writeText(mcpPath, JSON.stringify(nextConfig, null, 2) + "\n");
+      onRegistered();
+      return true;
     }
+
+    const newConfig = {
+      mcpServers: {
+        "mcp-memory-service": memoryServerConfig,
+      },
+    };
+    writeText(mcpPath, JSON.stringify(newConfig, null, 2) + "\n");
+    onRegistered();
     return true;
-  } catch {
+  } catch (error) {
+    onFailure(error);
     return false;
   }
 }
 
-function isMcpMemoryProcessRunning() {
-  if (platform() !== "win32") return false;
-  try {
-    const result = spawnSync(
-      "pwsh.exe",
-      [
-        "-NoProfile",
-        "-Command",
-        "if (Get-Process -Name memory -ErrorAction SilentlyContinue) { 'running' }",
-      ],
-      { encoding: "utf8", windowsHide: true },
-    );
-    if (result.status === 0 && result.stdout.includes("running")) return true;
-  } catch {}
-
-  try {
-    const result = spawnSync("tasklist", ["/FI", "IMAGENAME eq memory.exe"], {
-      encoding: "utf8",
-      windowsHide: true,
-    });
-    return result.status === 0 && /\bmemory\.exe\b/iu.test(result.stdout);
-  } catch {
-    return false;
+async function startMcpMemoryServiceBackground(
+  resolved,
+  endpoint = resolveMemoryEndpoint(),
+  {
+    memoryBinOverride = null,
+    databasePathOverride = null,
+    lockAlreadyHeld = false,
+    configureBootOnHealthy = true,
+    writeActiveStateOnHealthy = true,
+    extraEnv = {},
+  } = {},
+) {
+  if (!endpoint.canAutoStart) {
+    info(t.mcpMemoryRemoteEndpointNoAutoStart(endpoint.endpointUrl));
+    return true;
   }
-}
-
-async function startMcpMemoryServiceBackground(resolved) {
-  const memoryBin = findMemoryBinPath(resolved);
+  const memoryBin = memoryBinOverride ?? findMemoryBinPath(resolved);
   if (!memoryBin) {
     warn(t.mcpMemoryAutoStartFailed);
     info(t.mcpMemoryAutoStartManual);
-    return;
+    return false;
+  }
+  const activeDatabasePath = readActiveMemoryRuntimeState()?.databasePath;
+  const databasePath = resolveMcpMemoryDatabasePathWithRuntime(resolved.python, {
+    preferredPath: databasePathOverride ?? activeDatabasePath ?? null,
+  });
+  if (!databasePath) {
+    warn(t.mcpMemoryAutoStartFailed);
+    return false;
   }
 
   info(t.mcpMemoryAutoStarting);
-  const env = {
-    ...process.env,
-    MCP_ALLOW_ANONYMOUS_ACCESS: "true",
-    HF_HUB_OFFLINE: "1",
-    TRANSFORMERS_OFFLINE: "1",
-  };
-
-  try {
-    const child = spawn(memoryBin, ["server", "--http"], {
-      env,
-      detached: true,
-      stdio: "ignore",
-      windowsHide: true,
-    });
-    child.unref();
-  } catch {
-    // Background start may report errors but still succeed
-  }
-
-  // Poll health endpoint — service may need several seconds to initialize
-  const POLL_INTERVAL = 1500;
-  const POLL_MAX_MS = 10000;
-  const pollStart = Date.now();
-  let healthy = false;
-
-  while (Date.now() - pollStart < POLL_MAX_MS) {
-    await new Promise((r) => setTimeout(r, POLL_INTERVAL));
-    healthy = await new Promise((resolve) => {
-      const req = http.get(
-        "http://127.0.0.1:8000/api/health",
-        { timeout: 3000 },
-        (res) => {
-          let body = "";
-          res.on("data", (c) => (body += c));
-          res.on("end", () => resolve(body.includes("healthy")));
-        },
-      );
-      req.on("error", () => resolve(false));
-      req.on("timeout", () => {
-        req.destroy();
-        resolve(false);
+  const env = memoryServiceEnv(
+    endpoint,
+    buildInitialMemoryServiceEnv({
+      ...process.env,
+      ...extraEnv,
+      MCP_MEMORY_SQLITE_PATH: databasePath,
+    }),
+  );
+  const { logDir, stdoutLog, stderrLog } = firstStartLogPaths(homedir());
+  mkdirSync(logDir, { recursive: true });
+  const start = async () => {
+      let childState = {
+        spawnError: null,
+        exited: false,
+        exitCode: null,
+        signal: null,
+      };
+      let stdoutFd;
+      let stderrFd;
+      try {
+        stdoutFd = openSync(stdoutLog, "a");
+        stderrFd = openSync(stderrLog, "a");
+        const child = spawn(memoryBin, memoryServerHttpArgs(endpoint), {
+          env,
+          detached: true,
+          shell: false,
+          stdio: ["ignore", stdoutFd, stderrFd],
+          windowsHide: true,
+        });
+        childState = observeMemoryServiceChild(child);
+        child.unref();
+      } catch (error) {
+        childState.spawnError = error;
+      } finally {
+        if (stdoutFd !== undefined) closeSync(stdoutFd);
+        if (stderrFd !== undefined) closeSync(stderrFd);
+      }
+      const healthResult = await waitForMcpMemoryHealth({
+        probeHealth: () => probeMcpMemoryHealth(endpoint.healthUrl),
+        childState,
+        allowLauncherExit: true,
       });
+      return { ok: healthResult.healthy, started: true, healthResult };
+  };
+  const lockResult = lockAlreadyHeld
+    ? await start()
+    : await withEndpointStartLock({
+      endpoint,
+      lockRoot: join(homedir(), ".meta-kim", "locks"),
+      probeHealth: () => probeMcpMemoryHealth(endpoint.healthUrl),
+      start,
     });
-    if (healthy) break;
-  }
+  const healthResult = lockResult.reason === "already_healthy_after_lock"
+    ? { healthy: true, reason: lockResult.reason }
+    : lockResult.healthResult ?? { healthy: false, reason: lockResult.reason };
 
-  if (healthy) {
-    ok(t.mcpMemoryAutoStarted);
-    const bootOk = configureBootAutoStart(memoryBin);
-    if (bootOk) ok(t.mcpMemoryAutoStartBoot);
-    return;
-  }
-
-  if (isMcpMemoryProcessRunning()) {
-    ok(t.mcpMemoryAutoStartUnverified);
-    const bootOk = configureBootAutoStart(memoryBin);
-    if (bootOk) ok(t.mcpMemoryAutoStartBoot);
-    return;
+  if (healthResult.healthy) {
+    ok(t.mcpMemoryAutoStarted(endpoint.endpointUrl));
+    if (configureBootOnHealthy) {
+      const bootOk = configureBootAutoStart(memoryBin, endpoint, { databasePath });
+      if (bootOk) ok(t.mcpMemoryAutoStartBoot);
+      else warn(t.mcpMemoryAutoStartBootFailed);
+    }
+    if (writeActiveStateOnHealthy) {
+      writeActiveMemoryRuntimeState({ resolved, memoryBin, databasePath });
+    }
+    return true;
   }
 
   warn(t.mcpMemoryAutoStartFailed);
   info(t.mcpMemoryAutoStartManual);
+  info(`  ${stdoutLog}`);
+  info(`  ${stderrLog}`);
+  try {
+    appendFileSync(
+      stderrLog,
+      `[${new Date().toISOString()}] ${t.mcpMemoryAutoStartFailureMessage(endpoint.healthUrl)}\nreason=${healthResult.reason}\n`,
+      "utf8",
+    );
+  } catch {}
+  return false;
 }
 
-function configureBootAutoStart(memoryBin) {
+function findMemoryHealthProbePython(memoryBin) {
+  if (platform() === "win32") return null;
+  for (const candidate of [
+    join(dirname(memoryBin), "python"),
+    join(dirname(memoryBin), "python3"),
+  ]) {
+    if (isAbsolute(candidate) && existsSync(candidate)) {
+      try {
+        return realpathSync(candidate);
+      } catch {}
+    }
+  }
+  try {
+    const firstLine = readFileSync(memoryBin, "utf8").split(/\r?\n/, 1)[0];
+    const shebang = firstLine.match(/^#!\s*(\/\S*python(?:\d+(?:\.\d+)*)?)\s*$/u)?.[1];
+    if (shebang && existsSync(shebang)) return realpathSync(shebang);
+  } catch {}
+  return null;
+}
+
+function memoryProcessIdentityExpectation(memoryBin) {
+  if (platform() === "win32") {
+    const expected = resolveWindowsVenvProcessExpectation(memoryBin);
+    return {
+      platformName: "win32",
+      expectedExecutablePath: expected?.expectedExecutablePath ?? null,
+      expectedExecutablePaths: expected?.expectedExecutablePaths ?? [],
+      expectedLauncherPath: expected?.expectedLauncherPath ?? null,
+    };
+  }
+  return {
+    platformName: platform(),
+    expectedExecutablePath: findMemoryHealthProbePython(memoryBin),
+    expectedLauncherPath: memoryBin,
+  };
+}
+
+function verifyEndpointRuntimeIdentity(endpoint, memoryBin) {
+  const expected = memoryProcessIdentityExpectation(memoryBin);
+  if (!expected.expectedExecutablePath) return false;
+  const identity = inspectEndpointListener(endpoint);
+  return verifyMemoryListenerIdentity(identity, {
+    platform: expected.platformName,
+    executablePath: expected.expectedExecutablePath,
+    executablePaths: expected.expectedExecutablePaths,
+    launcherPath: expected.expectedLauncherPath,
+    host: endpoint.hostname,
+    port: endpoint.port,
+  }).verified;
+}
+
+async function verifyEndpointRuntimeHealthy(endpoint, memoryBin) {
+  const verification = await waitForMcpMemoryHealth({
+    probeHealth: async () => (
+      await probeMcpMemoryHealth(endpoint.healthUrl) &&
+      verifyEndpointRuntimeIdentity(endpoint, memoryBin)
+    ),
+    timeoutMs: 5_000,
+    pollIntervalMs: 250,
+  });
+  return verification.healthy;
+}
+
+function configureBootAutoStart(
+  memoryBin,
+  endpoint = resolveMemoryEndpoint(),
+  { databasePath = readActiveMemoryRuntimeState()?.databasePath ?? null } = {},
+) {
+  if (!endpoint.canAutoStart) return false;
+  if (!databasePath || !isAbsolute(databasePath)) return false;
   const plat = platform();
   const shellQuote = (value) => `'${String(value).replace(/'/g, `'\\''`)}'`;
-  const psSingleQuote = (value) => `'${String(value).replace(/'/g, "''")}'`;
-  const failureTitle = t.mcpMemoryAutoStartFailureTitle;
-  const failureMessage = t.mcpMemoryAutoStartFailureMessage;
+  const xmlEscape = (value) => String(value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&apos;");
+  const bootEnv = buildBootMemoryServiceEnv();
+  const startLockPath = join(
+    homedir(),
+    ".meta-kim",
+    "locks",
+    endpointStartLockName(endpoint),
+  );
+  mkdirSync(dirname(startLockPath), { recursive: true });
+  const pythonProbeBin = plat === "win32"
+    ? null
+    : findMemoryHealthProbePython(memoryBin);
+  if (plat !== "win32" && !pythonProbeBin) return false;
+  const failureMessage = t.mcpMemoryAutoStartFailureMessage(endpoint.healthUrl);
+  const posixOwnerReadProbe = shellQuote(
+    "import json,sys; o=json.load(open(sys.argv[1],encoding='utf-8-sig')); print(str(o.get('ownerPid',''))+'\\t'+str(o.get('ownerStartIdentity',''))+'\\t'+str(o.get('expiresAt','')))",
+  );
+  const posixOwnerTokenProbe = shellQuote(
+    "import json,sys; o=json.load(open(sys.argv[1],encoding='utf-8-sig')); print(str(o.get('token','')))",
+  );
+  const posixLockAcquire =
+    `LOCK_DIR=${shellQuote(startLockPath)}\n` +
+    `LOCK_TOKEN="$$-$(date +%s)-\${RANDOM:-0}"\n` +
+    `LOCK_ACQUIRED=0\n` +
+    `read_start_identity() {\n` +
+    `  if [ -r "/proc/$1/stat" ]; then sed 's/^[^)]*) //' "/proc/$1/stat" | awk '{print $20}'; else ps -o lstart= -p "$1" 2>/dev/null | sed 's/^[[:space:]]*//'; fi\n` +
+    `}\n` +
+    `if mkdir "$LOCK_DIR" 2>/dev/null; then LOCK_ACQUIRED=1; else\n` +
+    `  check_health && exit 0\n` +
+    `LOCK_NOW=$(( $(date +%s) * 1000 ))\n` +
+    `  OWNER_PID=; OWNER_START=; OWNER_EXPIRES=\n` +
+    `  if [ -f "$LOCK_DIR/owner.json" ]; then\n` +
+    `    OWNER_FIELDS=$("$PYTHON_BIN" -c ${posixOwnerReadProbe} "$LOCK_DIR/owner.json" 2>/dev/null || true)\n` +
+    `    OWNER_PID=$(printf '%s' "$OWNER_FIELDS" | cut -f1); OWNER_START=$(printf '%s' "$OWNER_FIELDS" | cut -f2); OWNER_EXPIRES=$(printf '%s' "$OWNER_FIELDS" | cut -f3)\n` +
+    `  fi\n` +
+    `  OWNER_ALIVE=0\n` +
+    `  if [ -n "$OWNER_PID" ] && kill -0 "$OWNER_PID" 2>/dev/null && [ "$(read_start_identity "$OWNER_PID")" = "$OWNER_START" ]; then OWNER_ALIVE=1; fi\n` +
+    `  OWNER_EXPIRED=0\n` +
+    `  if [ -n "$OWNER_EXPIRES" ]; then [ "$OWNER_EXPIRES" -le "$LOCK_NOW" ] 2>/dev/null && OWNER_EXPIRED=1; else\n` +
+    `    LOCK_MTIME=$(stat -f %m "$LOCK_DIR" 2>/dev/null || stat -c %Y "$LOCK_DIR" 2>/dev/null || echo 0)\n` +
+    `    [ $(( LOCK_NOW - LOCK_MTIME * 1000 )) -ge 360000 ] && OWNER_EXPIRED=1\n` +
+    `  fi\n` +
+    `  if [ "$OWNER_ALIVE" -eq 0 ] && [ "$OWNER_EXPIRED" -eq 1 ]; then\n` +
+    `    STALE_DIR="$LOCK_DIR.stale.$LOCK_TOKEN"\n` +
+    `    if mv "$LOCK_DIR" "$STALE_DIR" 2>/dev/null && mkdir "$LOCK_DIR" 2>/dev/null; then LOCK_ACQUIRED=1; rm -rf -- "$STALE_DIR"; fi\n` +
+    `  fi\n` +
+    `  if [ "$LOCK_ACQUIRED" -ne 1 ]; then printf '%s\\n' "$MSG" >>"$LOG_PATH"; exit 1; fi\n` +
+    `fi\n` +
+    `LOCK_START_IDENTITY=$(read_start_identity $$)\n` +
+    `LOCK_NOW=$(( $(date +%s) * 1000 ))\n` +
+    `LOCK_EXPIRES=$(( LOCK_NOW + 360000 ))\n` +
+    `printf '{"schemaVersion":"meta-kim-mcp-memory-start-lock-v1","token":"%s","ownerPid":%s,"ownerStartIdentity":"%s","acquiredAt":%s,"expiresAt":%s}\\n' "$LOCK_TOKEN" "$$" "$LOCK_START_IDENTITY" "$LOCK_NOW" "$LOCK_EXPIRES" >"$LOCK_DIR/owner.json"\n` +
+    `if check_health; then LOCK_OWNER_TOKEN=$("$PYTHON_BIN" -c ${posixOwnerTokenProbe} "$LOCK_DIR/owner.json" 2>/dev/null || true); [ "$LOCK_OWNER_TOKEN" = "$LOCK_TOKEN" ] && rm -rf -- "$LOCK_DIR"; exit 0; fi\n`;
+  const posixLockRelease =
+    `LOCK_OWNER_TOKEN=$("$PYTHON_BIN" -c ${posixOwnerTokenProbe} "$LOCK_DIR/owner.json" 2>/dev/null || true)\n` +
+    `[ "$LOCK_OWNER_TOKEN" = "$LOCK_TOKEN" ] && rm -rf -- "$LOCK_DIR"\n`;
   try {
     if (plat === "win32") {
       const startupDir = join(
@@ -5917,47 +7246,19 @@ function configureBootAutoStart(memoryBin) {
       const vbsPath = join(startupDir, "mcp-memory-silent.vbs");
       const legacyCmdPath = join(startupDir, "mcp-memory-start.cmd");
       if (existsSync(legacyCmdPath)) rmSync(legacyCmdPath, { force: true });
-      const escapedMemoryBin = memoryBin.replace(/'/g, "''");
-      writeUtf8BomFileSync(
-        psPath,
-        `$ErrorActionPreference = "SilentlyContinue"\r\n` +
-          `$env:MCP_ALLOW_ANONYMOUS_ACCESS = "true"\r\n` +
-          `$env:HF_HUB_OFFLINE = "1"\r\n` +
-          `$env:TRANSFORMERS_OFFLINE = "1"\r\n` +
-          `$memoryBin = '${escapedMemoryBin}'\r\n` +
-          `$failureTitle = ${psSingleQuote(failureTitle)}\r\n` +
-          `$failureMessage = ${psSingleQuote(failureMessage)}\r\n` +
-          `$logDir = Join-Path $env:USERPROFILE ".meta-kim"\r\n` +
-          `$stdoutLog = Join-Path $logDir "mcp-memory.out.log"\r\n` +
-          `$stderrLog = Join-Path $logDir "mcp-memory.err.log"\r\n` +
-          `function Test-MetaKimMemoryHealth {\r\n` +
-          `  try {\r\n` +
-          `    $response = Invoke-WebRequest -Uri "http://127.0.0.1:8000/api/health" -UseBasicParsing -TimeoutSec 3\r\n` +
-          `    return ($response.Content -match "healthy")\r\n` +
-          `  } catch { return $false }\r\n` +
-          `}\r\n` +
-          `if (Test-MetaKimMemoryHealth) { exit 0 }\r\n` +
-          `try {\r\n` +
-          `  Start-Process -FilePath $memoryBin -ArgumentList @("server", "--http") -WindowStyle Hidden -RedirectStandardOutput $stdoutLog -RedirectStandardError $stderrLog\r\n` +
-          `} catch {}\r\n` +
-          `$healthy = $false\r\n` +
-          `for ($i = 0; $i -lt 150; $i++) {\r\n` +
-          `  Start-Sleep -Seconds 2\r\n` +
-          `  if (Test-MetaKimMemoryHealth) { $healthy = $true; break }\r\n` +
-          `}\r\n` +
-          `if (-not $healthy) {\r\n` +
-          `  Add-Type -AssemblyName PresentationFramework\r\n` +
-          `  [System.Windows.MessageBox]::Show($failureMessage, $failureTitle, "OK", "Warning") | Out-Null\r\n` +
-          `}\r\n`,
-      );
-      writeFileSync(
-        cmdPath,
-        `@echo off\r\npowershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "${psPath}"\r\n`,
-      );
-      writeFileSync(
-        vbsPath,
-        `Set WshShell = CreateObject("WScript.Shell")\r\nWshShell.Run """${cmdPath}""", 0, False\r\n`,
-      );
+      writeFileSync(psPath, renderCurrentWindowsMcpMemoryPowerShellBytes({
+        memoryBin,
+        databasePath,
+        endpointUrl: endpoint.endpointUrl,
+        healthUrl: endpoint.healthUrl,
+        hostname: endpoint.hostname,
+        port: endpoint.port,
+        failureMessage,
+        lockDir: startLockPath,
+        bootEnv,
+      }));
+      writeFileSync(cmdPath, renderCurrentWindowsMcpMemoryCommandBytes({ powershellPath: psPath }));
+      writeFileSync(vbsPath, renderCurrentWindowsMcpMemoryStartupVbsBytes({ commandPath: cmdPath }));
       return true;
     }
     if (plat === "darwin") {
@@ -5970,21 +7271,27 @@ function configureBootAutoStart(memoryBin) {
       writeFileSync(
         scriptPath,
         `#!/bin/sh\n` +
-          `export MCP_ALLOW_ANONYMOUS_ACCESS=true\n` +
-          `export HF_HUB_OFFLINE=1\n` +
-          `export TRANSFORMERS_OFFLINE=1\n` +
+          `export MCP_ALLOW_ANONYMOUS_ACCESS=${bootEnv.MCP_ALLOW_ANONYMOUS_ACCESS}\n` +
+          `export HF_HUB_OFFLINE=${bootEnv.HF_HUB_OFFLINE}\n` +
+          `export TRANSFORMERS_OFFLINE=${bootEnv.TRANSFORMERS_OFFLINE}\n` +
+          `export MCP_MEMORY_ONNX_ALLOW_DOWNLOAD=${bootEnv.MCP_MEMORY_ONNX_ALLOW_DOWNLOAD}\n` +
+          `export MCP_MEMORY_ALLOW_HASH_EMBEDDINGS=${bootEnv.MCP_MEMORY_ALLOW_HASH_EMBEDDINGS}\n` +
+          `export MCP_MEMORY_USE_ONNX=${bootEnv.MCP_MEMORY_USE_ONNX}\n` +
+          `export MCP_MEMORY_SQLITE_PATH=${shellQuote(databasePath)}\n` +
+          `export MCP_MEMORY_URL=${shellQuote(endpoint.endpointUrl)}\n` +
+          `export META_KIM_MEMORY_PORT=${shellQuote(endpoint.port)}\n` +
+          `export MCP_HTTP_HOST=${shellQuote(endpoint.hostname)}\n` +
+          `export MCP_HTTP_PORT=${shellQuote(endpoint.port)}\n` +
           `MEMORY_BIN=${shellQuote(memoryBin)}\n` +
+          `PYTHON_BIN=${shellQuote(pythonProbeBin)}\n` +
           `LOG_PATH=${shellQuote(logPath)}\n` +
-          `TITLE=${shellQuote(failureTitle)}\n` +
           `MSG=${shellQuote(failureMessage)}\n` +
+          `HEALTH_URL=${shellQuote(endpoint.healthUrl)}\n` +
           `check_health() {\n` +
-          `  command -v curl >/dev/null 2>&1 && curl -fsS --noproxy '*' --max-time 3 http://127.0.0.1:8000/api/health 2>/dev/null | grep -q healthy\n` +
+          `  "$PYTHON_BIN" -c ${shellQuote(PYTHON_MEMORY_HEALTH_PROBE)} "$HEALTH_URL"\n` +
           `}\n` +
-          `notify_failure() {\n` +
-          `  osascript -e "display dialog \\"$MSG\\" with title \\"$TITLE\\" buttons {\\"OK\\"} with icon caution" >/dev/null 2>&1 || true\n` +
-          `}\n` +
-          `check_health && exit 0\n` +
-          `"$MEMORY_BIN" server --http >>"$LOG_PATH" 2>&1 &\n` +
+          posixLockAcquire +
+          `"$MEMORY_BIN" server --http --http-host ${shellQuote(endpoint.hostname)} --http-port ${shellQuote(endpoint.port)} >>"$LOG_PATH" 2>&1 &\n` +
           `healthy=0\n` +
           `i=0\n` +
           `while [ "$i" -lt 150 ]; do\n` +
@@ -5992,7 +7299,8 @@ function configureBootAutoStart(memoryBin) {
           `  if check_health; then healthy=1; break; fi\n` +
           `  i=$((i + 1))\n` +
           `done\n` +
-          `[ "$healthy" -eq 1 ] || notify_failure\n`,
+          `[ "$healthy" -eq 1 ] || printf '%s\\n' "$MSG" >>"$LOG_PATH"\n` +
+          posixLockRelease,
         { mode: 0o755 },
       );
       writeFileSync(
@@ -6002,16 +7310,24 @@ function configureBootAutoStart(memoryBin) {
 <plist version="1.0"><dict>
   <key>Label</key><string>com.meta-kim.mcp-memory-service</string>
   <key>ProgramArguments</key><array>
-    <string>/bin/sh</string><string>${scriptPath}</string>
+    <string>/bin/sh</string><string>${xmlEscape(scriptPath)}</string>
   </array>
   <key>EnvironmentVariables</key><dict>
     <key>MCP_ALLOW_ANONYMOUS_ACCESS</key><string>true</string>
-    <key>HF_HUB_OFFLINE</key><string>1</string>
-    <key>TRANSFORMERS_OFFLINE</key><string>1</string>
+    <key>HF_HUB_OFFLINE</key><string>${bootEnv.HF_HUB_OFFLINE}</string>
+    <key>TRANSFORMERS_OFFLINE</key><string>${bootEnv.TRANSFORMERS_OFFLINE}</string>
+    <key>MCP_MEMORY_ONNX_ALLOW_DOWNLOAD</key><string>${bootEnv.MCP_MEMORY_ONNX_ALLOW_DOWNLOAD}</string>
+    <key>MCP_MEMORY_ALLOW_HASH_EMBEDDINGS</key><string>${bootEnv.MCP_MEMORY_ALLOW_HASH_EMBEDDINGS}</string>
+    <key>MCP_MEMORY_USE_ONNX</key><string>${bootEnv.MCP_MEMORY_USE_ONNX}</string>
+    <key>MCP_MEMORY_SQLITE_PATH</key><string>${xmlEscape(databasePath)}</string>
+    <key>MCP_MEMORY_URL</key><string>${xmlEscape(endpoint.endpointUrl)}</string>
+    <key>META_KIM_MEMORY_PORT</key><string>${xmlEscape(endpoint.port)}</string>
+    <key>MCP_HTTP_HOST</key><string>${xmlEscape(endpoint.hostname)}</string>
+    <key>MCP_HTTP_PORT</key><string>${xmlEscape(endpoint.port)}</string>
   </dict>
   <key>RunAtLoad</key><true/>
-  <key>StandardOutPath</key><string>${logPath}</string>
-  <key>StandardErrorPath</key><string>${logPath}</string>
+  <key>StandardOutPath</key><string>${xmlEscape(logPath)}</string>
+  <key>StandardErrorPath</key><string>${xmlEscape(logPath)}</string>
 </dict></plist>`,
       );
       return true;
@@ -6026,25 +7342,27 @@ function configureBootAutoStart(memoryBin) {
     writeFileSync(
       scriptPath,
       `#!/bin/sh\n` +
-        `export MCP_ALLOW_ANONYMOUS_ACCESS=true\n` +
-        `export HF_HUB_OFFLINE=1\n` +
-        `export TRANSFORMERS_OFFLINE=1\n` +
+        `export MCP_ALLOW_ANONYMOUS_ACCESS=${bootEnv.MCP_ALLOW_ANONYMOUS_ACCESS}\n` +
+        `export HF_HUB_OFFLINE=${bootEnv.HF_HUB_OFFLINE}\n` +
+        `export TRANSFORMERS_OFFLINE=${bootEnv.TRANSFORMERS_OFFLINE}\n` +
+        `export MCP_MEMORY_ONNX_ALLOW_DOWNLOAD=${bootEnv.MCP_MEMORY_ONNX_ALLOW_DOWNLOAD}\n` +
+        `export MCP_MEMORY_ALLOW_HASH_EMBEDDINGS=${bootEnv.MCP_MEMORY_ALLOW_HASH_EMBEDDINGS}\n` +
+        `export MCP_MEMORY_USE_ONNX=${bootEnv.MCP_MEMORY_USE_ONNX}\n` +
+        `export MCP_MEMORY_SQLITE_PATH=${shellQuote(databasePath)}\n` +
+        `export MCP_MEMORY_URL=${shellQuote(endpoint.endpointUrl)}\n` +
+        `export META_KIM_MEMORY_PORT=${shellQuote(endpoint.port)}\n` +
+        `export MCP_HTTP_HOST=${shellQuote(endpoint.hostname)}\n` +
+        `export MCP_HTTP_PORT=${shellQuote(endpoint.port)}\n` +
         `MEMORY_BIN=${shellQuote(memoryBin)}\n` +
+        `PYTHON_BIN=${shellQuote(pythonProbeBin)}\n` +
         `LOG_PATH=${shellQuote(logPath)}\n` +
-        `TITLE=${shellQuote(failureTitle)}\n` +
         `MSG=${shellQuote(failureMessage)}\n` +
+        `HEALTH_URL=${shellQuote(endpoint.healthUrl)}\n` +
         `check_health() {\n` +
-        `  command -v curl >/dev/null 2>&1 && curl -fsS --noproxy '*' --max-time 3 http://127.0.0.1:8000/api/health 2>/dev/null | grep -q healthy\n` +
+        `  "$PYTHON_BIN" -c ${shellQuote(PYTHON_MEMORY_HEALTH_PROBE)} "$HEALTH_URL"\n` +
         `}\n` +
-        `notify_failure() {\n` +
-        `  if command -v notify-send >/dev/null 2>&1; then notify-send "$TITLE" "$MSG"; return; fi\n` +
-        `  if command -v zenity >/dev/null 2>&1; then zenity --warning --title="$TITLE" --text="$MSG"; return; fi\n` +
-        `  if command -v kdialog >/dev/null 2>&1; then kdialog --sorry "$MSG" --title "$TITLE"; return; fi\n` +
-        `  if command -v xmessage >/dev/null 2>&1; then xmessage -center "$MSG"; return; fi\n` +
-        `  printf '%s\\n' "$MSG" >>"$LOG_PATH"\n` +
-        `}\n` +
-        `check_health && exit 0\n` +
-        `"$MEMORY_BIN" server --http >>"$LOG_PATH" 2>&1 &\n` +
+        posixLockAcquire +
+        `"$MEMORY_BIN" server --http --http-host ${shellQuote(endpoint.hostname)} --http-port ${shellQuote(endpoint.port)} >>"$LOG_PATH" 2>&1 &\n` +
         `healthy=0\n` +
         `i=0\n` +
         `while [ "$i" -lt 150 ]; do\n` +
@@ -6052,7 +7370,8 @@ function configureBootAutoStart(memoryBin) {
         `  if check_health; then healthy=1; break; fi\n` +
         `  i=$((i + 1))\n` +
         `done\n` +
-        `[ "$healthy" -eq 1 ] || notify_failure\n`,
+        `[ "$healthy" -eq 1 ] || printf '%s\\n' "$MSG" >>"$LOG_PATH"\n` +
+        posixLockRelease,
       { mode: 0o755 },
     );
     writeFileSync(
@@ -6065,7 +7384,753 @@ function configureBootAutoStart(memoryBin) {
   }
 }
 
-async function installMcpMemoryServiceStep(inUpdateMode = false, activeTargets = DEFAULT_TARGETS.map((target) => target.id)) {
+function resolveMcpMemoryDatabasePathWithRuntime(python, { preferredPath = null } = {}) {
+  const script = [
+    "import json",
+    "from mcp_memory_service.config import SQLITE_VEC_PATH",
+    "print(json.dumps({'path': str(SQLITE_VEC_PATH)}))",
+  ].join("\n");
+  const databaseEnv = { ...process.env };
+  delete databaseEnv.MCP_MEMORY_SQLITE_PATH;
+  const result = runMcpMemoryPython(python, ["-c", script], {
+    cwd: PROJECT_DIR,
+    env: {
+      ...databaseEnv,
+      ...(preferredPath ? { MCP_MEMORY_SQLITE_PATH: preferredPath } : {}),
+    },
+  });
+  if (result.status !== 0) return null;
+  try {
+    const line = result.stdout.trim().split(/\r?\n/u).filter(Boolean).at(-1);
+    const databasePath = JSON.parse(line || "{}").path;
+    if (!databasePath || !isAbsolute(databasePath)) return null;
+    const confirmedPath = resolve(databasePath);
+    const pathKey = (value) => platform() === "win32"
+      ? resolve(value).replace(/\\/g, "/").toLowerCase()
+      : resolve(value);
+    if (preferredPath && pathKey(confirmedPath) !== pathKey(preferredPath)) return null;
+    return confirmedPath;
+  } catch {
+    return null;
+  }
+}
+
+function snapshotManagedFile(filePath) {
+  const existed = existsSync(filePath);
+  return {
+    filePath,
+    existed,
+    content: existed ? readFileSync(filePath) : null,
+    mode: existed ? statSync(filePath).mode & 0o777 : null,
+  };
+}
+
+function restoreManagedFile(snapshot) {
+  if (snapshot.existed) {
+    mkdirSync(dirname(snapshot.filePath), { recursive: true });
+    const tempPath = `${snapshot.filePath}.restore-${process.pid}-${Date.now()}.tmp`;
+    writeFileSync(tempPath, snapshot.content);
+    renameSync(tempPath, snapshot.filePath);
+    if (Number.isInteger(snapshot.mode)) {
+      try { chmodSync(snapshot.filePath, snapshot.mode); } catch {}
+    }
+  } else {
+    rmSync(snapshot.filePath, { force: true });
+  }
+  return true;
+}
+
+function restoreMcpMemoryServerEntry(mcpPath, snapshot) {
+  let current = {};
+  if (existsSync(mcpPath)) current = JSON.parse(readFileSync(mcpPath, "utf8"));
+  const mcpServers = { ...(current.mcpServers ?? {}) };
+  if (snapshot.existed) mcpServers["mcp-memory-service"] = snapshot.entry;
+  else delete mcpServers["mcp-memory-service"];
+  const next = { ...current };
+  if (Object.keys(mcpServers).length > 0) next.mcpServers = mcpServers;
+  else delete next.mcpServers;
+  if (!snapshot.fileExisted && Object.keys(next).length === 0) {
+    rmSync(mcpPath, { force: true });
+  } else {
+    writeJsonAtomic(mcpPath, next);
+  }
+  return true;
+}
+
+function memoryBootArtifactPaths() {
+  const metaKimDir = join(homedir(), ".meta-kim");
+  if (platform() === "win32") {
+    return [
+      join(metaKimDir, "mcp-memory-start.ps1"),
+      join(metaKimDir, "mcp-memory-start.cmd"),
+      join(homedir(), "AppData", "Roaming", "Microsoft", "Windows", "Start Menu", "Programs", "Startup", "mcp-memory-silent.vbs"),
+      join(homedir(), "AppData", "Roaming", "Microsoft", "Windows", "Start Menu", "Programs", "Startup", "mcp-memory-start.cmd"),
+    ];
+  }
+  if (platform() === "darwin") {
+    return [
+      join(metaKimDir, "mcp-memory-start.sh"),
+      join(homedir(), "Library", "LaunchAgents", "com.meta-kim.mcp-memory-service.plist"),
+    ];
+  }
+  return [
+    join(metaKimDir, "mcp-memory-start.sh"),
+    join(homedir(), ".config", "autostart", "mcp-memory-service.desktop"),
+  ];
+}
+
+function pathKeyForRecovery(value) {
+  const normalized = resolve(value).replace(/\\/gu, "/");
+  return platform() === "win32" ? normalized.toLowerCase() : normalized;
+}
+
+function isPathInsideRecoveryRoot(root, candidate) {
+  const rel = relative(resolve(root), resolve(candidate));
+  return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
+}
+
+function mcpMemoryRecoveryDigest(payload) {
+  const canonical = {
+    schemaVersion: payload.schemaVersion,
+    transactionId: payload.transactionId,
+    oldMemoryBin: pathKeyForRecovery(payload.oldMemoryBin),
+    oldPython: payload.oldPython,
+    candidateMemoryBin: pathKeyForRecovery(payload.candidateMemoryBin),
+    databasePath: pathKeyForRecovery(payload.databasePath),
+    databaseExistedBefore: payload.databaseExistedBefore === true,
+    mcpPath: pathKeyForRecovery(payload.mcpPath),
+    mcpMemoryEntrySnapshot: payload.mcpMemoryEntrySnapshot,
+    stateSnapshot: payload.stateSnapshot,
+    bootSnapshots: payload.bootSnapshots,
+  };
+  return createHash("sha256").update(JSON.stringify(canonical)).digest("hex");
+}
+
+function persistMcpMemoryRecoverySnapshots({
+  transactionRoot,
+  transactionId,
+  oldMemoryBin,
+  oldPython,
+  candidateMemoryBin,
+  databasePath,
+  databaseExistedBefore,
+  mcpPath,
+  mcpMemoryEntrySnapshot,
+  stateSnapshot,
+  bootSnapshots,
+}) {
+  if (!MCP_MEMORY_TRANSACTION_ID_PATTERN.test(transactionId)) return { ok: false };
+  let trustedTransactionRoot;
+  try {
+    const metadata = lstatSync(transactionRoot);
+    if (!metadata.isDirectory() || metadata.isSymbolicLink()) return { ok: false };
+    trustedTransactionRoot = realpathSync(transactionRoot);
+  } catch { return { ok: false }; }
+  const recoveryPath = resolve(trustedTransactionRoot, `${transactionId}-recovery.json`);
+  if (!isPathInsideRecoveryRoot(trustedTransactionRoot, recoveryPath)) return { ok: false };
+  const payload = {
+    schemaVersion: "meta-kim-mcp-memory-recovery-v1",
+    transactionId,
+    oldMemoryBin,
+    oldPython: typeof oldPython === "string"
+      ? { command: oldPython, args: [] }
+      : { command: oldPython.command, args: oldPython.args ?? [] },
+    candidateMemoryBin,
+    databasePath,
+    databaseExistedBefore,
+    mcpPath,
+    mcpMemoryEntrySnapshot,
+    createdAt: new Date().toISOString(),
+    stateSnapshot: {
+      filePath: stateSnapshot.filePath,
+      existed: stateSnapshot.existed,
+      contentBase64: stateSnapshot.content ? stateSnapshot.content.toString("base64") : null,
+      mode: stateSnapshot.mode,
+    },
+    bootSnapshots: bootSnapshots.map((snapshot) => ({
+      filePath: snapshot.filePath,
+      existed: snapshot.existed,
+      contentBase64: snapshot.content ? snapshot.content.toString("base64") : null,
+      mode: snapshot.mode,
+    })),
+  };
+  const recoveryDigest = mcpMemoryRecoveryDigest(payload);
+  writeJsonAtomic(recoveryPath, { ...payload, recoveryDigest });
+  return { ok: true, identity: recoveryPath, recoveryDigest };
+}
+
+async function recoverIncompleteMcpMemoryTransaction({ transactionRoot, endpoint, resolved }) {
+  if (!existsSync(transactionRoot)) return true;
+  let trustedTransactionRoot;
+  try {
+    const metadata = lstatSync(transactionRoot);
+    if (!metadata.isDirectory() || metadata.isSymbolicLink()) return false;
+    trustedTransactionRoot = realpathSync(transactionRoot);
+  } catch { return false; }
+  const rootTrust = verifyPrivateRecoveryRoot({ directoryPath: trustedTransactionRoot });
+  if (!rootTrust.ok) return false;
+  const evidenceFiles = readdirSync(trustedTransactionRoot)
+    .filter((name) => /^update-\d{13}-\d{1,10}\.json$/u.test(name))
+    .sort()
+    .reverse();
+  const incomplete = [];
+  for (const evidenceName of evidenceFiles) {
+    let evidence;
+    try {
+      const evidencePath = resolve(trustedTransactionRoot, evidenceName);
+      const evidenceMetadata = lstatSync(evidencePath);
+      if (
+        !isPathInsideRecoveryRoot(trustedTransactionRoot, evidencePath) ||
+        !evidenceMetadata.isFile() || evidenceMetadata.isSymbolicLink() || evidenceMetadata.nlink !== 1
+      ) continue;
+      evidence = JSON.parse(readFileSync(evidencePath, "utf8"));
+    } catch {
+      continue;
+    }
+    if (
+      evidence?.schemaVersion !== "meta-kim-mcp-memory-upgrade-v1" ||
+      !MCP_MEMORY_TRANSACTION_ID_PATTERN.test(evidence.transactionId ?? "") ||
+      evidenceName !== `${evidence.transactionId}.json` ||
+      !["running", "rollback_failed"].includes(evidence.status)
+    ) continue;
+    const recoveryPath = resolve(trustedTransactionRoot, `${evidence.transactionId}-recovery.json`);
+    if (!isPathInsideRecoveryRoot(trustedTransactionRoot, recoveryPath) || !existsSync(recoveryPath)) continue;
+    try {
+      const recoveryMetadata = lstatSync(recoveryPath);
+      if (!recoveryMetadata.isFile() || recoveryMetadata.isSymbolicLink() || recoveryMetadata.nlink !== 1) continue;
+    } catch { continue; }
+    incomplete.push({ evidenceName, evidence, recoveryPath });
+  }
+  if (incomplete.length === 0) return true;
+
+  const { evidenceName, evidence, recoveryPath } = incomplete[0];
+  let recovery;
+  try { recovery = JSON.parse(readFileSync(recoveryPath, "utf8")); } catch { return false; }
+  if (
+    !Array.isArray(evidence.events) ||
+    !recovery || typeof recovery !== "object" || Array.isArray(recovery) ||
+    !Array.isArray(recovery.bootSnapshots) ||
+    !recovery.stateSnapshot || typeof recovery.stateSnapshot !== "object" ||
+    Array.isArray(recovery.stateSnapshot) ||
+    !recovery.oldPython || typeof recovery.oldPython !== "object" ||
+    !Array.isArray(recovery.oldPython.args)
+  ) return false;
+  const expectedSnapshotPaths = new Set([
+    activeMemoryRuntimeStatePath(),
+    ...memoryBootArtifactPaths(),
+  ].map(pathKeyForRecovery));
+  const isAbsoluteRecoveryPath = (value) => typeof value === "string" && isAbsolute(value);
+  const recoveryEvents = evidence.events.filter(({ stage }) => stage === "recovery_snapshots_persisted");
+  const recoveryEvent = recoveryEvents[0];
+  let calculatedRecoveryDigest;
+  try { calculatedRecoveryDigest = mcpMemoryRecoveryDigest(recovery); } catch { return false; }
+  const trustedOldMemoryBin = findMemoryBinPath(resolved, { preferActive: false });
+  const trustedDatabasePath = resolveMcpMemoryDatabasePathWithRuntime(resolved.python);
+  const expectedCandidateRoot = resolve(homedir(), ".meta-kim", "memory-runtimes", evidence.transactionId);
+  let trustedCandidateMemoryBin;
+  try {
+    trustedCandidateMemoryBin = realpathSync(recovery.candidateMemoryBin);
+  } catch { return false; }
+  const resolvedPython = typeof resolved.python === "string"
+    ? { command: resolved.python, args: [] }
+    : { command: resolved.python.command, args: resolved.python.args ?? [] };
+  const recoveryPython = recovery.oldPython;
+  const materialValidation = validateMcpMemoryRecoveryMaterial({
+    transactionRoot: trustedTransactionRoot,
+    evidenceName,
+    transactionId: evidence.transactionId,
+    recovery,
+    expectedOldMemoryBin: trustedOldMemoryBin,
+    expectedPython: resolved.python,
+    expectedDatabasePath: trustedDatabasePath,
+    expectedCandidateRoot,
+    expectedMcpPath: mcpMemoryRuntimeConfigPath(),
+    expectedSnapshotPaths: [...expectedSnapshotPaths],
+    platformName: platform(),
+  });
+  if (!materialValidation.ok) return false;
+  if (
+    recovery?.schemaVersion !== "meta-kim-mcp-memory-recovery-v1" ||
+    recoveryEvents.length !== 1 ||
+    recovery.transactionId !== evidence.transactionId ||
+    recovery.recoveryDigest !== calculatedRecoveryDigest ||
+    recoveryEvent?.recoveryDigest !== calculatedRecoveryDigest ||
+    !isAbsoluteRecoveryPath(recovery.databasePath) ||
+    !isAbsoluteRecoveryPath(recovery.oldMemoryBin) ||
+    !isAbsoluteRecoveryPath(recovery.candidateMemoryBin) ||
+    !isAbsoluteRecoveryPath(recovery.mcpPath) ||
+    pathKeyForRecovery(recovery.mcpPath) !== pathKeyForRecovery(mcpMemoryRuntimeConfigPath()) ||
+    !trustedOldMemoryBin ||
+    pathKeyForRecovery(recovery.oldMemoryBin) !== pathKeyForRecovery(realpathSync(trustedOldMemoryBin)) ||
+    !trustedDatabasePath ||
+    pathKeyForRecovery(recovery.databasePath) !== pathKeyForRecovery(trustedDatabasePath) ||
+    !recoveryPython ||
+    pathKeyForRecovery(recoveryPython.command) !== pathKeyForRecovery(realpathSync(resolvedPython.command)) ||
+    JSON.stringify(recoveryPython.args ?? []) !== JSON.stringify(resolvedPython.args ?? []) ||
+    !isPathInsideRecoveryRoot(expectedCandidateRoot, trustedCandidateMemoryBin) ||
+    !/[/\\]Scripts[/\\]memory\.exe$/iu.test(trustedCandidateMemoryBin) ||
+    ![recovery.stateSnapshot, ...(recovery.bootSnapshots ?? [])]
+      .filter(Boolean)
+      .every(({ filePath }) => isAbsoluteRecoveryPath(filePath) && expectedSnapshotPaths.has(pathKeyForRecovery(filePath)))
+  ) return false;
+
+  const trustedBackupPath = resolve(trustedTransactionRoot, `${evidence.transactionId}-sqlite-backup.db`);
+  if (!isPathInsideRecoveryRoot(trustedTransactionRoot, trustedBackupPath)) return false;
+  const snapshots = [recovery.stateSnapshot, ...recovery.bootSnapshots];
+  const canonicalBase64 = (value) => {
+    if (typeof value !== "string" || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u.test(value)) return false;
+    return Buffer.from(value, "base64").toString("base64") === value;
+  };
+  if (
+    !snapshots.every((snapshot) => (
+      snapshot && typeof snapshot === "object" && !Array.isArray(snapshot) &&
+      typeof snapshot.existed === "boolean" &&
+      (snapshot.existed ? canonicalBase64(snapshot.contentBase64) : snapshot.contentBase64 === null) &&
+      (snapshot.mode === null || (Number.isInteger(snapshot.mode) && snapshot.mode >= 0 && snapshot.mode <= 0o777))
+    )) ||
+    !recovery.mcpMemoryEntrySnapshot || typeof recovery.mcpMemoryEntrySnapshot !== "object" ||
+    typeof recovery.mcpMemoryEntrySnapshot.fileExisted !== "boolean" ||
+    typeof recovery.mcpMemoryEntrySnapshot.existed !== "boolean"
+  ) return false;
+
+  const backupEvents = evidence.events.filter(({ stage }) => stage === "database_backup_verified");
+  if (backupEvents.length !== 1 || !/^[a-f0-9]{64}$/u.test(backupEvents[0].backupContentDigest ?? "")) return false;
+  const expectedBackupDigest = backupEvents[0].backupContentDigest;
+  if (recovery.databaseExistedBefore === true) {
+    let backupMetadata;
+    let trustedExistingBackupPath;
+    try {
+      backupMetadata = lstatSync(trustedBackupPath);
+      trustedExistingBackupPath = realpathSync(trustedBackupPath);
+    } catch { return false; }
+    if (
+      !backupMetadata.isFile() || backupMetadata.isSymbolicLink() || backupMetadata.nlink !== 1 ||
+      pathKeyForRecovery(trustedExistingBackupPath) !== pathKeyForRecovery(trustedBackupPath) ||
+      createHash("sha256").update(readFileSync(trustedExistingBackupPath)).digest("hex") !== expectedBackupDigest ||
+      !sqliteQuickCheck({ python: resolved.python, databasePath: trustedExistingBackupPath }).ok
+    ) return false;
+  } else if (
+    recovery.databaseExistedBefore !== false ||
+    expectedBackupDigest !== MCP_MEMORY_NO_DATABASE_DIGEST ||
+    existsSync(trustedBackupPath)
+  ) return false;
+
+  const identityMatches = (listener, memoryBin) => {
+    const expected = memoryProcessIdentityExpectation(memoryBin);
+    return verifyMemoryListenerIdentity(listener, {
+      platform: expected.platformName,
+      executablePath: expected.expectedExecutablePath,
+      executablePaths: expected.expectedExecutablePaths,
+      launcherPath: expected.expectedLauncherPath,
+      host: endpoint.hostname,
+      port: endpoint.port,
+    }).verified;
+  };
+  const protocol = await runMcpMemoryRecoveryProtocol({
+    preflight: async () => ({ ok: true }),
+    adapters: {
+      acquireTransactionLock: async () => acquireEndpointStartLock({
+        endpoint,
+        lockRoot: join(homedir(), ".meta-kim", "locks"),
+      }),
+      releaseTransactionLock: async (lock) => releaseEndpointStartLock(lock),
+      inspectWriter: async () => {
+        const listener = inspectEndpointListener(endpoint);
+        if (isEndpointNotListening(listener)) return { kind: "none" };
+        if (listener?.kind !== "listening") return { kind: "unknown" };
+        if (identityMatches(listener, trustedCandidateMemoryBin)) return { kind: "candidate" };
+        if (identityMatches(listener, trustedOldMemoryBin)) return { kind: "old" };
+        return { kind: "unknown" };
+      },
+      stopWriter: ({ kind }) => stopVerifiedEndpointProcess({
+        endpoint,
+        ...memoryProcessIdentityExpectation(
+          kind === "candidate" ? trustedCandidateMemoryBin : trustedOldMemoryBin,
+        ),
+      }),
+      verifyNoWriter: async () => isEndpointNotListening(inspectEndpointListener(endpoint)),
+      restoreDatabase: async () => {
+        const backupPath = trustedBackupPath;
+        if (existsSync(backupPath)) {
+          const actualBackupDigest = createHash("sha256").update(readFileSync(backupPath)).digest("hex");
+          if (!expectedBackupDigest || actualBackupDigest !== expectedBackupDigest) return false;
+          return sqliteRestoreWithQuickCheck({
+            python: resolved.python,
+            backupPath,
+            targetPath: recovery.databasePath,
+          }).ok;
+        }
+        if (recovery.databaseExistedBefore === false) return !existsSync(recovery.databasePath);
+        return !evidence.events.some(({ stage }) => stage === "database_backup_verified");
+      },
+      restoreMcpEntry: async () => restoreMcpMemoryServerEntry(
+        recovery.mcpPath,
+        recovery.mcpMemoryEntrySnapshot,
+      ),
+      restoreBootAndActiveState: async () => {
+        const snapshots = [recovery.stateSnapshot, ...(recovery.bootSnapshots ?? [])].filter(Boolean);
+        return snapshots.every((snapshot) => restoreManagedFile({
+          filePath: snapshot.filePath,
+          existed: snapshot.existed === true,
+          content: snapshot.contentBase64 ? Buffer.from(snapshot.contentBase64, "base64") : null,
+          mode: snapshot.mode,
+        }));
+      },
+      startOldRuntime: async () => ({
+        ok: await startMcpMemoryServiceBackground(
+          { ...resolved, python: resolved.python },
+          endpoint,
+          {
+            memoryBinOverride: trustedOldMemoryBin,
+            databasePathOverride: recovery.databasePath,
+            lockAlreadyHeld: true,
+            configureBootOnHealthy: false,
+            writeActiveStateOnHealthy: false,
+            extraEnv: { MCP_MEMORY_SQLITE_PATH: recovery.databasePath },
+          },
+        ),
+      }),
+      verifyOldRuntime: async () => (
+        await probeMcpMemoryHealth(endpoint.healthUrl) &&
+        verifyEndpointRuntimeIdentity(endpoint, trustedOldMemoryBin)
+      ),
+      markRecovered: async () => {
+        evidence.status = "recovered_on_next_setup";
+        evidence.stage = "recovered_on_next_setup";
+        writeJsonAtomic(resolve(trustedTransactionRoot, evidenceName), evidence);
+        return true;
+      },
+    },
+  });
+  return protocol.ok;
+}
+
+async function runTransactionalMcpMemoryUpdate({
+  resolved,
+  endpoint,
+  mcpPath,
+  oldMemoryBinOverride = null,
+}) {
+  const oldMemoryBin = oldMemoryBinOverride ?? findMemoryBinPath(resolved);
+  const transactionRoot = join(homedir(), ".meta-kim", "transactions", "mcp-memory");
+  preparePrivateTransactionRoot(transactionRoot);
+  cleanupExpiredMcpMemoryRecoveryArtifacts({ transactionRoot });
+  if (!await recoverIncompleteMcpMemoryTransaction({ transactionRoot, endpoint, resolved })) {
+    return { ok: false, status: "incomplete_transaction_recovery_failed" };
+  }
+  const recoveredOldMemoryBin = findMemoryBinPath(resolved);
+  if (!recoveredOldMemoryBin && !oldMemoryBin) return { ok: false, status: "old_runtime_missing" };
+  const effectiveOldMemoryBin = recoveredOldMemoryBin ?? oldMemoryBin;
+  const activeOldRuntime = readActiveMemoryRuntimeState();
+  const effectiveOldPython = (
+    activeOldRuntime?.pythonPath &&
+    isAbsolute(activeOldRuntime.pythonPath) &&
+    existsSync(activeOldRuntime.pythonPath)
+  )
+    ? { command: activeOldRuntime.pythonPath, args: [] }
+    : resolved.python;
+  const transactionId = `update-${Date.now()}-${process.pid}`;
+  const candidateDir = join(homedir(), ".meta-kim", "memory-runtimes", transactionId);
+  const sentinelRoot = join(transactionRoot, `${transactionId}-sentinel`);
+  const stateSnapshot = snapshotManagedFile(activeMemoryRuntimeStatePath());
+  const existingMcpConfig = existsSync(mcpPath)
+    ? JSON.parse(readFileSync(mcpPath, "utf8"))
+    : {};
+  const mcpMemoryEntrySnapshot = {
+    fileExisted: existsSync(mcpPath),
+    existed: Object.hasOwn(existingMcpConfig.mcpServers ?? {}, "mcp-memory-service"),
+    entry: existingMcpConfig.mcpServers?.["mcp-memory-service"] ?? null,
+  };
+  const bootSnapshots = memoryBootArtifactPaths().map(snapshotManagedFile);
+  const databasePath = resolveMcpMemoryDatabasePathWithRuntime(effectiveOldPython, {
+    preferredPath: activeOldRuntime?.databasePath ?? null,
+  });
+  if (!databasePath) return { ok: false, status: "database_path_resolution_failed" };
+  const databaseExistedBefore = existsSync(databasePath);
+  const backupPath = join(transactionRoot, `${transactionId}-sqlite-backup.db`);
+  const recoveryPath = join(transactionRoot, `${transactionId}-recovery.json`);
+  let candidateResolved = null;
+  let candidateMemoryBin = null;
+
+  const transaction = await runMcpMemoryUpgradeTransaction({
+    transactionRoot,
+    transactionId,
+    adapters: {
+      prepareCandidate: async () => {
+        const launcher = createMemoryServiceVenv(effectiveOldPython, candidateDir);
+        if (!launcher) return { ok: false };
+        candidateResolved = { python: launcher, venvDir: candidateDir, venvCreated: true };
+        const plan = planMcpMemoryReconciliation({
+          existingInstalled: false,
+          inUpdateMode: true,
+        });
+        const installed = executeMcpMemoryReconciliation({
+          python: launcher,
+          plan,
+          runPython: runMcpMemoryPython,
+          repairDependencyProbe: ({ python, verifyArgs }) => repairWindowsCandidateOnnxRuntime({
+            python,
+            candidateDir,
+            verifyArgs,
+            runPython: runMcpMemoryPython,
+          }),
+        });
+        if (!installed.ok) {
+          return {
+            ok: false,
+            code: installed.code,
+            stage: installed.stage,
+            processResult: installed.processResult,
+            repairEvidence: installed.repairEvidence,
+            repairReason: installed.repairReason,
+          };
+        }
+        candidateMemoryBin = findMemoryBinPath(candidateResolved, { preferActive: false });
+        if (!candidateMemoryBin) return { ok: false };
+        return {
+          ok: true,
+          identity: candidateDir,
+          resolved: candidateResolved,
+          memoryBin: candidateMemoryBin,
+          pythonPath: launcher.command,
+          reconciliationStage: installed.stage,
+          reconciliationCode: installed.code,
+          repairEvidence: installed.repairEvidence,
+        };
+      },
+      validateCandidateOnline: (candidate) => runCandidateOnnxSentinel({
+        pythonPath: candidate.resolved.python,
+        workDir: join(sentinelRoot, "online"),
+        offline: false,
+      }),
+      validateCandidateBootOffline: (candidate) => runCandidateOnnxSentinel({
+        pythonPath: candidate.resolved.python,
+        workDir: join(sentinelRoot, "offline"),
+        offline: true,
+      }),
+      persistRecoverySnapshots: async () => persistMcpMemoryRecoverySnapshots({
+        transactionRoot,
+        transactionId,
+        oldMemoryBin: effectiveOldMemoryBin,
+        oldPython: effectiveOldPython,
+        candidateMemoryBin,
+        databasePath,
+        databaseExistedBefore,
+        mcpPath,
+        mcpMemoryEntrySnapshot,
+        stateSnapshot,
+        bootSnapshots,
+      }),
+      acquireTransactionLock: async () => acquireEndpointStartLock({
+        endpoint,
+        lockRoot: join(homedir(), ".meta-kim", "locks"),
+      }),
+      releaseTransactionLock: async (lock) => releaseEndpointStartLock(lock),
+      stopOldRuntime: () => stopVerifiedEndpointProcess({
+        endpoint,
+        ...memoryProcessIdentityExpectation(effectiveOldMemoryBin),
+        expectedPythonPath: effectiveOldPython,
+        expectedDatabasePath: databasePath,
+        resolveRuntimeAuthority: () => readMcpMemoryRuntimeAuthority(),
+        requireRuntimeAuthority: true,
+      }),
+      backupDatabase: async () => {
+        if (!existsSync(databasePath)) {
+          return {
+            ok: true,
+            quickCheck: "ok",
+            identity: "no_database",
+            contentSha256: MCP_MEMORY_NO_DATABASE_DIGEST,
+          };
+        }
+        return sqliteBackupWithQuickCheck({
+          python: effectiveOldPython,
+          sourcePath: databasePath,
+          backupPath,
+        });
+      },
+      startCandidate: async (candidate) => ({
+        ok: await startMcpMemoryServiceBackground(candidate.resolved, endpoint, {
+          memoryBinOverride: candidate.memoryBin,
+          databasePathOverride: databasePath,
+          lockAlreadyHeld: true,
+          configureBootOnHealthy: false,
+          writeActiveStateOnHealthy: false,
+          extraEnv: { MCP_MEMORY_SQLITE_PATH: databasePath },
+        }),
+      }),
+      verifyCandidateHealthy: (candidate) =>
+        verifyEndpointRuntimeHealthy(endpoint, candidate.memoryBin),
+      updateMcpConfig: async (candidate) => {
+        let mcpConfig = {};
+        if (existsSync(mcpPath)) mcpConfig = JSON.parse(readFileSync(mcpPath, "utf8"));
+        writeJsonAtomic(mcpPath, {
+          ...mcpConfig,
+          mcpServers: {
+            ...(mcpConfig.mcpServers ?? {}),
+            "mcp-memory-service": buildMcpMemoryServerConfig(candidate.resolved, {
+              memoryBinOverride: candidate.memoryBin,
+              preferActive: false,
+              databasePathOverride: databasePath,
+            }),
+          },
+        });
+        return true;
+      },
+      configureCandidateBoot: (candidate) => configureBootAutoStart(candidate.memoryBin, endpoint, {
+        databasePath,
+      }),
+      writeActiveState: async (candidate) => {
+        writeActiveMemoryRuntimeState({
+          resolved: candidate.resolved,
+          memoryBin: candidate.memoryBin,
+          databasePath,
+        });
+        return true;
+      },
+      commit: async () => true,
+      cleanupSensitiveArtifacts: async () => {
+        rmSync(backupPath, { force: true });
+        rmSync(recoveryPath, { force: true });
+        return true;
+      },
+      cleanupCandidate: async () => {
+        rmSync(candidateDir, { recursive: true, force: true });
+        return true;
+      },
+      stopCandidate: () => stopVerifiedEndpointProcess({
+        endpoint,
+        ...memoryProcessIdentityExpectation(candidateMemoryBin),
+      }),
+      verifyNoWriter: async () => isEndpointNotListening(inspectEndpointListener(endpoint)),
+      restoreDatabase: async (backup) => {
+        if (!backup) return true;
+        if (backup?.identity === "no_database") {
+          rmSync(databasePath, { force: true });
+          return true;
+        }
+        return sqliteRestoreWithQuickCheck({
+          python: effectiveOldPython,
+          backupPath,
+          targetPath: databasePath,
+        });
+      },
+      restoreBoot: async () => bootSnapshots.every(restoreManagedFile),
+      restoreState: async () => {
+        restoreManagedFile(stateSnapshot);
+        restoreMcpMemoryServerEntry(mcpPath, mcpMemoryEntrySnapshot);
+        return true;
+      },
+      startOldRuntime: async () => ({
+        ok: await startMcpMemoryServiceBackground({ ...resolved, python: effectiveOldPython }, endpoint, {
+          memoryBinOverride: effectiveOldMemoryBin,
+          databasePathOverride: databasePath,
+          lockAlreadyHeld: true,
+          configureBootOnHealthy: false,
+          writeActiveStateOnHealthy: false,
+          extraEnv: { MCP_MEMORY_SQLITE_PATH: databasePath },
+        }),
+      }),
+      verifyOldRuntimeHealthy: async () => (
+        await probeMcpMemoryHealth(endpoint.healthUrl) &&
+        verifyEndpointRuntimeIdentity(endpoint, effectiveOldMemoryBin)
+      ),
+    },
+  });
+  return {
+    ...transaction,
+    resolved: transaction.ok ? candidateResolved : resolved,
+    registrationOk: transaction.ok,
+  };
+}
+
+async function planMcpMemoryUpdateRoute({ resolved, endpoint, existingInstalled }) {
+  if (endpoint.canAutoStart === false) {
+    return { ok: true, useTransaction: false, reason: "remote_endpoint" };
+  }
+
+  const oldMemoryBin = findMemoryBinPath(resolved);
+  const listener = inspectEndpointListener(endpoint);
+  if (isEndpointNotListening(listener)) {
+    return {
+      ok: true,
+      useTransaction: Boolean(oldMemoryBin),
+      oldMemoryBin,
+      reason: existingInstalled ? "installed_runtime_not_listening" : "historical_runtime_not_listening",
+    };
+  }
+  if (listener?.kind !== "listening") {
+    return {
+      ok: false,
+      reason: listener?.reason || "unknown_listener",
+    };
+  }
+  if (!oldMemoryBin) {
+    return { ok: false, reason: "old_runtime_missing_for_listener" };
+  }
+
+  const expected = memoryProcessIdentityExpectation(oldMemoryBin);
+  const identity = verifyMemoryListenerIdentity(listener, {
+    platform: expected.platformName,
+    executablePath: expected.expectedExecutablePath,
+    executablePaths: expected.expectedExecutablePaths,
+    launcherPath: expected.expectedLauncherPath,
+    host: endpoint.hostname,
+    port: endpoint.port,
+  });
+  if (!identity.verified) {
+    return { ok: false, reason: identity.reason || "user_drift_or_unknown_listener" };
+  }
+
+  if (!await probeMcpMemoryHealth(endpoint.healthUrl)) {
+    return { ok: false, reason: "old_runtime_unhealthy" };
+  }
+
+  let authority = readMcpMemoryRuntimeAuthority();
+  if (
+    platform() === "win32" &&
+    authority.manifest?.verified !== true &&
+    authority.manifest?.reason === "runtime_manifest_boot_chain_unverified"
+  ) {
+    const adoption = await adoptHistoricalWindowsMcpMemoryBootArtifactOwnership({
+      homeRoot: homedir(),
+      platformName: platform(),
+      metaKimVersion: packageVersion,
+      manifestEntries: authority.manifest.entries,
+      expectedMemoryBin: oldMemoryBin,
+      expectedPythonPaths: expected.expectedExecutablePaths,
+      endpoint,
+      expectedLockDir: join(
+        homedir(),
+        ".meta-kim",
+        "locks",
+        endpointStartLockName(endpoint),
+      ),
+    });
+    if (!adoption.ok) return { ok: false, reason: adoption.reason };
+    authority = readMcpMemoryRuntimeAuthority();
+  }
+  const activeState = authority.activeState;
+  const authorityCheck = verifyMcpMemoryRuntimeAuthority(authority, {
+    memoryBin: oldMemoryBin,
+    pythonPath: activeState?.pythonPath ?? resolved.python,
+    databasePath: activeState?.databasePath,
+  });
+  if (!authorityCheck.verified) {
+    return { ok: false, reason: authorityCheck.reason };
+  }
+  return {
+    ok: true,
+    useTransaction: true,
+    oldMemoryBin,
+    reason: "verified_running_runtime",
+  };
+}
+
+async function installMcpMemoryServiceStep(
+  inUpdateMode = false,
+  activeTargets = RUNTIME_CHOICES.map(({ id }) => id),
+) {
   heading(t.stepMcpMemory);
 
   const want = await askYesNo(t.askMcpMemoryInstall, true);
@@ -6074,133 +8139,132 @@ async function installMcpMemoryServiceStep(inUpdateMode = false, activeTargets =
     return;
   }
 
+  let memoryEndpoint;
+  try {
+    memoryEndpoint = resolveMemoryEndpoint();
+  } catch (error) {
+    warn(t.mcpMemoryEndpointInvalid(error.message));
+    return false;
+  }
+  info(t.mcpMemoryEndpointSelected(memoryEndpoint.endpointUrl));
+
   // Detect Python — reuse same detection as graphify for consistency
   const detected = checkPython310();
   if (!detected) {
     warn(t.pythonNotFound);
     info(t.pythonHint);
-    return;
+    return false;
   }
 
   // Resolve Python for mcp-memory-service (safetensors prefers 3.11/3.12).
   // When the detected Python is outside that range, try to build/reuse a venv
   // locked to 3.12. Falls back to the detected Python with a warning.
-  const resolved = resolvePythonForMemoryService(detected);
-  const python = resolved.python;
+  let resolved = resolvePythonForMemoryService(detected);
+  let python = resolved.python;
+  const mcpPath = mcpMemoryRuntimeConfigPath();
+  mkdirSync(dirname(mcpPath), { recursive: true });
 
   // Check if already installed
   const existing = checkMcpMemoryService(python);
-  if (existing.installed) {
-    if (inUpdateMode) {
-      // Stop running service before upgrading (Windows locks the binary)
-      info(t.mcpMemoryStopping);
-      const stopped = stopMcpMemoryService();
-      if (stopped) {
-        ok(t.mcpMemoryStopped);
-        await new Promise((r) => setTimeout(r, 2000));
-      }
-      // Upgrade in update mode
-      info(t.mcpMemoryUpgrading);
-      const upgradeResult = runPythonModule(python, [
-        "-m",
-        "pip",
-        "install",
-        "--upgrade",
-        "mcp-memory-service",
-      ]);
-      if (upgradeResult.status !== 0) {
-        const stderr = readProcessText(upgradeResult);
-        warn(t.mcpMemoryUpgradeFailed);
-        if (stderr) {
-          console.log(`${C.dim}${t.pipErrorDetail(stderr)}${C.reset}`);
-        }
-        return;
-      }
-      const newVersion = checkMcpMemoryService(python).version ?? "latest";
-      ok(t.mcpMemoryUpgraded(newVersion));
-    } else {
-      ok(t.mcpMemoryAlreadyInstalled(existing.version ?? "unknown"));
-    }
-  } else {
-    // Install via pip (use resolved Python for cross-platform compatibility)
-    info(t.mcpMemoryInstalling);
-    const installResult = runPythonModule(python, [
-      "-m",
-      "pip",
-      "install",
-      "mcp-memory-service",
-    ]);
-    if (installResult.status !== 0) {
-      const stderr = readProcessText(installResult);
-      warn(t.mcpMemoryInstallFailed);
-      if (stderr) {
-        console.log(`${C.dim}${t.pipErrorDetail(stderr)}${C.reset}`);
-      }
-      return;
-    } else {
-      ok(t.mcpMemoryInstalled);
-    }
+  const updateRoute = inUpdateMode
+    ? await planMcpMemoryUpdateRoute({
+        resolved,
+        endpoint: memoryEndpoint,
+        existingInstalled: existing.installed,
+      })
+    : { ok: true, useTransaction: false };
+  if (!updateRoute.ok) {
+    warn(t.mcpMemoryUpgradeFailed);
+    info(`  update refused: ${updateRoute.reason}`);
+    return false;
   }
-
-  // Register in project .mcp.json. When running inside a venv we write the
-  // absolute python path so Claude Code can launch it without shell PATH setup.
-  // `python` here is a launcher descriptor { command, args, version, ... }.
-  const memoryServerConfig = buildMcpMemoryServerConfig(resolved);
-
-  const mcpPath = join(PROJECT_DIR, ".mcp.json");
-  if (existsSync(mcpPath)) {
-    try {
-      const mcpConfig = JSON.parse(readFileSync(mcpPath, "utf8"));
-      if (
-        isLegacyMcpMemoryServerConfig(
-          mcpConfig.mcpServers?.["mcp-memory-service"],
-        )
-      ) {
-        const nextConfig = {
-          ...mcpConfig,
-          mcpServers: {
-            ...(mcpConfig.mcpServers ?? {}),
-            "mcp-memory-service": memoryServerConfig,
-          },
-        };
-        writeFileSync(mcpPath, JSON.stringify(nextConfig, null, 2) + "\n");
-        ok(t.mcpMemoryServerRegistered);
-      } else if (mcpConfig.mcpServers?.["mcp-memory-service"]) {
-        ok(t.mcpMemoryServerExists);
-      } else {
-        const nextConfig = {
-          ...mcpConfig,
-          mcpServers: {
-            ...(mcpConfig.mcpServers ?? {}),
-            "mcp-memory-service": memoryServerConfig,
-          },
-        };
-        writeFileSync(mcpPath, JSON.stringify(nextConfig, null, 2) + "\n");
-        ok(t.mcpMemoryServerRegistered);
-      }
-    } catch {
-      warn(t.mcpMemoryServerExists);
+  let registrationOk = false;
+  let backgroundOk = false;
+  if (inUpdateMode && updateRoute.useTransaction) {
+    info(t.mcpMemoryUpgrading);
+    const transaction = await runTransactionalMcpMemoryUpdate({
+      resolved,
+      endpoint: memoryEndpoint,
+      mcpPath,
+      oldMemoryBinOverride: updateRoute.oldMemoryBin,
+    });
+    if (!transaction.ok) {
+      warn(t.mcpMemoryUpgradeFailed);
+      info(`  ${transaction.status}: code=${transaction.code ?? "unknown"}; ${transaction.evidencePath || "no evidence"}`);
+      return false;
     }
+    resolved = transaction.resolved;
+    python = resolved.python;
+    registrationOk = transaction.registrationOk;
+    backgroundOk = true;
+    ok(t.mcpMemoryUpgraded(checkMcpMemoryService(python).version ?? "latest"));
   } else {
-    // Create minimal .mcp.json with just the memory service
-    const newConfig = {
-      mcpServers: {
-        "mcp-memory-service": memoryServerConfig,
-      },
-    };
-    writeFileSync(mcpPath, JSON.stringify(newConfig, null, 2) + "\n");
-    ok(t.mcpMemoryServerRegistered);
+    const reconciliationPlan = planMcpMemoryReconciliation({
+      existingInstalled: existing.installed,
+      inUpdateMode,
+    });
+    info(inUpdateMode ? t.mcpMemoryUpgrading : t.mcpMemoryInstalling);
+    const reconciliation = executeMcpMemoryReconciliation({
+      python,
+      plan: reconciliationPlan,
+      runPython: runMcpMemoryPython,
+    });
+    if (!reconciliation.ok) {
+      const stderr = readProcessText(reconciliation.processResult);
+      warn(inUpdateMode ? t.mcpMemoryUpgradeFailed : t.mcpMemoryInstallFailed);
+      info(`  code=${reconciliation.code ?? "unknown"}; stage=${reconciliation.stage ?? "unknown"}`);
+      if (stderr) console.log(`${C.dim}${t.pipErrorDetail(stderr)}${C.reset}`);
+      return false;
+    }
+    const reconciledVersion = checkMcpMemoryService(python).version ?? "latest";
+    if (existing.installed) ok(t.mcpMemoryAlreadyInstalled(reconciledVersion));
+    else ok(t.mcpMemoryInstalled);
+
+    let memoryServerConfig;
+    try {
+      memoryServerConfig = buildMcpMemoryServerConfig(resolved);
+    } catch (error) {
+      warn(`${t.setupError} MCP Memory server registration: ${error.message}`);
+      return false;
+    }
+    registrationOk = registerMcpMemoryServer({
+      mcpPath,
+      memoryServerConfig,
+      onRegistered: () => ok(t.mcpMemoryServerRegistered),
+      onExisting: () => ok(t.mcpMemoryServerExists),
+      onFailure: (error) =>
+        warn(`${t.setupError} MCP Memory server registration: ${error.message}`),
+    });
+    if (!registrationOk) return false;
+    backgroundOk = await startMcpMemoryServiceBackground(resolved, memoryEndpoint);
   }
 
   info(t.mcpMemoryServerStartHint);
 
-  // Step 4.7 — auto-install runtime memory hooks so the full pipeline
-  // (pip package → .mcp.json → hook files → runtime registration →
-  // health check) runs from a single `node setup.mjs` invocation.
-  await runMcpMemoryHookInstaller(activeTargets);
+  if (!registrationOk || !backgroundOk) return false;
 
-  // Step 4.8 — start the HTTP server in background and configure boot auto-start
-  await startMcpMemoryServiceBackground(resolved);
+  const ownership = await recordMcpMemoryBootArtifactOwnership({
+    homeRoot: homedir(),
+    platformName: platform(),
+    metaKimVersion: packageVersion,
+    canAutoStart: memoryEndpoint.canAutoStart,
+  });
+  if (!ownership.ok) {
+    warn(
+      `MCP Memory boot ownership recording failed: ${ownership.error}. ` +
+      "The service may be running, but setup is incomplete; repair the reported artifact or manifest issue and rerun setup.",
+    );
+    return MCP_MEMORY_INSTALL_OUTCOME.OWNERSHIP_FAILURE;
+  }
+
+  // Step 4.7 — auto-install runtime memory hooks so the full pipeline
+  // (pip package → local runtime state → hook files → runtime registration →
+  // health check) runs from a single `node setup.mjs` invocation.
+  const hooksOk = await runMcpMemoryHookInstaller(activeTargets, {
+    allowClaudeGlobalSettings: want && activeTargets.includes("claude"),
+  });
+
+  return registrationOk && hooksOk && backgroundOk;
 }
 
 function ensureNetworkxCompatibility(python) {
@@ -6242,32 +8306,111 @@ function upgradeNetworkx(python) {
 
 // ── Step 5: Validate + next steps ───────────────────────
 
-async function validate() {
+async function validateInstalledArtifacts({
+  installScope,
+  activeTargets,
+  projectSyncOk = true,
+  projectDeployResults = [],
+}) {
   heading(t.stepValidate);
-  const agentsDir = join(PROJECT_DIR, ".claude", "agents");
-  if (existsSync(agentsDir)) {
-    const summary = summarizeExpectedFiles(
-      readdirSync(agentsDir).filter((f) => f.endsWith(".md")),
-      expectedAgentProjectionFiles(".md"),
+  if (installScope === "global") {
+    // The final global check receives the selected runtimes independently of
+    // the hooks opt-in so it can read back each setup launch descriptor.
+    const globalValidationTargets = [...new Set(activeTargets)];
+    const projectReady = projectDeployResults.every(
+      (result) => result.status === "ok" && result.stateStatus === "ready",
     );
-    ok(t.agentPrompts(summary.presentCount));
+    const globalSyncReady = checkGlobalRuntimeSync(globalValidationTargets);
+    if (globalSyncReady && projectReady) {
+      ok(t.validationPassed);
+      return true;
+    }
+    warn(`${t.setupError} ${t.stepValidate}`);
+    return false;
   }
-  const validateSpawn = buildNodeScriptSpawn(
-    process.execPath,
-    PROJECT_DIR,
-    "scripts/validate-project.mjs",
-    ["--context", "install"],
-  );
-  const validateResult = spawnSync(
-    validateSpawn.command,
-    validateSpawn.args,
-    validateSpawn.options,
-  );
-  if (validateResult.status === 0) ok(t.validationPassed);
-  else warn(t.validationWarnings);
+
+  if (!projectSyncOk) {
+    warn(`${t.setupError} ${t.stepValidate}`);
+    return false;
+  }
+  if (projectDeployResults.length > 0) {
+    const allTargetsReady = projectDeployResults.every(
+      (result) => result.status === "ok" && result.stateStatus === "ready",
+    );
+    if (allTargetsReady) {
+      ok(t.validationPassed);
+      return true;
+    }
+    warn(`${t.setupError} ${t.stepValidate}`);
+    return false;
+  }
+
+  // A source checkout can be its own project target. A packed distribution is
+  // only a staging source and must not pass project scope without a real target.
+  if (isSourceCheckout()) {
+    ok(t.validationPassed);
+    return true;
+  }
+  warn(`${t.setupError} ${t.stepValidate}`);
+  return false;
 }
 
-function showNextSteps(runtimes) {
+function printInstallResult(result, completeMessage) {
+  if (result.status === "complete") {
+    console.log(`\n${C.bold}${C.green}✓ ${completeMessage}${C.reset}\n`);
+    return;
+  }
+
+  const failedLabels = result.failedSteps.map((step) => step.id).join(", ");
+  if (result.status === "partial") {
+    console.log(`\n${C.bold}${C.yellow}⚠ ${t.validationWarnings}${C.reset}`);
+    console.log(`${C.dim}  ${failedLabels}${C.reset}\n`);
+    return;
+  }
+
+  console.log(`\n${C.bold}${C.red}✗ ${t.setupError} ${failedLabels}${C.reset}`);
+  console.log("");
+}
+
+function installRecoveryCopy(mode, result) {
+  const failed = result.failedSteps.map((step) => step.id).join(", ");
+  const copies = {
+    en: {
+      title: mode === "update" ? "Update needs attention" : "Installation needs attention",
+      partial: "Core setup may be usable, but optional or follow-up steps did not finish.",
+      failed: "Setup is incomplete. Do not treat the runtime as ready yet.",
+      retry: `Failed steps: ${failed || "unknown"}. Fix the reported cause, rerun the same command, then run node setup.mjs --check.`,
+    },
+    "zh-CN": {
+      title: mode === "update" ? "更新尚未完整完成" : "安装尚未完整完成",
+      partial: "核心能力可能可用，但仍有可选项或收尾步骤未完成。",
+      failed: "当前安装不完整，请先不要把运行时视为已就绪。",
+      retry: `失败步骤：${failed || "未知"}。修复上方原因后重跑同一命令，再执行 node setup.mjs --check。`,
+    },
+    "ja-JP": {
+      title: mode === "update" ? "更新はまだ完了していません" : "インストールはまだ完了していません",
+      partial: "コア機能は利用できる可能性がありますが、任意または後続の手順が未完了です。",
+      failed: "セットアップは未完了です。runtime を準備完了として扱わないでください。",
+      retry: `失敗した手順: ${failed || "不明"}。上記の原因を修正して同じコマンドを再実行し、その後 node setup.mjs --check を実行してください。`,
+    },
+    "ko-KR": {
+      title: mode === "update" ? "업데이트가 아직 완료되지 않았습니다" : "설치가 아직 완료되지 않았습니다",
+      partial: "핵심 기능은 사용할 수 있을 수 있지만 선택 또는 후속 단계가 완료되지 않았습니다.",
+      failed: "설치가 불완전합니다. 아직 runtime을 준비 완료로 간주하지 마세요.",
+      retry: `실패 단계: ${failed || "알 수 없음"}. 위 원인을 해결한 뒤 같은 명령을 다시 실행하고 node setup.mjs --check 를 실행하세요.`,
+    },
+  };
+  return copies[currentLangCode] ?? copies.en;
+}
+
+function showInstallRecovery(result, mode) {
+  const copy = installRecoveryCopy(mode, result);
+  console.log(`${C.bold}${result.status === "partial" ? C.yellow : C.red}${copy.title}${C.reset}`);
+  console.log(result.status === "partial" ? copy.partial : copy.failed);
+  console.log(`${C.dim}${copy.retry}${C.reset}\n`);
+}
+
+function showNextSteps(runtimes, selectedTargets = detectedTargetIds(runtimes)) {
   const hasDeployDirs = quickDeployDirs.length > 0 || Boolean(quickDeployDir);
   const displayDir = quickDeployDirs[0] || quickDeployDir || PROJECT_DIR;
 
@@ -6311,10 +8454,7 @@ function showNextSteps(runtimes) {
   ) {
     console.log(`${C.yellow}${t.noRuntimeGetStarted}${C.reset}`);
     console.log(
-      `${C.dim}${
-        EXTERNAL_URLS.claudeCodeDocs ||
-        "https://docs.anthropic.com/en/docs/claude-code"
-      }${C.reset}`,
+      `${C.dim}${DISTRIBUTION.documentation.claudeCode}${C.reset}`,
     );
   }
 
@@ -6322,11 +8462,12 @@ function showNextSteps(runtimes) {
   console.log(`${C.bold}${t.usefulCommands}${C.reset}
 `);
   if (hasDeployDirs) {
+    const npxPrefix = `npx --yes ${DISTRIBUTION.project.npxSpec} meta-kim`;
     console.log(
-      `${C.dim}npx --yes github:KimYx0207/Meta_Kim meta-kim -- --update${C.reset}`,
+      `${C.dim}${npxPrefix} -- --update${C.reset}`,
     );
     console.log(
-      `${C.dim}npx --yes github:KimYx0207/Meta_Kim meta-kim -- --check${C.reset}`,
+      `${C.dim}${npxPrefix} -- --check${C.reset}`,
     );
   } else {
     console.log(
@@ -6356,19 +8497,11 @@ function showNextSteps(runtimes) {
     `${C.bold}${C.cyan}● ${t.postInstallNotesPlatformSync}${C.reset}`,
   );
   const platformRows = [
-    { name: t.platformClaudeCode, cap: t.platformClaudeCodeCap },
-    { name: t.platformCodex, cap: t.platformCodexCap },
-    { name: t.platformOpenClaw, cap: t.platformOpenClawCap },
-    { name: t.platformCursor, cap: t.platformCursorCap },
-  ].filter(
-    (r) =>
-      runtimes[
-        r.name
-          .replace("platform", "")
-          .toLowerCase()
-          .replace("claudecode", "claude")
-      ] || r.name === t.platformClaudeCode,
-  );
+    { id: "claude", name: t.platformClaudeCode, cap: t.platformClaudeCodeCap },
+    { id: "codex", name: t.platformCodex, cap: t.platformCodexCap },
+    { id: "openclaw", name: t.platformOpenClaw, cap: t.platformOpenClawCap },
+    { id: "cursor", name: t.platformCursor, cap: t.platformCursorCap },
+  ].filter((row) => selectedTargets.includes(row.id));
   for (const row of platformRows) {
     console.log(`${C.dim}• ${row.name}: ${row.cap}${C.reset}`);
   }
@@ -6378,7 +8511,10 @@ function showNextSteps(runtimes) {
   );
   console.log(`${C.dim}${t.layer1Label} — ${t.layer1Note}${C.reset}`);
   console.log(`${C.dim}${t.layer2Label} — ${t.layer2Note}${C.reset}`);
-  console.log(`${C.dim}${t.layer3Label} — ${t.layer3Note}${C.reset}`);
+  const memoryEndpoint = resolveMemoryEndpoint();
+  console.log(
+    `${C.dim}${t.layer3Label} — ${t.mcpMemoryEndpointSelected(memoryEndpoint.endpointUrl)}${C.reset}`,
+  );
   console.log("");
   console.log(`${C.bold}${C.cyan}● ${t.installLocationsHeading}${C.reset}`);
   console.log(
@@ -6392,15 +8528,18 @@ function showNextSteps(runtimes) {
   );
   console.log("");
   console.log(`${C.bold}${C.cyan}● ${t.usefulCommandsHeading}${C.reset}`);
-  console.log(
-    `${C.dim}  npm run meta:status        # ${t.cmdWhereStatus}${C.reset}`,
-  );
-  console.log(
-    `${C.dim}  npm run meta:status:diff   # ${t.cmdWhereStatusDiff}${C.reset}`,
-  );
-  console.log(
-    `${C.dim}  npm run meta:uninstall     # ${t.cmdWhereUninstall}${C.reset}`,
-  );
+  if (hasDeployDirs) {
+    const npxPrefix = `npx --yes ${DISTRIBUTION.project.npxSpec} meta-kim`;
+    console.log(`${C.dim}  ${npxPrefix} status          # ${t.cmdWhereStatus}${C.reset}`);
+    console.log(`${C.dim}  ${npxPrefix} status --diff   # ${t.cmdWhereStatusDiff}${C.reset}`);
+    console.log(`${C.dim}  ${npxPrefix} doctor          # ${t.cmdDoctor}${C.reset}`);
+    console.log(`${C.dim}  ${npxPrefix} uninstall       # ${t.cmdWhereUninstall}${C.reset}`);
+  } else {
+    console.log(`${C.dim}  npm run meta:status        # ${t.cmdWhereStatus}${C.reset}`);
+    console.log(`${C.dim}  npm run meta:status:diff   # ${t.cmdWhereStatusDiff}${C.reset}`);
+    console.log(`${C.dim}  npm run meta:doctor        # ${t.cmdDoctor}${C.reset}`);
+    console.log(`${C.dim}  npm run meta:uninstall     # ${t.cmdWhereUninstall}${C.reset}`);
+  }
   console.log("");
   console.log(
     `${C.dim}${C.yellow}★ ${t.postInstallNotesReminder} ${t.postInstallNotesReminderText}${C.reset}`,
@@ -6518,14 +8657,11 @@ function bannerLogo() {
     }, 0);
 
   const contacts = [
-    `Website: ${EXTERNAL_URLS.author?.website || "https://www.aiking.dev/"}`,
-    `GitHub:  ${EXTERNAL_URLS.author?.github || "https://github.com/KimYx0207"}`,
-    `X:       ${EXTERNAL_URLS.author?.x || "https://x.com/KimYx0207"}`,
-    `Feishu:  ${
-      EXTERNAL_URLS.author?.feishu ||
-      "https://my.feishu.cn/wiki/OhQ8wqntFihcI1kWVDlcNdpznFf"
-    }`,
-    "WeChat:  \u8001\u91d1\u5e26\u4f60\u73a9AI",
+    `Website: ${DISTRIBUTION.contact.website}`,
+    `GitHub:  ${DISTRIBUTION.contact.github}`,
+    `X:       ${DISTRIBUTION.contact.x}`,
+    `Feishu:  ${DISTRIBUTION.contact.feishu}`,
+    `WeChat:  ${DISTRIBUTION.contact.wechat}`,
   ];
 
   const padVis = (s, width) => s + " ".repeat(Math.max(0, width - dw(s)));
@@ -6587,10 +8723,58 @@ function showModeInfo() {
   );
 }
 
-function checkProjectRuntimeSync(runtimes, targetContext) {
-  if (targetContext.localOverrides?.projectProjectionMode !== "global_only") {
-    checkSync(runtimes, targetContext.activeTargets);
+const GLOBAL_ONLY_PROJECT_HOOK_PAIRS = [
+  { runtime: "Claude Code", dir: ".claude/hooks" },
+  { runtime: "Codex", dir: ".codex/hooks" },
+  { runtime: "Cursor", dir: ".cursor/hooks" },
+];
+
+function checkGlobalOnlyProjectHookPairs(projectRoot = PROJECT_DIR) {
+  heading(t.syncHeading);
+  let allOk = true;
+  for (const pair of GLOBAL_ONLY_PROJECT_HOOK_PAIRS) {
+    const activator = join(projectRoot, pair.dir, "activate-meta-theory-spine.mjs");
+    const resolver = join(projectRoot, pair.dir, "project-root.mjs");
+    const activatorExists = existsSync(activator) && statSync(activator).isFile();
+    const resolverExists = existsSync(resolver) && statSync(resolver).isFile();
+    const importsResolver = activatorExists &&
+      /from\s+["']\.\/project-root\.mjs["']/u.test(readFileSync(activator, "utf8"));
+    if (activatorExists && resolverExists && importsResolver) {
+      ok(t.syncGlobalOnlyHookPairOk(pair.runtime));
+      continue;
+    }
+    allOk = false;
+    fail(
+      t.syncGlobalOnlyHookPairFailed(
+        pair.runtime,
+        [
+          !activatorExists ? "activate-meta-theory-spine.mjs" : null,
+          !resolverExists ? "project-root.mjs" : null,
+          activatorExists && !importsResolver ? "project-root import" : null,
+        ].filter(Boolean).join(", "),
+      ),
+    );
   }
+  console.log("");
+  if (allOk) info(t.syncOk);
+  return allOk;
+}
+
+function checkProjectRuntimeSync(runtimes, targetContext) {
+  const projectRoot = executingStableProjectionPackage
+    ? CALLER_CWD
+    : PROJECT_DIR;
+  if (targetContext.localOverrides?.projectProjectionMode === "global_only") {
+    return checkGlobalOnlyProjectHookPairs(projectRoot);
+  }
+  return checkSync(runtimes, targetContext.activeTargets, projectRoot);
+}
+
+function reportProjectRuntimeSyncResult(syncOk) {
+  if (syncOk) return true;
+  console.error(`\n${C.red}✗ ${t.checkOverallFailed}${C.reset}`);
+  console.error(`${C.yellow}${t.checkRepairCommand}${C.reset}\n`);
+  return false;
 }
 
 async function runProjectBootstrapCli() {
@@ -6599,8 +8783,11 @@ async function runProjectBootstrapCli() {
   }
   const targetContext = await resolveTargetContext(args);
   const activeTargets = targetContext.activeTargets;
-  const targetDirs = cliProjectDeployDirs.length > 0 ? cliProjectDeployDirs : [process.cwd()];
+  const targetDirs = cliProjectDeployDirs.length > 0 ? cliProjectDeployDirs : [CALLER_CWD];
   const applyMode = projectBootstrapApply && !projectBootstrapDryRun;
+  if (applyMode) {
+    await assertProjectPersistentWriteBoundary(targetDirs, "project bootstrap");
+  }
   const results = [];
   let ok = true;
 
@@ -6661,12 +8848,13 @@ async function runProjectCleanupCli() {
       ? cliProjectDeployDirs
       : savedDirs;
 
+  await assertProjectPersistentWriteBoundary(targetDirs, "project cleanup");
+
   const results = await cleanupProjectRedundancyDirs(activeTargets, targetDirs);
-  const failed = results.filter((result) => result.status === "failed");
   const summary = {
     schemaVersion: "meta-kim-project-cleanup-result-v0.1",
     mode: "cleanup",
-    ok: failed.length === 0,
+    ok: results.every((result) => result.status === "ok"),
     resultCount: results.length,
     results,
   };
@@ -6676,19 +8864,26 @@ async function runProjectCleanupCli() {
     return summary.ok;
   }
 
-  console.log(`Meta_Kim project cleanup: ${summary.ok ? "ok" : "failed"}`);
-  console.log(`  targets=${activeTargets.join(",")}`);
-  console.log(`  cleanedProjects=${summary.resultCount}`);
+  console.log(t.projectCleanupCliResult(summary.ok));
+  console.log(`  ${t.projectCleanupCliTargets(activeTargets.join(","))}`);
+  console.log(`  ${t.projectCleanupCliProjects(summary.resultCount)}`);
   return summary.ok;
 }
 
 async function main() {
+  executingStableProjectionPackage =
+    await projectionPackageBoundary.detectExecutingStablePackage();
+
   if (projectBootstrapMode) {
     const ok = await runProjectBootstrapCli();
     process.exit(ok ? 0 : 1);
   }
   if (projectCleanupMode) {
     const ok = await runProjectCleanupCli();
+    process.exit(ok ? 0 : 1);
+  }
+  if (rebindRuntimeLaunchMode) {
+    const ok = await runRebindRuntimeLaunchCli();
     process.exit(ok ? 0 : 1);
   }
 
@@ -6706,43 +8901,18 @@ async function main() {
 
   // ── CLI shortcut modes (non-interactive) ──
   if (checkOnly) {
-    console.log(`\n${C.green}✓ ${t.envOk}${C.reset}\n`);
-    const detectedRuntimes = await detectRuntimes();
-    const targetContext = await resolveTargetContext(args);
-    checkProjectRuntimeSync(detectedRuntimes, targetContext);
-    console.log(
-      `${C.dim}${t.checkTargets(targetContext.activeTargets.join(", "), targetContext.supportedTargets.join(", "))}${C.reset}`,
-    );
-    const localState = await ensureProfileState();
-    console.log("");
-    console.log(`${C.bold}${t.localStateHeader}${C.reset}`);
-    console.log(
-      `${C.dim}  profile=${localState.profile} key=${localState.metadata.profileKey}${C.reset}`,
-    );
-    console.log(
-      `${C.dim}  run index: ${toRepoRelative(localState.runIndexPath)}${C.reset}`,
-    );
-    console.log(
-      `${C.dim}  compaction: ${toRepoRelative(localState.compactionDir)}${C.reset}`,
-    );
-    console.log(
-      `${C.dim}  dispatch envelope: config/contracts/workflow-contract.json -> protocols.dispatchEnvelopePacket${C.reset}`,
-    );
-    console.log(
-      `${C.dim}  migration helper: npm run migrate:meta-kim -- <source-dir> --apply${C.reset}`,
-    );
-    console.log("");
-    process.exit(0);
+    const checkOk = await runCheck();
+    process.exit(checkOk ? 0 : 1);
   }
 
   if (updateMode) {
-    await runUpdate();
-    process.exit(0);
+    const result = await runUpdate();
+    process.exit(result.exitCode);
   }
 
   if (silentMode) {
-    await runInstall();
-    process.exit(0);
+    const result = await runInstall();
+    process.exit(result.exitCode);
   }
 
   // ── Interactive: choose action ──
@@ -6754,23 +8924,44 @@ async function main() {
   ];
   const actionIdx = await askSelect(t.actionPrompt, actionLabels);
 
-  if (actionIdx === 0) await runInstall();
-  else if (actionIdx === 1) await runUpdate();
-  else if (actionIdx === 2) await runCheck();
+  let result = null;
+  if (actionIdx === 0) result = await runInstall();
+  else if (actionIdx === 1) result = await runUpdate();
+  else if (actionIdx === 2) {
+    const checkOk = await runCheck();
+    if (!checkOk) process.exitCode = 1;
+  }
   else process.exit(0);
+  if (result?.exitCode) process.exitCode = result.exitCode;
 }
 
 // ── Action runners ──────────────────────────────────────
 
+function runAutomaticMcpMemoryBootRepair() {
+  const result = repairOrphanMcpMemoryBootLaunchers({
+    homeRoot: homedir(),
+    platformName: platform(),
+  });
+  if (!result.ok) {
+    warn(`MCP Memory automatic boot repair failed: ${result.error}`);
+    return false;
+  }
+  if (result.status === "repaired") {
+    ok(`Automatically repaired ${result.repaired.length} orphan MCP Memory startup launcher(s)`);
+  }
+  return true;
+}
+
 async function runInstall() {
+  const stepResults = [];
   const runtimes = await detectRuntimes();
   const activeTargets = await selectActiveTargets(runtimes);
+  const { profiles: runtimeProfiles } = await resolveTargetContext(args);
 
   // 询问安装范围
   const installScope = await askInstallScope();
   const needProject = installScope === "project";
   const needGlobal = installScope === "global";
-  await rememberProjectProjectionMode(needGlobal ? "global_only" : "project");
 
   // Ask proxy configuration (saves to localOverrides)
   await askProxyConfig();
@@ -6784,16 +8975,17 @@ async function runInstall() {
   showDirectoryExplanation();
 
   // Ask project deploy directories BEFORE confirm (so user decides upfront)
-  const deployDirs = needProject ? await askDeployDirectory() : [];
-  const cleanupDirs = needGlobal ? await askProjectCleanupDirectory() : [];
-
-  // Early cleanup: run right after directory selection so the user sees the
-  // result immediately. Must not depend on the slower install steps below
-  // (npm install / python / mcp / validate) — those are easy to interrupt,
-  // and losing the cleanup defeats the global-single-source intent.
-  if (cleanupDirs.length > 0) {
-    await cleanupProjectRedundancyDirs(activeTargets, cleanupDirs);
-  }
+  const handedOffProjectResolution =
+    projectionPackageBoundary.readStableProjectDeploymentHandoff(
+      executingStableProjectionPackage,
+    );
+  const managedProjectResolution = needProject
+    ? { deployments: await askDeployDirectory(), rejected: [] }
+    : (handedOffProjectResolution ?? await existingManagedProjectDeployments());
+  const deployDirs = managedProjectResolution.deployments;
+  await assertProjectPersistentWriteBoundary(deployDirs, "install project target");
+  reportRejectedManagedProjectTargets(managedProjectResolution.rejected);
+  if (needGlobal) info(t.globalManagedProjectRefreshInfo(deployDirs.length));
 
   // Show installation overview
   showInstallOverview(
@@ -6811,14 +9003,51 @@ async function runInstall() {
 
   console.log();
 
+  const explicitRejectedTargets = managedProjectResolution.rejected.filter(
+    (item) => item.source === "explicit_project_dirs",
+  );
+
+  if (needGlobal) {
+    const stableSetup = await ensureStableGlobalProjectionPackage(
+      {
+        currentAuthority: executingStableProjectionPackage,
+        mode: "install",
+        activeTargets,
+        skillIds: selectedSkillIds,
+        deployments: deployDirs,
+        rejectedManagedProjects: managedProjectResolution.rejected,
+        language: currentLangCode,
+        withGlobalHooks: setupWithGlobalHooks,
+        saveProjectDirs: saveProjectDirsMode,
+      },
+      projectionPackageBoundary,
+    );
+    if (stableSetup.executingAuthority) {
+      executingStableProjectionPackage = stableSetup.executingAuthority;
+    }
+    if (stableSetup.delegatedResult) {
+      return stableSetup.delegatedResult;
+    }
+  }
+
+  if (needGlobal) {
+    stepResults.push(
+      installStep("automatic MCP Memory boot repair", runAutomaticMcpMemoryBootRepair()),
+    );
+  }
+
   // 步骤计数
   let stepNum = 0;
+  if (explicitRejectedTargets.length > 0) {
+    stepResults.push(installStep(t.managedProjectRejectedStep, false));
+  }
 
   // 项目目录更新
   if (needProject) {
     stepNum++;
-    await withProgress(t.stepLabel(stepNum, t.progressNpmInstall), async () => {
+    const npmOk = await withProgress(t.stepLabel(stepNum, t.progressNpmInstall), async () => {
       if (
+        executingStableProjectionPackage ||
         existsSync(join(PROJECT_DIR, "node_modules", "@modelcontextprotocol"))
       ) {
         skip(t.nodeModulesExist);
@@ -6836,22 +9065,30 @@ async function runInstall() {
       warn(t.npmFailed);
       return false;
     });
+    stepResults.push(installStep(t.progressNpmInstall, npmOk));
 
     stepNum++;
     await withProgress(t.stepLabel(stepNum, t.progressCleanupLegacy), () => {
-      const n = cleanupLegacySkills(installScope);
+      const n = executingStableProjectionPackage
+        ? 0
+        : cleanupLegacySkills(installScope);
       if (n > 0) ok(`Cleaned ${n} legacy file(s)`);
       return true;
     });
 
     stepNum++;
-    await withProgress(t.stepLabel(stepNum, t.progressSyncConfig), async () => {
+    const configOk = await withProgress(t.stepLabel(stepNum, t.progressSyncConfig), async () => {
+      if (executingStableProjectionPackage) {
+        skip(t.nodeModulesExist);
+        return INSTALL_STEP_OUTCOME.SKIPPED;
+      }
       const configResult = await autoConfigure(installScope, activeTargets);
       if (!configResult) {
         warn(t.warnConfigSyncFailed);
       }
       return configResult;
     });
+    stepResults.push(installStep(t.progressSyncConfig, configOk));
   }
 
   // 全局安装
@@ -6869,25 +9106,22 @@ async function runInstall() {
 
     // 安装全局技能
     stepNum++;
-    await withProgress(
+    const skillsOk = await withProgress(
       t.stepLabel(stepNum, t.progressInstallSkills),
       async () => {
         const localOverrides = await loadLocalOverrides();
         const proxyEnv = localOverrides.gitProxy
           ? { META_KIM_GIT_PROXY: localOverrides.gitProxy }
           : {};
-        const skillArgs =
-          selectedSkillIds.length > 0
-            ? [
-                "--targets",
-                activeTargets.join(","),
-                "--skills",
-                selectedSkillIds.join(","),
-              ]
-            : ["--targets", activeTargets.join(","), "--skills", ""];
+        const skillArgs = buildGlobalSkillsInstallerArgs({
+          targets: activeTargets,
+          skillIds: selectedSkillIds,
+          preferLocalDependencies,
+          skipInventoryRefresh: true,
+        });
         // ).concat(["--log-file", INSTALL_LOG_FILE]);
         const installResult = runNodeScript(
-          "scripts/install-global-skills-all-runtimes.mjs",
+          SETUP_NODE_CHILD.GLOBAL_SKILLS_INSTALLER,
           skillArgs,
           proxyEnv,
         );
@@ -6898,168 +9132,332 @@ async function runInstall() {
         return installResult.status === 0;
       },
     );
+    stepResults.push(installStep(t.progressInstallSkills, skillsOk));
 
     // 同步全局 meta-theory
     stepNum++;
-    await withProgress(t.stepLabel(stepNum, t.progressSyncMeta), () => {
+    const metaSyncOk = await withProgress(t.stepLabel(stepNum, t.progressSyncMeta), () => {
       const syncResult = runNodeScript(
-        "scripts/sync-global-meta-theory.mjs",
+        SETUP_NODE_CHILD.GLOBAL_META_THEORY_SYNC,
         metaTheoryGlobalSyncArgs(activeTargets, setupWithGlobalHooks),
       );
-      const runtimeHooksOk = syncNonClaudeGlobalRuntimeHooks(
+      const runtimeAssetsOk = syncOwnedGlobalRuntimeAssets(
         activeTargets,
+        runtimeProfiles,
         setupWithGlobalHooks,
       );
-      if (syncResult.status !== 0 || !runtimeHooksOk) {
+      if (syncResult.status !== 0 || !runtimeAssetsOk) {
         warn(t.warnMetaTheorySyncFailed);
       }
-      return syncResult.status === 0 && runtimeHooksOk;
+      return syncResult.status === 0 && runtimeAssetsOk;
     });
-  }
-
-  if (needGlobal) {
-    stepNum++;
-    await withProgress(
-      t.stepLabel(stepNum, t.refreshGlobalCapabilityInventory),
-      async () => refreshGlobalCapabilityInventory(activeTargets),
-    );
+    stepResults.push(installStep(t.progressSyncMeta, metaSyncOk));
   }
 
   // [Optional] Python tools (graphify)
   stepNum++;
-  await withProgress(
-    t.stepLabel(stepNum, t.progressInstallPython),
-    async () => {
-      const wantPython = await askYesNo(t.askPythonToolsUpdate, true);
-      if (wantPython) {
-        await installPythonTools(activeTargets, false, PROJECT_DIR, {
-          projectWiring: needProject,
-        });
-      } else {
-        skip(`${C.dim}${t.pythonToolsSkipped}${C.reset}`);
-      }
-    },
+  const pythonToolsOk = skipOptionalTools
+    ? (skip(`${C.dim}${t.pythonToolsSkipped}${C.reset}`), INSTALL_STEP_OUTCOME.SKIPPED)
+    : await withProgress(
+        t.stepLabel(stepNum, t.progressInstallPython),
+        async () => {
+          const wantPython = await askYesNo(t.askPythonToolsUpdate, true);
+          if (wantPython) {
+            return await installPythonTools(
+              activeTargets,
+              false,
+              executingStableProjectionPackage
+                ? projectDeploymentTargetDir(deployDirs[0], CALLER_CWD)
+                : PROJECT_DIR,
+              {
+              projectWiring: needProject,
+              },
+            );
+          }
+          skip(`${C.dim}${t.pythonToolsSkipped}${C.reset}`);
+          return INSTALL_STEP_OUTCOME.SKIPPED;
+        },
+      );
+  stepResults.push(
+    installStep(
+      t.progressInstallPython,
+      pythonToolsOk,
+      INSTALL_STEP_CLASSIFICATION.OPTIONAL,
+    ),
   );
 
   // [Optional] MCP Memory Service (Layer 3)
   stepNum++;
-  await withProgress(
-    t.stepLabel(stepNum, t.progressInstallMcpMemory),
-    async () => {
-      await installMcpMemoryServiceStep(false, activeTargets);
-    },
-  );
-
-  // 验证：项目路径检查 repo-local；全局路径只跑项目完整性校验
-  stepNum++;
-  await withProgress(t.stepLabel(stepNum, t.progressValidate), async () => {
-    if (needProject) {
-      checkSync(runtimes, activeTargets);
-    }
-    await validate();
+  const memoryPolicy = resolveMcpMemorySetupPolicy({
+    needGlobal,
+    withGlobalHooks: setupWithGlobalHooks,
+    skipOptionalTools,
   });
+  const mcpMemoryOk = memoryPolicy.action === MCP_MEMORY_SETUP_ACTION.SKIP
+    ? (
+        skip(`${C.dim}${
+          memoryPolicy.reason === MCP_MEMORY_SETUP_REASON.GLOBAL_HOOKS_REQUIRED
+            ? t.mcpMemoryRequiresGlobalHooks
+            : t.mcpMemorySkipped
+        }${C.reset}`),
+        INSTALL_STEP_OUTCOME.SKIPPED
+      )
+    : await withProgress(
+        t.stepLabel(stepNum, t.progressInstallMcpMemory),
+        async () => installMcpMemoryServiceStep(false, activeTargets),
+      );
+  stepResults.push(mcpMemoryInstallStep(t.progressInstallMcpMemory, mcpMemoryOk));
 
-  console.log(`\n${C.bold}${C.green}✓ ${t.installComplete}${C.reset}\n`);
-
-  // Copy runtime files to user-chosen project directories (if opted in earlier)
-  if (deployDirs.length > 0) {
-    await copyToDeployDirs(activeTargets, deployDirs);
+  // Memory can add its uniquely-owned Python hook, SessionStart fragment, and
+  // command subtree after global sync. Refresh only after those writes so a
+  // successful setup never leaves the capability inventory stale immediately.
+  if (needGlobal) {
+    stepNum++;
+    const inventoryOk = await withProgress(
+      t.stepLabel(stepNum, t.refreshGlobalCapabilityInventory),
+      async () => refreshGlobalCapabilityInventory(activeTargets),
+    );
+    stepResults.push(installStep(t.refreshGlobalCapabilityInventory, inventoryOk));
   }
 
-  showNextSteps(runtimes);
+  // Copy runtime files to user-chosen project directories (if opted in earlier)
+  let deployResults = [];
+  if (deployDirs.length > 0) {
+    deployResults = await copyToDeployDirs(activeTargets, deployDirs);
+    stepResults.push(
+      installStep(
+        t.projectDeployBatchHeading(deployDirs.length),
+        deployResults.length === deployDirs.length &&
+          deployResults.every(
+            (item) => item.status === "ok" && item.stateStatus === "ready",
+          ),
+      ),
+    );
+  }
+
+  stepNum++;
+  const runtimeBindingsOk = await withProgress(
+    t.stepLabel(stepNum, "runtime executable bindings"),
+    async () => refreshRuntimeExecutableBindings(activeTargets, installScope, deployDirs),
+  );
+  stepResults.push(installStep("runtime executable bindings", runtimeBindingsOk));
+
+  // Validate the installed global/project artifacts. Public package installs
+  // must not depend on maintainer-only repository files such as .gitignore.
+  stepNum++;
+  let runtimeSyncOk = true;
+  const validationOk = await withProgress(t.stepLabel(stepNum, t.progressValidate), async () => {
+  if (needProject) {
+      runtimeSyncOk = executingStableProjectionPackage
+        ? true
+        : checkSync(runtimes, activeTargets);
+    }
+    return validateInstalledArtifacts({
+      installScope,
+      activeTargets,
+      projectSyncOk: runtimeSyncOk,
+      projectDeployResults: deployResults,
+    });
+  });
+  if (needProject) {
+    stepResults.push(installStep(t.syncHeading, runtimeSyncOk));
+  }
+  stepResults.push(installStep(t.progressValidate, validationOk));
+
+  if (
+    needProject &&
+    summarizeInstallStatus(stepResults).status === "complete" &&
+    deployResults.some((item) => item.status === "ok")
+  ) {
+    const stateOk = rememberProjectProjectionMode(
+      deployResults.filter((item) => item.status === "ok").map((item) => item.dir),
+    );
+    stepResults.push(installStep(t.projectDeploySummary, stateOk));
+  }
+  stepResults.push(
+    installStep(
+      "stable projection package integrity",
+      await projectionPackageBoundary.verifyExecutingIntegrity(
+        executingStableProjectionPackage,
+      ),
+    ),
+  );
+
+  let result = {
+    ...summarizeInstallStatus(stepResults),
+    rejectedManagedProjects: managedProjectResolution.rejected,
+  };
+
+  if (result.status === "complete") {
+    console.log(`\n${C.bold}${C.green}✓ ${t.installComplete}${C.reset}\n`);
+  } else {
+    printInstallResult(result, t.installComplete);
+  }
+
+  if (result.status === "complete") {
+    showNextSteps(runtimes, activeTargets);
+  } else {
+    showInstallRecovery(result, "install");
+  }
+  return result;
 }
 
 async function runUpdate() {
+  const stepResults = [];
   heading(t.updateHeading);
   const runtimes = await detectRuntimes();
   const reselectTargets = await askYesNo(t.askReselectRuntimes, true);
   const activeTargets = reselectTargets
     ? await selectActiveTargets(runtimes)
     : (await resolveTargetContext(args)).activeTargets;
+  const { profiles: runtimeProfiles } = await resolveTargetContext(args);
 
   // ── 0. Ask for update scope (like install mode) ─────────────────────
   const updateScope = await askInstallScope();
   const needProject = updateScope === "project";
   const needGlobal = updateScope === "global";
-  await rememberProjectProjectionMode(needGlobal ? "global_only" : "project");
 
   // Ask proxy configuration (saves to localOverrides)
   await askProxyConfig();
 
   // Ask project deploy directories BEFORE update starts
-  const deployDirs = needProject ? await askDeployDirectory() : [];
-  const cleanupDirs = needGlobal ? await askProjectCleanupDirectory() : [];
+  const handedOffProjectResolution =
+    projectionPackageBoundary.readStableProjectDeploymentHandoff(
+      executingStableProjectionPackage,
+    );
+  const managedProjectResolution = needProject
+    ? { deployments: await askDeployDirectory(), rejected: [] }
+    : (handedOffProjectResolution ?? await existingManagedProjectDeployments());
+  const deployDirs = managedProjectResolution.deployments;
+  await assertProjectPersistentWriteBoundary(deployDirs, "update project target");
+  reportRejectedManagedProjectTargets(managedProjectResolution.rejected);
+  if (managedProjectResolution.rejected.some((item) => item.source === "explicit_project_dirs")) {
+    stepResults.push(installStep(t.managedProjectRejectedStep, false));
+  }
+  if (needGlobal) info(t.globalManagedProjectRefreshInfo(deployDirs.length));
 
-  // Early cleanup: run right after directory selection so the user sees the
-  // result immediately. Must not depend on the slower install steps below
-  // (npm install / python / mcp / validate) — those are easy to interrupt,
-  // and losing the cleanup defeats the global-single-source intent.
-  if (cleanupDirs.length > 0) {
-    await cleanupProjectRedundancyDirs(activeTargets, cleanupDirs);
+  const updateSkillIds = needGlobal
+    ? await resolveSelectedSkillDependencyIds()
+    : [];
+  if (needGlobal) {
+    const stableSetup = await ensureStableGlobalProjectionPackage(
+      {
+        currentAuthority: executingStableProjectionPackage,
+        mode: "update",
+        activeTargets,
+        skillIds: updateSkillIds,
+        deployments: deployDirs,
+        rejectedManagedProjects: managedProjectResolution.rejected,
+        language: currentLangCode,
+        withGlobalHooks: setupWithGlobalHooks,
+        saveProjectDirs: saveProjectDirsMode,
+      },
+      projectionPackageBoundary,
+    );
+    if (stableSetup.executingAuthority) {
+      executingStableProjectionPackage = stableSetup.executingAuthority;
+    }
+    if (stableSetup.delegatedResult) {
+      return stableSetup.delegatedResult;
+    }
+  }
+
+  if (needGlobal) {
+    stepResults.push(
+      installStep("automatic MCP Memory boot repair", runAutomaticMcpMemoryBootRepair()),
+    );
   }
 
   // ── 1. npm install (always — new code may have new deps) ────────────
-  info(t.updateNpm);
-  const npmResult = spawnCliSync("npm", ["install"], {
-    cwd: PROJECT_DIR,
-    stdio: "inherit",
-  });
-  if (npmResult.status === 0) ok(t.npmDone);
-  else warn(t.npmFailed);
+  if (executingStableProjectionPackage) {
+    skip(`${C.dim}${t.nodeModulesExist}${C.reset}`);
+    stepResults.push(installStep(t.updateNpm, INSTALL_STEP_OUTCOME.SKIPPED));
+  } else {
+    info(t.updateNpm);
+    const npmResult = spawnCliSync("npm", ["install"], {
+      cwd: PROJECT_DIR,
+      stdio: "inherit",
+    });
+    if (npmResult.status === 0) ok(t.npmDone);
+    else warn(t.npmFailed);
+    stepResults.push(installStep(t.updateNpm, npmResult.status === 0));
+  }
 
   // ── 2. [Optional] Python tools (graphify) ─────────────────────────
   console.log("");
-  const wantPython = await askYesNo(t.askPythonToolsUpdate, true);
-  if (wantPython) {
-    await installPythonTools(activeTargets, true, PROJECT_DIR, {
-      projectWiring: needProject,
-    });
-  } else {
+  let pythonToolsOutcome = INSTALL_STEP_OUTCOME.SKIPPED;
+  if (skipOptionalTools) {
     skip(`${C.dim}${t.pythonToolsSkipped}${C.reset}`);
+  } else {
+    const wantPython = await askYesNo(t.askPythonToolsUpdate, true);
+    if (wantPython) {
+      pythonToolsOutcome = await installPythonTools(
+        activeTargets,
+        true,
+        executingStableProjectionPackage
+          ? projectDeploymentTargetDir(deployDirs[0], CALLER_CWD)
+          : PROJECT_DIR,
+        { projectWiring: needProject },
+      );
+    } else {
+      skip(`${C.dim}${t.pythonToolsSkipped}${C.reset}`);
+    }
   }
-
-  // ── 2.5 [Optional] MCP Memory Service (Layer 3) ─────────────────
-  console.log("");
-  await installMcpMemoryServiceStep(true, activeTargets);
+  stepResults.push(
+    installStep(
+      t.progressInstallPython,
+      pythonToolsOutcome,
+      INSTALL_STEP_CLASSIFICATION.OPTIONAL,
+    ),
+  );
 
   // ── 2.8. Clean up legacy skill files ───────────────────────────────
-  const legacyCount = cleanupLegacySkills(updateScope);
+  const legacyCount = executingStableProjectionPackage && needProject
+    ? 0
+    : cleanupLegacySkills(updateScope);
   if (legacyCount > 0) ok(`Cleaned ${legacyCount} legacy file(s)`);
 
   // ── 3. sync-runtimes (scope from user selection) ──────────────────
   if (needProject) {
-    info(t.updateSyncProjectFiles);
-    const syncResult = runNodeScript("scripts/sync-runtimes.mjs", [
-      "--scope",
-      updateScope,
-      "--targets",
-      activeTargets.join(","),
-    ]);
-    if (syncResult.status === 0) ok(t.updateSyncDone);
-    else warn(t.updateSyncSkip);
+    if (executingStableProjectionPackage) {
+      skip(t.nodeModulesExist);
+      stepResults.push(
+        installStep(
+          t.updateSyncProjectFiles,
+          INSTALL_STEP_OUTCOME.SKIPPED,
+        ),
+      );
+    } else {
+      info(t.updateSyncProjectFiles);
+      const syncResult = runNodeScript(SETUP_NODE_CHILD.RUNTIME_SYNC, [
+        "--scope",
+        updateScope,
+        "--targets",
+        activeTargets.join(","),
+      ]);
+      if (syncResult.status === 0) ok(t.updateSyncDone);
+      else warn(t.updateSyncSkip);
+      stepResults.push(installStep(t.updateSyncProjectFiles, syncResult.status === 0));
+    }
   }
 
   // ── 4. Global skills update ───────────────────────────────────────
   console.log("");
   if (needGlobal) {
-    const updateSkillIds = await resolveSelectedSkillDependencyIds();
     const localOverrides = await loadLocalOverrides();
     const proxyEnv = localOverrides.gitProxy
       ? { META_KIM_GIT_PROXY: localOverrides.gitProxy }
       : {};
-    const updateSkillArgs =
-      updateSkillIds.length > 0
-        ? [
-            "--update",
-            "--targets",
-            activeTargets.join(","),
-            "--skills",
-            updateSkillIds.join(","),
-          ]
-        : ["--update", "--targets", activeTargets.join(","), "--skills", ""];
+    const updateSkillArgs = buildGlobalSkillsInstallerArgs({
+      targets: activeTargets,
+      skillIds: updateSkillIds,
+      update: true,
+      preferLocalDependencies,
+      skipInventoryRefresh: true,
+    });
     // ).concat(["--log-file", INSTALL_LOG_FILE]);
     const updateInstallResult = runNodeScript(
-      "scripts/install-global-skills-all-runtimes.mjs",
+      SETUP_NODE_CHILD.GLOBAL_SKILLS_INSTALLER,
       updateSkillArgs,
       proxyEnv,
     );
@@ -7068,23 +9466,55 @@ async function runUpdate() {
       warn(t.warnSkillsUpdateFailed);
       warn(`${C.dim}${t.warnSkillsUpdateFailedHint}${C.reset}`);
     }
+    stepResults.push(
+      installStep(t.progressInstallSkills, updateInstallResult.status === 0),
+    );
   }
 
   // ── 5. Global meta-theory sync ────────────────────────────────────
   console.log("");
   if (needGlobal) {
     const updateSyncResult = runNodeScript(
-      "scripts/sync-global-meta-theory.mjs",
+      SETUP_NODE_CHILD.GLOBAL_META_THEORY_SYNC,
       metaTheoryGlobalSyncArgs(activeTargets, setupWithGlobalHooks),
     );
-    const runtimeHooksOk = syncNonClaudeGlobalRuntimeHooks(
+    const runtimeAssetsOk = syncOwnedGlobalRuntimeAssets(
       activeTargets,
+      runtimeProfiles,
       setupWithGlobalHooks,
     );
-    if (updateSyncResult.status === 0 && runtimeHooksOk)
+    if (updateSyncResult.status === 0 && runtimeAssetsOk)
       ok(t.updateMetaTheoryDone);
     else warn(t.warnMetaTheoryUpdateFailed);
+    stepResults.push(
+      installStep(
+        t.progressSyncMeta,
+        updateSyncResult.status === 0 && runtimeAssetsOk,
+      ),
+    );
   }
+
+  // ── 5.2 [Optional] MCP Memory Service (Layer 3) ─────────────────
+  // Global sync renders shared runtime assets first. The memory installer can
+  // then prove the ownership handoff before installing its unique assets,
+  // without treating rendered Meta_Kim commands as memory-owned files.
+  console.log("");
+  const memoryPolicy = resolveMcpMemorySetupPolicy({
+    needGlobal,
+    withGlobalHooks: setupWithGlobalHooks,
+    skipOptionalTools,
+  });
+  const mcpMemoryOk = memoryPolicy.action === MCP_MEMORY_SETUP_ACTION.SKIP
+    ? (
+        skip(`${C.dim}${
+          memoryPolicy.reason === MCP_MEMORY_SETUP_REASON.GLOBAL_HOOKS_REQUIRED
+            ? t.mcpMemoryRequiresGlobalHooks
+            : t.mcpMemorySkipped
+        }${C.reset}`),
+        INSTALL_STEP_OUTCOME.SKIPPED
+      )
+    : await installMcpMemoryServiceStep(true, activeTargets);
+  stepResults.push(mcpMemoryInstallStep(t.progressInstallMcpMemory, mcpMemoryOk));
 
   // ── 5.5. Refresh global capability inventory ───────────────────────
   console.log("");
@@ -7092,26 +9522,127 @@ async function runUpdate() {
     await refreshGlobalCapabilityInventory(activeTargets);
   }
 
-  // ── 6. checkSync (repo-local, project scope) ───────────────────────
-  if (needProject) {
-    checkSync(runtimes, activeTargets);
-  }
-  console.log(`\n${C.bold}${C.green}✓ ${t.updateComplete}${C.reset}\n`);
-
-  // Copy runtime files to user-chosen project directories (if opted in earlier)
+  // Copy runtime files before validating their final target state.
+  let deployResults = [];
   if (deployDirs.length > 0) {
-    await copyToDeployDirs(activeTargets, deployDirs);
+    deployResults = await copyToDeployDirs(activeTargets, deployDirs);
+    stepResults.push(
+      installStep(
+        t.projectDeployBatchHeading(deployDirs.length),
+        deployResults.length === deployDirs.length &&
+          deployResults.every(
+            (item) => item.status === "ok" && item.stateStatus === "ready",
+          ),
+      ),
+    );
   }
+
+  const runtimeBindingsOk = await refreshRuntimeExecutableBindings(
+    activeTargets,
+    updateScope,
+    deployDirs,
+  );
+  stepResults.push(installStep("runtime executable bindings", runtimeBindingsOk));
+
+  // ── 6. Validate installed artifacts, not the package source tree ───
+  if (needGlobal) {
+    stepResults.push(
+      installStep(
+        t.refreshGlobalCapabilityInventory,
+        lastGlobalCapabilityInventoryResult,
+      ),
+    );
+  }
+  let updateRuntimeSyncOk = true;
+  if (needProject) {
+    updateRuntimeSyncOk = executingStableProjectionPackage
+      ? true
+      : checkSync(runtimes, activeTargets);
+    stepResults.push(installStep(t.syncHeading, updateRuntimeSyncOk));
+  }
+  stepResults.push(
+    installStep(
+      t.progressValidate,
+      await validateInstalledArtifacts({
+        installScope: updateScope,
+        activeTargets,
+        projectSyncOk: updateRuntimeSyncOk,
+        projectDeployResults: deployResults,
+      }),
+    ),
+  );
+  if (
+    needProject &&
+    summarizeInstallStatus(stepResults).status === "complete" &&
+    deployResults.some((item) => item.status === "ok")
+  ) {
+    const stateOk = rememberProjectProjectionMode(
+      deployResults.filter((item) => item.status === "ok").map((item) => item.dir),
+    );
+    stepResults.push(installStep(t.projectDeploySummary, stateOk));
+  }
+  stepResults.push(
+    installStep(
+      "stable projection package integrity",
+      await projectionPackageBoundary.verifyExecutingIntegrity(
+        executingStableProjectionPackage,
+      ),
+    ),
+  );
+  let result = {
+    ...summarizeInstallStatus(stepResults),
+    rejectedManagedProjects: managedProjectResolution.rejected,
+  };
+  if (result.status === "complete") {
+    console.log(`\n${C.bold}${C.green}✓ ${t.updateComplete}${C.reset}\n`);
+  } else {
+    printInstallResult(result, t.updateComplete);
+    showInstallRecovery(result, "update");
+  }
+  return result;
 }
 
 async function runCheck() {
   console.log(`\n${C.green}✓ ${t.envOk}${C.reset}\n`);
   const runtimes = await detectRuntimes();
   const targetContext = await resolveTargetContext(args);
-  checkProjectRuntimeSync(runtimes, targetContext);
+  const scopeArgIndex = args.indexOf("--scope");
+  const checkScope = scopeArgIndex >= 0 ? args[scopeArgIndex + 1] : "project";
+  const syncOk = checkScope === "global"
+    ? checkGlobalRuntimeSync(targetContext.activeTargets)
+    : checkProjectRuntimeSync(runtimes, targetContext);
   console.log(
     `${C.dim}${t.checkTargets(targetContext.activeTargets.join(", "), targetContext.supportedTargets.join(", "))}${C.reset}`,
   );
+  const stateRepoPath = checkScope === "global"
+    ? homedir()
+    : (executingStableProjectionPackage ? CALLER_CWD : PROJECT_DIR);
+  const stateOptions = {
+    repoPath: stateRepoPath,
+    stateRoot: join(stateRepoPath, ".meta-kim", "state"),
+  };
+  const localState = getProfilePaths(stateOptions);
+  const profileMetadata = await readProfileMetadata(stateOptions);
+  console.log("");
+  console.log(`${C.bold}${t.localStateHeader}${C.reset}`);
+  console.log(
+    `${C.dim}  profile=${localState.profile} key=${profileMetadata?.profileKey ?? localState.profileKey} status=${profileMetadata ? "present" : "not-created"}${C.reset}`,
+  );
+  console.log(
+    `${C.dim}  run index: ${toRepoRelative(localState.runIndexPath)}${C.reset}`,
+  );
+  console.log(
+    `${C.dim}  compaction: ${toRepoRelative(localState.compactionDir)}${C.reset}`,
+  );
+  console.log(
+    `${C.dim}  dispatch envelope: config/contracts/workflow-contract.json -> protocols.dispatchEnvelopePacket${C.reset}`,
+  );
+  console.log(
+    `${C.dim}  migration helper: npm run migrate:meta-kim -- <source-dir> --apply${C.reset}`,
+  );
+  console.log("");
+  reportProjectRuntimeSyncResult(syncOk);
+  return syncOk;
 }
 
 // Exposed for tests (project deploy + hook-source resolution). Importing this

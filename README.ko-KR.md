@@ -12,10 +12,10 @@
 </p>
 
 <p>
-  <img alt="Projection tiers" src="https://img.shields.io/badge/default-Claude%20Code%20%7C%20Codex%20%2B%20compat-OpenClaw%20%7C%20Cursor-111827"/>
-  <img alt="Candidate compatibility probes" src="https://img.shields.io/badge/candidate-Qoder%20%7C%20Trae%20%7C%20Kiro%20%7C%20Cascade%20%7C%20Cline%20%7C%20Roo%20%7C%20Continue-475569"/>
-  <img alt="Stars" src="https://img.shields.io/github/stars/KimYx0207/Meta_Kim?style=flat&logo=github"/>
-  <img alt="License" src="https://img.shields.io/badge/license-Apache--2.0-green"/>
+  <a href="config/runtime-compatibility-catalog.json"><img alt="Projection tiers" src="https://img.shields.io/badge/default-Claude%20Code%20%7C%20Codex%20%2B%20compat--OpenClaw%20%7C%20Cursor-111827"/></a>
+  <a href="config/runtime-compatibility-catalog.json"><img alt="Candidate compatibility probes" src="https://img.shields.io/badge/candidate-Qoder%20%7C%20Trae%20%7C%20Kiro%20%7C%20Cascade%20%7C%20Cline%20%7C%20Roo%20%7C%20Continue-475569"/></a>
+  <a href="https://github.com/KimYx0207/Meta_Kim/stargazers"><img alt="Stars" src="https://img.shields.io/github/stars/KimYx0207/Meta_Kim?style=flat&logo=github"/></a>
+  <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-Apache--2.0-green"/></a>
 </p>
 
 </div>
@@ -72,7 +72,7 @@ npm run meta:validate
 
 1. 이 파일, `README.ko-KR.md`
 2. `AGENTS.md`
-3. `docs/runtime-capability-matrix.md`
+3. `config/runtime-capability-matrix.json`
 
 ### 플랫폼 지원 계층
 
@@ -629,6 +629,7 @@ Meta_Kim은 단일 기억 레이어를 사용하지 않습니다. 세 가지 다
 - **책임**: 프로젝트 수준 코드 지식 그래프
 - **저장 위치**: `graphify-out/graph.json` (NetworkX node-link 형식). 심층 탐색 시 동일 디렉터리 `GRAPH_REPORT.md` 우선
 - **메커니즘 (데이터)**: `node setup.mjs` 선택 Python 단계는 graphify 설치 후 **멱등적으로** `python -m graphify claude install` 및 `python -m graphify hook install` 실행(pip로 이미 설치된 경우에도 hook 보완). git hook은 **현재 리포지토리**에서 commit/checkout 시 재구축. `npm run meta:graphify:install`도 동일(hook 포함).
+- **Windows 기존 프로젝트 마이그레이션**: Claude 프로젝트에 `C:Users...graphify.EXE: command not found` 오류가 남아 있으면 해당 프로젝트에서 `meta-kim doctor hooks --fix`를 실행하세요. `.claude/settings.json`을 먼저 백업하고 알려진 위험한 Graphify Hook 형식만 복구합니다. 사용자 수준 설정도 검사하려는 경우에만 `--all`을 사용하세요.
 - **메커니즘 (사용)**: 동기화된 meta-theory `dev-governance.md` Fetch **Step 0.5**가 모델 측 검출/사용 규칙. 백그라운드 데몬 아님. Claude Code 하위 에이전트는 `subagent-context.mjs`로 **짧은 힌트**만. Codex/OpenClaw/Cursor는 SubagentStart hook 없음, `sync:runtimes` 후 동일 참조 공유. 다른 런타임은 **대상 리포지토리**에서 `python -m graphify codex install` 또는 `claw install` 선택(`python -m graphify --help`).
 - **핵심 가치**:
   - 기억이 프로젝트에 점점 익숙해집니다 — 코드 원문이 아닌 구조와 관계를 이해
@@ -787,13 +788,15 @@ flowchart TB
 
 ### `npx`로 설치했는데, 파일이 어디에 있나요?
 
-Meta_Kim은 3 곳에 기록합니다:
+Meta_Kim은 설치 범위와 실행 중 프로젝트 정착을 분리합니다:
 
-1. **현재 디렉터리** — `.claude/`, `.codex/`, `.cursor/`, `openclaw/` 이 프로젝트의 런타임 투영
-2. **홈 디렉터리** — `~/.claude/skills/meta-theory/` (및 `.codex / .cursor / .openclaw`) 프로젝트 간 공유되는 전역 스킬
-3. **매니페스트** — `~/.meta-kim/install-manifest.json`이 모든 변경사항을 추적하여 안전한 롤백을 지원
+1. **전역 선택** — 홈 디렉터리의 `~/.claude/`, `~/.codex/`, `~/.cursor/`, `~/.openclaw/`에 공유 기능을 설치합니다.
+2. **프로젝트 선택** — 명시적으로 선택한 현재 프로젝트에 런타임 투영을 설치합니다.
+3. **실행 중 기능 정착** — 이후 governed run이 Agent, Skill, Command를 새로 만들거나 반복 개선하면 프로젝트 안에 독립 복사본을 만들고, 의존성 업데이트가 덮어쓰지 못하도록 ownership을 기록합니다.
 
-`npx`를 실행한 디렉터리에서 `npm run meta:status` (또는 `node setup.mjs --check`)를 실행하여 전체 풋프린트를 확인하세요. 롤백하려면 `npm run meta:uninstall`을 실행하세요.
+의도적으로 유지하는 예외가 하나 있습니다. 전역 설치/업데이트 중 유효한 Meta_Kim bootstrap manifest가 있는 기존 프로젝트를 발견하면, 전역 설치를 업데이트하는 동시에 그 프로젝트에 저장된 런타임 대상과 merge/delta 정책으로 기존 투영도 새로 고칩니다. 새 프로젝트 투영을 만들지 않으며 프로젝트에 정착된 기능이나 사용자 파일을 덮어쓰지 않습니다.
+
+전역 설치 후에는 어떤 디렉터리에서든 `meta-kim status`로 전체 풋프린트를 확인할 수 있습니다.
 
 ### Meta_Kim은 일반 AI 코딩 보조와 뭐가 다르나요?
 
@@ -865,7 +868,7 @@ Meta_Kim은 MCP(Model Context Protocol)를 사용하여 agent의 역량 경계�
 - [README.md](README.md)
 - [AGENTS.md](AGENTS.md)
 - [config/contracts/workflow-contract.json](config/contracts/workflow-contract.json)
-- [docs/runtime-capability-matrix.md](docs/runtime-capability-matrix.md)
+- [config/runtime-capability-matrix.json](config/runtime-capability-matrix.json)
 - [canonical/skills/meta-theory/SKILL.md](canonical/skills/meta-theory/SKILL.md)
 
 ---

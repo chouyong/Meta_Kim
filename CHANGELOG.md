@@ -6,7 +6,778 @@ This file is the reader-facing release history for Meta_Kim.
 
 The changelog explains the user-facing problem or risk each release solved, what changed to solve it, and why the change matters. It intentionally avoids long internal task ledgers, low-signal backlog ids, and implementation trivia. When exact evidence is needed, use the repository history, tests, generated reports, and PRD artifacts.
 
-## Unreleased
+## [3.0.0] - 2026-08-12
+
+### Added
+
+- **Governed execution now has one layered source of truth.** Pure Domain rules evaluate evidence, continuation, dependency-safe progress, scheduler eligibility, lease/claim state, runtime health, and quota observations without writing or granting authority. Application use cases compose those rules, Data adapters own durable SQLite/transaction work, and Presentation renders read-only views. Legacy script entrypoints remain compatibility facades instead of parallel implementations.
+- **A01-A12 close the architecture loop in reader-visible terms.** A01-A03 distinguish verified evidence, continuation advice, and dependency-safe candidates; A04-A07 reuse the existing scheduler and execution authority while projecting claims, health, and quota without creating a second controller; A08 renders the same digest-bound run as a native panel, Kanban, Markdown, or HTML; A09 unifies durable execution events and repository semantics; A10 separates setup orchestration from package/runtime infrastructure; A11 makes knowledge lifecycle changes reversible and approval-bound; A12 keeps documentation and release claims tied to current contracts, runtime evidence, package truth, and release gates.
+- **Knowledge evolution is candidate-only until exact Warden approval.** Age, score, a generated suggestion, or a legacy approval cannot write, delete, or authorize execution. Approval binds the exact target, operation, source digest, candidate digest, rollback plan, and scope; source drift fails closed. Retirement keeps a tombstone, foundational capabilities cannot be retired, and unknown or user-owned state is preserved.
+- **Run projections are explicitly read-only.** Native panel, Kanban, Markdown, and HTML surfaces share one semantic digest and cannot dispatch, complete work, move the durable cursor, create claims or leases, or become a second run-state authority.
+
+### Changed
+
+- **Install and update use an immutable packed-package handoff before persistent global writes.** The CLI remains the user-facing setup facade, while Application and Infrastructure boundaries verify the exact package receipt, stable root, child process, write boundary, and install result. Help, status, and doctor remain non-materializing diagnostics; check remains read-only.
+- **Codex agent fan-out now starts from a resource-safe default.** New/default configuration uses at most two agent threads and one nested level. An explicit user override is preserved; the former Meta_Kim default of six threads is migrated to the safer value.
+- **Runtime support remains evidence-tiered.** Claude Code and Codex are the default formal projections. OpenClaw and Cursor remain non-default compatibility projections whose runtime-specific changes require their own strict evidence; OpenClaw still has no Meta_Kim typed-plugin tool-blocking adapter, and Cursor native arbitrary-choice popup authority remains unverified.
+
+### Fixed
+
+- **An upstream dependency installer can no longer rewrite Codex configuration as authority.** Update reconciles from the user's pre-install snapshot, so a third-party MCP server the user removed is not resurrected, an installer-added server is not silently adopted, and known Meta_Kim benchmark/test project registrations do not persist. User-owned MCP servers, projects, hooks, agents, and unrelated settings remain intact.
+
+### Evidence boundaries
+
+- The Codex app-server and Claude SDK/CLI decision substrate remains permanently non-authorizing. It can correlate a presented request and observed return, but current public host surfaces do not prove Codex Desktop UI, human identity, or a human answer. Trusted host/Desktop authority remains parked until such evidence exists.
+- Legacy governance-gate parity and cutover remain deferred. Meta_Kim 3.0 does not claim that the old gates have been replaced, nor does a shadow result or read-only projection change production execution authority.
+
+## [2.9.30] - 2026-08-10
+
+### Added
+
+- **Meta_Kim 3.0 now has a durable, non-authorizing claimed-host-event substrate.** Codex app-server and Claude SDK/CLI adapters bind the exact decision, challenge, rendered payload digest, runtime session or thread, turn, item, and request identity, then persist only bounded references and digests. The substrate records presentation, observed-return, consumption, expiry, and invalidation transitions without claiming that the host, human, or answer has been independently verified.
+- **Host-event replay and crash recovery are fail closed.** A profile-local repository uses immutable revisions, exact compare-and-swap, independent host-event and challenge uniqueness, bounded reads, and dead-owner-only lock recovery. Codex and Claude adapters require return redelivery and acknowledge it only after the matching observation is durable, so interruptions before or after CAS converge without granting execution authority.
+- **Real runtime probes now preserve the evidence boundary instead of simulating host authority.** A Codex 0.146 app-server probe correlates the actual `requestUserInput` request and completed turn, including the built-in Other option, while a Claude Code 2.1.220 / Agent SDK 0.3.220 probe correlates the active `AskUserQuestion` callback and stream result through the configured MiniMax-M3 provider. Both probes explicitly record that their answers were machine/script selected and keep human verification, current-host authority, and execution authorization false.
+
+### Security
+
+- **Every new host-event gate remains permanently non-authorizing.** No verifier or `answered_verified` API is exposed, every adapter result keeps `executionAllowed=false`, raw prompts and answers are excluded from persistence, and accessor, Proxy, sparse-array, cross-runtime, cross-session, cross-request, stale, and replay inputs fail closed.
+- **Distribution remains exact and layered.** The package adds exactly five approved `src` Domain, schema, Data repository, and runtime-adapter files, while the existing bounded `scripts/**/*.mjs` distribution includes the three non-authorizing live-probe/composition scripts. Domain code has no filesystem dependency, adapters receive repository ports instead of importing storage, and no broad `src/**` package entry or runner authorization wiring was added.
+
+### Fixed
+
+- **The four-runtime install/update release preflight now has the same bounded 10-minute per-mode allowance as the other heavy four-runtime acceptance lanes.** Ordinary commands keep their existing limits, and a timeout still fails closed; the wider bound prevents a valid external dependency install on a busy Windows host from being cut off by the former three-minute ceiling.
+
+### Verification
+
+- Focused Domain, repository, Codex, Claude, fake-host integration, architecture-boundary, and package-closure tests passed `65/65`; `meta:check` also passed. Fake/injected host ports do not prove real Codex or Claude host identity, human identity, or transport durability, and M3-P2 therefore remains active until a later real-host E2E increment. Publication still requires a fresh verified Graphify rebuild and one stable-source `npm run meta:verify:all`.
+- The real Codex transport and Claude SDK callback probes passed with exact correlation, but the public host surfaces still do not prove Codex Desktop UI or a human answer. The user chose to wait for trusted host proof rather than lower the evidence standard, so M3-P2 remains blocked and M3-P3, the final full regression, and the 3.0 release have not started.
+
+## [2.9.29] - 2026-08-09
+
+### Added
+
+- **Meta_Kim 3.0 now has a fail-closed native decision foundation.** Codex and Claude native-choice adapters can issue, normalize, expire, and record host-answer claims without granting execution authority. Every generated claim remains non-authorizing until a future host-attested observer path proves session identity, displayed content, and single-use consumption.
+- **Decision authority now rejects forged or stale terminal states.** The domain uses half-open expiry, semantic replay binding, option-membership validation, payload/reference integrity checks, and non-enumerable snapshot hardening so a structural pass cannot be mistaken for a verified answer.
+
+### Fixed
+
+- **Packed install/update verification now gives the two heaviest four-runtime updates their own bounded time budgets.** Project-aware global refresh and portable runtime preparation each receive a fail-closed 10-minute allowance, while ordinary commands remain capped at five minutes. Their release evidence keeps only bounded, redacted metadata and still rejects timeouts, truncated output, signals, and inconsistent process results.
+- **Capability discovery help is now read-only.** `discover:global -- --help` and `-h` print usage without scanning runtimes or rewriting the canonical capability index, so the release suite can no longer invalidate its own source snapshot while testing the help entrypoint.
+
+### Verification
+
+- Focused authority, adapter, security, boundary, package-closure, and existing decision/governance tests passed `63/63`; three independent review lanes accepted the result. Publication still requires one fresh, stable-source `npm run meta:verify:all`; focused evidence alone is never treated as release proof.
+
+## [2.9.28] - 2026-08-09
+
+### Fixed
+
+- **macOS temporary-base handling now resolves the real path before relying on it.** This makes temporary-base selection reliable across macOS path aliases and links, including the reliability repair merged in [#52](https://github.com/KimYx0207/Meta_Kim/pull/52).
+- **The report privacy gate now accepts documented `~/` display aliases without accepting a real machine identity.** Safe, documented aliases no longer produce a false privacy finding, while actual local user, host, and machine-path identity still blocks the report, including the privacy-gate repair merged in [#53](https://github.com/KimYx0207/Meta_Kim/pull/53).
+- **Canonical Memory Hooks now reject a non-string transcript path before calling `existsSync`.** This closes the proven Node 24 `DEP0187` edge while making no claim that it caused the original setup warning.
+- **The public Claude controlled producer is now isolated from caller environment routing.** `meta-kim runtime produce` reads allowlisted provider configuration from the exact `CLAUDE_CONFIG_DIR`, strips ambient Anthropic/cloud-provider variables and `NODE_OPTIONS`, and fails closed without a valid endpoint and credential. This prevents a configured MiniMax-M3 producer from being silently routed to another provider by the caller's environment.
+- **Contributor credit:** Thanks to [@qitiandashenggogogo](https://github.com/qitiandashenggogogo) for the contributions merged in [#52](https://github.com/KimYx0207/Meta_Kim/pull/52) and [#53](https://github.com/KimYx0207/Meta_Kim/pull/53).
+
+### Verification
+
+- Focused evidence already run: Graphify 24/24, runtime 25/25, and Hook 13/13. This is not a full release gate or a release claim.
+
+## [2.9.27] - 2026-08-05
+
+### Fixed
+
+- **Packed global install and update now migrate the existing MCP Memory runtime instead of skipping it.** The immutable v2.9.26 package correctly refreshed Claude/Codex projections but accidentally treated the independent live Memory lifecycle as already handled. Historical users could therefore retain an old, proxy-sensitive startup script even though the canonical template was fixed. The exact packed CLI now applies the normal dependency, side-by-side upgrade, precise process quiesce, rollback, startup-artifact refresh, restart, and health-readback policy. Fresh installs, same-version reinstalls, missing dependencies, and explicit optional-tool skips keep their existing behavior.
+- **Pre-manifest Windows startup chains are adopted automatically only when their ownership is fully proven.** Update requires the exact historical PowerShell bytes, the complete CMD/VBS reference chain, an unchanged active-runtime state, safe physical runtime/Python/database files, a matching healthy listener, and no existing or concurrent manifest owner. Missing, modified, linked, ambiguous, or user-owned content remains untouched and the update fails closed.
+- **The global Memory lifecycle no longer writes `.mcp.json` into the immutable packed package.** Its rollback state now lives under the Meta_Kim user-state root, so a successful Memory migration cannot invalidate the stable package closure or mutate the caller's project. The public `meta-kim-runtime` MCP projection remains the single Meta_Kim MCP server surface.
+- **Post-switch verification tolerates only transient observation gaps, not identity drift.** Windows health and process-identity readback now retries for a bounded five-second window while requiring the same exact executable, launcher, arguments, host, and port on every successful observation; persistent mismatch still rolls back.
+- **Transient Windows directory locks no longer make global Skill installation fail at the final rename.** Fresh Skill promotion, archive promotion, and the multi-target `meta-skill-creator` transaction now retry only their exact transaction-owned sibling rename for a short bounded window when Windows reports `EPERM`, `EBUSY`, or `EACCES`. Persistent locks still fail without publishing a partial target, while the prior live target or prepared staging directory remains recoverable; unknown paths are never deleted or broadly retried.
+- **Packed release verification no longer lets a long historical-update lane age an already-copied runtime observation snapshot.** The read-only advisory snapshot is now captured after historical-user acceptance and immediately before portable installed-CLI readback. The 24-hour real-host freshness requirement is unchanged; the repair removes only the check/use race and does not turn stale evidence into fresh evidence.
+- **Controlled Claude capability probes no longer inherit prompt-rewriting settings or unrelated MCP servers.** They retain the current authentication boundary but run with empty setting sources, a strict empty MCP configuration, and only the capability-specific native tools. The edit probe also requires one exact `after-<marker>` line and forbids retaining the `before` marker or adding explanatory text. This prevents user-profile prompt optimization from replacing the bounded action, avoids loading a six-figure irrelevant context, and eliminates false failures that waste another live probe.
+- **Contributor credit:** Thanks to [@qitiandashenggogogo](https://github.com/qitiandashenggogogo) for the contributions initiated in [#50](https://github.com/KimYx0207/Meta_Kim/pull/50) and [#51](https://github.com/KimYx0207/Meta_Kim/pull/51), which remain part of this release together with the installed-user migration hardening built around them.
+
+### Verification
+
+- Verification includes a packed global update against a real pre-manifest Memory runtime and confirms that the historical chain is adopted without widening ownership, the generated Windows launcher uses a proxy-disabled `HttpClientHandler`, the referenced executable exists, the service is healthy after restart, no orphan launcher is left behind, and the immutable packed package still matches its exact receipt. Focused tests also inject transient and persistent Windows rename locks to prove bounded recovery, failure atomicity, and shared coverage for ordinary Skills plus the multi-target meta-skill transaction, assert that portable runtime observations are captured only after the slow historical-update lane, and bind the live edit probe to one exact final line.
+
+## [2.9.26] - 2026-08-05
+
+### Fixed
+
+- **Existing Windows users can rerun install or update without manually killing MCP Memory or deleting locked files.** A running service is quiesced only when the endpoint PID, start identity, executable, launcher, arguments, host/port, global manifest, active interpreter, and database all match Meta_Kim's recorded authority. Unknown or user-modified listeners fail closed. Same-version and historical updates prepare and validate a side-by-side candidate before stopping the old runtime, then restore the prior runtime, database, startup files, MCP entry, and active state if switching, restart, or health/identity readback fails.
+- **Windows startup and dependency checks no longer turn machine configuration into a support chore.** Exact orphaned Meta_Kim startup launchers are repaired automatically before dependency work, healthy dependencies are reused, missing dependencies enter the normal installer, failed replacements preserve the last working runtime, loopback health checks bypass user proxies on Windows PowerShell 5.1 and 7, and real HTTP failures such as 503 still fail verification. Child probes are hidden, shell-free, and bounded.
+- **Historical install state now migrates through normal update with strict ownership boundaries.** Eligible stale manifest records are classified and removed only under the global install lock; unreadable, existing, drifted, linked, or user-owned content is preserved. Install, update, and exact uninstall also share the immutable projection-package digest lock, preventing a cleanup from racing an active package consumer.
+- **Release proof is stricter and more portable.** Release audit and planning closure now use bounded WinINET/WinHTTP/direct networking with trusted Windows system tools, explicit proxy/TLS cleanup, caller-repository state authority, and exact asset size/digest binding. The new `meta:release:plan` command recommends smoke or full verification from the actual diff, while install, runtime, security, unknown, and empty-change inputs fail closed to the full gate; it does not weaken `meta:verify:all`.
+- **Runtime claims keep their real provenance.** External or linked reports cannot inherit a repository run identity, runtime acceptance writes canonical runtime names, unknown runtimes fail before state mutation, and activation metadata cannot manufacture provider support that the provider registry does not declare.
+- **Graphify release rebuilds recover strict upstream serialization edge cases without hiding unsafe output.** A hyperedge wrapped as a single `$text` JSON object, an exact `{item:[...]}` wrapper around its node list, the exact alternate `name/kind/paths/weight` hyperedge schema, and strict 0–1 decimal confidence strings are pre-bound and normalized before the existing ID/reference checks. Public `https://` labels are no longer mistaken for Windows drive paths, and safe `~/.meta-kim` display aliases render as `<meta-kim-home>`; mixed or extra schema fields, invalid wrappers or scores, unsafe alias traversal, dangling references, real local paths, and incomplete graph identity still block the release.
+- **Contributor credit:** Thanks to [@qitiandashenggogogo](https://github.com/qitiandashenggogogo) for the starting contributions in [#50](https://github.com/KimYx0207/Meta_Kim/pull/50) and [#51](https://github.com/KimYx0207/Meta_Kim/pull/51). This release carries those merged contributions forward together with the historical-user update, rollback, and release-proof hardening built on top of them.
+
+### Verification
+
+- Release verification covers fresh install, existing same-version reinstall, historical update, partial prior state, user-modified drift, exact Windows process authority, transaction rollback/retry, proxy-free local health, locked manifest migration, shared package lifecycle locking, packed public CLI install/update, runtime/provider provenance, and exact GitHub Release binding.
+
+## [2.9.25] - 2026-08-05
+
+### Fixed
+
+- **The installed Windows CLI can now finish a global update when its active Node executable does not bundle npm beside itself.** Stable-package sync first uses direct Node/npm layouts, then safely resolves the real `npm.cmd` on the sanitized PATH and invokes its absolute `npm-cli.js` without a visible shell. This covers Codex/portable Node launchers while preserving the immutable package authority and shell-free child-process boundary.
+- **Release verification remains stable under a busy Windows host.** The Graphify merge attribute is now a tracked repository rule instead of a verification-time untracked file; the Job Object owner-death probe allows enough time for a contended PowerShell process query; and concurrent verification-history fixtures retry bounded Windows temporary-directory cleanup. These changes do not weaken the production assertions.
+- **All v2.9.23 and v2.9.24 compatibility repairs remain included.** Historical startup cleanup, dependency-state handling, global `meta-theory` projection, hidden Graphify probing, PR #50/#51 corrections, and exact Release audit promotion are unchanged. Thanks again to [@qitiandashenggogogo](https://github.com/qitiandashenggogogo) for the starting contributions in [#50](https://github.com/KimYx0207/Meta_Kim/pull/50) and [#51](https://github.com/KimYx0207/Meta_Kim/pull/51).
+
+### Verification
+
+- Verification includes the portable-Node/no-bundled-npm regression, the real packed global update, the standard full release gate, and exact GitHub Release binding.
+
+## [2.9.24] - 2026-08-05
+
+### Fixed
+
+- **The public release audit CLI now completes after creating an exact release binding.** Runtime-capability promotion no longer imports back through the executing audit module, removing the circular module wait that could write a valid `published_bound` record and then exit with Node's unsettled top-level-await warning.
+- **The v2.9.23 installation, update, startup repair, hidden Graphify probing, global Claude Hook, and runtime rebind fixes are unchanged.** This patch supersedes v2.9.23 only to repair its post-release audit command and carries forward the contribution credit for [@qitiandashenggogogo](https://github.com/qitiandashenggogogo)'s work on [#50](https://github.com/KimYx0207/Meta_Kim/pull/50) and [#51](https://github.com/KimYx0207/Meta_Kim/pull/51).
+
+### Verification
+
+- Release verification covers the shared canonical hashing boundary, current and legacy verification-report stage layouts, the real packed audit CLI, and a new clean full packed-product gate followed by exact GitHub Release binding.
+
+## [2.9.23] - 2026-08-04
+
+### Fixed
+
+- **Existing Windows users no longer need to remove a broken MCP Memory startup entry by hand.** Normal install/update detects only the exact Meta_Kim `mcp-memory-silent.vbs` shape whose command target is missing and removes the orphan before dependency work; the public recovery uninstall path provides the same bounded repair while preserving unknown or modified startup files.
+- **MCP Memory dependency setup now distinguishes a missing dependency from a healthy existing installation and a failed replacement.** Install/update verifies executable candidates instead of trusting the first PATH match, reuses healthy state, activates a replacement only after validation, and preserves the previous working runtime when an upgrade candidate fails.
+- **Historical Claude MCP registrations migrate through the public update path.** Strict legacy matching now accepts the previously emitted direct Node and `cmd /c` forms, including an absolute `node.exe` path, then replaces only the proven `meta_kim_runtime` entry with the durable `meta-kim-runtime` registration while preserving unrelated servers, auth, environment, and user configuration.
+- **Installed-user compatibility is now a release invariant.** Install, update, sync, cleanup, dependency, startup, manifest, and generated-config changes must cover fresh installs, same-version reinstalls, historical updates, partial prior installs, and user-modified drift; a maintainer-only cleanup or fresh-install-only patch no longer counts as a product fix.
+- **Windows Graphify verification no longer calls `py -3` or opens a visible terminal.** Automatic discovery accepts only absolute `python.exe` / `python3.exe` paths from PATH or standard install roots, rejects WindowsApps aliases, and hides version, pip, Graphify, Git, and migration child processes. A missing interpreter now falls through cleanly to dependency setup, while a healthy installation is reused directly.
+- **Global Claude Code installs now register the capability-first enforcement Hook they already project.** Normal updates add `enforce-agent-dispatch` to historical global settings, repeated updates remain idempotent, and global governance no longer has a wiring gap that is absent from project installs.
+- **Runtime CLI upgrades can refresh launch inventory without reinstalling boot startup.** The public `meta-kim runtime rebind` entrypoint rebinds only Claude Code / Codex executable identities with strict target, scope, and Node validation. macOS and Linux MCP Memory boot chains, like Windows, are recorded by normal update with exact manifest ownership instead of filename or script-text heuristics.
+- **Contributor credit:** Thank you to [@qitiandashenggogogo](https://github.com/qitiandashenggogogo) for identifying the missing global Claude governance Hook wiring and runtime launch-inventory rebind gap in [#50](https://github.com/KimYx0207/Meta_Kim/pull/50) and [#51](https://github.com/KimYx0207/Meta_Kim/pull/51), and for providing the starting implementations. This release completes those contributions with historical-update behavior, the public CLI, cross-platform scope handling, safety boundaries, and release regressions.
+
+### Verification
+
+- The standard full release gate exercises the packed public CLI across install, update, repeated update, historical migration, automatic orphan-startup repair, cross-platform boot-chain manifests, manifest-owned uninstall, user-state preservation, runtime rebind, global Claude Hook upgrade, hidden Graphify probing, runtime sync, and governance regressions.
+
+## [2.9.22] - 2026-08-02
+
+### Fixed
+
+- **Claude Code progress saving now works on modern macOS systems that provide `python3` but no bare `python` command.** macOS and Linux try `python3` first and retain `python` as a compatibility fallback, while every candidate must prove Python 3.10+ before the memory helper runs.
+- **Windows Python Hooks no longer fall back to `py.exe` or open a visible console window.** Claude Code and generated Codex Hooks select a verified interpreter from safe explicit paths, PATH, and standard off-PATH installation directories; stale overrides, WindowsApps aliases, and the `py` launcher are rejected, and child processes use hidden-window spawning.
+- **Hook behavior stays stable across the compatibility repair.** stdin/stdout forwarding, exit-code handling, bounded probes, and execution timeouts remain intact, and the runtime evidence ledger is rebound to the corrected canonical Claude projection.
+
+### Verification
+
+- Focused cross-platform installer and MCP memory Hook regressions pass (83/83), runtime evidence regressions pass (11/11), and the runtime capability matrix validates against the corrected source digest.
+
+## [2.9.21] - 2026-08-01
+
+### Fixed
+
+- **Run-status output no longer republishes governed task text or stable fingerprints.** Text, details, and JSON use one redacted public projection; nested fingerprint fields are removed, free-text status fields redact embedded task canaries, and explicit report readback remains the only surface for report content.
+- **Codex planning Hooks no longer carry fixed Python paths from a maintainer machine.** Install/update records only the interpreter descriptor that passed the shared live probe, then the generated runner revalidates Python 3.10+ on every use. Stale environment overrides, stale install hints, missing PATH entries, and fake `--version` launchers are rejected before falling back to a live interpreter.
+- **Stale interpreter failure no longer causes multi-second Hook stalls.** PATH candidates receive an existence precheck and each executable probe has a short bounded timeout.
+
+### Verification
+
+- Focused status, installer, packed-readback, Graphify-runtime, PRD, sync, and project checks pass. Two independent reviews rejected the first candidate, their nested-fingerprint, short-task, non-PATH fallback, stale-hint, and timeout counterexamples were added as regressions, and the corrected candidate uses the low-risk release smoke rather than the unrelated full release suite.
+
+## [2.9.20] - 2026-08-01
+
+### Fixed
+
+- **npx remains a supported global install/update entry without turning its disposable cache into permanent runtime authority.** Before a global-writing operation projects Claude Code or Codex Commands, Hooks, or merged settings, the candidate materializes the exact package into a shared immutable store keyed by package version and packed-package SHA-256; persistent references are rendered only from that stable root.
+- **Read-only, environment, and ownership boundaries stay explicit.** Help, status, and doctor do not materialize the store merely by being invoked; check derives the real npm pack file set without writing the user's npm cache. Version probing, packing, and installation share one private cache/temp transaction, while the stable child removes transient executable environment overrides. Uninstall clears persistent references before removing only an exact manifest-owned bundle whose receipt, first-party files, and directory closure still match.
+- **Interrupted materialization can recover without trusting or deleting unknown content.** A per-digest owner lock serializes package creation; a dead incomplete directory with no receipt is atomically quarantined with its evidence before replacement, while a complete but untrusted directory still fails closed. Stable project handoff also resolves structured deployment records to their real target directory before Graphify tooling runs.
+- **Retained Hook backups no longer inflate the live capability inventory.** Discovery prunes only Meta_Kim's exact non-live Hook backup directories before traversal, while preserving every backup on disk and continuing to discover user directories whose names merely contain words such as `backup`. On the maintainer acceptance machine this reduced reported live Hooks from 5,947 to 153 and searchable capability entries from 7,573 to 1,779.
+- **Release proof now exercises the disposable-root failure mode directly.** The packed public-CLI lane updates Claude Code and Codex from an npx-shaped package root, removes every disposable package origin, runs check from the exact stable authority, and reads back Commands, Hooks, merged configuration, manifest integrity, and referenced paths. A current-version Git tag blocks the release preflight before expensive probes, preventing an unbumped candidate from being certified against an older historical tag.
+
+### Verification
+
+- Focused lifecycle, cleanup, Hook projection, packed-proof, tag-guard, release-binding, and first-party drift regressions pass after adversarial correctness, security, and completeness review. The declared security boundary covers normal cache deletion, accidental content drift, linked-path rejection, and precise uninstall ownership; it does not claim resistance to a malicious same-user process, a compromised Node/npm installation, or supply-chain compromise. P-141, P-151, P-154, P-156, Cursor live acceptance, Docker acceptance, and the cancelled Claude context-reduction A/B remain separate.
+
+## [2.9.19] - 2026-08-01
+
+### Fixed
+
+- **Windows runtime evaluation now contains its own processes with a private Job Object instead of reconstructing a process tree from reusable PIDs.** The root process is created suspended, assigned before resume, and protected by kill-on-close plus owner-process and supervisor-pipe leases. Timeout, launcher failure, supervisor death, and an early root exit all drain the processes actually admitted to the Job.
+- **Runtime command output is bounded without losing whole-stream evidence.** Each stream retains a bounded prefix and tail, records complete byte counts and SHA-256, preserves valid UTF-8 boundaries, and applies mandatory repository, home, WSL-path, and credential redaction. Secondary temporary-file cleanup failures no longer hide the primary process-cleanup result.
+- **Cleanup claims now match the real containment boundary.** Release evidence may verify only the runner-owned Windows Job or POSIX detached process group; it explicitly does not claim arbitrary whole-process-tree cleanup or cover processes created outside that group. A dedicated serial process-guard stage exercises this boundary once in the standard release chain.
+- **Windows PowerShell 5.1 now reads evaluator launch specifications as explicit UTF-8.** Real Chinese agent definitions, emoji, accented Latin, Japanese, and Korean survive the no-BOM JSON handoff; launcher/result contradictions, out-of-range protocol values, and malformed public failure evidence fail closed instead of being reported as verified cleanup.
+- **Primary process cleanup truth is kept separate from secondary control-directory cleanup.** A retained temporary directory remains visible as a bounded allowlisted secondary failure, while a coherently verified Windows Job or POSIX process-group cleanup keeps its verified status. Public reports omit raw commands, prompts, paths, environment values, output, stacks, and signals.
+- **Graphify rebuilds now tolerate intentional tracked-file deletions in the current worktree.** Deleted index entries are excluded from the live repository snapshot before hashing, so replacing the legacy process guardian no longer crashes the graph migration with an `ENOENT`; a concurrent disappearance still fails closed during digest verification.
+- **Graphify's verified Windows install retries only short-lived directory-lock errors during atomic replacement.** `EPERM`, `EBUSY`, and `EACCES` receive a small finite backoff; every other error fails immediately, and exhaustion still restores the previous verified graph instead of weakening the release gate.
+- **OpenClaw 2026.7.1 SQLite auth storage no longer fails the compatibility smoke or triggers legacy credential copying.** Meta_Kim recognizes the runtime-managed per-agent SQLite store and leaves authentication inheritance to OpenClaw; it never copies credential databases. The old fixed-file mirror remains available only for legacy installations that do not have the current store.
+
+### Verification
+
+- Focused regressions cover root/child/grandchild timeout cleanup, nonzero root exit with descendant draining, launcher crash, Node supervisor death, missing launcher results, stale timers, stdout and stderr floods, default redaction, UTF-8 splitting/spec roundtrips, POSIX outcome ordering, contradictory protocol tuples, and primary-versus-secondary cleanup truth. Independent correctness, security, and completeness reviews report P0/P1/P2=0. Final release evidence still requires one clean 15/15 standard gate on the final commit, exact Release binding, and formal Claude Code/Codex global readback; an earlier failed stage-8 report and a later Claude-only diagnostic are not release evidence.
+
+## [2.9.18] - 2026-08-01
+
+### Fixed
+
+- **Governance decisions and transactional run state now have a clear boundary.** `spine-state.mjs` remains the single compatibility entrypoint and state authority; path/profile routing, task identity, HMAC, migration, locks/CAS, activation, and terminalization stay in the original transaction chain. Pure stage, capability, choice-surface, and fan-out policy moved into one shared zero-I/O module, reducing the verification blast radius of policy-only changes.
+- **Claude Code, Codex, and Cursor Hook projection installs dependencies before replacing their consumers.** Project sync, global sync, setup, cleanup ownership sets, and capability discovery all include the new shared dependency. An interrupted update cannot create this release's new “consumer written before dependency exists” window.
+- **In-process importers can no longer mutate shared governance policy.** Stage order, public labels, choice-surface states, and nested stage policy are deeply frozen, while the Meta Agent allowlist remains private. A forged owner cannot enter the primary dispatch chain by changing a shared array.
+
+### Verification
+
+- All 43 historical `spine-state.mjs` exports remain available, and the 14 extracted policy exports retain identity through the compatibility façade. Focused regressions cover state CAS/migration/interruption repair, cold import across three runtime projections, packed/global Hook projection, dependency write order, policy mutation, and forged owners. Independent correctness, security, and projection-completeness reviews end with no P0/P1/P2 findings. Final release evidence still requires the standard full gate, exact Release binding, and formal Claude Code/Codex global readback.
+
+## [2.9.17] - 2026-07-31
+
+### Fixed
+
+- **Codex Agent and Skill discovery now keeps source provenance instead of flattening same-name definitions into one unverified capability.** Exact duplicates remain aliasable, while conflicting or invalid definitions are published as diagnosis-only and cannot enter normal or dynamic execution routing. Live filesystem definitions outrank stale cache entries, and project/global collisions retain their ownership and repair boundary.
+- **Offline routing can no longer manufacture native Codex custom-agent authority from supplied JSON or environment data.** Only the current interactive host may prove native `agent_type` support; offline selection rejects self-reported host schemas and safely falls back to a run-scoped owner contract.
+- **Capability diagnostics and publication are safer and more honest.** New Codex skill preflight and JSONL replay commands report candidate-set pressure and observed event markers without claiming host completion or causality. Published inventory and route output redact secrets and local paths, summarize developer instructions instead of exposing prompt text, and fail closed when install ownership cannot be validated.
+- **Standard release verification no longer treats a maintainer-adopted Graphify artifact as fresh production evidence.** The gate now launches and observes a deterministic local code-graph update, binds its unchanged repository snapshot, then reclusters without an LLM before the normal identity and freshness checks. Existing-extract adoption remains a recovery aid only.
+
+### Verification
+
+- Focused discovery, routing, YAML metadata, ownership, privacy, and replay regressions pass, including conflicting custom agents, invalid dynamic-lane providers, quoted and delimiter-containing local paths, secret-bearing environment fragments, process-exit failures, and markers without an independently bound host receipt. Three independent correctness, product-fit, and security reviews report no remaining P0/P1/P2. Standard full release verification, packed-product installation, exact Release binding, and final Claude Code/Codex global readback remain required before publication. This release does not claim that Codex host metadata truncation is fixed.
+
+## [2.9.16] - 2026-07-31
+
+### Fixed
+
+- **Codex CLI 0.146 now receives a valid custom-agent release-fuse request.** The self-contained child review pairs its explicit `agent_type` with `fork_turns: "none"`, avoiding the host-rejected custom-agent plus default full-history combination.
+- **Full release verification now keeps all declared runtime projections present and checks the same set throughout one run.** Its sync and readback stages derive the explicit Claude Code, Codex, OpenClaw, and Cursor targets from the canonical sync manifest instead of collapsing back to machine-local defaults before cross-runtime smoke checks.
+- **Claude Code 2.1.202 asynchronous Agent runs now become evidence only after the exact child result and the full task lifecycle are complete.** Agent and subagent observations bind the same session, tool call, task, child result, completion boundary, and marker digest. Failed, duplicated, reordered, cross-session, or decorated-only results fail closed instead of being mistaken for a successful child run.
+- **Codex Desktop can provide fresh release evidence from the current native task when a separate Codex CLI invocation is unavailable.** The reader accepts the current structured output-block form, ignores outer in-progress string outputs, and still requires the exact ordered shell, file-read, and patch chain. A plain string or self-declared `Exit code: 0` cannot mint a successful capability receipt.
+- **A completed Graphify extract can now be adopted without repeating extraction, but only through an explicit, fail-closed takeover.** The takeover binds the exact HEAD, repository inventory and contents, plain-file artifact hashes, graph identity, report counts, and source-versus-artifact timestamps before it can resume clustering. The rebuild path also rewrites only the canonical `~/.meta-kim/...` documentation alias to a non-local display token while real home paths, unknown aliases, and traversal forms remain blocked.
+- **The runtime-capability evidence regression clock now matches the repository evidence date.** The baseline no longer misclassifies the existing 2026-07-31 OpenClaw projection observation as future evidence, while the negative fixture still proves that a genuinely later observation is rejected.
+
+### Verification
+
+- Focused observer, producer, raw-replay, acceptance, and Graphify safety regressions cover synchronous and asynchronous Claude Agent lifecycles, exact child-result hashing, duplicate and failed terminals, cross-session/call splicing, Codex Desktop string-output falsification, valid structured desktop evidence, safe existing-extract takeover, wrong-HEAD/source-change rejection, and private-path/traversal refusal. Independent correctness, security/truth, and completeness reviews found no remaining P0/P1/P2 before the Graphify gate fix; that additional fix still requires the standard full release verification and exact post-publication package binding before this version is declared released. Fresh production observations cover the exact Claude Code 5/5 and Codex 5/5 capability set.
+
+## [2.9.15] - 2026-07-31
+
+### Fixed
+
+- **OpenClaw's declarative `executionBlock` policy is no longer described as mechanical tool-call enforcement.** The canonical runtime boundary now states that refusal prose is policy guidance, while actual blocking or parameter rewriting requires an OpenClaw typed plugin hook. Meta_Kim still does not claim that such an adapter is installed, and it does not copy Claude Code or Codex deny-payload semantics into OpenClaw.
+
+### Verification
+
+- Independent correctness, security/truth, and completeness reviews closed all P0/P1 findings. The private capability-gap PRD test passes 56/56, its strict five-classification acceptance check passes, runtime projections sync cleanly, and `git diff --check` passes. A single post-repair global readback confirms current Claude Code and Codex governance agents, Meta-Theory skills, Hooks, commands, MCP, and choice configuration before publication.
+
+## [2.9.14] - 2026-07-30
+
+### Fixed
+
+- **GitHub source downloads and Windows Git checkouts no longer fail repository-evidence validation solely because text files use LF or CRLF line endings.** Repository source bindings now hash a canonical LF representation for UTF-8 text while preserving byte-exact hashing for non-text files, so the same tracked content verifies consistently in source archives, npm packages, and local checkouts.
+
+### Verification
+
+- Repository-evidence regressions verify equivalent LF and CRLF distributions and retain byte-sensitive hashing for non-UTF-8 files. The GitHub source-archive shape and the packed npm-product shape both validate without SHA-256 mismatches. Standard full release verification and exact post-publication package binding remain required before publication.
+
+## [2.9.13] - 2026-07-29
+
+### Fixed
+
+- **Claude Code no longer keeps calling a Graphify executable from an obsolete Windows Python installation.** Install and update resolve the console script from the Python interpreter Meta_Kim actually selected, including versioned Windows user-script directories, then migrate only recognized existing `hook-guard read/search` entries to shell-free `command` + `args` form. The resolver never trusts an unrelated `graphify` from `PATH`.
+- **Global-only updates can repair an existing user Hook without creating new project or user wiring.** Existing guide text no longer suppresses the upstream Graphify refresh, unknown and bare commands remain untouched, backups and atomic replacement protect settings, and Doctor reports a missing Graphify executable without deleting or rewriting the stale Hook when no verified replacement is available.
+- **Graphify rebuilds no longer leave a private local path in a node `source_url`.** The output sanitizer removes only recognized Windows, UNC, macOS, Linux, and home-relative local paths from that field, reports the exact redaction count, and preserves HTTP(S) and repository-relative sources.
+
+### Verification
+
+- Focused parser, sanitizer, Doctor, runtime-resolver, setup-flow, Graphify CLI safety, output privacy, and Windows integration regressions cover the original forward-slash Python 3.11 command, the current Python 3.14 user-script location, selected-interpreter binding, `PATH` rejection, idempotence, unknown-Hook preservation, backup/atomic-write failures, global-only no-creation behavior, private `source_url` redaction, and byte-identical Doctor diagnostics. Independent release-fit and Hook-safety reviews closed all P0-P2 findings. Standard full release verification and exact post-publication package binding are required before this version is published; Docker, Cursor product execution, task budgets, and optional live certification are not inferred from these focused checks.
+
+## [2.9.12] - 2026-07-28
+
+### Fixed
+
+- **Context-engineering budgets no longer pass before the host has observed or measured them.** The default governed run stays partial until the runtime proves the loaded fixed and variable context, reports a finite nonnegative input-token count, completes duplicate/conflict/omission checks, and binds every observed source to evidence. Missing measurements now become explicit blockers instead of a hard-coded pass.
+- **Every public-ready validation path now consumes the same context truth.** The generic run-artifact validator and strict intent validator reject missing, partial, blocked, unmeasured, unobserved, or evidence-free context budgets. Top-level and `coreLoop` copies must agree, so a successful nested packet cannot hide a failing peer. Non-public-ready runs remain allowed to omit the packet.
+
+### Verification
+
+- Targeted public-ready and context-budget regressions cover the generic validator, strict validator, governed runner, product-goal flow, valid fixtures, and top-level/`coreLoop` masking counterexamples. Three independent correctness, completeness, and collision reviews accepted the final isolated diff. Standard full release verification and exact post-publication package binding are required before this version is published; Graphify, Docker, task budgets, Cursor product execution, and optional live certification are not inferred from the targeted checks.
+
+## [2.9.11] - 2026-07-28
+
+### Fixed
+
+- **Claude Code and Codex capability evidence now describes what the current host may attempt without pretending that Meta_Kim authorized or executed it.** Compatible host surfaces enter an explicit handoff state; historical observations remain advisory, while unsupported, reference-only, wrong-runtime, and unknown native-choice claims fail closed. The standalone runner emits a bounded host request and never converts callbacks, environment values, JSON, receipts, or self-hashes into current execution authority.
+- **Runtime observations now form a recoverable, capability-specific product path instead of a report-only matrix.** The packed CLI records and reads the exact Claude Code/Codex ten-capability set, binds producer events and release lineage, preserves failed evidence for diagnosis, exposes exact populated and empty MCP partitions, and keeps every persisted result non-authorizing.
+- **Install and release proof now follows the package users actually run.** Windows launch descriptors bind the discovered entry, shim, launcher, and JavaScript entrypoint without claiming a same-user trust root or eliminating TOCTOU. Project-aware global refreshes normalize managed deployment records into absolute inventory roots instead of failing after project capability copies. Packed current, project, and historical install/update lanes must cover the canonical four targets exactly; verification, release audit, release close, and observation readback recompute one shared raw proof and reject partial, legacy, count-only, or self-declared success.
+- **Packed MCP verification now checks advisory observations against the effective matrix they actually produce.** The packaged canonical baseline must still match exactly, while the MCP readback must exactly match the effective matrix recomputed from that same installed package and isolated read-only snapshot; an expected advisory overlay no longer causes a false release failure, and neither baseline drift nor effective-state drift is accepted.
+- **Governance verification now reads the current mode-scoped runtime claim format.** It requires non-empty `evidenceRefs` and complete `claimsByMode` facts for every declared runtime mode instead of demanding the retired top-level `evidence` placeholder; legacy-shaped or incomplete records still fail closed.
+- **Graphify can now give a repository-root file a stable unique label when subdirectories contain files with the same name.** The root file uses its real explicit relative form, such as `./README.md`, while ordinary and nested shortest-unique labels remain unchanged; a regression protects the replayable identity proof.
+
+### Verification
+
+- Eleven falsification/rework rounds closed authority minting, route deadlocks, native-choice ambiguity, Stage Runner bypasses, launch-identity drift, packed source leakage, incomplete target sets, release-audit trust, false worker attribution, and consecutive-release lineage. Final independent correctness, security, and product-completeness Reviews report no P0/P1/P2; Meta-Review authorizes the standard release gate. Existing production observations remain Claude Code 5/5 and Codex 5/5 and were consumed read-only rather than regenerated. Cursor product execution, Docker, task budgets, and optional live-certified external signing are not acceptance evidence for this release.
+
+## [2.9.10] - 2026-07-28
+
+### Fixed
+
+- **A fresh Graphify graph now proves its identity schema and repository contents, not only its Git commit.** Every real upstream file node uses the installed Graphify 0.9.28 Unicode normalizer and a full source-path identity. The proof binds the exact repository inventory and file contents, all node and link data, both hyperedge surfaces, analysis, provenance, sanitization, and report counts. Same-name Claude adapter and shared implementation nodes remain distinct and queryable.
+- **Incremental updates and interrupted clustering now resume from a coherent snapshot.** Extract checkpoints preserve bound graph and analysis inputs; cluster checkpoints additionally bind the final report. A truncated sidecar, partial graph, changed report, source mutation during an upstream command, stale community membership, or an orphan snapshot cannot be stamped as current. Incremental updates automatically re-cluster when new or renamed nodes are absent from the analysis, and every graph node must appear in exactly one community.
+- **Generated Graphify evidence no longer exposes or follows private local paths.** Graph, analysis keys and values, report text, and recovery snapshots reject Windows, UNC, Unix home, and delimiter-prefixed `~/` paths without echoing them. Graphify output, state, and snapshots must be plain files contained in the real repository output directory; mixed `GIT_*` redirection and junction or symlink escapes fail closed.
+- **Cross-runtime release evaluation now uses the target Claude Code provider instead of inheriting the caller's provider.** Hook isolation still uses empty setting sources, while a strict allowlist hydrates only Claude's provider, model, and timeout environment from its global settings. A Codex-launched release check can therefore call the user's configured `MiniMax-M3` without sending that model name to an unrelated ambient GLM endpoint, and arbitrary settings environment keys remain excluded.
+
+### Verification
+
+- Independent correctness, adversarial, and security reviews all ended with P0/P1/P2 at zero after their crash, stale-proof, TOCTOU, path-leak, symlink, incomplete-community, and orphan-snapshot counterexamples became regressions. Focused Graphify tests pass 69/69; Claude provider-environment tests pass 24/24; the private PRD contract passes 56/56; a real Python 3.14.6 / Graphify 0.9.28 rebuild and independent check bind every represented node, exact link, community reference, and real file identity with no open checkpoint. Release verification also excludes the root `debug.log` that Windows CEF applications can emit when they inherit the repository working directory, with a regression proving that this machine-local file cannot stale the graph proof. The primary release fuse then completed real Claude Code `MiniMax-M3` and Codex calls with release-grade evidence. The 88 upstream zero-node sources and semantic-collision completeness remain explicitly deferred to P-149. Docker, task budgets, and Cursor product execution are not acceptance evidence.
+
+## [2.9.9] - 2026-07-27
+
+### Fixed
+
+- **A private work queue can now close a public release without becoming public itself.** The packed `meta-kim release close` command reads the one ignored PRD `ACTIVE` row and appends one human-readable, idempotent release-fact block to each existing ignored planning file. It never creates a public backlog mirror, publishes the PRD, or treats a planning block as queue authority.
+- **Release closure now proves current public and global truth instead of trusting a local success label.** Before writing, the command replays the chained `published_bound` evidence against the live GitHub annotated tag, Release, downloaded tgz, exact clean verification report, and remote main; it checks the real default Claude Code and Codex global homes, then revalidates the PRD, tracked tree, tag, audit, planning-file presence, and markers immediately around projection and record publication.
+- **Interruptions and hostile local path redirection fail closed.** Immutable backups, atomic per-file replacement, a fully hashed closure record, and stable release markers let a retry keep correct work and add only missing projections. Dirty or tracked planning files, malformed markers, detached or forged audits, tampered records, symlink/junction paths, concurrent queue/file changes, runtime/source/Node preload overrides, and case-insensitive `GIT_*` repository redirection are rejected without claiming `release_closed`.
+
+### Verification
+
+- Independent correctness, adversarial, and security reviews ended with no P0/P1 findings after their counterexamples were converted into regressions. Focused closure and release-audit tests, CLI UX, the complete governance suite, packed-package boundary checks, project sync/checks, the standard full release gate, exact post-publication package audit, and final Claude Code/Codex global setup readback cover this release. Docker, task budgets, and Cursor product execution are not acceptance evidence.
+
+## [2.9.8] - 2026-07-27
+
+### Fixed
+
+- **Full-verification failures no longer erase the evidence that came before them.** Every `meta:verify:all` completion now writes an immutable attempt before updating the compatible `verification-report.json` latest projection. A separate latest-release-grade pointer keeps the exact clean attempt available for release audit even after a later diagnostic or failed run.
+- **Interrupted report writes recover instead of poisoning every later verification.** Attempt and lock ownership become visible only after a complete atomic write. Legacy clean reports are imported on first use, while half-written projections, corrupt attempts, dead locks, and stale locks with a reused PID are preserved as recovery evidence and no longer block the next report.
+- **Concurrent and custom outputs cannot cross-contaminate verification history.** Latest selection uses completion time plus attempt ID instead of lock order, custom report paths own separate histories, Windows path-case aliases and traversal IDs cannot overwrite immutable attempts, and existing release-audit readers remain compatible with the enriched report schema.
+
+### Verification
+
+- Focused crash, migration, concurrency, custom-path, Windows alias, traversal, and exact release-audit regressions cover the storage boundary. Standard release verification, exact package binding, and Claude Code/Codex global setup readback are required before this version is published. Docker, task budgets, and Cursor product execution are not acceptance evidence.
+
+## [2.9.7] - 2026-07-27
+
+### Fixed
+
+- **Runtime-specific providers no longer impersonate support in other runtimes.** Claude Code, Codex, Cursor, OpenClaw, and HookPrompt adapter records keep their positive claim only on the declared target runtime. Every non-target adapter is explicitly blocked, has unsupported install and OS layers, and carries no copied activation event.
+- **Provider claims now have one durable authority.** `providers[*].support` owns availability truth, explicit runtime targets own applicability, and `runtimeAdapters` is a schema- and validator-checked projection. Static registry data cannot claim that a provider was selected, invoked, completed, or live; those remain run-scoped evidence.
+- **The validator now rejects believable false records.** Negative controls cover cross-runtime `verified` claims, support overrides that try to invent a target, adapter/source mapping drift, contradictory state/status pairs, activation leakage, and private run-state fields. Claude Code and Codex retain their verified target capability; Cursor product execution remains outside this release.
+
+### Verification
+
+- Focused provider tests, the complete governance regression, schema validation, project sync/checks, the standard release gate, exact release binding, and final Claude Code/Codex global setup readback cover this change. Docker, task budgets, and Cursor product execution are not acceptance evidence.
+
+## [2.9.6] - 2026-07-27
+
+### Fixed
+
+- **Published release evidence can now be audited instead of reconstructed from memory.** The packed `meta-kim release audit` command joins the local and GitHub annotated tag, peeled commit/tree, clean full-verification report, public Release, and uploaded npm package into an immutable, hash-chained attempt record. Historical releases whose clean report no longer exists remain explicitly verification-unbound and cannot be promoted.
+- **A package with substituted code cannot inherit a clean release result.** Exact promotion requires the local tgz and GitHub asset to be byte-identical to the npm candidate that the same clean `meta:verify:all` report installed and tested; matching only package name, version, or `package.json` is rejected.
+- **Audit evidence stays inside the repository-owned state tree.** The output root and its `attempts` and `stale-locks` children reject symlink/junction redirection before lock, record, pointer, or stale-lock writes. Failed attempts remain append-only and never replace the latest successful binding.
+
+### Verification
+
+- Release acceptance covers the focused audit and junction counterexamples, the complete governance regression, a dirty-candidate and clean-commit standard `meta:verify:all`, packed CLI execution, an exact post-publication `published_bound` record attached to the GitHub Release, and final Claude Code/Codex global setup readback. Docker, task budgets, and Cursor product execution are not acceptance evidence.
+
+## [2.9.5] - 2026-07-27
+
+### Fixed
+
+- **`meta:theory:report latest` now explains exactly which "latest" it selected.** The command still opens the newest committed governed report, including valid `partial` reports, but the JSON summary now includes a stable `selection` block that distinguishes the committed report pointer from the current active lifecycle run.
+- **Current-run status can no longer silently rewrite report readback.** Repository lifecycle relation is read through the canonical Meta_Kim status reader; weak or invalid `active-run.json` projections stay untrusted, custom report directories remain isolated, and explicit run IDs continue to read the requested committed artifact.
+- **Claude Code and Codex command help now carries the same boundary.** Both projections tell the operator to report the selected run, artifact claim status, active-run relation, and continuation command without exposing task text or task fingerprints.
+
+### Verification
+
+- The standard `meta:verify:all` gate passed all 13 stages in one uninterrupted run, including four-runtime isolated install/update probes, packed user and project install/update/re-update, global Hook checks, 1,366 Meta-Theory tests with zero failures and three declared skips, integration, and fresh Claude Code/Codex live release-fuse evidence. Docker, task budgets, and Cursor product execution were not used as acceptance evidence.
+
+## [2.9.4] - 2026-07-26
+
+### Fixed
+
+- **LangGraph can now enter the real Dynamic Workflow path without becoming a second workflow engine.** An optional ready-set adapter consumes only the exact nodes already selected from `coreLoop.stageDagPacket`, invokes LangGraph's Functional API `entrypoint` and `task`, and leaves graph topology, checkpointing, leases, resume, and merge authority with Meta_Kim.
+- **The default install remains unchanged.** Native execution is still the default, `@langchain/langgraph` is dynamically imported only after explicit `--stage-runner-orchestrator langgraph` selection, and missing or incompatible packages fail explicitly instead of silently falling back.
+- **Packed external-consumer acceptance proves the boundary.** A normal packed install contains no LangGraph dependency and explicit selection fails without native fallback; after an explicit `@langchain/langgraph@1.4.8` install, a deliberate process exit after worker A's durable commit resumed only worker B and merged once. The deterministic worker is labeled test-only and cannot count as native provider proof. OpenAI Agents and Claude Agent SDK adapters remain truthfully deferred and unimplemented without credential-backed live evidence.
+- **Claude Code live release evaluation no longer lets unrelated user prompt hooks rewrite its structured evidence.** The evaluator reads the actual installed runtime Agent definition, verifies its declared identity and boundary fields, records the full-file digest, then binds a compact projection through Claude's native `--setting-sources "" --agents --agent` path. Empty setting sources exclude unrelated user/project hooks without disabling the explicit inline Agent or host-managed authentication. User hooks remain untouched, and the inline binding is reported separately from a normally loaded custom Agent.
+- **MCP Memory install, update, and boot startup are recoverable and quiet.** Install paths pin `mcp-memory-service[sqlite]==11.5.5`, force ONNX, and forbid hash embeddings. Updates build a side-by-side candidate and prove online and boot-offline ONNX vectors before taking the endpoint transaction lock. They then stop only a listener whose PID, start identity, executable/launcher, host, port, and argv all match, back up the quiesced SQLite database with `quick_check`, and verify the candidate's health and listener identity before changing MCP config, boot files, or active state. The runtime-verified absolute database path is bound into MCP config, live process env, every boot launcher, active state, and recovery journal so a custom database cannot silently revert to the default. Crash recovery takes the same endpoint lock, stops an exact old/candidate writer before restore, and fails closed on unknown listeners. Recovery stores only the MCP Memory entry plus necessary state, uses private file modes, removes sensitive backup/recovery material after commit, and conservatively expires only its own failed artifacts. Setup and boot share an owner-aware endpoint mkdir lock, preventing double starts without broad process-name kills or GUI notifications.
+- **Broken mixed-generation Windows C++ runtimes no longer force hash fallback or a misleading generic install error.** If package installation succeeds but the ONNX dependency probe fails, setup may retry once using only a complete, same-version x64 CRT bundle discovered under the official local Visual Studio Redist tree, copied beside the candidate ONNX module. Non-Windows hosts, incomplete or mixed bundles, symlink/path escapes, and missing official assets fail closed; setup never writes System32, downloads arbitrary DLLs, or sources another application's private runtime.
+
+## [2.9.3] - 2026-07-26
+
+### Solved Problem
+
+Meta_Kim could execute its Dynamic Workflow stage graph through Claude Code and Codex, but an interrupted process still recovered by rerunning the original request. A completed worker could therefore be repeated after a crash, generated artifacts could disagree with runtime state, and the existing checkpoint/replay labels did not provide durable node-level recovery.
+
+### Fixed
+
+- **Governed runs now resume from an append-only SQLite kernel.** Each run binds the exact task and canonical graph digest, records hash-chained events, node attempts, checkpoints, leases, fencing tokens, coordinator ownership, fork lineage, and actual traversed edges. Completion and edge traversal commit atomically, while corrupted events, mutable projections, checkpoints, claims, or materialization digests fail closed.
+- **A crash resumes unfinished work instead of replaying completed workers.** The formal runner exposes separate fresh and resume modes, blocks active-lease takeover, repairs only identity-bound staging/final artifact states, and materializes one JSON/Markdown pair without worker replay. A child-process kill test proves that worker A remains committed, only unfinished worker B runs after lease expiry, and merge runs once.
+- **The same durable boundary serves both primary runtimes without becoming a second graph.** Claude Code and Codex still consume `coreLoop.stageDagPacket`; the bridge stores execution as a projection and cannot redefine stages, dependencies, or merge ownership. External side effects remain forbidden in this read-only release; effect reconciliation is retained as a future adapter safety boundary, not claimed as live external-effect proof.
+- **Runtime launch and retained evidence are narrowed.** Windows CLI resolution respects PATH directory order, runtime children inherit exact named authentication/config variables instead of prefix wildcards, and built-in or custom worker output is bounded and redacted before durable persistence.
+- **Global update closes a Codex App regeneration edge without taking over user config.** When Codex restores a new valid bundled-marketplace path next to Meta_Kim's exact prior disabled-conflict comment, the merge removes only that stale managed comment and closes its journal ownership. Unknown, duplicated, non-adjacent, or user-authored changes still fail closed.
+
+### Verification
+
+- Targeted durable-kernel, runner, bridge, graph, CLI, PRD, tamper, crash/resume, artifact-repair, credential-boundary, and traversal tests passed with 126 tests and 0 failures; independent architecture, persistence, bridge, security, and final reviews found no P1/P2 blocker.
+- Native run `p117-2026-07-26T05-36-46-515Z` passed all four product scenarios: Claude Code and Codex each completed one sequential worker and one overlapping two-worker fan-out/merge after the final environment-boundary changes.
+- Durable governed-entry run `p117-governed-2026-07-26T05-39-25-380Z` passed through both Codex and Claude Code with `releaseEligible=true`, proving the formal kernel-backed execution/materialization path separately from the four-scenario bridge acceptance.
+- The standard `meta:verify:all` gate passed all 13 stages in one uninterrupted run, including four-target isolated install/update proof, packed user/project install-update proof, global Hook checks, Graphify, setup, 1,342 Meta-Theory tests with zero failures, integration, and fresh Claude Code/Codex live release-fuse evidence. Docker, Cursor product execution, synthetic provider output, task/token budgets, project mutation, and external side effects are outside this acceptance.
+
+## [2.9.2] - 2026-07-26
+
+### Solved Problem
+
+After crashes or interrupted Stop hooks, Meta_Kim could leave hundreds of historical run-status files marked `active=true`. A later prompt could then appear to inherit stale Critical-stage state, while Claude Code and Codex Stop hooks were not yet wired through one lifecycle contract without risking runtime-specific Hook drift.
+
+### Fixed
+
+- **Run continuity now has one authoritative spine and recoverable public projections.** New run IDs are collision-resistant and lowercase, refresh/Stop writes require the expected run ID, active/status files are repaired from the spine instead of becoming separate truth, and strong legacy records are migrated once to `archived_legacy` while unknown or malformed records are preserved.
+- **Task identity no longer stores raw prompts.** Status records keep a protected project/profile HMAC fingerprint, reject unsafe JSON boundaries before writing, fail closed if an existing HMAC key is missing or corrupt, and strip nested raw prompt fields from persisted state.
+- **Claude Code and Codex keep separate runtime Hook ownership where needed.** Shared code is limited to runtime-neutral spine, lock, path, lifecycle, and generic Codex/Cursor behavior. Claude Code keeps its own Stop entrypoint and memory hook source; Codex project/global Stop wiring now preserves user hooks, saves memory first, and runs lifecycle cleanup last.
+- **The full meta-theory release suite now has load-safe verification headroom.** Its release-stage safety timeout matches the other large validation stages, preventing a green 1,269-test suite from being killed only because earlier live runtime checks temporarily increased machine load.
+- **Claude Code and Codex keep runtime-specific release probe paths.** Claude retains its direct custom-agent binding probe. Codex alone runs in a clean child process after Claude finishes, so preceding runtime state cannot delay Codex host-event discovery; the single dual-runtime fuse still makes one combined decision.
+- **A transient Codex host-event miss is retried without reusing evidence.** Each of at most two attempts gets a fresh isolated child and process-tree guardian; the first failure remains as a safe digest, cleanup failure stops immediately, and only one attempt's own strict live evidence can pass. The probe keeps Codex authentication but ignores unrelated user MCP configuration, and a nonzero wrapper exit can recover only from the same fresh session's completed native invocation instead of discarding a task Codex actually finished. The outer release-stage safety timeout now covers both attempts under load.
+- **Windows probe cleanup no longer depends on `taskkill` process-provider health.** A Toolhelp32 guardian is ready before the isolated Codex evaluator starts, tracks the owned descendant tree, drains it on normal exit or timeout, verifies zero survivors, and fails the release gate if cleanup cannot be proven.
+- **Status remains usable with long local verification history.** The concise CLI and its regression harness can carry the full internal footprint payload instead of silently failing at Node's small default child-output buffer.
+
+### Verification
+
+- Focused suites passed for run-status lifecycle, eight-stage spine behavior, hook canonical ownership, data integrity, MCP memory hooks, project bootstrap, runtime sync manifests, global hook policy, W2 transaction safety, and the unique PRD contract.
+- The real local state was backed up, then reconciled: 216 stale active histories were archived, 303 terminal records were preserved, and exactly one current v2 active record remained.
+- The standard packed `meta:verify:all` gate passed all 13 stages with fresh Claude Code/Codex live evidence and global Hook checks. Docker, fixture-only evidence, and projection-only checks were not used as product proof.
+
+## [2.9.1] - 2026-07-25
+
+### Solved Problem
+
+Meta_Kim already generated an authoritative stage DAG and Dynamic Workflow worker plan, but the default artifact still stopped at `planned_not_executed`: no native worker process consumed the graph, timing stayed zero, and replay/checkpoint fields could be mistaken for execution. A Codex-only bridge would also have violated the product's dual-primary Claude Code/Codex boundary.
+
+### Fixed
+
+- **One stage graph now drives real read-only work in both primary runtimes.** The explicit `--execute-stage-dag` path consumes `coreLoop.stageDagPacket`, uses the existing safe-ready-set scheduler for sequential and fan-out work, invokes either Codex or Claude Code through thin native adapters, and performs one deterministic local merge. Runtime adapters cannot redefine stages, dependencies, waves, or merge ownership; the normal path remains planned-only.
+- **Execution truth is recorded before the governed artifact is saved.** Worker evidence now carries the actual runtime binding, native session/message identity, start/end timestamps, non-zero duration, terminal result, tool counts, output digests, and failure class. Planned worker rows, Execution timing, and LangGraph-style runtime evidence are replaced only by observed results; Review still owns semantic acceptance, and durable resume is not claimed.
+- **The bridge is safe for normal Claude Code and Codex environments.** Both adapters are shell-free and read-only, strip parent-session markers, inherit only allowlisted system/runtime/authentication variables, reject side-effect work before launch, redact local paths, and use a process timeout only as a safety fuse. Claude Code 2.1.202 streamed results are accepted only when the final text is closed by an exact same-session success record.
+
+### Verification
+
+- Independent-host run `p117-2026-07-25T12-37-33-190Z` passed all four native bridge scenarios and is `releaseEligible=true`: Codex and Claude Code each completed one sequential worker plus one overlapping two-worker fan-out/merge with exact file markers, native session/message IDs, read/search tools, non-zero timing, and a completed local merge.
+- Governed-entry run `p117-governed-2026-07-25T12-39-56-219Z` is also `releaseEligible=true`: the formal `meta:theory:run` path completed the package inspection through Codex and Claude Code and replaced planned execution truth in both saved artifacts.
+- No Docker, WSL, task/token/cost budget, elevated access, project mutation, external side effect, or synthetic provider output can satisfy this release acceptance.
+
+## [2.9.0] - 2026-07-25
+
+### Solved Problem
+
+Meta_Kim's first Harness Fitness Lab could prove that its benchmark runner was honest, but two task classes hit a quality ceiling and the experiment could not isolate the cost or value of the core governance scaffold, the Review chain, and Evolution. Repeatedly making hidden tests harsher—or imposing an artificial task-time budget—would have manufactured failures instead of measuring user outcomes.
+
+### Fixed
+
+- **The lab now measures components without turning ceiling tasks into traps.** P-135 adds a cumulative `baseline -> slim -> reviewed -> full` ladder, three repetitions for each task/group pair, five visible requirements bound one-to-one to held-out behavior checks, an unbudgeted single-flight concurrency scenario, and a cost-only discrimination branch that is valid only when every group achieves the same perfect outcome. Cost-only evidence can prove overhead, never quality benefit.
+- **Default governance depth now follows measured value.** Critical / Fetch / Thinking stay the canonical ordering and truth boundary but use concise inline records for clear low-risk local work. Review / Meta-Review run conditionally by risk, ambiguity, blast radius, failed verification, or claim strength. Evolution remains a canonical capability but leaves the default execution scaffold; without a durable learning trigger, the run closes inline with `none-with-reason` instead of dispatching Evolution work.
+- **Fitness trials can genuinely resume after a crash.** Trial results now retain a stable provider identity separately from structured provider evidence, legacy results are inferred safely, and the formal-result pointer is excluded from the immutable contract-definition digest. Restarting the same formal run reused all 36 completed trials without another provider invocation.
+
+### Verification
+
+- The native Windows/Codex formal matrix completed 36/36 live trials with complete JSONL trajectories and product-evidence eligibility; all four groups achieved 9/9 and 5/5, so no governance component is credited with a quality gain.
+- Core governance measured 1.201× token and 1.354× wall-clock cost versus baseline and is conditional; Review measured 1.029× token and 0.971× time versus slim and is conditional; Evolution measured 1.525× token and 1.289× time versus reviewed and is removed from the default scaffold.
+- No Docker, WSL, task budget, elevated access, or sandbox bypass contributed to acceptance. Fixture runs and the stopped 2/12 budget experiment remain diagnostic-only and cannot satisfy product evidence.
+
+## [2.8.93] - 2026-07-24
+
+### Solved Problem
+
+Meta_Kim had extensive governance structure but no controlled experiment showing whether that structure improved real outcomes. Its earlier Windows Codex pilot also mistook a headless approval-policy override for a platform-wide read-only limitation, which blocked real product evidence and encouraged an invalid Docker substitute.
+
+### Fixed
+
+- **Harness Fitness Lab now measures outcome truth instead of packet completeness.** A Codex-native runner executes a seeded 3-task × 3-group × 3-trial matrix with isolated committed workspaces, held-out environment tests, anonymized quality scoring, complete JSONL trajectories, token/tool/rework/wall-clock metrics, immutable resumable trial results, and explicit diagnostic-versus-product evidence boundaries.
+- **Native Windows trials use Codex's supported permission path.** Standalone runs bind `:workspace` permissions to `on-request` plus the native auto-reviewer, use one external Git workspace root, and reject managed Codex Desktop nesting. Docker, fixtures, planned runs, elevated access, and sandbox bypasses cannot satisfy product acceptance.
+- **The first result is preserved as a real negative fitness decision.** All 27 native trials completed: full governance succeeded 9/9 versus 8/9 for baseline and Review ablation, within the 1.5× cost budget, but only fuzzy product work improved materially. The general 2-of-3 fitness gate therefore remains failed, Review has no demonstrated independent benefit, and the next governed item is benchmark de-ceiling plus governance slimming—not another framework layer.
+
+### Verification
+
+- The standalone native Windows pilot completed real file changes plus public and held-out tests without Docker or unsafe permissions.
+- The formal matrix completed 27/27 live Codex trials with product-evidence eligibility and retained `criteriaPass=false` rather than promoting a convenient result.
+- Contract, planner, provider argument safety, scoring, failure-denominator, partial-pilot, package-surface, unique-PRD, Graphify, projection, setup, Meta-Theory, integration, and packed release paths are required to pass before publication.
+
+## [2.8.92] - 2026-07-24
+
+### Solved Problem
+
+The standard release path could report success after a smoke evaluator exited cleanly even when its own evidence said the runtime was projection-only and not release-grade. Claude discovery also confused the Agent View command with custom-agent definitions, while Codex could satisfy the live evaluator with model-authored JSON or timeout recovery without proving that a real child Agent completed. This made the release claim stronger than the underlying Claude Code and Codex evidence.
+
+### Fixed
+
+- **Standard releases now have one dual-primary runtime fuse.** The release evaluator fixes its scope to Claude Code and Codex, requires the complete nine-agent structural inventory, and permits release-grade only after one real host invocation succeeds in each primary runtime. Smoke, canonical fallback, fixtures, model-authored JSON, and projection-only evidence remain diagnostic and cannot open the fuse.
+- **Runtime identity is reported at the level the host actually proves.** Claude custom agents are discovered from declared project/global definitions and verified through a real `claude --agent` main-session binding. Codex definitions are discovered from TOML `name` fields; when the active `spawn_agent` schema has no `agent_type`, a completed child is recorded truthfully as a run-scoped invocation rather than being mislabeled as a loaded custom agent.
+- **Codex completion evidence survives incomplete CLI forwarding without trusting arbitrary files.** The evaluator first consumes native JSONL events. If Codex 0.144.x persists the completed collaboration but omits it from `exec --json`, the fallback accepts only the exact fresh exec thread and its unique child backlink from the bounded local session store. Wrong, stale, duplicate, oversized, linked, or fixture evidence fails closed, and public reports retain only IDs and digests.
+- **Global updates preserve ownership truth across host normalization and regeneration.** A Claude-managed durable MCP command may be migrated after Claude wraps it with an exact Windows `cmd` launcher only when the unwrapped definition matches the recorded manifest fingerprint. Codex TOML journals now collapse exact host-restored replays and rebase regenerated host values only when the managed result is unchanged; altered commands or different results still fail closed.
+
+### Verification
+
+- Focused evaluator, observer, release-chain, session-correlation, path-safety, and privacy regressions passed with 77 tests and 0 failures; an independent P0/P1 review found no release-truth or disclosure blocker.
+- A real primary-runtime fuse completed with both Claude Code and Codex marked `strictReleasePass=true`; Codex proved `spawn_agent -> returned_child_final` while preserving the truthful run-scoped binding boundary.
+- Focused global MCP ownership, durable bundle lifecycle, Codex TOML journal, and manifest regressions passed, including real v2.8.91-to-v2.8.92 global sync and post-sync checks.
+- The final release candidate is required to pass the complete packed-product, four-runtime projection/install, Graphify, setup, Meta-Theory, integration, and dual-primary runtime release suite before publication.
+
+## [2.8.91] - 2026-07-21
+
+### Solved Problem
+
+Version 2.8.90 repaired the unsafe Windows Graphify command after the main setup and Graphify CLI installers ran, but two real user paths remained open. The project post-copy initializer independently runs `graphify hook install` and could recreate the same backslash command, while projects that were already broken had no supported public migration command. Editing one project's `.claude/settings.json` therefore fixed that project only; it could not safely migrate another unmanaged project, and Meta_Kim must not scan and rewrite arbitrary repositories without explicit user scope.
+
+### Fixed
+
+- **Every Meta_Kim-owned Graphify install path now closes the Windows shell boundary.** The post-copy initializer sanitizes the project Hook immediately after the upstream installer, and install/update refreshes sanitize explicitly selected or manifest-managed Claude project deployments. Unmanaged projects remain untouched.
+- **Existing projects have a public, scoped migration command.** Run `meta-kim doctor hooks --fix` from the affected project. The stable CLI defaults to that caller project; `--project-root <dir>` selects another project explicitly, and `--all` is required before user-level settings are included.
+- **Repairs are narrow and recoverable.** Only the known Windows `graphify.EXE hook-guard read|search` shell form is rewritten. Hook metadata and executable paths containing spaces are preserved, the original JSON must be backed up successfully, and the repaired file is promoted atomically. Unknown incompatible Hooks remain diagnostic-only.
+- **Global Codex config recovery remains reversible after external drift.** If an active marketplace key reappears beside Meta_Kim's earlier disabled-conflict comment, the planner now collapses the adjacent duplicate into one managed comment and records an exactly invertible mutation instead of leaving global sync permanently partial.
+
+### Verification
+
+- Focused Hook doctor, sanitizer, public CLI, Graphify wiring, and runtime tests passed with 106 tests and 0 failures; the complete setup suite passed with 415 tests and 0 failures.
+- The Codex config planner regression suite passed with 26 tests and confirmed an exact in-memory round trip against the maintainer's previously failing real config shape.
+- The packed-product preflight exercised four-runtime install/update probes and a real npm package install followed by two updates successfully.
+- A fresh Claude Code `Read` probe and `meta-kim doctor hooks --project-root ... --silent` both completed without Hook errors in the originally reported multimedia project.
+
+## [2.8.90] - 2026-07-21
+
+### Solved Problem
+
+graphify's upstream installer writes Windows shell-form hook commands (`C:\Users\<user>\...\graphify.EXE hook-guard read`) into the project `.claude/settings.json`. Claude Code runs shell-form hooks through Git Bash, which consumes those backslashes as escapes and collapses the path to something like `C:UsersKim...graphify.EXE`, so every `Read`, `Glob`, and `Bash` tool call logged a non-blocking `command not found`. The Meta_Kim hook doctor could already diagnose this as a `windows_shell_backslash_path` incompatibility, but only as a diagnostic — the install and update flows kept regenerating the broken command, so anyone who cloned the repo on Windows hit the same noise on every fresh install.
+
+### Fixed
+
+- **graphify hook commands are repaired at install time, not just diagnosed.** After `graphify hook install` runs, both the setup flow (`setup.mjs`) and the `meta:graphify:install` / `meta:graphify:update` flows rewrite the Windows shell-form graphify command into the direct-spawn `command` + `args` form (for example `command: "C:\\...\\graphify.EXE"`, `args: ["hook-guard", "read"]`). Direct-spawn hooks bypass the Bash boundary, so the executable path survives verbatim. The repair is Windows-only, idempotent, writes a timestamped backup before changing anything, and only touches graphify-injected commands — unrelated user hooks are preserved for explicit review.
+
+### Verification
+
+- New `rewriteHookToDirectSpawn` unit tests (in `doctor-hooks`) cover drive-letter and UNC shell-form rewrites, safe-form passthrough (forward slashes, quoted, already-split `args`, bare `graphify`), non-graphify preservation, and non-win32 no-op.
+- New `sanitizeGraphifyWindowsHooks` unit tests cover the file round-trip, non-win32 no-op, idempotency, backup creation, missing-file handling, non-graphify preservation, and permissions/sibling-hook preservation.
+- Full `npm run meta:test:setup` passed with 409 tests, 0 failures.
+
+## [2.8.89] - 2026-07-16
+
+### Solved Problem
+
+Meta-Theory had more than one component trying to decide the same route. The entry classifier identified the task, but it also decided whether a native question was allowed and whether fan-out was authorized. Those decisions could disagree with the canonical Skill, the execution selector, and the host runtime, so material choices were rarely shown while safe parallel work could still be serialized or gated by an optional orchestration Skill. Separately, a legacy Claude `PostToolUse:Write` memory Hook could fail repeatedly when a CommonJS `.js` script inherited a project's ESM package type, and Hook diagnostics could mistake an unparseable external command for a healthy or broken file target.
+
+### Fixed
+
+- **Entry classification is factual instead of policy-owning.** The classifier now reports the entry path and observable signals only. It no longer owns native-choice state, fan-out authorization, lane counts, or execution policy.
+- **Native choice has one runtime-aware policy.** Material route, scope, risk, owner, and acceptance branches are evaluated centrally. Claude Code uses `AskUserQuestion`; Codex uses `request_user_input`. Missing, empty, rejected, or stripped native answers block or return to the responsible stage instead of silently becoming approval.
+- **The core-loop contract is the single parallelism authority.** All eight stages keep ordered merge barriers while independent work inside the active stage runs as the maximal safe ready set under dependency, resource, permission, isolation, useful-work, and host-capacity constraints. Parent/child paths and unknown write scopes are treated as real collisions instead of allowing unsafe apparent fan-out.
+- **Native fan-out no longer depends on `agent-teams-playbook`.** Claude Agent/Task or Codex `spawn_agent` plus the authoritative stage DAG is sufficient. The playbook remains an optional adapter and is never a prerequisite, degradation trigger, or substitute for live host invocation evidence.
+- **Hook diagnosis and legacy retirement are safer.** `doctor-hooks` accepts an explicit project root, detects CommonJS `.js` targets that run inside ESM projects, and reports commands whose target cannot be parsed as `unverified` instead of guessing. Automatic repair remains limited to proven missing zombie targets; unknown or incompatible user assets are preserved for explicit review.
+- **Claude global refresh can preserve an in-use durable MCP runtime.** An explicit maintenance flag refreshes the global Skill, Agents, commands, and manifest without replacing the active MCP bundle or rewriting user MCP configuration. The default synchronization behavior remains unchanged.
+
+### Verification
+
+- Focused choice, stage-DAG, Hook doctor, runtime projection, ownership, and governed-run regressions passed, including native-surface mismatch, empty-answer, path-collision, unknown-write-scope, and legacy Hook cases.
+- The Meta-Theory suite completed with 1,188 tests: 1,183 passed, 0 failed, and 5 declared skips.
+- One fresh `npm run meta:verify:all` run passed all `13/13` standard release-grade stages with `releaseGrade=true`, including four-runtime install/update probes and real packed user/project install and repeated-update acceptance.
+- Project and all four user-global Meta-Theory projections were synchronized with global Hooks enabled. Claude's durable MCP bundle and registration were transactionally upgraded to `2.8.89` with a pre-write backup, without terminating Claude. Optional private-attested `live-certified` verification was not requested.
+
+## [2.8.88] - 2026-07-16
+
+### Solved Problem
+
+The cross-runtime dispatch Hook still treated ordinary local file and command tools as stage-transition drivers. A user could therefore ask Meta_Kim to edit a normal business file, but the Hook would block or warn because Fetch, Thinking, or another governance stage was active—even though Agent dispatch is the behavior the Hook is meant to govern. This could create a self-lock where even the state repair command was intercepted. Separately, Claude Code on Windows can normalize Meta_Kim's exact durable MCP launch command into an equivalent `cmd /c` form. Global install and update then misclassified Meta_Kim's own entry as an unowned user collision and refused to finish the required Claude user-level installation.
+
+### Fixed
+
+- **Ordinary project work is no longer stage-gated by `enforce-agent-dispatch`.** Local file edits and commands now proceed without stage-based denial or warning. The Hook still governs Agent dispatch, keeps explicit query-only runs read-only, and preserves the trusted runtime-injected meta-agent read-only boundary.
+- **Historical dispatch records can no longer impersonate the current caller.** A prior meta-agent entry in the dispatch chain does not turn later main-thread business edits into meta-agent mutations or produce false warnings.
+- **Claude's exact Windows MCP wrapper is recognized as Meta_Kim-owned.** The installer accepts only an exact `cmd`/`cmd.exe` wrapper around the expected executable and arguments. Extra flags, changed paths, joined command strings, environment drift, and unknown lookalikes remain protected collisions.
+- **Claude global install and cleanup ownership stay exact.** Check and sync preserve the equivalent wrapper, while the install manifest records the fingerprint of the definition that is actually registered. Future update and cleanup can therefore act on Meta_Kim's fragment without claiming the rest of `.claude.json`.
+- **Packed lifecycle coverage now includes Claude normalization.** The packed global install test rewrites the registration into Claude's wrapper form, proves check and sync idempotence, verifies the real manifest fingerprint, and keeps unrelated user configuration untouched.
+
+### Verification
+
+- Focused Hook, stage-runtime, Claude global asset, and packed runtime lifecycle regressions passed, including negative collision cases and the retained meta-agent/query-only safety boundaries.
+- Claude user-level Agent, Skill, Hook, settings registration, commands, durable MCP bundle, and install manifest were synchronized; the all-target global release check passed.
+- One uninterrupted `npm run meta:verify:all` run passed all `13/13` standard release-grade stages with `releaseGrade=true`; Graphify freshness and diff hygiene also passed.
+- Optional private-attested `live-certified` verification was not requested and remains separate from the standard release gate.
+
+## [2.8.87] - 2026-07-15
+
+### Solved Problem
+
+Global runtime installation, update, and cleanup still depended on fixed assumptions about runtime profiles, historical Agent paths, package locations, and prior release versions. Those assumptions could make a valid future runtime profile fail, leave obsolete projections behind, or mistake a plausible path for an actually owned asset. Codex configuration changes were safe to retain when ownership was uncertain, but they were not yet recorded as an exact reversible delta. The bundled MCP runtime could also return structurally valid placeholder resources instead of proving that its capability matrix, Agents, and Meta-Theory guidance came from the installed package. Separately, setup and test subprocesses could pollute real user inventory state, while packed release verification still mixed repository-source evidence with installed-product truth and fixed historical baselines.
+
+### Fixed
+
+- **Runtime projection and migration are now source-driven.** Runtime profiles declare their own projection outputs, renderers, and retirement boundaries. Historical Agent fingerprints are generated from repository history in a canonical migration catalog instead of being maintained as fixed path or Agent lists, and unknown future profile shapes fail closed.
+- **Install ownership is exact and reversible.** Manifest policy binds category, source, runtime, asset type, purpose, and path before cleanup is allowed. Codex `config.toml` changes record only the real byte-preserving mutation delta, retain comments and line endings, use atomic compare-and-swap writes, and can be inverted without removing unrelated user edits. Drift, ambiguous TOML, symlink escapes, forged purposes, and legacy command-only ownership records are preserved or blocked rather than guessed.
+- **MCP runtime truth comes from the installed package.** Global sync installs a versioned durable bundle with exact package identity and layout checks. The server validates and serves the full runtime capability matrix plus canonical Agent and Meta-Theory resources from that package; transport acceptance rejects placeholder, partial, duplicated, empty, or out-of-package payloads. Runtime startup no longer depends on the source checkout, `npx`, or ambient `PATH`.
+- **Discovery and local state no longer leak across runtimes or tests.** Claude and Codex share an intentional runtime-family inventory profile without colliding through incidental entrypoint names. Targeted refreshes preserve unselected runtime inventories, concurrent refreshes use locked atomic publication, Setup owns one final inventory refresh, subprocess tests use isolated user homes, and the new project-registry repair command removes only exact missing temporary-project records with dry-run and backup safeguards.
+- **Global cleanup follows declared ownership instead of plausible paths.** `global_only` retirement, OpenClaw workspace selection, Memory Hook assets, durable MCP bundles, Agents, Skills, Commands, Hooks, and capability indexes all use profile- or contract-derived allowlists with most-specific matching. Unknown files, user drift, runtime-sedimented project copies, and third-party configuration remain untouched.
+- **Release verification now proves the packed product dynamically.** The isolated installed tarball runs real install, update, repeated-update, project, MCP, and historical-upgrade paths. The prior stable baseline is selected from repository tags instead of a fixed version, timeouts come from a release policy contract, slow packed acceptance has its own lane, and missing history fails release-grade verification unless an explicit diagnostic-only override is used.
+- **Release tests now show real progress without duplicate packed CLI work.** The Node test runner streams child output, derives fast versus subprocess-heavy setup groups from imports instead of fixed file lists, and keeps packed CLI acceptance in the release preflight rather than repeating it inside the standard setup stage.
+
+### Verification
+
+- Focused suites for Codex TOML planning and inversion, manifest and uninstall safety, MCP package/resource contracts, global Agent migration, project-registry isolation, setup orchestration, and packed-package boundaries passed during implementation.
+- One complete `npm run meta:verify:all` run passed all `13/13` standard release-grade stages with `releaseGrade=true`, `packedProductProofComplete=true`, and a stable source snapshot. The Meta-Theory stage completed with 1,190 tests, 1,185 passed, 0 failed, and 5 skipped.
+- Optional private-attested `live-certified` verification was not requested and remains separate from the standard release gate.
+
+## [2.8.86] - 2026-07-14
+
+### Solved Problem
+
+Global installation and project execution had been treated as if they were the same lifecycle. This could leave users unsure why project runtime files existed after choosing a global install, while a later global update could either miss an already managed project or risk overwriting a capability that had been intentionally customized for that project. Agent, Skill, Command, MCP, Hook, and tool status also did not consistently distinguish discovery, selection, host invocation, execution, and optional external certification. Separately, Issue #48 exposed two packed-update defects: the `npx` package was validated against a maintainer-only `.gitignore`, and an approved optional MCP Memory step did not forward its scoped Claude settings authorization.
+
+### Fixed
+
+- **Install scope and project capability ownership are now independent.** Users can install or update globally or for a project. A global update refreshes only projects already carrying a valid Meta_Kim bootstrap manifest; it does not create new project projections. Capabilities discovered globally are used directly unless the run must create or modify them for the current project, in which case the project copy receives independent sedimented ownership and is preserved by later global operations.
+- **Managed project updates preserve both freshness and user work.** Manifest-owned generated projections are backed up and replaced with the current package version, shared configuration is merged, and unknown or project-sedimented files remain untouched. Planning, writes, stale cleanup, and explicit cleanup all consult the same ownership records.
+- **Governed execution records runtime truth instead of display guesses.** Capability discovery now resolves owner, Agent, Skill, Command/tool, MCP provider, Hook, and verification path before mutation. User-facing status separates selected, requested, invoked, returned, failed, and externally certified states; Codex custom Agents are claimed only when the current host and projected TOML both support them.
+- **Material plan changes use a real challenge boundary.** Plan Challenge appears only when scope, risk, acceptance, or implementation shape materially branches. Understanding confirmation remains separate from execution authorization, and ordinary no-branch work is not burdened with redundant acceptance steps.
+- **Issue #48's packed-update failures are fixed.** Packed installs validate shipped product artifacts rather than a source-checkout `.gitignore`. An explicit MCP Memory confirmation now grants authorization only to the selected Claude child operation; the standalone installer remains fail-closed. Global Claude and Codex settings updates also use staged, synced, atomic replacement so an interrupted write cannot truncate user JSON.
+- **Release acceptance now follows the real user path.** The packed CLI exercises install and update for Claude Code, Codex, Cursor, and OpenClaw, including a historical `v2.8.85` to `v2.8.86` update, instead of relying only on repository-source execution.
+
+### Verification
+
+- Focused Issue #48 setup and MCP Memory tests passed `71/71`; global Hook/settings policy tests passed `19/19`, including injected replacement failures for Claude and Codex.
+- Packed-product install/update acceptance covers all four declared runtimes and the previous public release baseline.
+- The standard `npm run meta:verify:all` release gate passed from the final release tree with `releaseGrade=true`; optional private-attested `live-certified` verification was not requested.
+
+## [2.8.85] - 2026-07-13
+
+### Solved Problem
+
+An update launched through `setup.mjs` could fail before doing any work because the parent forwarded `--lang` to every child script, including strict child CLIs that did not support it. The failure was then followed by generic EBUSY, network, and conflict guesses, so Codex and other runtime users could be told to repair Claude-specific paths even though the exact argument error was already visible. The standard release checks exercised the installer directly and therefore did not prove the real setup-to-child argument contract.
+
+### Fixed
+
+- **Setup now uses explicit child CLI contracts.** Install, update, and quick deploy share production argument builders; localized children receive the selected language, while strict global Meta-Theory sync receives only supported arguments. Unknown child contracts and legacy argument-array calls fail loudly instead of silently dropping language.
+- **Installer language handling is complete and fail-closed.** Split and equals forms are equivalent, only supported language codes and aliases are accepted, and nested capability discovery inherits the same effective language.
+- **The real parent-to-child boundary is regression-tested.** Setup's production builders generate the quick-deploy/install/update argv accepted by the real installer validator, while strict global sync is executed in isolated runtime homes and proves both language exclusion and zero writes.
+- **Failure guidance is accurate across four languages.** English, Simplified Chinese, Japanese, and Korean prioritize the first exact error, make lock/network/permission/conflict advice conditional, use runtime-neutral recovery commands, and preserve useful cleanup guidance without recommending wildcard deletion of user-owned directories.
+- **The selected language remains consistent through final validation.** Runtime sync, capability discovery, dependency installation, and project validation no longer switch back to the host language mid-run.
+
+### Verification
+
+- Focused merged setup, language, strict-parser, and UX checks passed `109/109`; a final bounded language/validation check passed `63/63`.
+- The complete setup suite passed `648/649` with `0` failures and `1` expected POSIX-only skip on Windows.
+- Three independent correctness, security, and UX/test reviews closed every Critical/HIGH finding; the second review reported `0` Critical and `0` HIGH.
+- One complete `npm run meta:verify:all` run passed the standard release gate with `releaseGrade=true`; optional private-attested `live-certified` verification was not requested.
+
+## [2.8.84] - 2026-07-13
+
+### Solved Problem
+
+Meta_Kim's install, update, and cleanup paths still had several ways to confuse "not tracked by Git" with "owned by Meta_Kim." A renamed Hook could remain as a ghost file, an already-correct managed file could be backed up and rewritten again, malformed user settings could be overwritten, and a partial cleanup or runtime mismatch could still look successful. Concurrent setup/cleanup, interrupted writes, Windows Junctions and NTFS alternate data streams also needed one shared safety boundary. At the same time, long release probes could appear stuck and important recovery guidance was not consistently available in the user's language and chat-facing status.
+
+### Fixed
+
+- **Managed files now use one safe transaction lifecycle.** Exact manifest and prior-hash ownership, root/Junction containment, conflict preflight, verified backups, staging, atomic commit, rollback, receipt-bound recovery journals, deterministic paths, and cross-process locks protect install, update, sync, and cleanup operations.
+- **Cleanup is resumable and preserves user state.** Removed or renamed managed entries are retired only with exact ownership proof; drifted, unknown, malformed, seed-only, and user-authored files are preserved with an actionable `partial` or blocked result. Already-correct managed files are true no-ops without backup, rewrite, or mtime churn.
+- **Cross-runtime checks report the real result.** Claude, Codex, Cursor, and OpenClaw Hook/config writes share the safe boundary; `global_only` validates every required Hook dependency pair, OpenClaw check mode exits nonzero on mismatch, and failed setup sync or backup work can no longer be summarized as success.
+- **User guidance stays visible and localized.** Setup, cleanup, status, details, failures, choices, and recovery steps are consistent across English, Simplified Chinese, Japanese, and Korean. Redundant update confirmation was removed, while migration, safety, and next-action guidance remains available in the chat/terminal surface instead of being hidden in generated files.
+- **Release evidence and Windows report writes are more reliable.** Standard verification binds the isolated four-runtime install/update probes to stable source snapshots, emits progress before long operations, and reports a recovery action on failure. Governed-run report replacement now applies a short bounded retry only to transient Windows lock errors and still fails immediately for other error classes.
+- **Large setup safety policy was split into focused modules.** Managed-file transaction and project-bootstrap file-safety logic now live in narrow reusable modules instead of further expanding `setup.mjs` or duplicating call-site guards.
+
+### Verification
+
+- Focused governed-run surface checks passed `12/12`; the full Meta-Theory suite passed `1137/1142` with `0` failures and `5` expected conditional skips.
+- The full setup suite passed `641/642` with `0` failures and `1` expected POSIX-only skip on Windows; integration checks passed `6/6`.
+- Claude Code, Codex, Cursor, and OpenClaw project projections, global Meta-Theory skills/commands, and Claude/Codex global Hooks were synchronized and checked; Graphify was rebuilt and passed freshness verification.
+- One complete `npm run meta:verify:all` run passed all `11/11` standard release-grade stages with `releaseGrade=true`; isolated install and update probes each verified four runtime artifacts. Optional private-attested `live-certified` verification was not requested and remains separate from the ordinary release gate.
+
+## [2.8.83] - 2026-07-12
+
+### Solved Problem
+
+A stray meta-theory activation could previously treat an arbitrary working directory as a project and create `.meta-kim` or `graphify-out` state there. The initial PR fix removed that unsafe fallback, but its project-root logic was duplicated between the activation hook and post-copy initializer, accepted only a Claude-specific explicit root, and did not yet guarantee that every Claude, Codex, Cursor, global-sync, and project-bootstrap path shipped the resolver dependency with the activator. Maintainer entry documents also did not describe the new stable boundary.
+
+### Fixed
+
+- **Project-root resolution now has one shared implementation.** The activation hook and post-copy initializer use `project-root.mjs` instead of maintaining two copies that can drift.
+- **Cross-runtime fallback is safe and ordered.** Trusted explicit declarations win first, a marker-backed cwd project wins over payload input, and only absolute marker-backed runtime payload roots may be used as a final fallback. Relative payload paths and unmarked arbitrary directories are rejected.
+- **Post-copy receives the already resolved root.** The activation hook passes `--project-root` explicitly, so post-copy does not guess a second project location.
+- **Every projection ships a complete dependency set.** Claude, Codex, and Cursor project hooks, global Hook packages, `setup.mjs --project-bootstrap`, package inventory, and managed cleanup include `project-root.mjs` with the activator.
+- **Maintainer guides match runtime truth.** `AGENTS.md` and `CLAUDE.md` now document the resolver priority, no-write fallback, and shared dependency rule without expanding user-facing setup complexity.
+
+### Verification
+
+- Real subprocess tests cover arbitrary temp directories, `.git` and bootstrap markers, nested directories, invalid declarations, cross-runtime payload fields, cross-repository redirect attempts, relative payload rejection, Hook-to-post-copy argument binding, and startup from an actually generated Codex Hook directory.
+- Project and global runtime projections were synchronized for Claude Code, Codex, OpenClaw, and Cursor; Claude/Codex global Hook packages were refreshed with backups.
+- One complete standard release-grade verification run passed all `11/11` stages with `releaseGrade=true`; optional private-attested `live-certified` verification remains a separate, unrequested assurance layer.
+
+## [2.8.82] - 2026-07-12
+
+### Solved Problem
+
+Meta_Kim could report a Codex or Claude subagent capability as unavailable even when the current chat had already shown successful native calls, because user execution truth was flattened together with exact-binding and optional external-certification state. Important run progress also remained too dependent on generated artifacts, while install/update failures, run identity, host-observer evidence, and duplicated verification paths could still produce confusing or unsafe completion claims.
+
+### Fixed
+
+- **User execution truth is separate from internal assurance.** Current native results now drive the chat status: completed, called, partially failed, failed, denied, blocked, genuinely unavailable, and pending are distinct. Missing exact audit association can no longer erase a successful call, and `unavailable` is reserved for an unsupported surface or missing provider with no successful or strictly failed binding.
+- **Chat is the primary human-readable run surface.** Start, route, execution, review, verification, risk, owner handoff, and next action are emitted in the user's language. English, Simplified Chinese, Japanese, and Korean reports and panels avoid raw packet names, provider ids, lane enums, and certification jargon without removing useful guidance.
+- **Editable artifacts cannot certify themselves.** Caller JSON, environment hints, public trust flags, UI badges, fixtures, and ordinary run files cannot mint called/completed or independent-review status. Codex/Claude host observations, content-addressed candidate bundles, pinned trust roots, and the optional private-attested verifier remain fail-closed and separate from the standard release gate.
+- **Governed runs and installers fail closed.** Run ids are path-safe and collision-resistant, explicit overwrites require authorization, latest pointers are atomic, and readback is bound to the requested run. Setup aggregates deployment, MCP, Graphify, and optional-step failures so partial installation cannot report success.
+- **Routing and verification are less fragile.** Natural-language classification covers multilingual UX requests without content-brand hardcoding, visible consumers read the user presentation while strict validators read the top-level audit packet, and the standard verification chain has one canonical orchestrator instead of recursively duplicating stages.
+
+### Verification
+
+- Project and global Meta-Theory projections were synchronized for Claude Code, Codex, OpenClaw, and Cursor; Claude/Codex global hooks were synchronized with backups.
+- Graphify was rebuilt and passed freshness verification.
+- One complete `npm run meta:verify:all` run passed all `11/11` standard release-grade stages with `releaseGrade=true`.
+- Optional private-attested `live-certified` verification was not requested; this does not invalidate the standard release or the actual current-chat call results.
+
+## [2.8.81] - 2026-07-12
+
+### Solved Problem
+
+Meta_Kim could treat a business content request as runtime-platform governance and relied on specific content-platform names in route selection, research detection, and product naming. That made a reusable governance layer behave differently just because a user named one brand. GoalPro and Kim_Decision were also installed dependencies without a clear product-facing route boundary.
+
+### Fixed
+
+- **Business intent is now separated from runtime-platform governance.** Runtime governance requires technical signals such as hooks, adapters, permissions, MCP, installation, or configuration; content and growth work no longer becomes a runtime route merely because it mentions a platform.
+- **Removed named content-platform routing.** Product orchestration, external-research detection, release-risk recognition, and project identifiers now use general intent signals such as third-party service, current rules, publishing, authorization, or content automation instead of brand names.
+- **Kim_Decision is a decision lens, not an executor.** Explicit decision requests can use it across Critical, Fetch, and Thinking to frame the problem, identify evidence, and choose a path; it cannot become an implementation worker, scheduler, or code executor.
+- **GoalPro remains opt-in and prompt-only.** It is selected only for an explicit Goal Prompt, Loop Prompt, or goal-contract request; Evolution does not create user goals and a Loop starts only after a Goal result exists.
+- **GoalPro and Kim_Decision are registered dependencies.** Provider, dependency, installation, compatibility, and routing records now expose their boundaries across Claude Code, Codex, Cursor, and OpenClaw.
+
+### Verification
+
+- Standard full release gate: `npm run meta:verify:all`.
+- Focused routing, dependency, entry-classifier, governed-deliverable, and product-experience checks cover the new decision route and generic content-automation behavior.
+
+## [2.8.80] - 2026-07-11
+
+### Solved Problem
+
+Meta_Kim still installed and routed the external official `skill-creator` even though the project now has an owner-maintained `meta-skill-creator`. Changing only the repository entry was not enough: Claude Code and Codex use different user skill roots, Codex also needs a compatibility copy, empty dependency selections must remain empty, existing `skill-creator` trees must stay user-owned, and a failed multi-root update must not leave only part of the replacement installed.
+
+### Fixed
+
+- **Meta Skill Creator is now the formal skill-creation provider.** Dependency manifests, capability registries, routing, foundational validation, and evolution guidance select `KimYx0207/meta-skill-creator` for Claude Code and Codex instead of the external official package.
+- **Each runtime receives the skill through its actual discovery roots.** Claude Code installs to `~/.claude/skills`; Codex installs to `~/.agents/skills` and receives a synchronized `~/.codex/skills` compatibility copy, including when `CODEX_HOME` is customized.
+- **Install and update are transactional across all three targets.** Source validation and staging finish before live replacement; commit failures roll every target back, incomplete recovery reports retained backup paths, and symlink/Junction escapes fail closed.
+- **Existing `skill-creator` installations remain untouched.** Meta_Kim changes provider selection without deleting, migrating, or renaming user, compatibility, or Codex-bundled skill trees.
+- **Dependency selection and CLI queries are safe.** An explicit empty `--skills` selection installs nothing, while help and unknown arguments remain zero-write.
+
+### Verification
+
+- Installer transaction suite: `10/10` passed; focused routing, provider, and foundational suites: `10/10` passed.
+- Upstream commit `ace057d771c1baaa58811a00a2cbbdcad30d8e72` passed package and closed-loop validation; installed copies shared the exact `SKILL.md` SHA-256 `1528407a46fb3f47c035a831e91a8965f8a711f0ad6df458a7f7ef563d46d682`.
+- Fresh Claude Code and Codex read-only sessions discovered and read the installed `meta-skill-creator`; legacy user, compatibility, and Codex-bundled `skill-creator` tree hashes remained unchanged.
+- Standard full release gate: `npm run meta:verify:all` passed all `11/11` stages before the release metadata update; final release checks rerun the required version, package, and diff assertions.
+
+## [2.8.79] - 2026-07-11
+
+### Solved Problem
+
+The install, runtime-state, Hook, capability-discovery, and release paths had accumulated duplicated implementations and unsafe edge cases. Large cleanup diffs could pass focused tests while profile state split across directories, global sync followed Windows junctions or treated a user's same-name Hook as Meta_Kim-owned, CLI help performed writes, restored design tests stayed outside the standard test chain, and package contents were not asserted by the release suite.
+
+### Fixed
+
+- **Runtime state now has one collision-resistant profile contract.** Application and Hook code share the same sanitizer; traversal-like, Unicode, colliding, and overlong inputs keep deterministic isolated identities, while normal profile names remain compatible. Spine, active-run, and run-status files resolve one profile even with custom state directories and concurrent writes.
+- **Global sync fails closed at filesystem and ownership boundaries.** Help and unknown options are zero-write, runtime-home writes reject symlink/junction escapes, and retired Hook cleanup requires Meta_Kim ownership evidence, creates a backup, and removes only the matching managed settings entry. User-owned same-name files and settings remain untouched.
+- **Hook implementations have one canonical source without erasing runtime variants.** Claude compatibility adapters project the shared implementation, capability discovery records canonical and adapter paths, and independent Claude/OpenClaw same-name Hooks retain separate namespaces instead of being collapsed by basename.
+- **CLI and setup behavior is consistent from any directory.** The package CLI resolves its own scripts, setup accepts equivalent separated and equals-form value options, and empty or unknown values fail before installation work begins.
+- **Data and reporting helpers are modular and transactional.** Shared project inventory, report context, memory endpoint, SQLite transaction, setup policy, and governed fan-out helpers replace repeated ad-hoc logic while preserving user-owned state and rollback boundaries.
+- **Design PoC retirement is explicit and testable.** Four configuration-driven design-gate modules, their contract, and 59 tests remain packaged and covered; the unused draft validator and stale results report stay retired. The guard blocks real executable consumption without rejecting documentation or negative package assertions.
+- **The standard release chain covers every test and package boundary.** Inventory classification includes unit, setup, integration, meta-theory, and design-gate suites; offline `npm pack --dry-run` assertions prove required files are included and retired files are absent.
+
+### Verification
+
+- Adversarial correctness, security, and completeness reviews with traversal, collision, same-name user Hook, settings ownership, and Windows junction cases.
+- Focused merged repair suite: `130/130` passed before release metadata update.
+- `npm run meta:test:inventory`, `npm run meta:test:unit`, and offline package-manifest assertions.
+- Full four-runtime sync, Graphify rebuild, `npm run meta:verify:all`, and final package/diff checks are required on the release commit.
 
 ## [2.8.78] - 2026-07-11
 

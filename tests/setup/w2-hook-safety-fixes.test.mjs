@@ -2,9 +2,9 @@
  * W2 hook safety / reversibility regression tests (v2.8.62+).
  *
  * Covers:
- *   - setup.mjs backupBeforeMerge helper
+ *   - setup.mjs shared managed-file transaction boundary
  *   - scripts/uninstall.mjs Category B scope guard
- *   - scripts/install-mcp-memory-hooks.mjs backupBeforeForce helper
+ *   - scripts/install-mcp-memory-hooks.mjs transactional --force writes
  *   - canonical/runtime-assets/claude/hooks/enforce-agent-dispatch.mjs
  *       L2-02 (dead branch removed) + L2-03 (deactivationReason gate)
  */
@@ -20,32 +20,38 @@ function load(rel) {
   return readFileSync(join(REPO_ROOT, rel), "utf8");
 }
 
-describe("W2: backupBeforeMerge helper exists in setup.mjs", () => {
-  test("function is defined and called from both merge paths", () => {
+describe("W2: protected project writes use the shared safe transaction", () => {
+  test("transaction helper is defined and called from both merge paths", () => {
     const src = load("setup.mjs");
     assert.match(
       src,
-      /function\s+backupBeforeMerge\s*\(/,
-      "backupBeforeMerge must be defined",
+      /function\s+writeProjectManagedTransaction\s*\([\s\S]*?executeSafeManagedFileTransaction\s*\(/,
+      "the project transaction helper must delegate to the shared safe transaction",
     );
     assert.match(
       src,
-      /backupBeforeMerge\(destPath,\s*"pre-merge"\)/,
-      "backupBeforeMerge must be called from mergeProtectedProjectDeployFile",
+      /function\s+mergeProtectedProjectDeployFile\s*\([\s\S]*?writeProjectManagedTransaction\s*\(/,
+      "the JSON merge path must use the project transaction helper",
     );
     assert.match(
       src,
-      /backupBeforeMerge\(destPath,\s*"pre-merge"\)/g,
-      "backupBeforeMerge must be called from the text-merge path too",
+      /function\s+mergeProtectedProjectDeployTextFile\s*\([\s\S]*?writeProjectManagedTransaction\s*\(/,
+      "the text merge path must use the project transaction helper",
     );
+    assert.doesNotMatch(src, /function\s+backupBeforeMerge\s*\(/);
   });
 
-  test("strip hooks write sites also call backupBeforeMerge", () => {
+  test("strip-hooks writes use a transaction or verified backup boundary", () => {
     const src = load("setup.mjs");
-    const matches = src.match(/backupBeforeMerge\(configPath/g) || [];
-    assert.ok(
-      matches.length >= 2,
-      "expected at least 2 backupBeforeMerge calls in strip-hooks sites",
+    assert.match(
+      src,
+      /function\s+stripStaleProjectHookConfigs\s*\([\s\S]*?writeProjectManagedTransaction\s*\(/,
+      "stale Hook config stripping must use the shared transaction",
+    );
+    assert.match(
+      src,
+      /function\s+cleanupProjectHookConfigs\s*\([\s\S]*?writeProjectFileWithVerifiedBackup\s*\(/,
+      "cleanup Hook config stripping must verify its backup before writing",
     );
   });
 });
@@ -53,88 +59,91 @@ describe("W2: backupBeforeMerge helper exists in setup.mjs", () => {
 describe("W2: uninstall.mjs Category B scope guard", () => {
   test("scope==='project' skips global meta-kim removal action", () => {
     const src = load("scripts/uninstall.mjs");
-    // The guard should appear inside the case CATEGORIES.B branch
-    const branchMatch = src.match(
-      /case\s+CATEGORIES\.B\s*:\s*\{[\s\S]*?break;\s*\}/,
-    );
-    assert.ok(branchMatch, "case CATEGORIES.B branch must be present");
+    const branchStart = src.indexOf("case CATEGORIES.B:");
+    const branchEnd = src.indexOf("case CATEGORIES.C:", branchStart);
+    assert.ok(branchStart >= 0 && branchEnd > branchStart, "case CATEGORIES.B branch must be present");
+    const branch = src.slice(branchStart, branchEnd);
     assert.match(
-      branchMatch[0],
+      branch,
       /if\s*\(\s*scope\s*===\s*["']project["']\s*\)\s*\{?\s*break;?\s*\}?/,
       "scope==='project' must short-circuit the global meta-kim removal",
     );
-  });
-});
-
-describe("W2: install-mcp-memory-hooks.mjs --force backup", () => {
-  test("backupBeforeForce helper exists", () => {
-    const src = load("scripts/install-mcp-memory-hooks.mjs");
     assert.match(
-      src,
-      /function\s+backupBeforeForce\s*\(/,
-      "backupBeforeForce must be defined",
+      branch,
+      /f\.mcpMemoryBootArtifact\s*===\s*true[\s\S]*?kind:\s*["']remove["']/,
+      "an exact manifest-owned MCP Memory boot artifact remains independently removable",
     );
-  });
-
-  test("FORCE_UPDATE branch calls backupBeforeForce before writeFileSync", () => {
-    const src = load("scripts/install-mcp-memory-hooks.mjs");
-    const backupIdx = src.indexOf("backupBeforeForce(CLAUDE_SETTINGS)");
-    assert.ok(backupIdx > 0, "backupBeforeForce(CLAUDE_SETTINGS) must be called");
-    // After the backup call, the next writeFileSync must target CLAUDE_SETTINGS.
-    const tail = src.slice(backupIdx);
-    const writeFileMatches = [
-      ...tail.matchAll(/writeFileSync\s*\(\s*([A-Za-z_$][\w$]*)/g),
-    ];
     assert.ok(
-      writeFileMatches.length > 0,
-      "must have at least one writeFileSync after the backup",
-    );
-    const firstTarget = writeFileMatches[0][1];
-    assert.equal(
-      firstTarget,
-      "CLAUDE_SETTINGS",
-      "first writeFileSync after the backup must target CLAUDE_SETTINGS",
+      branch.indexOf('if (scope === "project")') < branch.lastIndexOf('recursive: true'),
+      "the project-scope guard must precede the generic global directory removal",
     );
   });
 });
 
-describe("W2: enforce-agent-dispatch.mjs dead-branch + critical bypass", () => {
-  test("dead else branch on req.met is removed", () => {
-    const src = load(
-      "canonical/runtime-assets/claude/hooks/enforce-agent-dispatch.mjs",
+describe("W2: install-mcp-memory-hooks.mjs --force transaction", () => {
+  test("install and removal use the shared safe transaction", () => {
+    const src = load("scripts/install-mcp-memory-hooks.mjs");
+    assert.match(
+      src,
+      /function\s+installSelectedRuntimeFilesTransactional\s*\([\s\S]*?executeSafeManagedFileTransaction\s*\(/,
+      "runtime Hook installation must use the shared safe transaction",
     );
-    // The original L2-02 had:
-    //   if (!req.met) { exitAfterDeny(...); } else { exitAfterDeny(...); }
-    // The fix keeps only the !req.met branch.
-    const designStageBlock = src.match(
-      /if\s*\(currentIdx\s*<\s*execIdx\s*&&\s*stage\s*!==\s*["']critical["']\)\s*\{[\s\S]*?\n\s*\}\s*\n/,
+    assert.match(
+      src,
+      /function\s+removeSelectedRuntimeFilesTransactional\s*\([\s\S]*?executeSafeManagedFileTransaction\s*\(/,
+      "runtime Hook removal must use the shared safe transaction",
     );
-    assert.ok(designStageBlock, "design-stage block must be present");
-    assert.doesNotMatch(
-      designStageBlock[0],
-      /\}\s*else\s*\{[\s\S]*?exitAfterDeny/,
-      "else branch with duplicate exitAfterDeny must be removed",
-    );
+    assert.doesNotMatch(src, /function\s+backupBeforeForce\s*\(/);
   });
 
-  test("critical bypass requires deactivationReason === 'session_stop'", () => {
+  test("FORCE_UPDATE authorizes but never bypasses transactional settings writes", () => {
+    const src = load("scripts/install-mcp-memory-hooks.mjs");
+    assert.match(src, /if\s*\(args\.includes\("--force"\)\)\s*\{[\s\S]*?FORCE_UPDATE\s*=\s*true/);
+    assert.match(
+      src,
+      /jsonOperation\s*\(\s*CLAUDE_SETTINGS,[\s\S]*?"auxiliary"\s*\)/,
+      "Claude settings must be planned as a transaction operation",
+    );
+    assert.doesNotMatch(
+      src,
+      /writeFileSync\s*\(\s*CLAUDE_SETTINGS\b/,
+      "--force must not restore a direct settings write bypass",
+    );
+  });
+});
+
+describe("W2: enforce-agent-dispatch.mjs local execution + inactive meta boundary", () => {
+  test("ordinary local execution no longer retains design-stage denial branches", () => {
     const src = load(
       "canonical/runtime-assets/claude/hooks/enforce-agent-dispatch.mjs",
     );
     assert.match(
       src,
-      /!state\.active\s*&&\s*state\.deactivationReason\s*===\s*["']session_stop["']/,
-      "inactive-spine bypass must require session_stop deactivation reason",
+      /Local execution tools are not stage drivers/,
+      "local execution must declare the non-stage-driver boundary",
     );
-    // The previous unconditional !state.active bypass must not exist.
-    const critBlock = src.match(
-      /if\s*\(stage\s*===\s*["']critical["']\s*&&\s*currentIdx\s*<\s*execIdx\)\s*\{[\s\S]*?\n\s*\}\s*\n/,
-    );
-    assert.ok(critBlock, "critical-stage block must be present");
     assert.doesNotMatch(
-      critBlock[0],
-      /if\s*\(\s*!state\.active\s*\)\s*\{[\s\S]{0,80}process\.exit\(0\)/,
-      "unconditional !state.active bypass must be removed",
+      src,
+      /currentIdx\s*<\s*execIdx|formatDesignStageMutationDeny|formatPostExecutionStageDeny/,
+      "ordinary local tools must not regain stage-based denial code",
+    );
+  });
+
+  test("inactive spine still enforces trusted meta-agent readonly identity", () => {
+    const src = load(
+      "canonical/runtime-assets/claude/hooks/enforce-agent-dispatch.mjs",
+    );
+    const start = src.indexOf("if (!state || !state.active)");
+    const end = src.indexOf("// Agent dispatch tools", start);
+    assert.ok(start >= 0 && end > start, "inactive-spine boundary must be present");
+    const inactiveBlock = src.slice(start, end);
+    assert.match(inactiveBlock, /inferCallerIdentity\(\)/);
+    assert.match(inactiveBlock, /enforceMetaReadonly\(toolName, toolInput, state, caller\)/);
+    assert.match(inactiveBlock, /process\.exit\(0\)/);
+    assert.doesNotMatch(
+      src,
+      /deactivationReason\s*===\s*["']session_stop["']/,
+      "session-stop state must not become permission for ordinary local file changes",
     );
   });
 });
@@ -142,7 +151,7 @@ describe("W2: enforce-agent-dispatch.mjs dead-branch + critical bypass", () => {
 describe("W2: activate-meta-theory-spine.mjs EXECUTION_DELTA boundary", () => {
   test("EXECUTION_DELTA marker precedes the top-level execution flow", () => {
     const src = load(
-      "canonical/runtime-assets/claude/hooks/activate-meta-theory-spine.mjs",
+      "canonical/runtime-assets/shared/hooks/activate-meta-theory-spine.mjs",
     );
     const markerIdx = src.indexOf("EXECUTION_DELTA");
     assert.ok(markerIdx > 0, "EXECUTION_DELTA marker must exist");
@@ -152,11 +161,11 @@ describe("W2: activate-meta-theory-spine.mjs EXECUTION_DELTA boundary", () => {
       helperIdx > 0 && helperIdx < markerIdx,
       "shouldReplaceActiveState must be defined before EXECUTION_DELTA",
     );
-    // writeSpineState call must come after EXECUTION_DELTA marker
-    const writeIdx = src.indexOf("writeSpineState(projectRoot, state);");
+    // CAS-aware activation must come after the EXECUTION_DELTA marker.
+    const writeIdx = src.indexOf("await activateSpineState(projectRoot, state, {");
     assert.ok(
       writeIdx > markerIdx,
-      "top-level writeSpineState must live below the EXECUTION_DELTA marker",
+      "top-level activateSpineState must live below the EXECUTION_DELTA marker",
     );
   });
 });

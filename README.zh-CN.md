@@ -12,10 +12,10 @@
 </p>
 
 <p>
-  <img alt="Projection tiers" src="https://img.shields.io/badge/default-Claude%20Code%20%7C%20Codex%20%2B%20compat-OpenClaw%20%7C%20Cursor-111827"/>
-  <img alt="Candidate compatibility probes" src="https://img.shields.io/badge/candidate-Qoder%20%7C%20Trae%20%7C%20Kiro%20%7C%20Cascade%20%7C%20Cline%20%7C%20Roo%20%7C%20Continue-475569"/>
-  <img alt="Stars" src="https://img.shields.io/github/stars/KimYx0207/Meta_Kim?style=flat&logo=github"/>
-  <img alt="License" src="https://img.shields.io/badge/license-Apache--2.0-green"/>
+  <a href="config/runtime-compatibility-catalog.json"><img alt="Projection tiers" src="https://img.shields.io/badge/default-Claude%20Code%20%7C%20Codex%20%2B%20compat--OpenClaw%20%7C%20Cursor-111827"/></a>
+  <a href="config/runtime-compatibility-catalog.json"><img alt="Candidate compatibility probes" src="https://img.shields.io/badge/candidate-Qoder%20%7C%20Trae%20%7C%20Kiro%20%7C%20Cascade%20%7C%20Cline%20%7C%20Roo%20%7C%20Continue-475569"/></a>
+  <a href="https://github.com/KimYx0207/Meta_Kim/stargazers"><img alt="Stars" src="https://img.shields.io/github/stars/KimYx0207/Meta_Kim?style=flat&logo=github"/></a>
+  <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-Apache--2.0-green"/></a>
 </p>
 
 <p>
@@ -49,6 +49,36 @@ Meta_Kim 就是干这个的。它不是另一个模型，而是编码工具之�
 | 命令跑绿就被误认为目标完成 | 证据必须回到用户真实目标上验收 |
 | 好经验沉没在聊天记录里 | 可复用经验会沉淀成 skill、agent、script、contract 或一次性任务 |
 
+### 3.0 改变了什么
+
+Meta_Kim 3.0 的重点是让治理系统更可信：建议、耐久真相、用户视图、安装状态和知识进化不再混成一件事。
+
+| 架构结果 | 对用户意味着什么 |
+| --- | --- |
+| **A01 - 证据迁移** | worker 自己说“完成”不算；证据要经过独立判断，不确定或矛盾材料继续保持 blocked / in doubt。 |
+| **A02 - 继续 / 等待 / 停止 / 升级** | 继续建议必须绑定同一份耐久运行快照，而且建议本身不能恢复执行。 |
+| **A03 - 依赖安全推进** | Meta_Kim 可以找出值得考虑的下一项工作，但 Todo 不能因此变成执行权。 |
+| **A04 - 复用调度器** | ready work 继续走现有调度规则，3.0 不创建一套竞争调度器。 |
+| **A05 - Lease / claim 可见性** | 当前占用与冲突只从既有耐久权威投影，不能由候选项凭空生成。 |
+| **A06 - 运行健康** | health 只是一个时间点的观察，不证明持续存活、已安装、会持久运行或有权执行。 |
+| **A07 - 额度 / 用量** | retry 和经过时间与未知 cost、progress、provider quota 分开；投影本身不能 stop 或 retry。 |
+| **A08 - 只读运行视图** | 原生面板、看板、Markdown、HTML 显示同一份摘要绑定的运行，不会变成第二事实源。 |
+| **A09 - 耐久仓储统一** | event、CAS、transaction、lease、fence、checkpoint 共用一套执行仓储模型；分析库和宿主事件库仍不是执行权威。 |
+| **A10 - 更安全的 setup 边界** | setup 继续作为 CLI 门面，稳定包物化与 runtime 写入被隔离并单独校验。 |
+| **A11 - 知识生命周期卫生** | 生成的进化建议在 Warden 精确批准前没有写入/删除权；回滚、源漂移、tombstone 和用户状态都受保护。 |
+| **A12 - 文档与发布真相** | 公开声明必须和合同、runtime 证据、package 内容、发布门一致；延期事项继续明确标注延期。 |
+
+实现遵守向内依赖原则：
+
+| 层 | 职责 | 明确边界 |
+| --- | --- | --- |
+| **Domain** | 纯决策语义与不变量 | 不碰文件系统、数据库、网络、runtime、模板或执行副作用 |
+| **Application** | 用例编排与 ports | 组合 Domain 与 adapters，不拥有 SQL、文件算法或宿主权威 |
+| **Data / Infrastructure** | SQLite、事务、包存储、runtime 进程与文件 adapter | 实现声明过的 ports，不能改变 Domain 判断或铸造授权 |
+| **Presentation** | 原生面板、看板、Markdown、HTML 渲染 | 只读取一份已验证模型，不能写入、派工、完成、claim、lease 或推进 cursor |
+
+这次分层是渐进完成的：需要兼容的旧脚本入口继续做门面，新稳定逻辑放在分层边界后面。
+
 ### 3 分钟证明
 
 Meta_Kim 最好不是靠读完整套规则理解，而是先看一次 governed run。
@@ -60,6 +90,9 @@ npm run meta:theory:report -- --run-id latest
 npm run meta:delivery:bundle
 ```
 
+`meta:run-status:latest` 只输出最小脱敏状态摘要；需要查看报告内容时，请使用显式的
+`meta:theory:report -- --run-id latest` 回读入口。
+
 这条证明链会展示五件事：
 
 - 模糊需求会先变成明确意图和成功标准
@@ -67,6 +100,8 @@ npm run meta:delivery:bundle
 - 复杂任务会拆成有边界的 worker task，而不是一段万能聊天回复
 - Review 和 Verification 会留下产物证据，而不是只给安慰性结论
 - 兼容证据会保持分层，smoke evidence 不会被冒充成 native live proof
+
+真正执行阶段图是显式开启的只读能力。运行 `npm run meta:theory:run -- --execute-stage-dag --stage-runner-runtime codex "<任务>"`，或把 `codex` 换成 `claude`；进程中断后，用 `--resume-stage-dag --run-id <原运行编号> --task "<同一任务>"` 只继续没完成的节点。两个运行端共用同一份 `coreLoop.stageDagPacket`，记录真实会话、工具调用和耗时，由耐久内核保存已完成节点，再在本地合并。默认仍然只做计划。ready set 默认由原生并行执行；维护者也可以自己安装当前已实测的 `@langchain/langgraph@1.4.8`，再加 `--stage-runner-orchestrator langgraph`，让 LangGraph Functional API 只负责包裹这一批执行。LangGraph 不接管流程图或 checkpoint，这个模式也不会执行写入或外部副作用。
 
 带着示例看第一遍：[`examples/first-run/README.md`](examples/first-run/README.md)。
 
@@ -87,7 +122,7 @@ npm install
 node setup.mjs
 ```
 
-> 💡 **安装之后**：`setup.mjs` 结尾会打印产物位置。任何时候想再看一眼（或对比上次安装），在安装目录里跑 `npm run meta:status` 即可。
+> 💡 **安装之后**：`setup.mjs` 结尾会打印产物位置。全局安装可在任意目录运行 `meta-kim status`；npx 安装可重新运行 `npx --yes github:KimYx0207/Meta_Kim meta-kim status`。npx 仍是正式支持的入口：在 install/update 写入持久 Claude Code 或 Codex 投影前，Meta_Kim 会把这份精确安装包固定到用户 home 下由“包版本 + 打包文件 SHA-256”定位的不可变目录，Commands、Hooks 和合并配置不会依赖可回收的 npm cache。仓库维护者也可继续使用 `npm run meta:status`。
 
 刚 clone 下来时，先按这三层看，避免把“主源”“生成物”和“本地状态”混在一起：
 
@@ -104,6 +139,10 @@ node setup.mjs
 如果你显式选择 **批量项目更新**，setup 会让你选择要更新的项目目录，并把所选 target 的项目级 runtime 投影写进去；runtime 支持的项目 hooks/config 也会恢复。这个路径不安装全局通用能力，也不会执行项目清理。
 
 项目文件仍然允许存在，但它不是通用能力仓库。确认过的 project bootstrap 只写项目上下文/配置/状态，以及经过证明的项目专用覆盖层；已有用户配置会通过 managed block、add-only 写入、保护式 JSON merge、备份和 manifest 保留。任何 apply 过的项目 bootstrap 都会记录 `.meta-kim/` 状态与备份文件。
+
+更新还会把第三方安装器视为“不可信配置生产者”。在 Codex 中，Meta_Kim 会恢复用户安装前的配置，只应用自己明确拥有的原生控制项。这样，上游安装器不会复活用户已删除的第三方 MCP server，不会静默接纳一个新 server，也不会留下已知 Meta_Kim benchmark/test 临时项目记录。用户自己的 MCP、项目、hooks、agents 和其它无关设置保持不变。
+
+Codex agent fan-out 的默认上限是同时 2 个线程、1 层嵌套。用户显式设置的其它上限会保留；只有缺失值或 Meta_Kim 旧默认值 6 会迁移。
 
 如果你准备维护仓库，优先改主源：`canonical/agents/`、`canonical/skills/meta-theory/`、`config/contracts/`、`config/capability-index/`，然后执行（需 Node.js >= 22.13.0）：
 
@@ -592,6 +631,8 @@ flowchart TB
 
 Claude/Codex/Cursor/OpenClaw 四个工具端都是 Meta_Kim 的投影家族，但原生能力表面和证据等级不同。Claude Code 和 Codex 是默认选择的主链路；OpenClaw 与 Cursor 是可用的非默认兼容投影，需要维护者确认，并且增强原生能力的 PR 必须先在对应工具端自己完成严格自测、提供证据，证据通过审查后才能合并。投影 smoke、fixture 校验和生成报告都是有用证据，但不能冒充 native-live runtime proof。
 
+Decision authority 的边界比“能生成投影”更窄。当前 Codex app-server 与 Claude SDK/CLI callback 可以产生精确关联但永久非授权的观察，公开宿主接口仍不能证明 Codex Desktop UI、真人身份或真人回答，因此可信宿主权威继续停放。旧治理 gate 的等价迁移与 cutover 另行延期，所以 3.0 不声称 shadow/只读结果已经替换生产 gate。OpenClaw 仍没有 Meta_Kim typed-plugin 工具阻断 adapter，Cursor 的任意原生选择弹窗权威仍未验证。
+
 | 能力面 | Claude Code | Codex | OpenClaw | Cursor |
 | --- | --- | --- | --- | --- |
 | **agent** | 原生 agents/subagents，项目级与用户级都成熟 | custom agents/subagents 很强 | workspace 型 agent，支持 agent-to-agent | 官方 `.cursor/agents` subagents 与项目规则兼容治理上下文 |
@@ -694,6 +735,7 @@ Meta_Kim 的记忆不是单一的。它有三层，各有分工，共同保障 a
 - **负责什么**：项目级别的代码知识图谱
 - **存储位置**：`graphify-out/graph.json`（NetworkX 节点链接格式）；人和 agent 应通过 query/path/explain 小切片使用它，`GRAPH_REPORT.md` 只作为大范围架构导览
 - **工作机制（数据面）**：`node setup.mjs` 可选步骤会安装 graphify、并**幂等**执行 `python -m graphify claude install` 与 `python -m graphify hook install`（即使 graphify 已通过 pip 安装过也会补全 hook）；git hook 在 commit/checkout 时触发当前仓库内图谱重建。`npm run meta:graphify:install` 行为与之一致（含 hook）。
+- **Windows 旧项目迁移**：如果已有 Claude 项目仍报 `C:Users...graphify.EXE: command not found`，请在该项目目录运行 `meta-kim doctor hooks --fix`。命令会先备份 `.claude/settings.json`，并且只修复已知的不安全 Graphify Hook；只有在也准备检查用户级配置时才加 `--all`。
 - **工作机制（使用面）**：同步后的 `meta-theory` 里 Fetch Step 0.5 约定模型如何检测与使用图谱；**不是**后台常驻进程。Claude Code 子代理仅通过 `subagent-context.mjs` 收到**短提示**，不会自动把整份 `graph.json` 塞进上下文。聚焦任务应先用 `graphify query`、`graphify path` 或 `graphify explain` 拿候选文件锚点，再回读真实源文件确认会影响路线的判断。Codex / OpenClaw / Cursor 无该 hook，但共享同一份 `dev-governance.md` 引用；其他工具端可在**目标仓库**按需执行 `python -m graphify codex install` 或 `python -m graphify claw install`（参见 `python -m graphify --help`）。
 - **核心价值**：
   - 让记忆越来越熟悉项目——不是记住代码原文，而是理解代码的结构和关系
@@ -826,7 +868,7 @@ flowchart TB
 | 命令 | 作用 |
 | --- | --- |
 | `npm run meta:sync` | 从 canonical 同步到四端 |
-| `npm run meta:check:runtimes` | 检查四端是否同步 |
+| `npm run meta:check:runtimes` | 按当前配置检查项目投影模式；仅在明确验收完整项目镜像时传入 runtime targets |
 | `npm run meta:validate` | 项目完整性校验 |
 | `npm run meta:install-scope:verify` | 校验全局/项目安装边界 |
 | `npm run meta:project-cache:verify` | 校验全局 hook 能生成项目本地缓存 |
@@ -898,13 +940,17 @@ Superpowers 在 Claude Code、Codex 和 Cursor 都有原生 plugin 入口。Meta
 
 ### Q：我用 `npx` 装的，文件在哪？
 
-Meta_Kim 把产物写到 3 个地方：
+Meta_Kim 明确区分全局和项目两个作用域；普通全局安装不会把持久运行时镜像写进当前项目：
 
-1. **当前目录** — `.claude/`、`.codex/`、`.cursor/`、`openclaw/` 本项目的工具端镜像
-2. **用户 home** — `~/.claude/skills/meta-theory/`（以及 `.codex / .cursor / .openclaw`）跨项目共享的全局 skill
-3. **清单** — `~/.meta-kim/install-manifest.json` 记录所有改动，支持安全卸载
+1. **用户 home** — `~/.claude/`、`~/.codex/`、`~/.cursor/`、`~/.openclaw/` 保存为对应运行时选择的全局复用能力。
+2. **全局清单** — `~/.meta-kim/install-manifest.json` 记录受管全局文件，支持安全更新和回滚。
+3. **稳定执行包** — 会写全局投影的 install/update 先把精确包保存到 `~/.meta-kim/runtime/projection-packages/<package>/<version>/<packed-sha256>/`。Claude Code 与 Codex 的 Commands、Hook 注册和合并后的 settings/config 只引用这个稳定根，不引用 npx cache 或临时解压目录。
 
-在你跑 `npx` 的那个目录下运行 `npm run meta:status`（或 `node setup.mjs --check`）查看完整足迹。想回滚就跑 `npm run meta:uninstall`。
+项目运行时镜像来自用户明确选择的项目安装/bootstrap，或治理运行中的能力沉淀。在 `global_only` 下，安装本身最多只保留宿主契约要求的最小项目 Hook 依赖闭包；但之后的治理运行只要新建或迭代 Agent、Skill、Command，就会把它复制到当前项目并记录独立 ownership，后续依赖更新不能替换这份项目版本。
+
+有一个刻意保留的特殊场景：如果全局安装/更新检测到某个项目已经有有效的 Meta_Kim bootstrap manifest，它会在更新全局安装的同时，按该项目自己保存的运行时目标和 merge/delta 策略刷新这个既有项目。它不会新建项目投影，也不会覆盖项目沉淀能力或用户文件。
+
+全局安装后，在任意目录运行 `meta-kim status` 即可查看完整足迹。使用 npx 时，重新运行 `npx --yes github:KimYx0207/Meta_Kim meta-kim status`，并可将 `status` 替换为 `check`、`doctor`、`update` 或 `uninstall`。这些命令从安装包解析脚本，不依赖当前目录存在 `package.json`。help、status、doctor 仍是查询/诊断入口，不会只因调用就创建不可变包目录；check 只读验证当前版本由 manifest 绑定的 package authority；install/update 则可在写全局投影前先物化稳定包。卸载只删除 manifest 能证明为 Meta_Kim 精确拥有且内容未漂移的 bundle，未知内容、已修改内容和用户资产一律保留。仓库维护者可继续使用对应的 `npm run meta:*` 命令。
 
 ### Q：Meta_Kim 和普通的 AI 编码助手有什么区别？
 
@@ -1003,7 +1049,9 @@ Meta_Kim 本身采用 Apache License 2.0。以下可选技能仓库通过 `node 
 | [OthmanAdi/planning-with-files](https://github.com/OthmanAdi/planning-with-files) | MIT |
 | [HKUDS/CLI-Anything](https://github.com/HKUDS/CLI-Anything) | Apache 2.0 |
 | [garrytan/gstack](https://github.com/garrytan/gstack) | MIT |
-| [anthropics/skills](https://github.com/anthropics/skills) | 未声明许可证（© Anthropic, PBC） |
+| [KimYx0207/meta-skill-creator](https://github.com/KimYx0207/meta-skill-creator) | MIT |
+
+`meta-skill-creator` 只安装到当前明确支持的平台：Claude Code 使用 `~/.claude/skills/meta-skill-creator`；Codex 使用 `~/.agents/skills/meta-skill-creator`，并同步一份兼容副本到 `~/.codex/skills/meta-skill-creator`。Cursor 和 OpenClaw 当前不安装此 Skill。
 
 ### 可选 pip 包
 

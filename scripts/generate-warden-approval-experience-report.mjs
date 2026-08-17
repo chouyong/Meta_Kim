@@ -6,14 +6,13 @@ import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 import { runMetaTheoryGovernedExecution } from "./run-meta-theory-governed-execution.mjs";
+import { createReportContext } from "./report-context.mjs";
 
-const scriptDir = path.dirname(fileURLToPath(import.meta.url));
-const REPO_ROOT = path.resolve(scriptDir, "..");
-const OUTPUT_DIR = path.join(REPO_ROOT, ".meta-kim", "state", "default", "warden-approval-experience");
+const reportContext = createReportContext();
+const REPO_ROOT = reportContext.repoRoot;
+const OUTPUT_DIR = reportContext.resolveStatePath("warden-approval-experience");
 
-function relativeToRepo(filePath) {
-  return path.relative(REPO_ROOT, filePath).replaceAll("\\", "/");
-}
+const relativeToRepo = reportContext.relativeToRepo;
 
 function hasLocalAbsolutePath(value) {
   const text = typeof value === "string" ? value : JSON.stringify(value);
@@ -36,16 +35,18 @@ async function runPreviewAndRollback() {
       throw new Error("Preview run did not produce a candidate target.");
     }
     const approvalPacket = {
-      schemaVersion: "warden-approval-v0.1",
+      schemaVersion: "warden-approval-v0.2",
       approvalId: "approval-preview-rehearsal",
       approver: "meta-warden",
       approvedAt: "2026-06-04T00:00:00.000Z",
-      scope: "Temporary approval rehearsal for Warden panel and rollback proof.",
-      targets: [`canonical/${candidate.targetRelativeToCanonical}`],
+      scope: "canonical_reverse_sync",
+      mutationBindings: [candidate.mutationBinding],
       diffSummary: candidate.diffSummary,
       rollbackPlan: "Remove the temporary canonical root created for this rehearsal.",
-      riskReview: "Run-scoped task details must not enter durable identity.",
-      humanApprovalEvidence: "fixture-only-rehearsal-not-current-repo-approval",
+      riskReview: {
+        status: "fixture_only_rehearsal",
+        boundary: "Run-scoped task details must not enter durable identity.",
+      },
     };
     const tempCanonicalRoot = path.join(tempDir, "approved-canonical");
     const approvedRun = await runMetaTheoryGovernedExecution({
@@ -192,13 +193,13 @@ async function main() {
     },
   };
 
-  await fs.mkdir(OUTPUT_DIR, { recursive: true });
+  await reportContext.ensureDirectory(OUTPUT_DIR);
   const jsonPath = path.join(OUTPUT_DIR, "latest.json");
   const mdPath = path.join(OUTPUT_DIR, "latest.zh-CN.md");
   const htmlPath = path.join(OUTPUT_DIR, "approval-panel.html");
-  await fs.writeFile(jsonPath, `${JSON.stringify(report, null, 2)}\n`);
-  await fs.writeFile(mdPath, buildMarkdown(report));
-  await fs.writeFile(htmlPath, buildHtml(report));
+  await reportContext.writeJson(jsonPath, report);
+  await reportContext.writeText(mdPath, buildMarkdown(report));
+  await reportContext.writeText(htmlPath, buildHtml(report));
   process.stdout.write(
     `${JSON.stringify(
       {

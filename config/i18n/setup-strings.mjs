@@ -1,3 +1,58 @@
+export const PROJECT_BOOTSTRAP_CHOICE_COPY = {
+  en: {
+    readyHeader: "Project ready", readyQuestion: "Meta_Kim project bootstrap is current. No project-specific files or repeated confirmation are needed.", continueLabel: "Continue",
+    bootstrapHeader: "Project bootstrap", runtimeRequirement: "Claude Code must use AskUserQuestion and Codex must use request_user_input before --apply. Compatibility runtimes may show a labeled chat decision card.",
+    understanding: (targets) => `AI understanding: this directory needs Meta_Kim project-specific context, config, state, or confirmed overrides for ${targets}.`,
+    additions: (status, reason) => `AI additions: dry-run status is ${status}; ${reason}`,
+    route: "Capability route: reuse global runtime capabilities first, then apply only confirmed project-specific state.",
+    candidates: (conflicts, pending, conflictCount, globalCount) => `Candidate paths: ${conflicts ? "resolve conflicts, inspect only, or skip" : "apply now, inspect only, or skip"}. Pending project writes: ${pending}; conflicts: ${conflictCount}; global writes: ${globalCount}.`,
+    apply: "Apply project bootstrap (Recommended)", applyBlocked: "Apply after resolving conflicts", inspect: "Inspect only", skip: "Skip project-local writes",
+    continueExpected: "Continue without project-specific writes.", continueAdvantage: "Avoids repeated prompts and leaves the project unchanged.", continueRisk: "No current risk.", continueVerify: "Dry-run reports ready and zero writes.",
+    applyExpected: "Write confirmed project-specific files and the bootstrap manifest.", applyAdvantage: "Current files will not require repeated confirmation.", applyRisk: "Only dry-run-listed files are changed after ownership and backup checks.", applyBlockedRisk: "Conflicts remain blocked; unknown user files are preserved.", applyVerify: "A second dry-run must report ready and zero pending writes.",
+    inspectExpected: "Keep the dry-run plan without writing.", inspectAdvantage: "Lets the owner review generated content first.", inspectRisk: "Project-specific state may remain stale.", inspectVerify: "The manifest is unchanged and the next run may ask again.",
+    skipExpected: "Continue without project-specific files.", skipAdvantage: "Leaves a global-capability-only project untouched.", skipRisk: "Project overrides and state remain disabled.", skipVerify: "The run must not claim project-governed readiness.",
+  },
+  "zh-CN": {
+    readyHeader: "项目已就绪", readyQuestion: "Meta_Kim 项目初始化已是最新，无需写入项目专用文件或重复确认。", continueLabel: "继续",
+    bootstrapHeader: "项目初始化", runtimeRequirement: "Claude Code 必须在 --apply 前使用 AskUserQuestion，Codex 必须使用 request_user_input；兼容运行时可展示带标签的聊天决策卡。",
+    understanding: (targets) => `AI 理解：此目录需要面向 ${targets} 的 Meta_Kim 项目专用上下文、配置、状态或已确认覆盖。`,
+    additions: (status, reason) => `AI 补充：dry-run 状态为 ${status}；${reason}`,
+    route: "能力路径：优先复用全局运行时能力，只应用已确认的项目专用状态。",
+    candidates: (conflicts, pending, conflictCount, globalCount) => `候选路径：${conflicts ? "解决冲突、仅检查或跳过" : "立即应用、仅检查或跳过"}。待写项目文件：${pending}；冲突：${conflictCount}；全局写入：${globalCount}。`,
+    apply: "应用项目初始化（推荐）", applyBlocked: "解决冲突后应用", inspect: "仅检查", skip: "跳过项目级写入",
+    continueExpected: "继续运行，不写项目专用文件。", continueAdvantage: "避免重复询问并保持项目不变。", continueRisk: "当前无风险。", continueVerify: "dry-run 显示已就绪且写入为零。",
+    applyExpected: "写入已确认的项目专用文件和初始化清单。", applyAdvantage: "文件未变化时不再重复确认。", applyRisk: "仅在所有权和备份校验后修改 dry-run 清单中的文件。", applyBlockedRisk: "冲突保持阻断，未知用户文件会被保留。", applyVerify: "再次 dry-run 必须显示已就绪且待写为零。",
+    inspectExpected: "保留 dry-run 计划，不写文件。", inspectAdvantage: "可先检查生成内容。", inspectRisk: "项目专用状态可能仍然陈旧。", inspectVerify: "清单不变，下次运行可能再次询问。",
+    skipExpected: "继续运行但不应用项目专用文件。", skipAdvantage: "保持只使用全局能力的项目不变。", skipRisk: "项目覆盖和状态不会启用。", skipVerify: "不得声称项目治理已就绪。",
+  },
+  "ja-JP": {
+    readyHeader: "プロジェクト準備完了", readyQuestion: "Meta_Kim のプロジェクト初期化は最新です。専用ファイルの書き込みや再確認は不要です。", continueLabel: "続行",
+    bootstrapHeader: "プロジェクト初期化", runtimeRequirement: "--apply の前に Claude Code は AskUserQuestion、Codex は request_user_input を使用する必要があります。互換 runtime はラベル付き決定カードを表示できます。",
+    understanding: (targets) => `AI の理解: このディレクトリには ${targets} 向けの Meta_Kim 固有 context、config、state、または確認済み override が必要です。`,
+    additions: (status, reason) => `AI の補足: dry-run の状態は ${status}；${reason}`,
+    route: "能力ルート: global runtime 能力を優先し、確認済みのプロジェクト固有状態だけを適用します。",
+    candidates: (conflicts, pending, conflictCount, globalCount) => `候補: ${conflicts ? "競合解決、確認のみ、またはスキップ" : "今すぐ適用、確認のみ、またはスキップ"}。書き込み予定: ${pending}；競合: ${conflictCount}；global 書き込み: ${globalCount}。`,
+    apply: "プロジェクト初期化を適用（推奨）", applyBlocked: "競合解決後に適用", inspect: "確認のみ", skip: "プロジェクト書き込みをスキップ",
+    continueExpected: "固有ファイルを書かず続行します。", continueAdvantage: "再確認を避け、プロジェクトを変更しません。", continueRisk: "現在のリスクはありません。", continueVerify: "dry-run は ready、書き込み 0 を示します。",
+    applyExpected: "確認済みの固有ファイルと manifest を書き込みます。", applyAdvantage: "変更がなければ再確認は不要です。", applyRisk: "所有権と backup 検証後、dry-run の一覧だけを変更します。", applyBlockedRisk: "競合はブロックされ、不明なユーザーファイルは保持されます。", applyVerify: "再 dry-run は ready、保留 0 である必要があります。",
+    inspectExpected: "書き込まず dry-run 計画を保持します。", inspectAdvantage: "生成内容を先に確認できます。", inspectRisk: "固有状態が古いままの可能性があります。", inspectVerify: "manifest は変わらず、次回再確認される場合があります。",
+    skipExpected: "固有ファイルを適用せず続行します。", skipAdvantage: "global 能力だけのプロジェクトを変更しません。", skipRisk: "固有 override と state は無効のままです。", skipVerify: "project-governed ready を主張してはいけません。",
+  },
+  "ko-KR": {
+    readyHeader: "프로젝트 준비 완료", readyQuestion: "Meta_Kim 프로젝트 초기화가 최신입니다. 전용 파일 쓰기나 반복 확인이 필요하지 않습니다.", continueLabel: "계속",
+    bootstrapHeader: "프로젝트 초기화", runtimeRequirement: "--apply 전에 Claude Code는 AskUserQuestion, Codex는 request_user_input을 사용해야 합니다. 호환 runtime은 라벨이 있는 결정 카드를 표시할 수 있습니다.",
+    understanding: (targets) => `AI 이해: 이 디렉터리에는 ${targets}용 Meta_Kim 프로젝트 전용 context, config, state 또는 확인된 override가 필요합니다.`,
+    additions: (status, reason) => `AI 보충: dry-run 상태는 ${status}; ${reason}`,
+    route: "능력 경로: 전역 runtime 능력을 먼저 재사용하고 확인된 프로젝트 전용 상태만 적용합니다.",
+    candidates: (conflicts, pending, conflictCount, globalCount) => `후보 경로: ${conflicts ? "충돌 해결, 확인만 또는 건너뛰기" : "지금 적용, 확인만 또는 건너뛰기"}. 예정 쓰기: ${pending}; 충돌: ${conflictCount}; 전역 쓰기: ${globalCount}.`,
+    apply: "프로젝트 초기화 적용(권장)", applyBlocked: "충돌 해결 후 적용", inspect: "확인만", skip: "프로젝트 쓰기 건너뛰기",
+    continueExpected: "전용 파일을 쓰지 않고 계속합니다.", continueAdvantage: "반복 확인을 피하고 프로젝트를 변경하지 않습니다.", continueRisk: "현재 위험이 없습니다.", continueVerify: "dry-run이 ready와 쓰기 0을 표시합니다.",
+    applyExpected: "확인된 전용 파일과 manifest를 씁니다.", applyAdvantage: "변경이 없으면 다시 확인하지 않습니다.", applyRisk: "소유권과 backup 검증 후 dry-run 목록만 변경합니다.", applyBlockedRisk: "충돌은 차단되고 알 수 없는 사용자 파일은 보존됩니다.", applyVerify: "다시 실행한 dry-run은 ready와 대기 0이어야 합니다.",
+    inspectExpected: "쓰지 않고 dry-run 계획만 유지합니다.", inspectAdvantage: "생성 내용을 먼저 검토할 수 있습니다.", inspectRisk: "전용 상태가 오래된 채로 남을 수 있습니다.", inspectVerify: "manifest는 바뀌지 않으며 다음 실행에서 다시 물을 수 있습니다.",
+    skipExpected: "전용 파일을 적용하지 않고 계속합니다.", skipAdvantage: "전역 능력만 쓰는 프로젝트를 변경하지 않습니다.", skipRisk: "전용 override와 state는 비활성 상태입니다.", skipVerify: "project-governed ready를 주장하면 안 됩니다.",
+  },
+};
+
 export function buildI18N({ MIN_NODE_VERSION }) {
   return {
   en: {
@@ -5,6 +60,9 @@ export function buildI18N({ MIN_NODE_VERSION }) {
     modeUpdate: "update",
     modeSilent: "silent",
     modeInteractive: "interactive",
+    checkOverallFailed: "Project runtime sync check failed.",
+    checkRepairCommand:
+      "Repair: run `npm run meta:sync`, then run the check again.",
     /** Shared gate before menu / CLI modes — headings below are titles only, no "step 1/N" */
     preflightHeading: "Environment check",
     nodeOld: (v) => `Node.js v${v} too old, need >=${MIN_NODE_VERSION}`,
@@ -29,6 +87,14 @@ export function buildI18N({ MIN_NODE_VERSION }) {
     noRuntimeHint1:
       "Meta_Kim works with Claude Code, Codex, OpenClaw, or Cursor.",
     noRuntimeHint2: "Install at least one: {claudeCodeDocs}",
+    selectedRuntimeCapabilityHeading: "Selected runtime capability summary:",
+    selectedRuntimeCapabilities: {
+      codex: "Codex: agents, skills, commands, MCP, and version-dependent project/global hooks",
+      cursor: "Cursor: agents, skills, MCP, rules, and official preToolUse hooks",
+      openclaw: "OpenClaw: workspaces, skills, hooks, and declarative governance; tool blocking still requires a typed plugin adapter",
+    },
+    selectedRuntimeCapabilityBoundary:
+      "Capabilities vary by runtime; this report lists only what was selected and synchronized.",
     continueAnyway: "Continue setup anyway?",
     setupCancelled: "Setup cancelled. Install an AI coding tool and re-run.",
     stepConfig: "Project configuration",
@@ -112,11 +178,11 @@ ${r ? `Raw error: ${r}` : ""}
     platformClaudeCode: "Claude Code",
     platformClaudeCodeCap: "agents + skills + hooks",
     platformCodex: "Codex",
-    platformCodexCap: "agents + skills",
+    platformCodexCap: "agents + skills + commands + MCP + hooks (version-dependent)",
     platformOpenClaw: "OpenClaw",
-    platformOpenClawCap: "workspace + skills",
+    platformOpenClawCap: "workspace + skills + hooks + declarative governance",
     platformCursor: "Cursor",
-    platformCursorCap: "agents + skills",
+    platformCursorCap: "agents + skills + rules + MCP + preToolUse hooks",
     postInstallNotesLayerActivation: "Three-layer memory activation:",
     layer1Label: "Layer 1 (Memory)",
     layer1Note: "automatic — built into Claude Code",
@@ -194,6 +260,10 @@ ${r ? `Raw error: ${r}` : ""}
     projectCleanupBatchHeading: (n) =>
       `Cleaning redundant Meta_Kim project-level assets in ${n} project directory/directories`,
     projectCleanupSummary: "Project cleanup summary",
+    projectCleanupCliResult: (passed) =>
+      `Meta_Kim project cleanup: ${passed ? "complete" : "failed"}`,
+    projectCleanupCliTargets: (targets) => `targets=${targets}`,
+    projectCleanupCliProjects: (count) => `cleanedProjects=${count}`,
     // Directory structure explanation
     directoryExplanationHeading: "Directory Structure",
     directoryExplanationIntro: "Meta_Kim creates two levels of directories:",
@@ -232,29 +302,33 @@ ${r ? `Raw error: ${r}` : ""}
     depSummarySome: (ok, total) =>
       `Only ${ok}/${total} dependencies verified — re-run with --update`,
     syncHeading: "Cross-Runtime Sync Check",
-    syncClaudeAgents: (n) => `Claude Code agents: ${n}/${META_AGENTS.length} .md files`,
+    syncClaudeAgents: (n, total) => `Claude Code agents: ${n}/${total} .md files`,
     syncClaudeSkills: "Claude Code skills/meta-theory/SKILL.md",
     syncClaudeHooks: (n) => `Claude Code hooks: ${n} scripts`,
     syncClaudeProjectHooksMigrated:
       "Claude Code project hooks migrated to global hooks; repo-local .claude/hooks is not required",
     syncClaudeSettings: "Claude Code .claude/settings.json",
     syncClaudeMcp: "Claude Code .mcp.json",
-    syncCodexAgents: (n, total = META_AGENTS.length) =>
+    syncCodexAgents: (n, total) =>
       `Codex agents: ${n}/${total} .toml files`,
     syncCodexSkills: "Codex .agents/skills/meta-theory/SKILL.md",
     syncCodexSkillsGlobal:
       "Codex project skill mirror: .agents/skills/meta-theory/SKILL.md",
-    syncOpenclawWorkspaces: (n) =>
-      `OpenClaw workspaces: ${n}/${META_AGENTS.length} agents — each folder has the 9 required .md files (BOOT, SOUL, …)`,
+    syncOpenclawWorkspaces: (n, total) =>
+      `OpenClaw workspaces: ${n}/${total} agents — each folder has the 9 required .md files (BOOT, SOUL, …)`,
     syncOpenclawSkill: "OpenClaw shared meta-theory",
     syncSharedSkills: "Shared skills/meta-theory/SKILL.md",
-    syncCursorAgents: (n) => `Cursor agents: ${n}/${META_AGENTS.length} .md files`,
+    syncCursorAgents: (n, total) => `Cursor agents: ${n}/${total} .md files`,
     syncCursorSkills: "Cursor skills/meta-theory/SKILL.md",
     syncCursorMcp: "Cursor .cursor/mcp.json",
     mcpRuntimeProjectOnly: (p) =>
       `${p} contains meta-kim-runtime, but its script path is not usable here. This MCP is only for the Meta_Kim source repo; remove the meta-kim-runtime block in copied projects. Agents still load from .claude/.codex/.cursor/openclaw files.`,
     syncOk: "All sync targets verified",
     syncMissing: (p) => `Missing: ${p}`,
+    syncGlobalOnlyHookPairOk: (runtime) =>
+      `${runtime} project hook pair: activator + project-root resolver`,
+    syncGlobalOnlyHookPairFailed: (runtime, detail) =>
+      `${runtime} project hook pair is incomplete: ${detail}`,
     syncPartial: (label, got, need) => `${label}: got ${got}, need ${need}`,
     stepPythonTools: "Optional Python Tools",
     pythonNotFound: "Python 3.10+ not found — skipping graphify",
@@ -310,6 +384,8 @@ Possible causes:
     graphifyHookInstalled:
       "graphify git hooks installed (auto-rebuild on commit/checkout)",
     graphifyHookFailed: "graphify git hook installation failed (non-blocking)",
+    graphifyHooksRepaired: (n, project, backup) =>
+      `Repaired ${n} unsafe Graphify hook command(s) in ${project} (backup: ${backup})`,
     graphifyProjectWiringSkipped:
       "Graphify is installed globally. Run `npm run meta:graphify:rebuild` (or `python -m graphify update .`) inside a project to build its knowledge graph.",
     stepMcpMemory: "Meta_Kim cross-session memory",
@@ -329,24 +405,32 @@ Possible causes:
     askMcpMemoryInstall:
       "Enable Meta_Kim cross-session memory? This uses MCP Memory Service; setup installs it if missing, registers it, and starts it in the background.",
     mcpMemorySkipped: "MCP Memory Service skipped",
+    mcpMemoryRequiresGlobalHooks:
+      "MCP Memory Service skipped: rerun with --with-global-hooks so shared runtime hooks are installed first",
     mcpMemoryServerStartHint:
       "MCP Memory Service installed — HTTP service starts with: MCP_ALLOW_ANONYMOUS_ACCESS=true memory server --http",
-    mcpMemoryHookInstalling:
-      "Installing MCP Memory hooks for Claude Code, Codex, Cursor, and OpenClaw...",
+    mcpMemoryHookInstalling: (targets) =>
+      `Installing MCP Memory hooks for ${targets}...`,
     mcpMemoryHookInstalled: "MCP Memory runtime hooks installed",
     mcpMemoryHookWarnings:
       "Hook installation reported warnings (non-blocking) — underlying stderr shown below:",
+    mcpMemoryEndpointSelected: (endpoint) => `MCP Memory endpoint: ${endpoint}`,
+    mcpMemoryEndpointInvalid: (reason) => `Invalid MCP Memory endpoint configuration: ${reason}`,
+    mcpMemoryRemoteEndpointNoAutoStart: (endpoint) =>
+      `Using external MCP Memory endpoint ${endpoint}; local process and boot auto-start were not configured.`,
     mcpMemoryAutoStarting: "Starting MCP Memory Service (HTTP, background)...",
-    mcpMemoryAutoStarted: "MCP Memory Service running at http://localhost:8000",
+    mcpMemoryAutoStarted: (endpoint) => `MCP Memory Service running at ${endpoint}`,
     mcpMemoryAutoStartUnverified:
       "MCP Memory Service process is running; continuing",
     mcpMemoryAutoStartFailed: "Auto-start failed — start manually:",
     mcpMemoryAutoStartManual:
       "  MCP_ALLOW_ANONYMOUS_ACCESS=true memory server --http",
     mcpMemoryAutoStartBoot: "Boot auto-start configured",
+    mcpMemoryAutoStartBootFailed:
+      "MCP Memory Service is healthy, but boot auto-start could not be configured",
     mcpMemoryAutoStartFailureTitle: "Meta_Kim MCP Memory Service",
-    mcpMemoryAutoStartFailureMessage:
-      "Meta_Kim MCP Memory Service failed to start or did not become healthy at http://127.0.0.1:8000. Cross-session memory may be unavailable. Please start it manually: MCP_ALLOW_ANONYMOUS_ACCESS=true memory server --http",
+    mcpMemoryAutoStartFailureMessage: (healthUrl) =>
+      `Meta_Kim MCP Memory Service failed to start or did not become healthy at ${healthUrl}. Cross-session memory may be unavailable. Please start it manually: MCP_ALLOW_ANONYMOUS_ACCESS=true memory server --http`,
     updateHeading: "Update Mode",
     updateNpm: "Reinstalling npm dependencies...",
     updateSkills: "Updating all skills...",
@@ -438,6 +522,15 @@ Possible causes:
     progressValidate: "Validate installation",
     // Confirm strings
     confirmStartInstall: "Start installation?",
+    projectBootstrapConfirmationReasons: {
+      ready: "Project bootstrap manifest and project-specific files are current; no project write is needed.",
+      conflict: "Existing project files overlap generated paths but ownership is unproven; resolve conflicts before apply.",
+      stale: "The existing project bootstrap manifest uses a different Meta_Kim version.",
+      target_scope_changed: "Selected runtime targets differ from the previous project bootstrap manifest.",
+      missing: "Required project context, config, state, or confirmed overrides are missing.",
+      repair_required: "The bootstrap version is current, but managed files need repair, merge, or recreation.",
+      ready_with_existing_config: "Existing configuration still needs confirmed bootstrap state or pending changes.",
+    },
     footprintTitle: "Installation footprint (from previous run)",
     footprintFirstInstall:
       "First install on this machine — no previous footprint recorded.",
@@ -472,46 +565,44 @@ Possible causes:
     warnSkillsInstallFailed: `
 ⚠ Global skills install failed
 
-Possible causes:
-1. Directory locked (EBUSY) → Close Explorer/IDE, wait for antivirus, then retry
-2. Network error → Check proxy settings with: node setup.mjs --prompt-proxy
-3. Repo not found → Verify the skill repository URL is correct
+Primary cause: use the first exact error printed above. Apply the guidance below only when the log explicitly shows the matching condition:
+1. If the log contains EBUSY or "resource busy" → Close Explorer/IDE on the skills folder and wait for antivirus/indexing to finish. After the path is released, only consider removing the exact temporary path Meta_Kim reported for this failed run; first confirm it is inside the selected runtime's skills/plugins root and is not user-owned. Never delete temporary directories by wildcard.
+2. If the log reports a network or Git fetch error → Check the connection and proxy settings with: node setup.mjs --prompt-proxy
+3. If the log says the repository was not found → Verify the skill repository URL is correct
 
-→ Fix: Run: node setup.mjs --update
-→ Hint: If EBUSY, close programs holding the skills folder, then manually delete any *.staged-* temp dirs.
+→ Next step: Fix the first exact error, then retry: node setup.mjs --update
 `,
     warnMetaTheorySyncFailed: `
 ⚠ meta-theory sync failed
 
-Possible causes:
-1. Directory locked → Close programs holding ~/.claude/skills/
-2. Permission denied → Check write permissions on global skills dir
-3. Network error → Verify proxy settings
+Primary cause: use the first exact error printed above. Apply the guidance below only when the log explicitly shows the matching condition:
+1. If the log reports EBUSY or a locked directory → Close programs holding the selected runtime's Meta_Kim skills/plugins directory
+2. If the log reports permission denied → Check write permissions on that selected runtime directory
+3. If the log reports a network error → Verify the connection and proxy settings
 
-→ Fix: Run: node scripts/sync-global-meta-theory.mjs --targets claude
+→ Next step: Fix the first exact error, then retry the selected runtimes: node setup.mjs --update
 `,
     warnSkillsUpdateFailed: `
 ⚠ Global skills update failed
 
-Possible causes:
-1. Directory locked (EBUSY) → Close Explorer/IDE, wait for antivirus, then retry
-2. Git fetch failed → Check network/proxy connection
-3. Conflicts → Review staged files and resolve manually
+Primary cause: use the first exact error printed above. Apply the guidance below only when the log explicitly shows the matching condition:
+1. If the log contains EBUSY or "resource busy" → Close Explorer/IDE on the skills folder and wait for antivirus/indexing to finish. After the path is released, only consider removing the exact temporary path Meta_Kim reported for this failed run; first confirm it is inside the selected runtime's skills/plugins root and is not user-owned. Never delete temporary directories by wildcard.
+2. If the log reports a Git fetch or network error → Check the connection and proxy settings
+3. If the log reports a file conflict → Review the staged files and resolve the conflict manually
 
-→ Hint: If EBUSY, close programs holding the skills folder, then manually delete any *.staged-* temp dirs.
-→ Fix: Run: node setup.mjs --update
+→ Next step: Fix the first exact error, then retry: node setup.mjs --update
 `,
     warnSkillsUpdateFailedHint:
-      "If the log shows EBUSY or 'resource busy', close Explorer/IDE on the skills folder, wait for antivirus/indexing to finish, then retry. You can delete leftover *.staged-* dirs manually once nothing holds the path.",
+      "If the log shows EBUSY or 'resource busy', close Explorer/IDE on the skills folder and wait for antivirus/indexing to finish. Only consider removing the exact temporary path Meta_Kim reported for this failed run after confirming it is inside the selected runtime's skills/plugins root and is not user-owned; never delete by wildcard.",
     warnMetaTheoryUpdateFailed: `
 ⚠ meta-theory sync failed
 
-Possible causes:
-1. Directory locked → Close programs holding ~/.claude/skills/
-2. Permission denied → Check write permissions on global skills dir
-3. Network error → Verify proxy settings
+Primary cause: use the first exact error printed above. Apply the guidance below only when the log explicitly shows the matching condition:
+1. If the log reports EBUSY or a locked directory → Close programs holding the selected runtime's Meta_Kim skills/plugins directory
+2. If the log reports permission denied → Check write permissions on that selected runtime directory
+3. If the log reports a network error → Verify the connection and proxy settings
 
-→ Fix: Run: node scripts/sync-global-meta-theory.mjs --targets claude
+→ Next step: Fix the first exact error, then retry the selected runtimes: node setup.mjs --update
 `,
     warnManifestLoadFail: (msg) => `Failed to load skills manifest: ${msg}`,
     labelOptional: "(optional)",
@@ -576,6 +667,14 @@ Possible causes:
     projectDeployAsk: "Project directory updates",
     projectDeployProtectionNote:
       "Existing local settings and MCP/hook configs are preserved and merged; only selected directories are touched.",
+    globalManagedProjectRefreshInfo: (n) =>
+      `Detected ${n} managed project${n === 1 ? "" : "s"}. This operation refreshes the global installation and those existing projects with each project's saved runtime targets, using merge/delta updates. It creates no new project projection and never overwrites runtime-sedimented or user-owned files.`,
+    managedProjectRejectedHeading: (n) => `${n} existing project target${n === 1 ? " was" : "s were"} not refreshed:`,
+    managedProjectRejectedDetail: (source, reason) => `Source: ${source}. Reason: ${reason}.`,
+    managedProjectRejectedRepair: "Repair or remove the listed saved/registry target, or run project bootstrap explicitly to recreate a valid manifest, then retry.",
+    managedProjectRejectedStep: "Validate explicit existing project targets",
+    managedProjectRejectedSources: { explicit_project_dirs: "explicit --project-dir", saved_project_dirs: "saved project list", project_registry: "user-level project registry", current_working_directory: "current working directory" },
+    managedProjectRejectedReasons: { target_missing: "directory does not exist", unsafe_project_root: "project root is not a safe real directory", unsafe_manifest_path: "manifest path crosses a symlink or Junction", manifest_missing_or_invalid: "managed project manifest is missing or invalid", invalid_active_targets: "saved runtime targets are missing or unsupported" },
     projectDeployInteractiveHint:
       "Set up a saved project list once, then update every saved project together on future runs.",
     projectDeployPathEntryHint:
@@ -612,6 +711,8 @@ Possible causes:
       `Updating project-level runtime files in ${n} project director${n === 1 ? "y" : "ies"}`,
     projectDeploySummary: "Project directory update summary",
     projectDeployStatusOk: "updated",
+    projectDeployStatusPartial: "partially cleaned — retry required",
+    projectDeployStatusBlocked: "blocked — fix path safety and retry",
     projectDeployStatusFailed: "failed",
     projectDeployFailed: (dir, msg) => `Failed to update ${dir}: ${msg}`,
     projectDeployMoreTargets: (n) =>
@@ -627,6 +728,8 @@ Possible causes:
     modeUpdate: "更新",
     modeSilent: "静默",
     modeInteractive: "交互式",
+    checkOverallFailed: "项目运行时同步检查未通过。",
+    checkRepairCommand: "修复方法：运行 `npm run meta:sync`，然后重新检查。",
     preflightHeading: "环境检查",
     nodeOld: (v) => `Node.js v${v} 版本过低，需要 >=${MIN_NODE_VERSION}`,
     nodeOk: (v) => `Node.js v${v}`,
@@ -649,6 +752,14 @@ Possible causes:
     noRuntime: "未检测到 AI 编程工具。",
     noRuntimeHint1: "Meta_Kim 支持 Claude Code、Codex、OpenClaw 或 Cursor。",
     noRuntimeHint2: "至少安装一个：{claudeCodeDocs}",
+    selectedRuntimeCapabilityHeading: "已选 runtime 能力摘要：",
+    selectedRuntimeCapabilities: {
+      codex: "Codex：agents、skills、Commands、MCP，以及取决于版本的项目/全局 hooks",
+      cursor: "Cursor：agents、skills、rules、MCP 和官方 preToolUse hooks",
+      openclaw: "OpenClaw：workspaces、skills、hooks 和声明式治理；工具阻断仍需 typed plugin adapter",
+    },
+    selectedRuntimeCapabilityBoundary:
+      "各 runtime 能力不同；本报告只展示实际选中并同步的能力。",
     continueAnyway: "仍然继续安装？",
     setupCancelled: "安装已取消。请先安装 AI 编程工具。",
     stepConfig: "项目配置",
@@ -729,11 +840,11 @@ ${r ? `原始错误：${r}` : ""}
     platformClaudeCode: "Claude Code",
     platformClaudeCodeCap: "agents + skills + hooks",
     platformCodex: "Codex",
-    platformCodexCap: "agents + skills",
+    platformCodexCap: "agents + skills + Commands + MCP + hooks（取决于版本）",
     platformOpenClaw: "OpenClaw",
-    platformOpenClawCap: "workspace + skills",
+    platformOpenClawCap: "workspace + skills + hooks + 声明式治理",
     platformCursor: "Cursor",
-    platformCursorCap: "agents + skills",
+    platformCursorCap: "agents + skills + rules + MCP + preToolUse hooks",
     postInstallNotesLayerActivation: "三层记忆激活方式：",
     layer1Label: "第一层（Memory）",
     layer1Note: "自动激活——内置于 Claude Code",
@@ -805,6 +916,10 @@ ${r ? `原始错误：${r}` : ""}
     projectCleanupBatchHeading: (n) =>
       `正在清理 ${n} 个项目目录内冗余的 Meta_Kim 项目级资产`,
     projectCleanupSummary: "项目目录清理结果",
+    projectCleanupCliResult: (passed) =>
+      `Meta_Kim 项目清理：${passed ? "完成" : "失败"}`,
+    projectCleanupCliTargets: (targets) => `目标运行时=${targets}`,
+    projectCleanupCliProjects: (count) => `已处理项目数=${count}`,
     // 目录结构说明
     directoryExplanationHeading: "目录结构",
     directoryExplanationIntro: "Meta_Kim 创建两级目录：",
@@ -840,29 +955,33 @@ ${r ? `原始错误：${r}` : ""}
     depSummarySome: (ok, total) =>
       `仅 ${ok}/${total} 个依赖验证通过 — 请使用 --update 重新安装`,
     syncHeading: "同步状态检查",
-    syncClaudeAgents: (n) => `Claude Code 智能体: ${n}/${META_AGENTS.length} .md 文件`,
+    syncClaudeAgents: (n, total) => `Claude Code 智能体: ${n}/${total} .md 文件`,
     syncClaudeSkills: "Claude Code 技能/meta-theory/SKILL.md",
     syncClaudeHooks: (n) => `Claude Code 钩子: ${n} 个脚本`,
     syncClaudeProjectHooksMigrated:
       "Claude Code 项目级 hooks 已迁移到全局；不再要求仓库内 .claude/hooks",
     syncClaudeSettings: "Claude Code .claude/settings.json",
     syncClaudeMcp: "Claude Code .mcp.json",
-    syncCodexAgents: (n, total = META_AGENTS.length) =>
+    syncCodexAgents: (n, total) =>
       `Codex 智能体: ${n}/${total} .toml 文件`,
     syncCodexSkills: "Codex .agents/skills/meta-theory/SKILL.md",
     syncCodexSkillsGlobal:
       "Codex 项目技能镜像：.agents/skills/meta-theory/SKILL.md",
-    syncOpenclawWorkspaces: (n) =>
-      `OpenClaw 工作区：${n}/${META_AGENTS.length} 个智能体，各目录 9 个必备 Markdown 已齐（含 BOOT、SOUL 等；不含子文件夹里的额外文件）`,
+    syncOpenclawWorkspaces: (n, total) =>
+      `OpenClaw 工作区：${n}/${total} 个智能体，各目录 9 个必备 Markdown 已齐（含 BOOT、SOUL 等；不含子文件夹里的额外文件）`,
     syncOpenclawSkill: "OpenClaw 共享 meta-theory",
     syncSharedSkills: "共享技能/meta-theory/SKILL.md",
-    syncCursorAgents: (n) => `Cursor 智能体: ${n}/${META_AGENTS.length} .md 文件`,
+    syncCursorAgents: (n, total) => `Cursor 智能体: ${n}/${total} .md 文件`,
     syncCursorSkills: "Cursor 技能/meta-theory/SKILL.md",
     syncCursorMcp: "Cursor .cursor/mcp.json",
     mcpRuntimeProjectOnly: (p) =>
       `${p} 包含 meta-kim-runtime，但这里的脚本路径不可用。这个 MCP 只给 Meta_Kim 源仓库使用；复制到普通项目时请删除 meta-kim-runtime 这一块。Agent 仍会从 .claude/.codex/.cursor/openclaw 文件加载。`,
     syncOk: "所有同步目标验证通过",
     syncMissing: (p) => `缺失：${p}`,
+    syncGlobalOnlyHookPairOk: (runtime) =>
+      `${runtime} 项目 Hook 依赖完整：activator + project-root resolver`,
+    syncGlobalOnlyHookPairFailed: (runtime, detail) =>
+      `${runtime} 项目 Hook 依赖不完整：${detail}`,
     syncPartial: (label, got, need) => `${label}：实际 ${got}，需要 ${need}`,
     stepPythonTools: "可选 Python 工具",
     pythonNotFound: "未检测到 Python 3.10+ — 跳过 graphify",
@@ -914,6 +1033,8 @@ ${r ? `原始错误：${r}` : ""}
     graphifyHookInstalled:
       "graphify git hook 已安装（commit/checkout 时自动重建图谱）",
     graphifyHookFailed: "graphify git hook 安装失败（不影响其他功能）",
+    graphifyHooksRepaired: (n, project, backup) =>
+      `已修复 ${project} 中 ${n} 个不安全的 Graphify hook 命令（备份：${backup}）`,
     graphifyProjectWiringSkipped:
       "Graphify 已全局安装。在项目目录内跑 `npm run meta:graphify:rebuild`（或 `python -m graphify update .`）生成该项目的知识图谱。",
     stepMcpMemory: "Meta_Kim 跨会话记忆",
@@ -931,24 +1052,32 @@ ${r ? `原始错误：${r}` : ""}
     askMcpMemoryInstall:
       "启用 Meta_Kim 跨会话记忆？会使用 MCP Memory Service；若未安装则安装，并完成注册和后台启动。",
     mcpMemorySkipped: "MCP Memory Service 已跳过",
+    mcpMemoryRequiresGlobalHooks:
+      "MCP Memory Service 已跳过：请使用 --with-global-hooks 重新运行，先安装共享运行时 Hook",
     mcpMemoryServerStartHint:
       "MCP Memory Service 已安装——HTTP 服务启动方式：MCP_ALLOW_ANONYMOUS_ACCESS=true memory server --http",
-    mcpMemoryHookInstalling:
-      "正在安装 Claude Code、Codex、Cursor、OpenClaw 的 MCP Memory 钩子...",
+    mcpMemoryHookInstalling: (targets) =>
+      `正在安装 ${targets} 的 MCP Memory 钩子...`,
     mcpMemoryHookInstalled: "MCP Memory 运行时钩子已安装",
     mcpMemoryHookWarnings:
       "钩子安装产生警告（不影响后续流程）——以下是子进程 stderr 原文：",
+    mcpMemoryEndpointSelected: (endpoint) => `MCP Memory 端点：${endpoint}`,
+    mcpMemoryEndpointInvalid: (reason) => `MCP Memory 端点配置无效：${reason}`,
+    mcpMemoryRemoteEndpointNoAutoStart: (endpoint) =>
+      `使用外部 MCP Memory 端点 ${endpoint}；未启动本地进程，也未配置开机自启。`,
     mcpMemoryAutoStarting: "正在启动 MCP Memory Service（HTTP 后台模式）...",
-    mcpMemoryAutoStarted: "MCP Memory Service 已运行于 http://localhost:8000",
+    mcpMemoryAutoStarted: (endpoint) => `MCP Memory Service 已运行于 ${endpoint}`,
     mcpMemoryAutoStartUnverified:
       "MCP Memory Service 进程正在运行，继续安装",
     mcpMemoryAutoStartFailed: "自动启动失败——请手动启动：",
     mcpMemoryAutoStartManual:
       "  MCP_ALLOW_ANONYMOUS_ACCESS=true memory server --http",
     mcpMemoryAutoStartBoot: "已配置开机自启",
+    mcpMemoryAutoStartBootFailed:
+      "MCP Memory Service 当前健康，但未能配置开机自启",
     mcpMemoryAutoStartFailureTitle: "Meta_Kim MCP Memory Service",
-    mcpMemoryAutoStartFailureMessage:
-      "Meta_Kim MCP Memory Service 启动失败，或未在 http://127.0.0.1:8000 变为 healthy。跨会话记忆可能不可用。请手动启动：MCP_ALLOW_ANONYMOUS_ACCESS=true memory server --http",
+    mcpMemoryAutoStartFailureMessage: (healthUrl) =>
+      `Meta_Kim MCP Memory Service 启动失败，或未在 ${healthUrl} 变为 healthy。跨会话记忆可能不可用。请手动启动：MCP_ALLOW_ANONYMOUS_ACCESS=true memory server --http`,
     updateHeading: "更新模式",
     updateNpm: "正在重新安装 npm 依赖...",
     updateSkills: "正在更新所有技能...",
@@ -1038,6 +1167,15 @@ ${r ? `原始错误：${r}` : ""}
     progressValidate: "验证安装",
     // 确认字符串
     confirmStartInstall: "开始安装？",
+    projectBootstrapConfirmationReasons: {
+      ready: "项目初始化清单和项目专用文件均为最新，无需写入。",
+      conflict: "现有项目文件与生成路径重叠，但所有权未经证明；应用前必须先解决冲突。",
+      stale: "现有项目初始化清单使用了不同的 Meta_Kim 版本。",
+      target_scope_changed: "所选运行时目标与上次项目初始化清单不同。",
+      missing: "缺少必需的项目上下文、配置、状态或已确认覆盖。",
+      repair_required: "初始化版本为最新，但受管文件需要修复、合并或重建。",
+      ready_with_existing_config: "现有配置仍需确认初始化状态或应用待处理变更。",
+    },
     footprintTitle: "安装足迹（上次安装记录）",
     footprintFirstInstall: "首次安装 — 无历史足迹可显示。",
     footprintRefreshNote: "本次安装将刷新上述条目。",
@@ -1071,46 +1209,44 @@ ${r ? `原始错误：${r}` : ""}
     warnSkillsInstallFailed: `
 ⚠ 全局技能安装失败
 
-可能原因：
-1. 目录被锁定（EBUSY）→ 关闭资源管理器/IDE，等待杀毒/索引完成后重试
-2. 网络错误 → 使用 node setup.mjs --prompt-proxy 检查代理设置
-3. 仓库未找到 → 验证技能仓库 URL 是否正确
+主要原因：以上方第一条精确错误为准。仅当日志明确出现对应情况时，再使用下面的处理方法：
+1. 若日志含 EBUSY 或“目录被占用” → 关闭占用 skills 目录的资源管理器/IDE，等待杀毒与索引结束；目录释放后，只考虑处理 Meta_Kim 在本次失败日志中明确报告的那个临时路径，并先确认它位于当前所选运行时的 skills/plugins 根目录内且不属于用户资产；不要使用通配符删除临时目录
+2. 若日志明确提示网络错误或 Git fetch 失败 → 检查网络连接，并运行 node setup.mjs --prompt-proxy 检查代理设置
+3. 若日志提示仓库未找到 → 验证技能仓库 URL 是否正确
 
-修复：node setup.mjs --update
-提示：如遇 EBUSY，先关闭占用 skills 目录的程序，然后手动删除残留的 *.staged-* 临时目录。
+下一步：先修复上方第一条精确错误，再重试：node setup.mjs --update
 `,
     warnMetaTheorySyncFailed: `
 ⚠ meta-theory 同步失败
 
-可能原因：
-1. 目录被锁定 → 关闭占用 ~/.claude/skills/ 的程序
-2. 权限被拒绝 → 检查全局技能目录的写入权限
-3. 网络错误 → 验证代理设置
+主要原因：以上方第一条精确错误为准。仅当日志明确出现对应情况时，再使用下面的处理方法：
+1. 若日志提示 EBUSY 或目录被锁定 → 关闭占用当前所选运行时 Meta_Kim skills/plugins 目录的程序
+2. 若日志提示权限被拒绝 → 检查该所选运行时目录的写入权限
+3. 若日志提示网络错误 → 检查网络连接与代理设置
 
-修复：node scripts/sync-global-meta-theory.mjs --targets claude
+下一步：先修复上方第一条精确错误，再重试当前所选运行时：node setup.mjs --update
 `,
     warnSkillsUpdateFailed: `
 ⚠ 全局技能更新失败
 
-可能原因：
-1. 目录被锁定（EBUSY）→ 关闭资源管理器/IDE，等待杀毒/索引完成后重试
-2. Git fetch 失败 → 检查网络/代理连接
-3. 冲突 → 查看 staged 文件并手动解决
+主要原因：以上方第一条精确错误为准。仅当日志明确出现对应情况时，再使用下面的处理方法：
+1. 若日志含 EBUSY 或“目录被占用” → 关闭占用 skills 目录的资源管理器/IDE，等待杀毒与索引结束；目录释放后，只考虑处理 Meta_Kim 在本次失败日志中明确报告的那个临时路径，并先确认它位于当前所选运行时的 skills/plugins 根目录内且不属于用户资产；不要使用通配符删除临时目录
+2. 若日志明确提示 Git fetch 或网络错误 → 检查网络连接与代理设置
+3. 若日志明确提示文件冲突 → 查看 staged 文件并手动解决冲突
 
-提示：如遇 EBUSY，先关闭占用 skills 目录的程序，然后手动删除残留的 *.staged-* 临时目录。
-修复：node setup.mjs --update
+下一步：先修复上方第一条精确错误，再重试：node setup.mjs --update
 `,
     warnSkillsUpdateFailedHint:
-      "若日志含 EBUSY/目录被占用：请先关闭对该目录的资源管理器窗口与 IDE 监视、等待杀毒/索引结束后再重试；解锁后可手动删除残留的 *.staged-* 临时目录。",
+      "若日志含 EBUSY/目录被占用：请先关闭占用该目录的资源管理器窗口与 IDE 监视，并等待杀毒/索引结束。仅在确认 Meta_Kim 本次失败日志报告的那个临时路径位于当前所选运行时的 skills/plugins 根目录内且不属于用户资产后，才考虑处理该精确路径；不要使用通配符删除。",
     warnMetaTheoryUpdateFailed: `
 ⚠ meta-theory 同步失败
 
-可能原因：
-1. 目录被锁定 → 关闭占用 ~/.claude/skills/ 的程序
-2. 权限被拒绝 → 检查全局技能目录的写入权限
-3. 网络错误 → 验证代理设置
+主要原因：以上方第一条精确错误为准。仅当日志明确出现对应情况时，再使用下面的处理方法：
+1. 若日志提示 EBUSY 或目录被锁定 → 关闭占用当前所选运行时 Meta_Kim skills/plugins 目录的程序
+2. 若日志提示权限被拒绝 → 检查该所选运行时目录的写入权限
+3. 若日志提示网络错误 → 检查网络连接与代理设置
 
-修复：node scripts/sync-global-meta-theory.mjs --targets claude
+下一步：先修复上方第一条精确错误，再重试当前所选运行时：node setup.mjs --update
 `,
     warnManifestLoadFail: (msg) => `加载技能清单失败：${msg}`,
     labelOptional: "（可选）",
@@ -1172,6 +1308,14 @@ ${r ? `原始错误：${r}` : ""}
     projectDeployAsk: "项目目录更新",
     projectDeployProtectionNote:
       "已有本地 settings、MCP 和 hook 配置会保留并合并；只会更新你选择的目录。",
+    globalManagedProjectRefreshInfo: (n) =>
+      `检测到 ${n} 个已受管项目。本次会同时刷新全局安装和这些现有项目，并按每个项目已保存的运行时目标执行合并/增量更新；不会新建项目投影，也不会覆盖项目沉淀能力或用户文件。`,
+    managedProjectRejectedHeading: (n) => `有 ${n} 个既有项目目标未刷新：`,
+    managedProjectRejectedDetail: (source, reason) => `来源：${source}。原因：${reason}。`,
+    managedProjectRejectedRepair: "请修复或移除上述已保存/registry 目标，或显式运行项目 bootstrap 重建有效 manifest，然后重试。",
+    managedProjectRejectedStep: "验证显式既有项目目标",
+    managedProjectRejectedSources: { explicit_project_dirs: "显式 --project-dir", saved_project_dirs: "已保存项目列表", project_registry: "用户级项目 registry", current_working_directory: "当前工作目录" },
+    managedProjectRejectedReasons: { target_missing: "目录不存在", unsafe_project_root: "项目根目录不是安全的真实目录", unsafe_manifest_path: "manifest 路径经过 symlink 或 Junction", manifest_missing_or_invalid: "受管项目 manifest 缺失或无效", invalid_active_targets: "已保存的运行时目标为空或不受支持" },
     projectDeployInteractiveHint:
       "先配置一次常用项目目录，后续更新时可一次更新所有已保存项目。",
     projectDeployPathEntryHint:
@@ -1199,6 +1343,8 @@ ${r ? `原始错误：${r}` : ""}
     projectDeployBatchHeading: (n) => `正在更新 ${n} 个项目目录的项目级运行时文件`,
     projectDeploySummary: "项目目录更新结果",
     projectDeployStatusOk: "已更新",
+    projectDeployStatusPartial: "部分完成，需要重试",
+    projectDeployStatusBlocked: "已阻断，请修复路径安全问题后重试",
     projectDeployStatusFailed: "失败",
     projectDeployFailed: (dir, msg) => `更新 ${dir} 失败：${msg}`,
     projectDeployMoreTargets: (n) => `另外 ${n} 个项目目录也已更新。`,
@@ -1213,6 +1359,9 @@ ${r ? `原始错误：${r}` : ""}
     modeUpdate: "更新",
     modeSilent: "サイレント",
     modeInteractive: "インタラクティブ",
+    checkOverallFailed: "プロジェクト runtime の同期チェックに失敗しました。",
+    checkRepairCommand:
+      "修復: `npm run meta:sync` を実行してから、もう一度チェックしてください。",
     preflightHeading: "環境チェック",
     nodeOld: (v) =>
       `Node.js v${v} は古すぎます。>=${MIN_NODE_VERSION} が必要です`,
@@ -1238,6 +1387,14 @@ ${r ? `原始错误：${r}` : ""}
     noRuntimeHint1:
       "Meta_Kim は Claude Code、Codex、OpenClaw、または Cursor で動作します。",
     noRuntimeHint2: "少なくとも1つインストールしてください：{claudeCodeDocs}",
+    selectedRuntimeCapabilityHeading: "選択した runtime の機能概要:",
+    selectedRuntimeCapabilities: {
+      codex: "Codex: agents、skills、commands、MCP、バージョン依存の project/global hooks",
+      cursor: "Cursor: agents、skills、rules、MCP、公式 preToolUse hooks",
+      openclaw: "OpenClaw: workspaces、skills、hooks、宣言的ガバナンス。ツールブロックには typed plugin adapter が必要",
+    },
+    selectedRuntimeCapabilityBoundary:
+      "runtime ごとに機能は異なります。本レポートは実際に選択・同期した機能のみ表示します。",
     continueAnyway: "セットアップを続行しますか？",
     setupCancelled:
       "セットアップがキャンセルされました。AIコーディングツールをインストールして再実行してください。",
@@ -1322,11 +1479,11 @@ ${r ? `生エラー：${r}` : ""}
     platformClaudeCode: "Claude Code",
     platformClaudeCodeCap: "agents + skills + hooks",
     platformCodex: "Codex",
-    platformCodexCap: "agents + skills",
+    platformCodexCap: "agents + skills + commands + MCP + hooks (バージョン依存)",
     platformOpenClaw: "OpenClaw",
-    platformOpenClawCap: "workspace + skills",
+    platformOpenClawCap: "workspace + skills + hooks + 宣言的ガバナンス",
     platformCursor: "Cursor",
-    platformCursorCap: "agents + skills",
+    platformCursorCap: "agents + skills + rules + MCP + preToolUse hooks",
     postInstallNotesLayerActivation: "3層メモリの有効化方法：",
     layer1Label: "第1層（Memory）",
     layer1Note: "自動有効 — Claude Code に組み込み済み",
@@ -1403,6 +1560,10 @@ ${r ? `生エラー：${r}` : ""}
     projectCleanupBatchHeading: (n) =>
       `${n} 個のプロジェクトディレクトリで冗長な Meta_Kim プロジェクトレベル資産を整理中`,
     projectCleanupSummary: "プロジェクトディレクトリ整理結果",
+    projectCleanupCliResult: (passed) =>
+      `Meta_Kim プロジェクト整理：${passed ? "完了" : "失敗"}`,
+    projectCleanupCliTargets: (targets) => `対象 runtime=${targets}`,
+    projectCleanupCliProjects: (count) => `処理済みプロジェクト数=${count}`,
     // ディレクトリ構造説明
     directoryExplanationHeading: "ディレクトリ構造",
     directoryExplanationIntro: "Meta_Kim は 2 つのレベルのディレクトリを作成：",
@@ -1441,29 +1602,33 @@ ${r ? `生エラー：${r}` : ""}
     depSummarySome: (ok, total) =>
       `${ok}/${total} の依存関係のみ検証 — --update で再インストールしてください`,
     syncHeading: "同期状態チェック",
-    syncClaudeAgents: (n) => `Claude Code エージェント: ${n}/${META_AGENTS.length} .md ファイル`,
+    syncClaudeAgents: (n, total) => `Claude Code エージェント: ${n}/${total} .md ファイル`,
     syncClaudeSkills: "Claude Code スキル/meta-theory/SKILL.md",
     syncClaudeHooks: (n) => `Claude Code フック: ${n} スクリプト`,
     syncClaudeProjectHooksMigrated:
       "Claude Code プロジェクト hooks はグローバルへ移行済みです。repo 内 .claude/hooks は不要です",
     syncClaudeSettings: "Claude Code .claude/settings.json",
     syncClaudeMcp: "Claude Code .mcp.json",
-    syncCodexAgents: (n, total = META_AGENTS.length) =>
+    syncCodexAgents: (n, total) =>
       `Codex エージェント: ${n}/${total} .toml ファイル`,
     syncCodexSkills: "Codex .agents/skills/meta-theory/SKILL.md",
     syncCodexSkillsGlobal:
       "Codex プロジェクトスキルミラー：.agents/skills/meta-theory/SKILL.md",
-    syncOpenclawWorkspaces: (n) =>
-      `OpenClaw ワークスペース: ${n}/${META_AGENTS.length} エージェント — 各フォルダに必須の .md 9 件（BOOT、SOUL など）`,
+    syncOpenclawWorkspaces: (n, total) =>
+      `OpenClaw ワークスペース: ${n}/${total} エージェント — 各フォルダに必須の .md 9 件（BOOT、SOUL など）`,
     syncOpenclawSkill: "OpenClaw 共有 meta-theory",
     syncSharedSkills: "共有スキル/meta-theory/SKILL.md",
-    syncCursorAgents: (n) => `Cursor エージェント: ${n}/${META_AGENTS.length} .md ファイル`,
+    syncCursorAgents: (n, total) => `Cursor エージェント: ${n}/${total} .md ファイル`,
     syncCursorSkills: "Cursor スキル/meta-theory/SKILL.md",
     syncCursorMcp: "Cursor .cursor/mcp.json",
     mcpRuntimeProjectOnly: (p) =>
       `${p} に meta-kim-runtime がありますが、この場所ではスクリプトパスを使用できません。この MCP は Meta_Kim ソースリポジトリ専用です。コピー先プロジェクトでは meta-kim-runtime ブロックを削除してください。Agents は .claude/.codex/.cursor/openclaw ファイルから引き続き読み込まれます。`,
     syncOk: "すべての同期ターゲット検証済み",
     syncMissing: (p) => `不足：${p}`,
+    syncGlobalOnlyHookPairOk: (runtime) =>
+      `${runtime} project Hook ペア：activator + project-root resolver`,
+    syncGlobalOnlyHookPairFailed: (runtime, detail) =>
+      `${runtime} project Hook ペアが不完全です：${detail}`,
     syncPartial: (label, got, need) => `${label}：実際 ${got}、必要 ${need}`,
     stepPythonTools: "オプション Python ツール",
     pythonNotFound: "Python 3.10+ が見つかりません — graphify をスキップ",
@@ -1518,6 +1683,8 @@ ${r ? `生エラー：${r}` : ""}
     graphifyHookInstalled:
       "graphify git hookインストール完了（commit/checkout時に自動再構築）",
     graphifyHookFailed: "graphify git hookインストール失敗（非ブロッキング）",
+    graphifyHooksRepaired: (n, project, backup) =>
+      `${project} の安全でない Graphify hook コマンドを ${n} 件修復しました（バックアップ：${backup}）`,
     projectAssetsCleanupAllClean:
       "全タイプ綺麗（agents/skills/commands/capability-index/hooks）：削除 0",
     graphifyProjectWiringSkipped:
@@ -1544,26 +1711,34 @@ ${r ? `生エラー：${r}` : ""}
     askMcpMemoryInstall:
       "Meta_Kim のクロスセッション記憶を有効にしますか？MCP Memory Service を使用し、未インストールならインストールして登録・バックグラウンド起動します。",
     mcpMemorySkipped: "MCP Memory Service をスキップしました",
+    mcpMemoryRequiresGlobalHooks:
+      "MCP Memory Service をスキップしました。共有ランタイム Hook を先に導入するため、--with-global-hooks を付けて再実行してください",
     mcpMemoryServerStartHint:
       "MCP Memory Service がインストールされました——HTTP サービスの起動方法：MCP_ALLOW_ANONYMOUS_ACCESS=true memory server --http",
-    mcpMemoryHookInstalling:
-      "Claude Code、Codex、Cursor、OpenClaw の MCP Memory フックをインストール中...",
+    mcpMemoryHookInstalling: (targets) =>
+      `${targets} の MCP Memory フックをインストール中...`,
     mcpMemoryHookInstalled: "MCP Memory ランタイムフックをインストールしました",
     mcpMemoryHookWarnings:
       "フックのインストール中に警告が発生しました（非ブロッキング）——子プロセスの stderr を以下に表示します:",
+    mcpMemoryEndpointSelected: (endpoint) => `MCP Memory エンドポイント: ${endpoint}`,
+    mcpMemoryEndpointInvalid: (reason) => `MCP Memory エンドポイント設定が無効です: ${reason}`,
+    mcpMemoryRemoteEndpointNoAutoStart: (endpoint) =>
+      `外部 MCP Memory エンドポイント ${endpoint} を使用します。ローカルプロセスと自動起動は設定しません。`,
     mcpMemoryAutoStarting:
       "MCP Memory Service（HTTP バックグラウンド）を起動中...",
-    mcpMemoryAutoStarted:
-      "MCP Memory Service が http://localhost:8000 で実行中",
+    mcpMemoryAutoStarted: (endpoint) =>
+      `MCP Memory Service が ${endpoint} で実行中`,
     mcpMemoryAutoStartUnverified:
       "MCP Memory Service プロセスは実行中です。インストールを続行します",
     mcpMemoryAutoStartFailed: "自動起動に失敗——手動で起動してください：",
     mcpMemoryAutoStartManual:
       "  MCP_ALLOW_ANONYMOUS_ACCESS=true memory server --http",
     mcpMemoryAutoStartBoot: "起動時自動開始を設定しました",
+    mcpMemoryAutoStartBootFailed:
+      "MCP Memory Service は正常ですが、起動時の自動開始を設定できませんでした",
     mcpMemoryAutoStartFailureTitle: "Meta_Kim MCP Memory Service",
-    mcpMemoryAutoStartFailureMessage:
-      "Meta_Kim MCP Memory Service の起動に失敗したか、http://127.0.0.1:8000 が healthy になりませんでした。クロスセッションメモリが利用できない可能性があります。手動で起動してください: MCP_ALLOW_ANONYMOUS_ACCESS=true memory server --http",
+    mcpMemoryAutoStartFailureMessage: (healthUrl) =>
+      `Meta_Kim MCP Memory Service の起動に失敗したか、${healthUrl} が healthy になりませんでした。クロスセッションメモリが利用できない可能性があります。手動で起動してください: MCP_ALLOW_ANONYMOUS_ACCESS=true memory server --http`,
     updateHeading: "アップデートモード",
     updateNpm: "npm依存関係を再インストール中...",
     updateSkills: "すべてのスキルを更新中...",
@@ -1655,6 +1830,15 @@ ${r ? `生エラー：${r}` : ""}
     progressValidate: "インストールを検証",
     // 確認文字列
     confirmStartInstall: "インストールを開始しますか？",
+    projectBootstrapConfirmationReasons: {
+      ready: "初期化 manifest とプロジェクト固有ファイルは最新で、書き込みは不要です。",
+      conflict: "既存ファイルが生成パスと重なり、所有権を確認できません。適用前に競合を解決してください。",
+      stale: "既存の初期化 manifest は異なる Meta_Kim バージョンを使用しています。",
+      target_scope_changed: "選択した runtime 対象が前回の初期化 manifest と異なります。",
+      missing: "必要な project context、config、state、または確認済み override が不足しています。",
+      repair_required: "初期化バージョンは最新ですが、管理対象ファイルの修復、merge、または再作成が必要です。",
+      ready_with_existing_config: "既存 config には確認済み初期化 state または保留変更が必要です。",
+    },
     footprintTitle: "インストール足跡（前回の記録）",
     footprintFirstInstall:
       "このマシンでの初回インストール — 前回の足跡はありません。",
@@ -1689,46 +1873,44 @@ ${r ? `生エラー：${r}` : ""}
     warnSkillsInstallFailed: `
 ⚠ グローバルスキルインストール失敗
 
-考えられる原因：
-1. ディレクトリがロックされています（EBUSY）→ エクスプローラー/IDE を閉じ、ウイルス対策/インデックス完了を待ってから再試行
-2. ネットワークエラー → node setup.mjs --prompt-proxy でプロキシ設定を確認
-3. リポジトリが見つかりません → スキルリポジトリの URL が正しいか確認
+主な原因：上に表示された最初の正確なエラーを基準にしてください。ログに該当する状態が明示されている場合に限り、次の対処を行ってください：
+1. ログに EBUSY または「resource busy」がある場合 → スキルフォルダを開いているエクスプローラー/IDE を閉じ、ウイルス対策/インデックス処理の完了を待つ。パスの解放後は、Meta_Kim が今回の失敗ログで明示した一時パスだけを処理候補とし、選択中ランタイムの skills/plugins ルート内にあり、ユーザー所有データではないことを先に確認する。ワイルドカードで一時ディレクトリを削除しないでください
+2. ログにネットワークエラーまたは Git fetch 失敗がある場合 → 接続を確認し、node setup.mjs --prompt-proxy でプロキシ設定を確認
+3. ログにリポジトリ未検出がある場合 → スキルリポジトリの URL が正しいか確認
 
-修正：node setup.mjs --update
-ヒント：EBUSY の場合、スキルフォルダを使用しているプログラムを閉じてから、*.staged-* の一時ディレクトリを手動で削除してください。
+次の手順：最初の正確なエラーを修正してから再試行：node setup.mjs --update
 `,
     warnMetaTheorySyncFailed: `
 ⚠ meta-theory 同期失敗
 
-考えられる原因：
-1. ディレクトリがロックされています → ~/.claude/skills/ を使用しているプログラムを閉じる
-2. 権限が拒否されました → グローバルスキルディレクトリの書き込み権限を確認
-3. ネットワークエラー → プロキシ設定を確認
+主な原因：上に表示された最初の正確なエラーを基準にしてください。ログに該当する状態が明示されている場合に限り、次の対処を行ってください：
+1. ログに EBUSY またはディレクトリのロックがある場合 → 選択中ランタイムの Meta_Kim skills/plugins ディレクトリを使用しているプログラムを閉じる
+2. ログに権限拒否がある場合 → その選択中ランタイムディレクトリの書き込み権限を確認
+3. ログにネットワークエラーがある場合 → 接続とプロキシ設定を確認
 
-修正：node scripts/sync-global-meta-theory.mjs --targets claude
+次の手順：最初の正確なエラーを修正してから選択中ランタイムを再試行：node setup.mjs --update
 `,
     warnSkillsUpdateFailed: `
 ⚠ グローバルスキル更新失敗
 
-考えられる原因：
-1. ディレクトリがロックされています（EBUSY）→ エクスプローラー/IDE を閉じ、ウイルス対策/インデックス完了を待ってから再試行
-2. Git fetch に失敗しました → ネットワーク/プロキシ接続を確認
-3. 競合 → ステージされたファイルを確認し、手動で解決
+主な原因：上に表示された最初の正確なエラーを基準にしてください。ログに該当する状態が明示されている場合に限り、次の対処を行ってください：
+1. ログに EBUSY または「resource busy」がある場合 → スキルフォルダを開いているエクスプローラー/IDE を閉じ、ウイルス対策/インデックス処理の完了を待つ。パスの解放後は、Meta_Kim が今回の失敗ログで明示した一時パスだけを処理候補とし、選択中ランタイムの skills/plugins ルート内にあり、ユーザー所有データではないことを先に確認する。ワイルドカードで一時ディレクトリを削除しないでください
+2. ログに Git fetch 失敗またはネットワークエラーがある場合 → 接続とプロキシ設定を確認
+3. ログにファイル競合がある場合 → ステージされたファイルを確認し、競合を手動で解決
 
-ヒント：EBUSY の場合、スキルフォルダを使用しているプログラムを閉じてから、*.staged-* の一時ディレクトリを手動で削除してください。
-修正：node setup.mjs --update
+次の手順：最初の正確なエラーを修正してから再試行：node setup.mjs --update
 `,
     warnSkillsUpdateFailedHint:
-      "ログに EBUSY 等がある場合: スキルフォルダを開いているエクスプローラー/IDE を閉じ、ウイルス対策/インデックス完了を待って再実行。*.staged-* は解放後に手動削除可。",
+      "ログに EBUSY 等がある場合: スキルフォルダを開いているエクスプローラー/IDE を閉じ、ウイルス対策/インデックス完了を待つ。Meta_Kim が今回の失敗ログで明示した一時パスが選択中ランタイムの skills/plugins ルート内にあり、ユーザー所有データではないと確認できた場合に限り、その正確なパスだけを処理候補とする。ワイルドカードで削除しないでください。",
     warnMetaTheoryUpdateFailed: `
 ⚠ meta-theory 同期失敗
 
-考えられる原因：
-1. ディレクトリがロックされています → ~/.claude/skills/ を使用しているプログラムを閉じる
-2. 権限が拒否されました → グローバルスキルディレクトリの書き込み権限を確認
-3. ネットワークエラー → プロキシ設定を確認
+主な原因：上に表示された最初の正確なエラーを基準にしてください。ログに該当する状態が明示されている場合に限り、次の対処を行ってください：
+1. ログに EBUSY またはディレクトリのロックがある場合 → 選択中ランタイムの Meta_Kim skills/plugins ディレクトリを使用しているプログラムを閉じる
+2. ログに権限拒否がある場合 → その選択中ランタイムディレクトリの書き込み権限を確認
+3. ログにネットワークエラーがある場合 → 接続とプロキシ設定を確認
 
-修正：node scripts/sync-global-meta-theory.mjs --targets claude
+次の手順：最初の正確なエラーを修正してから選択中ランタイムを再試行：node setup.mjs --update
 `,
     warnManifestLoadFail: (msg) => `スキルマニフェストの読み込みに失敗：${msg}`,
     labelOptional: "（オプション）",
@@ -1794,6 +1976,14 @@ ${r ? `生エラー：${r}` : ""}
     projectDeployAsk: "プロジェクトディレクトリ更新",
     projectDeployProtectionNote:
       "既存のローカル settings、MCP、hook 設定は保持してマージします。選択したディレクトリだけを更新します。",
+    globalManagedProjectRefreshInfo: (n) =>
+      `管理済みプロジェクトを ${n} 件検出しました。今回はグローバル環境と既存プロジェクトを、各プロジェクトに保存されたランタイム対象でマージ／差分更新します。新しいプロジェクト投影は作成せず、プロジェクトに定着した機能やユーザーファイルを上書きしません。`,
+    managedProjectRejectedHeading: (n) => `${n} 件の既存プロジェクト対象を更新できませんでした：`,
+    managedProjectRejectedDetail: (source, reason) => `参照元：${source}。理由：${reason}。`,
+    managedProjectRejectedRepair: "表示された保存済み／registry 対象を修復または削除するか、project bootstrap を明示的に実行して有効な manifest を再作成してから再試行してください。",
+    managedProjectRejectedStep: "明示された既存プロジェクト対象を検証",
+    managedProjectRejectedSources: { explicit_project_dirs: "明示的な --project-dir", saved_project_dirs: "保存済みプロジェクト一覧", project_registry: "ユーザーレベル project registry", current_working_directory: "現在の作業ディレクトリ" },
+    managedProjectRejectedReasons: { target_missing: "ディレクトリが存在しません", unsafe_project_root: "プロジェクトルートが安全な実ディレクトリではありません", unsafe_manifest_path: "manifest パスが symlink または Junction を経由しています", manifest_missing_or_invalid: "管理対象プロジェクトの manifest がないか無効です", invalid_active_targets: "保存済みランタイム対象が空か未対応です" },
     projectDeployInteractiveHint:
       "プロジェクトリストを一度保存すると、以後の更新で保存済みプロジェクトをまとめて更新できます。",
     projectDeployPathEntryHint:
@@ -1831,6 +2021,8 @@ ${r ? `生エラー：${r}` : ""}
       `${n} 件のプロジェクトディレクトリでプロジェクト用ランタイムファイルを更新中`,
     projectDeploySummary: "プロジェクトディレクトリ更新結果",
     projectDeployStatusOk: "更新済み",
+    projectDeployStatusPartial: "一部完了 — 再試行が必要です",
+    projectDeployStatusBlocked: "ブロック — パスの安全性を修正して再試行してください",
     projectDeployStatusFailed: "失敗",
     projectDeployFailed: (dir, msg) => `${dir} の更新に失敗しました：${msg}`,
     projectDeployMoreTargets: (n) =>
@@ -1846,6 +2038,9 @@ ${r ? `生エラー：${r}` : ""}
     modeUpdate: "업데이트",
     modeSilent: "자동",
     modeInteractive: "대화형",
+    checkOverallFailed: "프로젝트 runtime 동기화 확인에 실패했습니다.",
+    checkRepairCommand:
+      "복구: `npm run meta:sync`를 실행한 뒤 다시 확인하세요.",
     preflightHeading: "환경 확인",
     nodeOld: (v) =>
       `Node.js v${v} 버전이 너무 낮습니다. >=${MIN_NODE_VERSION} 필요`,
@@ -1871,6 +2066,14 @@ ${r ? `生エラー：${r}` : ""}
     noRuntimeHint1:
       "Meta_Kim은 Claude Code, Codex, OpenClaw 또는 Cursor에서 작동합니다.",
     noRuntimeHint2: "최소 하나를 설치하세요: {claudeCodeDocs}",
+    selectedRuntimeCapabilityHeading: "선택한 runtime 기능 요약:",
+    selectedRuntimeCapabilities: {
+      codex: "Codex: agents, skills, commands, MCP 및 버전 의존 project/global hooks",
+      cursor: "Cursor: agents, skills, rules, MCP 및 공식 preToolUse hooks",
+      openclaw: "OpenClaw: workspaces, skills, hooks 및 선언적 governance; 도구 차단은 typed plugin adapter가 필요",
+    },
+    selectedRuntimeCapabilityBoundary:
+      "runtime별로 기능이 다릅니다. 본 보고서는 실제로 선택하고 동기화한 기능만 표시합니다.",
     continueAnyway: "설정을 계속 진행할까요?",
     setupCancelled:
       "설정이 취소되었습니다. AI 코딩 도구를 설치하고 다시 실행하세요.",
@@ -1953,11 +2156,11 @@ ${r ? `원본 오류：${r}` : ""}
     platformClaudeCode: "Claude Code",
     platformClaudeCodeCap: "agents + skills + hooks",
     platformCodex: "Codex",
-    platformCodexCap: "agents + skills",
+    platformCodexCap: "agents + skills + commands + MCP + hooks (버전 의존)",
     platformOpenClaw: "OpenClaw",
-    platformOpenClawCap: "workspace + skills",
+    platformOpenClawCap: "workspace + skills + hooks + 선언적 governance",
     platformCursor: "Cursor",
-    platformCursorCap: "agents + skills",
+    platformCursorCap: "agents + skills + rules + MCP + preToolUse hooks",
     postInstallNotesLayerActivation: "3층 메모리 활성화 방식:",
     layer1Label: "제1층 (Memory)",
     layer1Note: "자동 활성화 — Claude Code에 내장됨",
@@ -2032,6 +2235,10 @@ ${r ? `원본 오류：${r}` : ""}
     projectCleanupBatchHeading: (n) =>
       `${n}개 프로젝트 디렉터리의 중복 Meta_Kim 프로젝트 레벨 자산 정리 중`,
     projectCleanupSummary: "프로젝트 디렉터리 정리 결과",
+    projectCleanupCliResult: (passed) =>
+      `Meta_Kim 프로젝트 정리: ${passed ? "완료" : "실패"}`,
+    projectCleanupCliTargets: (targets) => `대상 runtime=${targets}`,
+    projectCleanupCliProjects: (count) => `처리한 프로젝트 수=${count}`,
     // 디렉토리 구조 설명
     directoryExplanationHeading: "디렉토리 구조",
     directoryExplanationIntro: "Meta_Kim 은 두 레벨의 디렉토리 생성：",
@@ -2069,29 +2276,33 @@ ${r ? `원본 오류：${r}` : ""}
     depSummarySome: (ok, total) =>
       `${ok}/${total}개 의존성만 확인 — --update로 재설치하세요`,
     syncHeading: "동기화 상태 확인",
-    syncClaudeAgents: (n) => `Claude Code 에이전트: ${n}/${META_AGENTS.length} .md 파일`,
+    syncClaudeAgents: (n, total) => `Claude Code 에이전트: ${n}/${total} .md 파일`,
     syncClaudeSkills: "Claude Code 스킬/meta-theory/SKILL.md",
     syncClaudeHooks: (n) => `Claude Code 훅: ${n} 스크립트`,
     syncClaudeProjectHooksMigrated:
       "Claude Code 프로젝트 hooks는 전역 hooks로 이전되었습니다. repo-local .claude/hooks는 필요하지 않습니다",
     syncClaudeSettings: "Claude Code .claude/settings.json",
     syncClaudeMcp: "Claude Code .mcp.json",
-    syncCodexAgents: (n, total = META_AGENTS.length) =>
+    syncCodexAgents: (n, total) =>
       `Codex 에이전트: ${n}/${total} .toml 파일`,
     syncCodexSkills: "Codex .agents/skills/meta-theory/SKILL.md",
     syncCodexSkillsGlobal:
       "Codex 프로젝트 스킬 미러: .agents/skills/meta-theory/SKILL.md",
-    syncOpenclawWorkspaces: (n) =>
-      `OpenClaw 워크스페이스: ${n}/${META_AGENTS.length} 에이전트 — 각 폴더에 필수 .md 9개(BOOT, SOUL 등)`,
+    syncOpenclawWorkspaces: (n, total) =>
+      `OpenClaw 워크스페이스: ${n}/${total} 에이전트 — 각 폴더에 필수 .md 9개(BOOT, SOUL 등)`,
     syncOpenclawSkill: "OpenClaw 공유 meta-theory",
     syncSharedSkills: "공유 스킬/meta-theory/SKILL.md",
-    syncCursorAgents: (n) => `Cursor 에이전트: ${n}/${META_AGENTS.length} .md 파일`,
+    syncCursorAgents: (n, total) => `Cursor 에이전트: ${n}/${total} .md 파일`,
     syncCursorSkills: "Cursor 스킬/meta-theory/SKILL.md",
     syncCursorMcp: "Cursor .cursor/mcp.json",
     mcpRuntimeProjectOnly: (p) =>
       `${p}에 meta-kim-runtime이 있지만 이 위치에서는 스크립트 경로를 사용할 수 없습니다. 이 MCP는 Meta_Kim 소스 저장소 전용입니다. 복사한 일반 프로젝트에서는 meta-kim-runtime 블록을 삭제하세요. Agents는 계속 .claude/.codex/.cursor/openclaw 파일에서 로드됩니다.`,
     syncOk: "모든 동기화 대상 확인 완료",
     syncMissing: (p) => `누락: ${p}`,
+    syncGlobalOnlyHookPairOk: (runtime) =>
+      `${runtime} 프로젝트 Hook 쌍: activator + project-root resolver`,
+    syncGlobalOnlyHookPairFailed: (runtime, detail) =>
+      `${runtime} 프로젝트 Hook 쌍이 불완전합니다: ${detail}`,
     syncPartial: (label, got, need) => `${label}: 실제 ${got}, 필요 ${need}`,
     stepPythonTools: "선택적 Python 도구",
     pythonNotFound: "Python 3.10+ 없음 — graphify 건너뜀",
@@ -2146,6 +2357,8 @@ ${r ? `원본 오류：${r}` : ""}
     graphifyHookInstalled:
       "graphify git hook 설치 완료 (commit/checkout 시 자동 재구축)",
     graphifyHookFailed: "graphify git hook 설치 실패 (비차단)",
+    graphifyHooksRepaired: (n, project, backup) =>
+      `${project}의 안전하지 않은 Graphify hook 명령 ${n}개를 복구했습니다 (백업: ${backup})`,
     projectAssetsCleanupAllClean:
       "모든 타입 정리됨 (agents/skills/commands/capability-index/hooks): 삭제 0",
     graphifyProjectWiringSkipped:
@@ -2167,25 +2380,33 @@ ${r ? `원본 오류：${r}` : ""}
     askMcpMemoryInstall:
       "Meta_Kim 크로스세션 메모리를 활성화할까요? MCP Memory Service 를 사용하며, 없으면 설치하고 등록한 뒤 백그라운드로 시작합니다.",
     mcpMemorySkipped: "MCP Memory Service 건너뜀",
+    mcpMemoryRequiresGlobalHooks:
+      "MCP Memory Service 건너뜀: 공유 런타임 Hook을 먼저 설치하도록 --with-global-hooks로 다시 실행하세요",
     mcpMemoryServerStartHint:
       "MCP Memory Service 설치 완료——HTTP 서비스 시작 방법: MCP_ALLOW_ANONYMOUS_ACCESS=true memory server --http",
-    mcpMemoryHookInstalling:
-      "Claude Code, Codex, Cursor, OpenClaw용 MCP Memory 훅 설치 중...",
+    mcpMemoryHookInstalling: (targets) =>
+      `${targets}용 MCP Memory 훅 설치 중...`,
     mcpMemoryHookInstalled: "MCP Memory 런타임 훅 설치 완료",
     mcpMemoryHookWarnings:
       "훅 설치에서 경고가 발생했습니다 (비차단) — 하위 프로세스의 stderr 원문은 아래와 같습니다:",
+    mcpMemoryEndpointSelected: (endpoint) => `MCP Memory 엔드포인트: ${endpoint}`,
+    mcpMemoryEndpointInvalid: (reason) => `MCP Memory 엔드포인트 설정이 잘못되었습니다: ${reason}`,
+    mcpMemoryRemoteEndpointNoAutoStart: (endpoint) =>
+      `외부 MCP Memory 엔드포인트 ${endpoint}를 사용합니다. 로컬 프로세스와 부팅 자동 시작은 설정하지 않았습니다.`,
     mcpMemoryAutoStarting: "MCP Memory Service (HTTP 백그라운드) 시작 중...",
-    mcpMemoryAutoStarted:
-      "MCP Memory Service가 http://localhost:8000에서 실행 중",
+    mcpMemoryAutoStarted: (endpoint) =>
+      `MCP Memory Service가 ${endpoint}에서 실행 중`,
     mcpMemoryAutoStartUnverified:
       "MCP Memory Service 프로세스가 실행 중이므로 설치를 계속합니다",
     mcpMemoryAutoStartFailed: "자동 시작 실패 — 수동으로 시작하세요:",
     mcpMemoryAutoStartManual:
       "  MCP_ALLOW_ANONYMOUS_ACCESS=true memory server --http",
     mcpMemoryAutoStartBoot: "부팅 시 자동 시작 구성 완료",
+    mcpMemoryAutoStartBootFailed:
+      "MCP Memory Service는 정상 상태이지만 부팅 시 자동 시작을 구성하지 못했습니다",
     mcpMemoryAutoStartFailureTitle: "Meta_Kim MCP Memory Service",
-    mcpMemoryAutoStartFailureMessage:
-      "Meta_Kim MCP Memory Service를 시작하지 못했거나 http://127.0.0.1:8000 이 healthy 상태가 되지 않았습니다. 세션 간 메모리를 사용할 수 없을 수 있습니다. 수동으로 시작하세요: MCP_ALLOW_ANONYMOUS_ACCESS=true memory server --http",
+    mcpMemoryAutoStartFailureMessage: (healthUrl) =>
+      `Meta_Kim MCP Memory Service를 시작하지 못했거나 ${healthUrl}이 healthy 상태가 되지 않았습니다. 세션 간 메모리를 사용할 수 없을 수 있습니다. 수동으로 시작하세요: MCP_ALLOW_ANONYMOUS_ACCESS=true memory server --http`,
     updateHeading: "업데이트 모드",
     updateNpm: "npm 의존성 재설치 중...",
     updateSkills: "모든 스킬 업데이트 중...",
@@ -2274,6 +2495,15 @@ ${r ? `원본 오류：${r}` : ""}
     progressValidate: "설치 검증",
     // 확인 문자열
     confirmStartInstall: "설치를 시작할까요?",
+    projectBootstrapConfirmationReasons: {
+      ready: "초기화 manifest와 프로젝트 전용 파일이 최신이므로 쓰기가 필요하지 않습니다.",
+      conflict: "기존 파일이 생성 경로와 겹치지만 소유권이 확인되지 않았습니다. 적용 전에 충돌을 해결하세요.",
+      stale: "기존 초기화 manifest가 다른 Meta_Kim 버전을 사용합니다.",
+      target_scope_changed: "선택한 runtime 대상이 이전 초기화 manifest와 다릅니다.",
+      missing: "필수 프로젝트 context, config, state 또는 확인된 override가 없습니다.",
+      repair_required: "초기화 버전은 최신이지만 관리 파일의 복구, 병합 또는 재생성이 필요합니다.",
+      ready_with_existing_config: "기존 config에는 확인된 초기화 state 또는 대기 변경이 필요합니다.",
+    },
     footprintTitle: "설치 발자국 (이전 설치 기록)",
     footprintFirstInstall: "이 머신에서 첫 설치 — 이전 발자국이 없습니다.",
     footprintRefreshNote: "설치 실행 시 위 항목들이 갱신됩니다.",
@@ -2307,46 +2537,44 @@ ${r ? `원본 오류：${r}` : ""}
     warnSkillsInstallFailed: `
 ⚠ 전역 스킬 설치 실패
 
-가능한 원인：
-1. 디렉토리가 잠겨 있습니다（EBUSY）→ 탐색기/IDE를 닫고, 백신/인덱싱이 끝난 뒤 재시도
-2. 네트워크 오류 → node setup.mjs --prompt-proxy 로 프록시 설정 확인
-3. 리포지토리를 찾을 수 없음 → 스킬 리포지토리 URL이 올바른지 확인
+주요 원인: 위에 표시된 첫 번째 정확한 오류를 기준으로 판단하세요. 로그에 해당 상태가 명시된 경우에만 아래 해결 방법을 적용하세요:
+1. 로그에 EBUSY 또는 "resource busy"가 있으면 → skills 폴더를 열어 둔 탐색기/IDE를 닫고 백신/인덱싱이 끝날 때까지 기다리세요. 경로가 해제된 뒤에는 Meta_Kim이 이번 실패 로그에서 명시한 정확한 임시 경로만 처리 대상으로 삼고, 선택한 런타임의 skills/plugins 루트 안에 있으며 사용자 소유 데이터가 아닌지 먼저 확인하세요. 와일드카드로 임시 폴더를 삭제하지 마세요
+2. 로그에 네트워크 오류 또는 Git fetch 실패가 있으면 → 연결을 확인하고 node setup.mjs --prompt-proxy 로 프록시 설정을 점검하세요
+3. 로그에 리포지토리를 찾을 수 없다고 나오면 → 스킬 리포지토리 URL이 올바른지 확인하세요
 
-수정：node setup.mjs --update
-힌트：EBUSY인 경우 skills 폴더를 사용하는 프로그램을 닫은 후 *.staged-* 임시 폴더를 수동으로 삭제하세요.
+다음 단계: 첫 번째 정확한 오류를 먼저 해결한 뒤 다시 실행하세요: node setup.mjs --update
 `,
     warnMetaTheorySyncFailed: `
 ⚠ meta-theory 동기화 실패
 
-가능한 원인：
-1. 디렉토리가 잠겨 있습니다 → ~/.claude/skills/ 를 사용하는 프로그램 닫기
-2. 권한 거부 → 전역 스킬 디렉토리의 쓰기 권한 확인
-3. 네트워크 오류 → 프록시 설정 확인
+주요 원인: 위에 표시된 첫 번째 정확한 오류를 기준으로 판단하세요. 로그에 해당 상태가 명시된 경우에만 아래 해결 방법을 적용하세요:
+1. 로그에 EBUSY 또는 디렉토리 잠금이 있으면 → 선택한 런타임의 Meta_Kim skills/plugins 디렉토리를 사용하는 프로그램을 닫으세요
+2. 로그에 권한 거부가 있으면 → 해당 런타임 디렉토리의 쓰기 권한을 확인하세요
+3. 로그에 네트워크 오류가 있으면 → 연결과 프록시 설정을 확인하세요
 
-수정：node scripts/sync-global-meta-theory.mjs --targets claude
+다음 단계: 첫 번째 정확한 오류를 먼저 해결한 뒤 선택한 런타임을 다시 실행하세요: node setup.mjs --update
 `,
     warnSkillsUpdateFailed: `
 ⚠ 전역 스킬 업데이트 실패
 
-가능한 원인：
-1. 디렉토리가 잠겨 있습니다（EBUSY）→ 탐색기/IDE를 닫고, 백신/인덱싱이 끝난 뒤 재시도
-2. Git fetch 실패 → 네트워크/프록시 연결 확인
-3. 충돌 → 스테이지된 파일을 확인하고 수동으로 해결
+주요 원인: 위에 표시된 첫 번째 정확한 오류를 기준으로 판단하세요. 로그에 해당 상태가 명시된 경우에만 아래 해결 방법을 적용하세요:
+1. 로그에 EBUSY 또는 "resource busy"가 있으면 → skills 폴더를 열어 둔 탐색기/IDE를 닫고 백신/인덱싱이 끝날 때까지 기다리세요. 경로가 해제된 뒤에는 Meta_Kim이 이번 실패 로그에서 명시한 정확한 임시 경로만 처리 대상으로 삼고, 선택한 런타임의 skills/plugins 루트 안에 있으며 사용자 소유 데이터가 아닌지 먼저 확인하세요. 와일드카드로 임시 폴더를 삭제하지 마세요
+2. 로그에 Git fetch 실패 또는 네트워크 오류가 있으면 → 연결과 프록시 설정을 확인하세요
+3. 로그에 파일 충돌이 있으면 → 스테이징된 파일을 확인하고 충돌을 수동으로 해결하세요
 
-힌트：EBUSY인 경우 skills 폴더를 사용하는 프로그램을 닫은 후 *.staged-* 임시 폴더를 수동으로 삭제하세요.
-수정：node setup.mjs --update
+다음 단계: 첫 번째 정확한 오류를 먼저 해결한 뒤 다시 실행하세요: node setup.mjs --update
 `,
     warnSkillsUpdateFailedHint:
-      "로그에 EBUSY 등이 있으면: 탐색기/IDE로 skills 폴더를 닫고, 후원/인덱싱이 끝난 뒤 재시도. 잠금 해제 후 *.staged-* 폴더는 수동 삭제 가능.",
+      "로그에 EBUSY 등이 있으면: skills 폴더를 연 탐색기/IDE를 닫고 백신/인덱싱이 끝날 때까지 기다리세요. Meta_Kim이 이번 실패 로그에서 명시한 임시 경로가 선택한 런타임의 skills/plugins 루트 안에 있고 사용자 소유 데이터가 아니라고 확인한 경우에만 그 정확한 경로를 처리 대상으로 삼으세요. 와일드카드로 삭제하지 마세요.",
     warnMetaTheoryUpdateFailed: `
 ⚠ meta-theory 동기화 실패
 
-가능한 원인：
-1. 디렉토리가 잠겨 있습니다 → ~/.claude/skills/ 를 사용하는 프로그램 닫기
-2. 권한 거부 → 전역 스킬 디렉토리의 쓰기 권한 확인
-3. 네트워크 오류 → 프록시 설정 확인
+주요 원인: 위에 표시된 첫 번째 정확한 오류를 기준으로 판단하세요. 로그에 해당 상태가 명시된 경우에만 아래 해결 방법을 적용하세요:
+1. 로그에 EBUSY 또는 디렉토리 잠금이 있으면 → 선택한 런타임의 Meta_Kim skills/plugins 디렉토리를 사용하는 프로그램을 닫으세요
+2. 로그에 권한 거부가 있으면 → 해당 런타임 디렉토리의 쓰기 권한을 확인하세요
+3. 로그에 네트워크 오류가 있으면 → 연결과 프록시 설정을 확인하세요
 
-수정：node scripts/sync-global-meta-theory.mjs --targets claude
+다음 단계: 첫 번째 정확한 오류를 먼저 해결한 뒤 선택한 런타임을 다시 실행하세요: node setup.mjs --update
 `,
     warnManifestLoadFail: (msg) => `스킬 매니페스트 로드 실패：${msg}`,
     labelOptional: "(선택)",
@@ -2410,6 +2638,14 @@ ${r ? `원본 오류：${r}` : ""}
     projectDeployAsk: "프로젝트 디렉터리 업데이트",
     projectDeployProtectionNote:
       "기존 로컬 settings, MCP, hook 구성은 보존하고 병합합니다. 선택한 디렉터리만 업데이트합니다.",
+    globalManagedProjectRefreshInfo: (n) =>
+      `관리 중인 프로젝트 ${n}개를 감지했습니다. 이번 업데이트는 각 프로젝트에 저장된 런타임 대상을 사용해 전역 설치와 기존 프로젝트를 병합/증분 방식으로 새로 고칩니다. 새 프로젝트 투영을 만들지 않으며 프로젝트에 정착된 기능이나 사용자 파일을 덮어쓰지 않습니다.`,
+    managedProjectRejectedHeading: (n) => `기존 프로젝트 대상 ${n}개를 새로 고치지 못했습니다:`,
+    managedProjectRejectedDetail: (source, reason) => `출처: ${source}. 이유: ${reason}.`,
+    managedProjectRejectedRepair: "표시된 저장/registry 대상을 수정하거나 제거하거나, project bootstrap을 명시적으로 실행해 유효한 manifest를 다시 만든 뒤 재시도하세요.",
+    managedProjectRejectedStep: "명시된 기존 프로젝트 대상 검증",
+    managedProjectRejectedSources: { explicit_project_dirs: "명시적 --project-dir", saved_project_dirs: "저장된 프로젝트 목록", project_registry: "사용자 수준 project registry", current_working_directory: "현재 작업 디렉터리" },
+    managedProjectRejectedReasons: { target_missing: "디렉터리가 없습니다", unsafe_project_root: "프로젝트 루트가 안전한 실제 디렉터리가 아닙니다", unsafe_manifest_path: "manifest 경로가 symlink 또는 Junction을 통과합니다", manifest_missing_or_invalid: "관리 프로젝트 manifest가 없거나 유효하지 않습니다", invalid_active_targets: "저장된 런타임 대상이 비어 있거나 지원되지 않습니다" },
     projectDeployInteractiveHint:
       "프로젝트 목록을 한 번 저장하면 이후 업데이트에서 저장된 모든 프로젝트를 함께 업데이트할 수 있습니다.",
     projectDeployPathEntryHint:
@@ -2447,6 +2683,8 @@ ${r ? `원본 오류：${r}` : ""}
       `프로젝트 디렉터리 ${n}개의 프로젝트용 런타임 파일 업데이트 중`,
     projectDeploySummary: "프로젝트 디렉터리 업데이트 결과",
     projectDeployStatusOk: "업데이트됨",
+    projectDeployStatusPartial: "일부 완료 — 재시도가 필요합니다",
+    projectDeployStatusBlocked: "차단됨 — 경로 안전 문제를 수정한 뒤 재시도하세요",
     projectDeployStatusFailed: "실패",
     projectDeployFailed: (dir, msg) => `${dir} 업데이트 실패: ${msg}`,
     projectDeployMoreTargets: (n) =>

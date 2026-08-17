@@ -4,8 +4,16 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { OS_TARGETS, RUNTIMES, exists, listFiles, readJson, repoPath, stateDir, toPosix, writeJson } from "./governance-lib.mjs";
+import { getProfilePaths, toRepoRelative } from "./meta-kim-local-state.mjs";
+import {
+  claimIsExecutable,
+  runtimeCapabilityNameForTool,
+  runtimeRouteEligibility,
+  runtimeSupportForCapability,
+} from "./runtime-capability-claims.mjs";
 
 const outputPath = path.join(stateDir, "capability-inventory.json");
+const profileStatePath = toRepoRelative(getProfilePaths().profileDir);
 
 function defaultSupport(runtime = "partial", os = "partial") {
   return {
@@ -24,6 +32,35 @@ function supportForOs(osName, support = "native", fallback = "unknown") {
   return Object.fromEntries(
     OS_TARGETS.map((name) => [name, name === osName ? support : fallback])
   );
+}
+
+function matrixCapabilityForRecord(record) {
+  if (record.type === "agent") return "agent";
+  if (record.type === "skill") return "skill";
+  if (record.type === "hook") return "hook";
+  if (record.type === "command") return "command";
+  if (["mcp_config", "mcp_server"].includes(record.type)) return "MCP";
+  if (record.type === "runtime_tool") return runtimeCapabilityNameForTool(record.id);
+  return null;
+}
+
+function applyRuntimeClaimBoundary(record, runtimeMatrix) {
+  const matrixCapability = matrixCapabilityForRecord(record);
+  if (!record.runtime || !matrixCapability) return record;
+  const resolvedRoute = runtimeRouteEligibility(
+    runtimeMatrix,
+    matrixCapability,
+    record.runtime,
+  );
+  return {
+    ...record,
+    runtimeSupport: runtimeSupportForCapability(runtimeMatrix, matrixCapability),
+    routeEligibility:
+      record.routeEligibility === "callable" && resolvedRoute === "callable"
+        ? "callable"
+        : "reference",
+    runtimeClaimMode: "interactive_host",
+  };
 }
 
 const PROVIDER_TYPE_BY_TYPE = {
@@ -97,6 +134,17 @@ function homeRelativePath(filePath) {
     return `~/${toPosix(relativeToHome)}`;
   }
   return toPosix(filePath);
+}
+
+function cachedGlobalSourcePath(entry, fallback) {
+  const sourceRef = toPosix(String(entry?.sourceRef ?? "").trim());
+  if (
+    /^~\/(?:[A-Za-z0-9._-]+)(?:\/[A-Za-z0-9._-]+)*$/u.test(sourceRef) &&
+    sourceRef.split("/").every((segment) => ![".", ".."].includes(segment))
+  ) {
+    return sourceRef;
+  }
+  return homeRelativePath(entry?.path) ?? fallback;
 }
 
 async function readJsonIfExists(relativePath) {
@@ -285,7 +333,7 @@ async function globalRuntimeCapabilities(projectProjectionMode) {
   if (projectProjectionMode !== "global_only") return [];
 
   const inventory = await readJsonIfExists(
-    ".meta-kim/state/default/capability-index/global-capabilities.json",
+    `${profileStatePath}/capability-index/global-capabilities.json`,
   );
   const byPlatform = inventory?.byPlatform;
   if (!byPlatform || typeof byPlatform !== "object") return [];
@@ -302,9 +350,10 @@ async function globalRuntimeCapabilities(projectProjectionMode) {
         if (capabilityType !== "agents") {
           continue;
         }
-        const sourcePath =
-          homeRelativePath(entry?.path) ??
-          `global:${platformId}:${capabilityType}:${entry?.id ?? "unknown"}`;
+        const sourcePath = cachedGlobalSourcePath(
+          entry,
+          `global:${platformId}:${capabilityType}:${entry?.id ?? "unknown"}`,
+        );
         const id = `global:${platformId}:${capabilityType}:${entry?.id ?? path.basename(sourcePath)}`;
         records.push({
           id,
@@ -369,9 +418,9 @@ async function configAndStateCapabilities() {
     ...(await fileCapabilities("config/contracts", "config", ["meta-prism"], { match: (file) => file.endsWith(".json") || file.endsWith(".md"), mustPreserve: true, routeEligibility: "reference", verificationMethod: "npm run meta:validate" })),
     ...(await fileRecordIfExists("canonical/runtime-assets/shared/hooks/meta-kim-memory-save.mjs", { id: "canonical-memory-save-hook", type: "memory", providerType: "memory", ownerCandidates: ["meta-librarian", "meta-sentinel"], routeEligibility: "reference", verificationMethod: "npm run meta:check:global:release" })),
     ...(await fileRecordIfExists("canonical/runtime-assets/claude/hooks/stop-memory-save.mjs", { id: "canonical-stop-memory-save-hook", type: "memory", providerType: "memory", ownerCandidates: ["meta-librarian", "meta-sentinel"], routeEligibility: "reference", verificationMethod: "npm run meta:check:global:release" })),
-    ...(await fileRecordIfExists(".meta-kim/state/default/capability-index/global-capabilities.json", { id: "cached-global-capability-inventory", type: "external", providerType: "external", ownerCandidates: ["meta-librarian", "meta-artisan"], routeEligibility: "reference", verificationMethod: "npm run discover:global" })),
-    ...(await fileRecordIfExists(".meta-kim/state/default/capability-inventory.json", { id: "local-capability-inventory-state", type: "memory", providerType: "memory", ownerCandidates: ["meta-librarian"], routeEligibility: "reference", verificationMethod: "npm run meta:capabilities:index" })),
-    ...(await fileRecordIfExists(".meta-kim/state/default/run-index.sqlite", { id: "run-index-state", type: "memory", providerType: "memory", ownerCandidates: ["meta-librarian"], routeEligibility: "reference", verificationMethod: "npm run meta:rebuild:run-index" })),
+    ...(await fileRecordIfExists(`${profileStatePath}/capability-index/global-capabilities.json`, { id: "cached-global-capability-inventory", type: "external", providerType: "external", ownerCandidates: ["meta-librarian", "meta-artisan"], routeEligibility: "reference", verificationMethod: "npm run discover:global" })),
+    ...(await fileRecordIfExists(`${profileStatePath}/capability-inventory.json`, { id: "local-capability-inventory-state", type: "memory", providerType: "memory", ownerCandidates: ["meta-librarian"], routeEligibility: "reference", verificationMethod: "npm run meta:capabilities:index" })),
+    ...(await fileRecordIfExists(`${profileStatePath}/run-index.sqlite`, { id: "run-index-state", type: "memory", providerType: "memory", ownerCandidates: ["meta-librarian"], routeEligibility: "reference", verificationMethod: "npm run meta:rebuild:run-index" })),
     ...(await fileRecordIfExists("graphify-out/GRAPH_REPORT.md", { id: "graphify-report", type: "graph", providerType: "graph", ownerCandidates: ["meta-librarian", "meta-conductor"], routeEligibility: "reference", verificationMethod: "npm run meta:graphify:check" })),
     ...(await fileRecordIfExists("graphify-out/graph.json", { id: "graphify-graph", type: "graph", providerType: "graph", ownerCandidates: ["meta-librarian", "meta-conductor"], routeEligibility: "reference", verificationMethod: "npm run meta:graphify:check" })),
   ];
@@ -398,6 +447,8 @@ export async function buildCapabilityInventory() {
     ...(await packageScripts()),
   ];
   for (const platform of runtimeMatrix.platforms ?? []) {
+    const hasExecutableCapability = (platform.capabilities ?? []).some((capability) =>
+      Object.values(capability.claimsByMode ?? {}).some(claimIsExecutable));
     records.push({
       id: `runtime:${platform.platform}`,
       type: "runtime_tool",
@@ -407,12 +458,12 @@ export async function buildCapabilityInventory() {
       ownerCandidates: ["meta-sentinel", "meta-artisan"],
       weaponCandidates: [],
       dependencyCandidates: [],
-      runtimeSupport: supportForRuntime(platform.platform, "native", "unknown"),
+      runtimeSupport: supportForRuntime(platform.platform, hasExecutableCapability ? "native" : "partial", "unknown"),
       osSupport: defaultSupport("partial", "partial").osSupport,
       verificationMethod: "npm run meta:runtime:validate",
       risk: { runtimeBoundary: true },
       mustPreserve: true,
-      routeEligibility: "callable",
+      routeEligibility: hasExecutableCapability ? "callable" : "reference",
       missingFields: [],
       evidence: { source: "local_file", sourceRef: "config/runtime-capability-matrix.json", confidence: "repo_claim" },
       confidence: "repo_claim",
@@ -444,6 +495,10 @@ export async function buildCapabilityInventory() {
     });
   }
   for (const tool of ["shell", "filesystem", "apply_patch", "browser", "web_search", "online_research", "MCP", "memory", "graph", "graphify", "hook", "command", "subagent", "approval", "sandbox"]) {
+    const matrixCapability = runtimeCapabilityNameForTool(tool);
+    const runtimeSupport = runtimeSupportForCapability(runtimeMatrix, matrixCapability);
+    const callableSomewhere = RUNTIMES.some((runtime) =>
+      runtimeRouteEligibility(runtimeMatrix, matrixCapability, runtime) === "callable");
     records.push({
       id: tool,
       type: "runtime_tool",
@@ -452,12 +507,12 @@ export async function buildCapabilityInventory() {
       ownerCandidates: ["meta-artisan", "meta-sentinel", "meta-scout"],
       weaponCandidates: [tool],
       dependencyCandidates: [],
-      runtimeSupport: defaultSupport("partial", "partial").runtimeSupport,
+      runtimeSupport,
       osSupport: defaultSupport("partial", "partial").osSupport,
       verificationMethod: "npm run meta:runtime:validate",
       risk: { requiresApproval: ["shell", "filesystem", "apply_patch"].includes(tool) },
       mustPreserve: true,
-      routeEligibility: "callable",
+      routeEligibility: callableSomewhere ? "callable" : "reference",
       missingFields: [],
       evidence: { source: "local_file", sourceRef: "config/runtime-capability-matrix.json", confidence: "repo_claim" },
       confidence: "repo_claim",
@@ -562,7 +617,9 @@ export async function buildCapabilityInventory() {
       reason: "External or dependency project capability candidate from the dependency registry.",
     });
   }
-  const normalizedRecords = records.map(withUnifiedCapabilityFields);
+  const normalizedRecords = records
+    .map((record) => applyRuntimeClaimBoundary(record, runtimeMatrix))
+    .map(withUnifiedCapabilityFields);
   const byProviderType = normalizedRecords.reduce((counts, record) => {
     counts[record.providerType] = (counts[record.providerType] ?? 0) + 1;
     return counts;

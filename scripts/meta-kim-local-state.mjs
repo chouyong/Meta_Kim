@@ -4,12 +4,17 @@ import os from "node:os";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
+import {
+  sanitizeStateProfile,
+  validateCanonicalStateProfile,
+} from "../canonical/runtime-assets/shared/hooks/spine-state.mjs";
 import { detectProjectRegistryEntry } from "./project-registry.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 export const repoRoot = path.resolve(__dirname, "..");
 export const localStateRoot = path.join(repoRoot, ".meta-kim", "state");
+export const SHARED_RUNTIME_FAMILY = "shared";
 
 function repoPathHash(repoPath = repoRoot) {
   return crypto
@@ -20,36 +25,52 @@ function repoPathHash(repoPath = repoRoot) {
 }
 
 export function resolveProfileName(input = process.env.META_KIM_PROFILE) {
-  return typeof input === "string" && input.trim() ? input.trim() : "default";
+  return sanitizeStateProfile(input);
 }
 
 export function resolveRuntimeFamily(
-  input = process.env.META_KIM_RUNTIME_FAMILY,
+  input,
+  {
+    environment = process.env,
+    argv = process.argv,
+    entrypoint = argv[1],
+  } = {},
 ) {
-  if (typeof input === "string" && input.trim()) {
-    return input.trim();
+  const explicit = input === undefined
+    ? environment.META_KIM_RUNTIME_FAMILY
+    : input;
+  if (typeof explicit === "string" && explicit.trim()) {
+    return explicit.trim();
   }
+  const entrypointSegments = String(entrypoint ?? "")
+    .replaceAll("\\", "/")
+    .toLowerCase()
+    .split("/")
+    .filter(Boolean);
+  const entrypointMatches = (runtimeId) =>
+    entrypointSegments.includes(runtimeId) ||
+    entrypointSegments.includes(`.${runtimeId}`);
   if (
-    process.env.OPENCLAW_HOME ||
-    process.argv.some((arg) => arg.includes("openclaw"))
+    environment.OPENCLAW_HOME ||
+    entrypointMatches("openclaw")
   ) {
     return "openclaw";
   }
   if (
-    process.env.CODEX_HOME ||
-    process.env.CODEX_SANDBOX ||
-    process.argv.some((arg) => arg.includes("codex"))
+    environment.CODEX_HOME ||
+    environment.CODEX_SANDBOX ||
+    entrypointMatches("codex")
   ) {
     return "codex";
   }
   if (
-    process.env.CLAUDE_PROJECT_DIR ||
-    process.env.CLAUDE_SESSION_ID ||
-    process.argv.some((arg) => arg.includes("claude"))
+    environment.CLAUDE_PROJECT_DIR ||
+    environment.CLAUDE_SESSION_ID ||
+    entrypointMatches("claude")
   ) {
     return "claude";
   }
-  return "shared";
+  return SHARED_RUNTIME_FAMILY;
 }
 
 export function buildProfileKey({
@@ -60,15 +81,29 @@ export function buildProfileKey({
 }
 
 export function getProfilePaths({
-  profile = resolveProfileName(),
+  profile,
+  canonicalProfile,
   runtimeFamily = resolveRuntimeFamily(),
   repoPath = repoRoot,
+  stateRoot = localStateRoot,
 } = {}) {
-  const profileDir = path.join(localStateRoot, profile);
+  if (profile !== undefined && canonicalProfile !== undefined) {
+    throw new TypeError("Pass either raw profile or canonicalProfile, not both.");
+  }
+  // `profile` is always raw external input and is normalized exactly once.
+  // Internal code that already owns a canonical result must opt into the
+  // separate canonicalProfile field so the reserved derived-* namespace is
+  // validated rather than mistaken for a new raw user name and re-hashed.
+  const safeProfile = canonicalProfile === undefined
+    ? resolveProfileName(profile)
+    : validateCanonicalStateProfile(canonicalProfile);
+  const resolvedRepoPath = path.resolve(repoPath);
+  const profileDir = path.join(path.resolve(stateRoot), safeProfile);
   return {
-    profile,
+    profile: safeProfile,
     runtimeFamily,
-    profileKey: buildProfileKey({ repoPath, runtimeFamily }),
+    repoPath: resolvedRepoPath,
+    profileKey: buildProfileKey({ repoPath: resolvedRepoPath, runtimeFamily }),
     profileDir,
     profileFile: path.join(profileDir, "profile.json"),
     runIndexPath: path.join(profileDir, "run-index.sqlite"),
@@ -76,6 +111,17 @@ export function getProfilePaths({
     doctorCacheDir: path.join(profileDir, "doctor-cache"),
     migrationsDir: path.join(profileDir, "migrations"),
   };
+}
+
+export function getGlobalProfilePaths({ profile, canonicalProfile } = {}) {
+  const home = os.homedir();
+  return getProfilePaths({
+    profile,
+    canonicalProfile,
+    runtimeFamily: SHARED_RUNTIME_FAMILY,
+    repoPath: home,
+    stateRoot: path.join(home, ".meta-kim", "state"),
+  });
 }
 
 export function toRepoRelative(targetPath) {
@@ -102,18 +148,28 @@ export async function readProfileMetadata(options = {}) {
 
 export async function ensureProfileState(options = {}) {
   const paths = getProfilePaths(options);
+  const existing = await readProfileMetadata(options);
+  if (
+    existing &&
+    (existing.profileKey !== paths.profileKey || existing.runtimeFamily !== paths.runtimeFamily)
+  ) {
+    throw new Error(
+      `profile collision detected for ${paths.profile}: expected ${paths.profileKey}/${paths.runtimeFamily}, ` +
+        `found ${existing.profileKey ?? "unknown"}/${existing.runtimeFamily ?? "unknown"}. ` +
+        `Set META_KIM_PROFILE to a distinct name for each concurrently used runtime (for example codex or claude).`,
+    );
+  }
   await fs.mkdir(paths.profileDir, { recursive: true });
   await fs.mkdir(paths.compactionDir, { recursive: true });
   await fs.mkdir(paths.doctorCacheDir, { recursive: true });
   await fs.mkdir(paths.migrationsDir, { recursive: true });
 
   const now = new Date().toISOString();
-  const existing = await readProfileMetadata(options);
   const metadata = {
     profile: paths.profile,
     profileKey: paths.profileKey,
-    repoRoot,
-    repoPathHash: repoPathHash(),
+    repoRoot: paths.repoPath,
+    repoPathHash: repoPathHash(paths.repoPath),
     runtimeFamily: paths.runtimeFamily,
     host: os.hostname(),
     createdAt: existing?.createdAt ?? now,
@@ -121,7 +177,7 @@ export async function ensureProfileState(options = {}) {
   };
 
   const projectRegistry = await detectProjectRegistryEntry({
-    repoPath: repoRoot,
+    repoPath: paths.repoPath,
     runtimeFamily: paths.runtimeFamily,
   });
   metadata.projectRef = projectRegistry.projectRef;
@@ -133,6 +189,16 @@ export async function ensureProfileState(options = {}) {
     "utf8",
   );
   return { ...paths, metadata, projectRegistry };
+}
+
+export async function ensureGlobalProfileState({ profile, canonicalProfile } = {}) {
+  const paths = getGlobalProfilePaths({ profile, canonicalProfile });
+  return ensureProfileState({
+    canonicalProfile: paths.profile,
+    runtimeFamily: SHARED_RUNTIME_FAMILY,
+    repoPath: paths.repoPath,
+    stateRoot: path.dirname(paths.profileDir),
+  });
 }
 
 export async function detectProfileCollision(options = {}) {

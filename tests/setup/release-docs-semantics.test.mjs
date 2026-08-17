@@ -1,7 +1,8 @@
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -49,6 +50,51 @@ describe("release documentation semantics", () => {
         ),
         `package.json files must not include ${forbiddenSource}`,
       );
+    }
+  });
+
+  test("npm dry-run package manifest preserves the design PoC boundary", () => {
+    const npmCli = process.env.npm_execpath || path.join(
+      path.dirname(process.execPath),
+      "node_modules",
+      "npm",
+      "bin",
+      "npm-cli.js",
+    );
+    assert.equal(existsSync(npmCli), true, `npm CLI not found: ${npmCli}`);
+
+    const cacheDir = mkdtempSync(path.join(tmpdir(), "meta-kim-npm-pack-cache-"));
+    try {
+      const raw = execFileSync(
+        process.execPath,
+        [npmCli, "pack", "--dry-run", "--ignore-scripts", "--offline", "--json"],
+        {
+          cwd: root,
+          encoding: "utf8",
+          env: { ...process.env, npm_config_cache: cacheDir },
+        },
+      );
+      const manifest = JSON.parse(raw);
+      const packageFiles = new Set(manifest[0]?.files?.map((entry) => entry.path) ?? []);
+      for (const requiredFile of [
+        "canonical/runtime-assets/shared/lib/deliverable-type-profile.mjs",
+        "canonical/runtime-assets/shared/lib/gate-dispatcher.mjs",
+        "canonical/runtime-assets/shared/lib/intent-verb-lexicon.mjs",
+        "canonical/runtime-assets/shared/lib/policy-registry.mjs",
+        "config/contracts/deliverable-type-profiles.json",
+        "CHANGELOG.md",
+        "CHANGELOG.zh-CN.md",
+      ]) {
+        assert.equal(packageFiles.has(requiredFile), true, `package missing ${requiredFile}`);
+      }
+      for (const retiredFile of [
+        "canonical/runtime-assets/shared/lib/validator.mjs",
+        "tests/poc-design-gate/RESULTS.md",
+      ]) {
+        assert.equal(packageFiles.has(retiredFile), false, `package retained ${retiredFile}`);
+      }
+    } finally {
+      rmSync(cacheDir, { recursive: true, force: true });
     }
   });
 
@@ -197,6 +243,10 @@ describe("release documentation semantics", () => {
     const combined = `${checklist}\n${pullRequestTemplate}`;
 
     assert.match(combined, /Host State Impact Matrix/);
+    assert.match(combined, /Installed-User Compatibility Gate/);
+    assert.match(combined, /Historical-version update/);
+    assert.match(combined, /Partial or failed prior install/);
+    assert.match(combined, /fresh install is not enough/);
     assert.match(combined, /Existing host state/);
     assert.match(combined, /Rollback path/);
     assert.match(combined, /Hook \/ Prompt Protocol Flow/);

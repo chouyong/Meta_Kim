@@ -86,6 +86,15 @@
       "sourceRef": "config/capability-index/weapon-registry.json",
       "required": true,
       "notes": "Every weapon id must map to a provider or provider group with a verification command."
+    },
+    "providerRuntimeClaims": {
+      "sourceRef": "providers[*].support",
+      "required": true,
+      "runtimeAdapters": "derived_projection",
+      "selection": "run_scoped_only",
+      "availability": "support_state_and_install_layers",
+      "nativeSupport": "runtime_native_target_only",
+      "liveEvidence": "verification_artifact_required"
     }
   },
   "providers": [
@@ -100,6 +109,9 @@
         ],
         "capabilityInventoryTypes": [
           "runtime_tool"
+        ],
+        "runtimeTargets": [
+          "claude_code"
         ]
       },
       "activation": {
@@ -123,18 +135,19 @@
       },
       "support": {
         "default": {
-          "state": "verified",
-          "status": "verified",
+          "state": "blocked_for_execution",
+          "status": "blocked",
+          "reason": "provider is scoped exclusively to claude_code",
           "installLayers": {
-            "runtime_native": "verified",
-            "project_projection": "verified",
-            "global_home": "partial"
+            "runtime_native": "unsupported",
+            "project_projection": "unsupported",
+            "global_home": "unsupported"
           },
           "os": {
-            "macos": "partial",
-            "windows": "partial",
-            "linux": "partial",
-            "wsl2": "partial"
+            "macos": "unsupported",
+            "windows": "unsupported",
+            "linux": "unsupported",
+            "wsl2": "unsupported"
           }
         },
         "runtimes": {
@@ -168,6 +181,9 @@
           ],
           "capabilityInventoryTypes": [
             "runtime_tool"
+          ],
+          "runtimeTargets": [
+            "claude_code"
           ]
         }
       },
@@ -212,40 +228,40 @@
           "reason": null
         },
         "codex": {
-          "state": "verified",
-          "status": "verified",
+          "state": "blocked_for_execution",
+          "status": "blocked",
           "installLayers": {
-            "runtime_native": "verified",
-            "project_projection": "verified",
-            "global_home": "partial"
+            "runtime_native": "unsupported",
+            "project_projection": "unsupported",
+            "global_home": "unsupported"
           },
-          "activationEvent": "Claude Code project/global runtime config",
+          "activationEvent": null,
           "outputContract": "runtime_call",
-          "reason": null
+          "reason": "provider is scoped exclusively to claude_code"
         },
         "cursor": {
-          "state": "verified",
-          "status": "verified",
+          "state": "blocked_for_execution",
+          "status": "blocked",
           "installLayers": {
-            "runtime_native": "verified",
-            "project_projection": "verified",
-            "global_home": "partial"
+            "runtime_native": "unsupported",
+            "project_projection": "unsupported",
+            "global_home": "unsupported"
           },
-          "activationEvent": "Claude Code project/global runtime config",
+          "activationEvent": null,
           "outputContract": "runtime_call",
-          "reason": null
+          "reason": "provider is scoped exclusively to claude_code"
         },
         "openclaw": {
-          "state": "verified",
-          "status": "verified",
+          "state": "blocked_for_execution",
+          "status": "blocked",
           "installLayers": {
-            "runtime_native": "verified",
-            "project_projection": "verified",
-            "global_home": "partial"
+            "runtime_native": "unsupported",
+            "project_projection": "unsupported",
+            "global_home": "unsupported"
           },
-          "activationEvent": "Claude Code project/global runtime config",
+          "activationEvent": null,
           "outputContract": "runtime_call",
-          "reason": null
+          "reason": "provider is scoped exclusively to claude_code"
         }
       },
       "osAdapters": {
@@ -277,9 +293,9 @@
       "degradation": {
         "statusByRuntime": {
           "claude_code": "none",
-          "codex": "none",
-          "cursor": "none",
-          "openclaw": "none"
+          "codex": "blocked",
+          "cursor": "blocked",
+          "openclaw": "blocked"
         },
         "reason": null
       },
@@ -298,6 +314,9 @@
         ],
         "capabilityInventoryTypes": [
           "runtime_tool"
+        ],
+        "runtimeTargets": [
+          "codex"
         ]
       },
       "activation": {
@@ -321,18 +340,19 @@
       },
       "support": {
         "default": {
-          "state": "verified",
-          "status": "verified",
+          "state": "blocked_for_execution",
+          "status": "blocked",
+          "reason": "provider is scoped exclusively to codex",
           "installLayers": {
-            "runtime_native": "verified",
-            "project_projection": "verified",
-            "global_home": "partial"
+            "runtime_native": "unsupported",
+            "project_projection": "unsupported",
+            "global_home": "unsupported"
           },
           "os": {
-            "macos": "partial",
-            "windows": "partial",
-            "linux": "partial",
-            "wsl2": "partial"
+            "macos": "unsupported",
+            "windows": "unsupported",
+            "linux": "unsupported",
+            "wsl2": "unsupported"
           }
         },
         "runtimes": {
@@ -366,6 +386,9 @@
           ],
           "capabilityInventoryTypes": [
             "runtime_tool"
+          ],
+          "runtimeTargets": [
+            "codex"
           ]
         }
       },
@@ -398,16 +421,16 @@
       },
       "runtimeAdapters": {
         "claude_code": {
-          "state": "verified",
-          "status": "verified",
+          "state": "blocked_for_execution",
+          "status": "blocked",
           "installLayers": {
-            "runtime_native": "verified",
-            "project_projection": "verified",
-            "global_home": "partial"
+            "runtime_native": "unsupported",
+            "project_projection": "unsupported",
+            "global_home": "unsupported"
           },
-          "activationEvent": "Codex project AGENTS.md and .codex config",
+          "activationEvent": null,
           "outputContract": "runtime_call",
-          "reason": null
+          "reason": "provider is scoped exclusively to codex"
         },
         "codex": {
           "state": "verified",
@@ -422,28 +445,28 @@
           "reason": null
         },
         "cursor": {
-          "state": "verified",
-          "status": "verified",
+          "state": "blocked_for_execution",
+          "status": "blocked",
           "installLayers": {
-            "runtime_native": "verified",
-            "project_projection": "verified",
-            "global_home": "partial"
+            "runtime_native": "unsupported",
+            "project_projection": "unsupported",
+            "global_home": "unsupported"
           },
-          "activationEvent": "Codex project AGENTS.md and .codex config",
+          "activationEvent": null,
           "outputContract": "runtime_call",
-          "reason": null
+          "reason": "provider is scoped exclusively to codex"
         },
         "openclaw": {
-          "state": "verified",
-          "status": "verified",
+          "state": "blocked_for_execution",
+          "status": "blocked",
           "installLayers": {
-            "runtime_native": "verified",
-            "project_projection": "verified",
-            "global_home": "partial"
+            "runtime_native": "unsupported",
+            "project_projection": "unsupported",
+            "global_home": "unsupported"
           },
-          "activationEvent": "Codex project AGENTS.md and .codex config",
+          "activationEvent": null,
           "outputContract": "runtime_call",
-          "reason": null
+          "reason": "provider is scoped exclusively to codex"
         }
       },
       "osAdapters": {
@@ -474,10 +497,10 @@
       },
       "degradation": {
         "statusByRuntime": {
-          "claude_code": "none",
+          "claude_code": "blocked",
           "codex": "none",
-          "cursor": "none",
-          "openclaw": "none"
+          "cursor": "blocked",
+          "openclaw": "blocked"
         },
         "reason": null
       },
@@ -496,6 +519,9 @@
         ],
         "capabilityInventoryTypes": [
           "runtime_tool"
+        ],
+        "runtimeTargets": [
+          "cursor"
         ]
       },
       "activation": {
@@ -520,19 +546,20 @@
       },
       "support": {
         "default": {
-          "state": "projected",
-          "status": "partial",
+          "state": "blocked_for_execution",
+          "status": "blocked",
+          "reason": "provider is scoped exclusively to cursor",
           "installLayers": {
-            "runtime_native": "partial",
-            "project_projection": "verified",
-            "global_home": "partial",
-            "rule_projection": "verified"
+            "runtime_native": "unsupported",
+            "project_projection": "unsupported",
+            "global_home": "unsupported",
+            "rule_projection": "unsupported"
           },
           "os": {
-            "macos": "partial",
-            "windows": "partial",
-            "linux": "partial",
-            "wsl2": "needs_probe"
+            "macos": "unsupported",
+            "windows": "unsupported",
+            "linux": "unsupported",
+            "wsl2": "unsupported"
           }
         },
         "runtimes": {
@@ -567,6 +594,9 @@
           ],
           "capabilityInventoryTypes": [
             "runtime_tool"
+          ],
+          "runtimeTargets": [
+            "cursor"
           ]
         }
       },
@@ -600,30 +630,30 @@
       },
       "runtimeAdapters": {
         "claude_code": {
-          "state": "projected",
-          "status": "partial",
+          "state": "blocked_for_execution",
+          "status": "blocked",
           "installLayers": {
-            "runtime_native": "partial",
-            "project_projection": "verified",
-            "global_home": "partial",
-            "rule_projection": "verified"
+            "runtime_native": "unsupported",
+            "project_projection": "unsupported",
+            "global_home": "unsupported",
+            "rule_projection": "unsupported"
           },
-          "activationEvent": "Cursor project hooks/rules/MCP",
+          "activationEvent": null,
           "outputContract": "runtime_call",
-          "reason": null
+          "reason": "provider is scoped exclusively to cursor"
         },
         "codex": {
-          "state": "projected",
-          "status": "partial",
+          "state": "blocked_for_execution",
+          "status": "blocked",
           "installLayers": {
-            "runtime_native": "partial",
-            "project_projection": "verified",
-            "global_home": "partial",
-            "rule_projection": "verified"
+            "runtime_native": "unsupported",
+            "project_projection": "unsupported",
+            "global_home": "unsupported",
+            "rule_projection": "unsupported"
           },
-          "activationEvent": "Cursor project hooks/rules/MCP",
+          "activationEvent": null,
           "outputContract": "runtime_call",
-          "reason": null
+          "reason": "provider is scoped exclusively to cursor"
         },
         "cursor": {
           "state": "projected",
@@ -639,17 +669,17 @@
           "reason": null
         },
         "openclaw": {
-          "state": "projected",
-          "status": "partial",
+          "state": "blocked_for_execution",
+          "status": "blocked",
           "installLayers": {
-            "runtime_native": "partial",
-            "project_projection": "verified",
-            "global_home": "partial",
-            "rule_projection": "verified"
+            "runtime_native": "unsupported",
+            "project_projection": "unsupported",
+            "global_home": "unsupported",
+            "rule_projection": "unsupported"
           },
-          "activationEvent": "Cursor project hooks/rules/MCP",
+          "activationEvent": null,
           "outputContract": "runtime_call",
-          "reason": null
+          "reason": "provider is scoped exclusively to cursor"
         }
       },
       "osAdapters": {
@@ -680,10 +710,10 @@
       },
       "degradation": {
         "statusByRuntime": {
-          "claude_code": "none",
-          "codex": "none",
+          "claude_code": "blocked",
+          "codex": "blocked",
           "cursor": "none",
-          "openclaw": "none"
+          "openclaw": "blocked"
         },
         "reason": null
       },
@@ -702,6 +732,9 @@
         ],
         "capabilityInventoryTypes": [
           "runtime_tool"
+        ],
+        "runtimeTargets": [
+          "openclaw"
         ]
       },
       "activation": {
@@ -725,19 +758,19 @@
       },
       "support": {
         "default": {
-          "state": "degraded",
-          "status": "degraded",
-          "reason": "typed plugin policy adapter not installed",
+          "state": "blocked_for_execution",
+          "status": "blocked",
+          "reason": "provider is scoped exclusively to openclaw",
           "installLayers": {
-            "runtime_native": "partial",
-            "project_projection": "verified",
-            "plugin_bundle": "needs_probe"
+            "runtime_native": "unsupported",
+            "project_projection": "unsupported",
+            "plugin_bundle": "unsupported"
           },
           "os": {
-            "macos": "partial",
-            "windows": "partial",
-            "linux": "partial",
-            "wsl2": "needs_probe"
+            "macos": "unsupported",
+            "windows": "unsupported",
+            "linux": "unsupported",
+            "wsl2": "unsupported"
           }
         },
         "runtimes": {
@@ -772,6 +805,9 @@
           ],
           "capabilityInventoryTypes": [
             "runtime_tool"
+          ],
+          "runtimeTargets": [
+            "openclaw"
           ]
         }
       },
@@ -804,40 +840,40 @@
       },
       "runtimeAdapters": {
         "claude_code": {
-          "state": "degraded",
-          "status": "degraded",
+          "state": "blocked_for_execution",
+          "status": "blocked",
           "installLayers": {
-            "runtime_native": "partial",
-            "project_projection": "verified",
-            "plugin_bundle": "needs_probe"
+            "runtime_native": "unsupported",
+            "project_projection": "unsupported",
+            "plugin_bundle": "unsupported"
           },
-          "activationEvent": "OpenClaw workspace/template projection",
+          "activationEvent": null,
           "outputContract": "runtime_call",
-          "reason": "typed plugin policy adapter not installed"
+          "reason": "provider is scoped exclusively to openclaw"
         },
         "codex": {
-          "state": "degraded",
-          "status": "degraded",
+          "state": "blocked_for_execution",
+          "status": "blocked",
           "installLayers": {
-            "runtime_native": "partial",
-            "project_projection": "verified",
-            "plugin_bundle": "needs_probe"
+            "runtime_native": "unsupported",
+            "project_projection": "unsupported",
+            "plugin_bundle": "unsupported"
           },
-          "activationEvent": "OpenClaw workspace/template projection",
+          "activationEvent": null,
           "outputContract": "runtime_call",
-          "reason": "typed plugin policy adapter not installed"
+          "reason": "provider is scoped exclusively to openclaw"
         },
         "cursor": {
-          "state": "degraded",
-          "status": "degraded",
+          "state": "blocked_for_execution",
+          "status": "blocked",
           "installLayers": {
-            "runtime_native": "partial",
-            "project_projection": "verified",
-            "plugin_bundle": "needs_probe"
+            "runtime_native": "unsupported",
+            "project_projection": "unsupported",
+            "plugin_bundle": "unsupported"
           },
-          "activationEvent": "OpenClaw workspace/template projection",
+          "activationEvent": null,
           "outputContract": "runtime_call",
-          "reason": "typed plugin policy adapter not installed"
+          "reason": "provider is scoped exclusively to openclaw"
         },
         "openclaw": {
           "state": "degraded",
@@ -880,9 +916,9 @@
       },
       "degradation": {
         "statusByRuntime": {
-          "claude_code": "degraded",
-          "codex": "degraded",
-          "cursor": "degraded",
+          "claude_code": "blocked",
+          "codex": "blocked",
+          "cursor": "blocked",
           "openclaw": "degraded"
         },
         "reason": "typed plugin policy adapter not installed"
@@ -2277,16 +2313,16 @@
       "evolutionKey": "provider:external-skill-gstack"
     },
     {
-      "id": "external-skill-skill-creator",
+      "id": "external-skill-meta-skill-creator",
       "providerType": "external_skill",
-      "summary": "Skill creation package provider.",
+      "summary": "Meta Skill Creator provider for evidence-backed Agent Skill design, refactoring, review, and release preparation.",
       "sourceOfTruth": "config/skills.json",
       "mappings": {
         "skillsJsonIds": [
-          "skill-creator"
+          "meta-skill-creator"
         ],
         "dependencyProjectIds": [
-          "skill-creator"
+          "meta-skill-creator"
         ]
       },
       "activation": {
@@ -2294,7 +2330,7 @@
           "global_home",
           "dependency_registry"
         ],
-        "trigger": "skill creation workflow",
+        "trigger": "skill creation, refactor, review, or release-preparation workflow",
         "outputConsumption": "model_context"
       },
       "verification": {
@@ -2302,7 +2338,7 @@
         "command": "npm run meta:deps:compat"
       },
       "risk": {
-        "trustReview": "third_party_skill"
+        "trustReview": "owner_managed_external_skill"
       },
       "support": {
         "default": {
@@ -2319,27 +2355,86 @@
             "wsl2": "partial"
           }
         },
-        "runtimes": {}
+        "runtimes": {
+          "claude_code": {
+            "state": "declared",
+            "status": "partial",
+            "installLayers": {
+              "global_home": "needs_probe",
+              "dependency_registry": "verified"
+            },
+            "os": {
+              "macos": "partial",
+              "windows": "partial",
+              "linux": "partial",
+              "wsl2": "partial"
+            }
+          },
+          "codex": {
+            "state": "declared",
+            "status": "partial",
+            "installLayers": {
+              "global_home": "needs_probe",
+              "dependency_registry": "verified"
+            },
+            "os": {
+              "macos": "partial",
+              "windows": "partial",
+              "linux": "partial",
+              "wsl2": "partial"
+            }
+          },
+          "cursor": {
+            "state": "blocked_for_execution",
+            "status": "blocked",
+            "reason": "No upstream Cursor installation contract is declared.",
+            "installLayers": {
+              "global_home": "unsupported",
+              "dependency_registry": "verified"
+            },
+            "os": {
+              "macos": "needs_probe",
+              "windows": "needs_probe",
+              "linux": "needs_probe",
+              "wsl2": "needs_probe"
+            }
+          },
+          "openclaw": {
+            "state": "blocked_for_execution",
+            "status": "blocked",
+            "reason": "No upstream OpenClaw installation contract is declared.",
+            "installLayers": {
+              "global_home": "unsupported",
+              "dependency_registry": "verified"
+            },
+            "os": {
+              "macos": "needs_probe",
+              "windows": "needs_probe",
+              "linux": "needs_probe",
+              "wsl2": "needs_probe"
+            }
+          }
+        }
       },
       "providerKind": "external_skill",
       "capabilities": [
-        "Skill creation package provider.",
-        "skill-creator",
-        "skill-creator"
+        "Agent Skill package creation and lifecycle governance.",
+        "meta-skill-creator",
+        "skill-agent-tool-creation"
       ],
       "source": {
         "sourceOfTruth": "config/skills.json",
         "mappings": {
           "skillsJsonIds": [
-            "skill-creator"
+            "meta-skill-creator"
           ],
           "dependencyProjectIds": [
-            "skill-creator"
+            "meta-skill-creator"
           ]
         }
       },
       "trust": {
-        "review": "third_party_skill",
+        "review": "owner_managed_external_skill",
         "required": true
       },
       "installMethod": "globalHome",
@@ -2349,11 +2444,11 @@
       ],
       "exposedArtifacts": [
         "config/skills.json",
-        "config/skills.json#skill-creator",
-        "dependency-project-registry.json#skill-creator"
+        "config/skills.json#meta-skill-creator",
+        "dependency-project-registry.json#meta-skill-creator"
       ],
       "activationEvents": [
-        "skill creation workflow"
+        "skill creation, refactor, review, or release-preparation workflow"
       ],
       "outputContracts": {
         "consumption": "model_context",
@@ -2361,8 +2456,11 @@
         "mustEnforcePolicy": false
       },
       "safetyBoundary": {
-        "trustReview": "third_party_skill",
-        "notes": []
+        "trustReview": "owner_managed_external_skill",
+        "notes": [
+          "Only Claude Code and Codex have an inspected upstream installation contract.",
+          "Structural validation must not be reported as runtime or human acceptance proof."
+        ]
       },
       "runtimeAdapters": {
         "claude_code": {
@@ -2372,7 +2470,7 @@
             "global_home": "needs_probe",
             "dependency_registry": "verified"
           },
-          "activationEvent": "skill creation workflow",
+          "activationEvent": "skill creation, refactor, review, or release-preparation workflow",
           "outputContract": "model_context",
           "reason": null
         },
@@ -2383,31 +2481,31 @@
             "global_home": "needs_probe",
             "dependency_registry": "verified"
           },
-          "activationEvent": "skill creation workflow",
+          "activationEvent": "skill creation, refactor, review, or release-preparation workflow",
           "outputContract": "model_context",
           "reason": null
         },
         "cursor": {
-          "state": "declared",
-          "status": "partial",
+          "state": "blocked_for_execution",
+          "status": "blocked",
           "installLayers": {
-            "global_home": "needs_probe",
+            "global_home": "unsupported",
             "dependency_registry": "verified"
           },
-          "activationEvent": "skill creation workflow",
-          "outputContract": "model_context",
-          "reason": null
+          "activationEvent": null,
+          "outputContract": "not_consumed",
+          "reason": "No upstream Cursor installation contract is declared."
         },
         "openclaw": {
-          "state": "declared",
-          "status": "partial",
+          "state": "blocked_for_execution",
+          "status": "blocked",
           "installLayers": {
-            "global_home": "needs_probe",
+            "global_home": "unsupported",
             "dependency_registry": "verified"
           },
-          "activationEvent": "skill creation workflow",
-          "outputContract": "model_context",
-          "reason": null
+          "activationEvent": null,
+          "outputContract": "not_consumed",
+          "reason": "No upstream OpenClaw installation contract is declared."
         }
       },
       "osAdapters": {
@@ -2432,14 +2530,14 @@
         "statusByRuntime": {
           "claude_code": "none",
           "codex": "none",
-          "cursor": "none",
-          "openclaw": "none"
+          "cursor": "unsupported_upstream_contract",
+          "openclaw": "unsupported_upstream_contract"
         },
         "reason": null
       },
       "owner": "meta-artisan",
       "reviewOwner": "meta-prism",
-      "evolutionKey": "provider:external-skill-skill-creator"
+      "evolutionKey": "provider:external-skill-meta-skill-creator"
     },
     {
       "id": "plugin-marketplace-superpowers",
@@ -3236,6 +3334,9 @@
         ],
         "capabilityInventoryTypes": [
           "hook"
+        ],
+        "runtimeTargets": [
+          "codex"
         ]
       },
       "activation": {
@@ -3258,17 +3359,18 @@
       },
       "support": {
         "default": {
-          "state": "projected",
-          "status": "partial",
+          "state": "blocked_for_execution",
+          "status": "blocked",
+          "reason": "provider is scoped exclusively to codex",
           "installLayers": {
-            "project_projection": "verified",
-            "global_home": "needs_probe"
+            "project_projection": "unsupported",
+            "global_home": "unsupported"
           },
           "os": {
-            "macos": "partial",
-            "windows": "partial",
-            "linux": "partial",
-            "wsl2": "partial"
+            "macos": "unsupported",
+            "windows": "unsupported",
+            "linux": "unsupported",
+            "wsl2": "unsupported"
           }
         },
         "runtimes": {
@@ -3302,6 +3404,9 @@
           ],
           "capabilityInventoryTypes": [
             "hook"
+          ],
+          "runtimeTargets": [
+            "codex"
           ]
         }
       },
@@ -3334,15 +3439,15 @@
       },
       "runtimeAdapters": {
         "claude_code": {
-          "state": "projected",
-          "status": "partial",
+          "state": "blocked_for_execution",
+          "status": "blocked",
           "installLayers": {
-            "project_projection": "verified",
-            "global_home": "needs_probe"
+            "project_projection": "unsupported",
+            "global_home": "unsupported"
           },
-          "activationEvent": "Codex UserPromptSubmit",
+          "activationEvent": null,
           "outputContract": "model_context",
-          "reason": null
+          "reason": "provider is scoped exclusively to codex"
         },
         "codex": {
           "state": "context_effective",
@@ -3356,26 +3461,26 @@
           "reason": null
         },
         "cursor": {
-          "state": "projected",
-          "status": "partial",
+          "state": "blocked_for_execution",
+          "status": "blocked",
           "installLayers": {
-            "project_projection": "verified",
-            "global_home": "needs_probe"
+            "project_projection": "unsupported",
+            "global_home": "unsupported"
           },
-          "activationEvent": "Codex UserPromptSubmit",
+          "activationEvent": null,
           "outputContract": "model_context",
-          "reason": null
+          "reason": "provider is scoped exclusively to codex"
         },
         "openclaw": {
-          "state": "projected",
-          "status": "partial",
+          "state": "blocked_for_execution",
+          "status": "blocked",
           "installLayers": {
-            "project_projection": "verified",
-            "global_home": "needs_probe"
+            "project_projection": "unsupported",
+            "global_home": "unsupported"
           },
-          "activationEvent": "Codex UserPromptSubmit",
+          "activationEvent": null,
           "outputContract": "model_context",
-          "reason": null
+          "reason": "provider is scoped exclusively to codex"
         }
       },
       "osAdapters": {
@@ -3406,10 +3511,10 @@
       },
       "degradation": {
         "statusByRuntime": {
-          "claude_code": "none",
+          "claude_code": "blocked",
           "codex": "none",
-          "cursor": "none",
-          "openclaw": "none"
+          "cursor": "blocked",
+          "openclaw": "blocked"
         },
         "reason": null
       },
@@ -3428,6 +3533,9 @@
         ],
         "capabilityInventoryTypes": [
           "hook"
+        ],
+        "runtimeTargets": [
+          "cursor"
         ]
       },
       "activation": {
@@ -3450,17 +3558,18 @@
       },
       "support": {
         "default": {
-          "state": "projected",
-          "status": "partial",
+          "state": "blocked_for_execution",
+          "status": "blocked",
+          "reason": "provider is scoped exclusively to cursor",
           "installLayers": {
-            "project_projection": "verified",
-            "global_home": "needs_probe"
+            "project_projection": "unsupported",
+            "global_home": "unsupported"
           },
           "os": {
-            "macos": "partial",
-            "windows": "partial",
-            "linux": "partial",
-            "wsl2": "partial"
+            "macos": "unsupported",
+            "windows": "unsupported",
+            "linux": "unsupported",
+            "wsl2": "unsupported"
           }
         },
         "runtimes": {
@@ -3494,6 +3603,9 @@
           ],
           "capabilityInventoryTypes": [
             "hook"
+          ],
+          "runtimeTargets": [
+            "cursor"
           ]
         }
       },
@@ -3526,26 +3638,26 @@
       },
       "runtimeAdapters": {
         "claude_code": {
-          "state": "projected",
-          "status": "partial",
+          "state": "blocked_for_execution",
+          "status": "blocked",
           "installLayers": {
-            "project_projection": "verified",
-            "global_home": "needs_probe"
+            "project_projection": "unsupported",
+            "global_home": "unsupported"
           },
-          "activationEvent": "Cursor beforeSubmitPrompt",
+          "activationEvent": null,
           "outputContract": "model_context",
-          "reason": null
+          "reason": "provider is scoped exclusively to cursor"
         },
         "codex": {
-          "state": "projected",
-          "status": "partial",
+          "state": "blocked_for_execution",
+          "status": "blocked",
           "installLayers": {
-            "project_projection": "verified",
-            "global_home": "needs_probe"
+            "project_projection": "unsupported",
+            "global_home": "unsupported"
           },
-          "activationEvent": "Cursor beforeSubmitPrompt",
+          "activationEvent": null,
           "outputContract": "model_context",
-          "reason": null
+          "reason": "provider is scoped exclusively to cursor"
         },
         "cursor": {
           "state": "context_effective",
@@ -3559,15 +3671,15 @@
           "reason": null
         },
         "openclaw": {
-          "state": "projected",
-          "status": "partial",
+          "state": "blocked_for_execution",
+          "status": "blocked",
           "installLayers": {
-            "project_projection": "verified",
-            "global_home": "needs_probe"
+            "project_projection": "unsupported",
+            "global_home": "unsupported"
           },
-          "activationEvent": "Cursor beforeSubmitPrompt",
+          "activationEvent": null,
           "outputContract": "model_context",
-          "reason": null
+          "reason": "provider is scoped exclusively to cursor"
         }
       },
       "osAdapters": {
@@ -3598,10 +3710,10 @@
       },
       "degradation": {
         "statusByRuntime": {
-          "claude_code": "none",
-          "codex": "none",
+          "claude_code": "blocked",
+          "codex": "blocked",
           "cursor": "none",
-          "openclaw": "none"
+          "openclaw": "blocked"
         },
         "reason": null
       },
@@ -3930,7 +4042,9 @@
           "planning-with-files",
           "cli-anything",
           "gstack",
-          "skill-creator"
+          "meta-skill-creator",
+          "goalpro",
+          "kim-decision"
         ]
       },
       "activation": {
@@ -3978,7 +4092,9 @@
         "planning-with-files",
         "cli-anything",
         "gstack",
-        "skill-creator"
+        "meta-skill-creator",
+        "goalpro",
+        "kim-decision"
       ],
       "source": {
         "sourceOfTruth": "config/capability-index/dependency-project-registry.json",
@@ -3993,7 +4109,9 @@
             "planning-with-files",
             "cli-anything",
             "gstack",
-            "skill-creator"
+            "meta-skill-creator",
+            "goalpro",
+            "kim-decision"
           ]
         }
       },
@@ -4016,7 +4134,9 @@
         "dependency-project-registry.json#planning-with-files",
         "dependency-project-registry.json#cli-anything",
         "dependency-project-registry.json#gstack",
-        "dependency-project-registry.json#skill-creator"
+        "dependency-project-registry.json#meta-skill-creator",
+        "dependency-project-registry.json#goalpro",
+        "dependency-project-registry.json#kim-decision"
       ],
       "activationEvents": [
         "Fetch dependency capability search"
@@ -4647,6 +4767,367 @@
       "owner": "meta-artisan",
       "reviewOwner": "meta-prism",
       "evolutionKey": "provider:command-governance-weapons"
+    },
+    {
+      "id": "external-skill-goalpro",
+      "providerType": "external_skill",
+      "summary": "GoalPro prompt-only Goal Contract provider for Goal Prompt + Loop Prompt handoff before execution.",
+      "sourceOfTruth": "config/skills.json",
+      "mappings": {
+        "skillsJsonIds": [
+          "goalpro"
+        ],
+        "dependencyProjectIds": [
+          "goalpro"
+        ]
+      },
+      "activation": {
+        "installLayers": [
+          "global_home",
+          "dependency_registry"
+        ],
+        "trigger": "goal prompt, loop prompt, or fuzzy goal contract request",
+        "outputConsumption": "model_context"
+      },
+      "verification": {
+        "method": "dependency compatibility",
+        "command": "npm run meta:deps:compat"
+      },
+      "risk": {
+        "trustReview": "owner_managed_external_skill",
+        "notes": [
+          "Prompt-only boundary must stop after producing the contract unless execution is separately authorized."
+        ]
+      },
+      "support": {
+        "default": {
+          "state": "declared",
+          "status": "partial",
+          "installLayers": {
+            "global_home": "needs_probe",
+            "dependency_registry": "verified"
+          },
+          "os": {
+            "macos": "partial",
+            "windows": "partial",
+            "linux": "partial",
+            "wsl2": "partial"
+          }
+        },
+        "runtimes": {}
+      },
+      "providerKind": "external_skill",
+      "capabilities": [
+        "Goal Prompt + Loop Prompt contract generation.",
+        "goalpro",
+        "goal-contract",
+        "intent-amplification",
+        "prompt-only-loop-contract"
+      ],
+      "source": {
+        "sourceOfTruth": "config/skills.json",
+        "mappings": {
+          "skillsJsonIds": [
+            "goalpro"
+          ],
+          "dependencyProjectIds": [
+            "goalpro"
+          ]
+        }
+      },
+      "trust": {
+        "review": "owner_managed_external_skill",
+        "required": true
+      },
+      "installMethod": "globalHome",
+      "installLayers": [
+        "global_home",
+        "dependency_registry"
+      ],
+      "exposedArtifacts": [
+        "config/skills.json",
+        "config/skills.json#goalpro",
+        "dependency-project-registry.json#goalpro"
+      ],
+      "activationEvents": [
+        "goal prompt, loop prompt, or fuzzy goal contract request"
+      ],
+      "outputContracts": {
+        "consumption": "model_context",
+        "mustEnterModelContext": true,
+        "mustEnforcePolicy": false
+      },
+      "safetyBoundary": {
+        "trustReview": "owner_managed_external_skill",
+        "notes": [
+          "GoalPro is not an executor, scheduler, release owner, or automation runtime."
+        ]
+      },
+      "runtimeAdapters": {
+        "claude_code": {
+          "state": "declared",
+          "status": "partial",
+          "installLayers": {
+            "global_home": "needs_probe",
+            "dependency_registry": "verified"
+          },
+          "activationEvent": "goal prompt, loop prompt, or fuzzy goal contract request",
+          "outputContract": "model_context",
+          "reason": null
+        },
+        "codex": {
+          "state": "declared",
+          "status": "partial",
+          "installLayers": {
+            "global_home": "needs_probe",
+            "dependency_registry": "verified"
+          },
+          "activationEvent": "goal prompt, loop prompt, or fuzzy goal contract request",
+          "outputContract": "model_context",
+          "reason": null
+        },
+        "cursor": {
+          "state": "declared",
+          "status": "partial",
+          "installLayers": {
+            "global_home": "needs_probe",
+            "dependency_registry": "verified"
+          },
+          "activationEvent": "goal prompt, loop prompt, or fuzzy goal contract request",
+          "outputContract": "model_context",
+          "reason": null
+        },
+        "openclaw": {
+          "state": "declared",
+          "status": "partial",
+          "installLayers": {
+            "global_home": "needs_probe",
+            "dependency_registry": "verified"
+          },
+          "activationEvent": "goal prompt, loop prompt, or fuzzy goal contract request",
+          "outputContract": "model_context",
+          "reason": null
+        }
+      },
+      "osAdapters": {
+        "macos": {
+          "status": "partial",
+          "risks": [
+            "Prompt-only contract must not be relabeled as execution evidence."
+          ]
+        },
+        "windows": {
+          "status": "partial",
+          "risks": [
+            "Prompt-only contract must not be relabeled as execution evidence."
+          ]
+        },
+        "linux": {
+          "status": "partial",
+          "risks": [
+            "Prompt-only contract must not be relabeled as execution evidence."
+          ]
+        },
+        "wsl2": {
+          "status": "partial",
+          "risks": [
+            "Prompt-only contract must not be relabeled as execution evidence."
+          ]
+        }
+      },
+      "degradation": {
+        "statusByRuntime": {
+          "claude_code": "none",
+          "codex": "none",
+          "cursor": "none",
+          "openclaw": "none"
+        },
+        "reason": null
+      },
+      "owner": "meta-artisan",
+      "reviewOwner": "meta-prism",
+      "evolutionKey": "provider:external-skill-goalpro"
+    },
+    {
+      "id": "external-skill-kim-decision",
+      "providerType": "external_skill",
+      "summary": "Kim_Decision reference-only decision protocol provider for path selection and pass/kill judgment.",
+      "sourceOfTruth": "config/skills.json",
+      "mappings": {
+        "skillsJsonIds": [
+          "kim-decision"
+        ],
+        "dependencyProjectIds": [
+          "kim-decision"
+        ]
+      },
+      "activation": {
+        "installLayers": [
+          "global_home",
+          "dependency_registry"
+        ],
+        "trigger": "branch-changing decision, path selection, or pass/kill review",
+        "outputConsumption": "reference_only"
+      },
+      "verification": {
+        "method": "dependency compatibility and route validation",
+        "command": "npm run meta:deps:compat && npm run meta:route:validate"
+      },
+      "risk": {
+        "trustReview": "reference_only_external_skill",
+        "notes": [
+          "Kim_Decision must not become a callable code executor or implementation owner."
+        ]
+      },
+      "support": {
+        "default": {
+          "state": "declared",
+          "status": "partial",
+          "installLayers": {
+            "global_home": "needs_probe",
+            "dependency_registry": "verified"
+          },
+          "os": {
+            "macos": "partial",
+            "windows": "partial",
+            "linux": "partial",
+            "wsl2": "partial"
+          }
+        },
+        "runtimes": {}
+      },
+      "providerKind": "external_skill",
+      "capabilities": [
+        "Decision protocol reference for real intent, path selection, minimum test, and pass/kill gates.",
+        "kim-decision",
+        "decision-protocol-reference",
+        "path-selection",
+        "pass-kill-gate"
+      ],
+      "source": {
+        "sourceOfTruth": "config/skills.json",
+        "mappings": {
+          "skillsJsonIds": [
+            "kim-decision"
+          ],
+          "dependencyProjectIds": [
+            "kim-decision"
+          ]
+        }
+      },
+      "trust": {
+        "review": "reference_only_external_skill",
+        "required": true
+      },
+      "installMethod": "globalHome",
+      "installLayers": [
+        "global_home",
+        "dependency_registry"
+      ],
+      "exposedArtifacts": [
+        "config/skills.json",
+        "config/skills.json#kim-decision",
+        "dependency-project-registry.json#kim-decision",
+        "config/governance/decision-pattern-catalog.json"
+      ],
+      "activationEvents": [
+        "branch-changing decision, path selection, or pass/kill review"
+      ],
+      "outputContracts": {
+        "consumption": "reference_only",
+        "mustEnterModelContext": false,
+        "mustEnforcePolicy": false
+      },
+      "safetyBoundary": {
+        "trustReview": "reference_only_external_skill",
+        "notes": [
+          "Reference-only dependency may guide Critical, Thinking, and Review; it may not execute implementation work."
+        ]
+      },
+      "runtimeAdapters": {
+        "claude_code": {
+          "state": "declared",
+          "status": "partial",
+          "installLayers": {
+            "global_home": "needs_probe",
+            "dependency_registry": "verified"
+          },
+          "activationEvent": "branch-changing decision, path selection, or pass/kill review",
+          "outputContract": "reference_only",
+          "reason": null
+        },
+        "codex": {
+          "state": "declared",
+          "status": "partial",
+          "installLayers": {
+            "global_home": "needs_probe",
+            "dependency_registry": "verified"
+          },
+          "activationEvent": "branch-changing decision, path selection, or pass/kill review",
+          "outputContract": "reference_only",
+          "reason": null
+        },
+        "cursor": {
+          "state": "declared",
+          "status": "partial",
+          "installLayers": {
+            "global_home": "needs_probe",
+            "dependency_registry": "verified"
+          },
+          "activationEvent": "branch-changing decision, path selection, or pass/kill review",
+          "outputContract": "reference_only",
+          "reason": null
+        },
+        "openclaw": {
+          "state": "declared",
+          "status": "partial",
+          "installLayers": {
+            "global_home": "needs_probe",
+            "dependency_registry": "verified"
+          },
+          "activationEvent": "branch-changing decision, path selection, or pass/kill review",
+          "outputContract": "reference_only",
+          "reason": null
+        }
+      },
+      "osAdapters": {
+        "macos": {
+          "status": "partial",
+          "risks": [
+            "Reference-only dependency must not enter execution routes."
+          ]
+        },
+        "windows": {
+          "status": "partial",
+          "risks": [
+            "Reference-only dependency must not enter execution routes."
+          ]
+        },
+        "linux": {
+          "status": "partial",
+          "risks": [
+            "Reference-only dependency must not enter execution routes."
+          ]
+        },
+        "wsl2": {
+          "status": "partial",
+          "risks": [
+            "Reference-only dependency must not enter execution routes."
+          ]
+        }
+      },
+      "degradation": {
+        "statusByRuntime": {
+          "claude_code": "none",
+          "codex": "none",
+          "cursor": "none",
+          "openclaw": "none"
+        },
+        "reason": null
+      },
+      "owner": "meta-artisan",
+      "reviewOwner": "meta-prism",
+      "evolutionKey": "provider:external-skill-kim-decision"
     }
   ]
 }

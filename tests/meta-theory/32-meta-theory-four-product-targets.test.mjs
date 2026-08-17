@@ -1,19 +1,19 @@
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
 import {
   buildRuntimeProjectionEvidence,
+  buildWardenWritebackFlow,
   classifyProjectionFailure,
+  exactInvocationBindingMatches,
   evaluateInvocationCoverage,
   readGovernedExecutionRun,
   runMetaTheoryGovernedExecution,
 } from "../../scripts/run-meta-theory-governed-execution.mjs";
-import { getReportLabels } from "../../scripts/meta-kim-i18n.mjs";
-
 const multiGapTask = [
   "同一套 PRD review standard 需要 skill。",
   "长期 test coverage owner 需要 agent。",
@@ -37,6 +37,42 @@ const trustedNativeChoiceEvidence = [
 ];
 
 describe("32 — Meta-theory three product goals and support gates", () => {
+  test("Agent invocation joins require exact owner binding mode and native Agent identity", () => {
+    const base = {
+      family: "agent_subagent",
+      providerId: "global:meta-prism",
+      bindingRef: "task-1:agent_subagent:global:meta-prism",
+    };
+    assert.equal(
+      exactInvocationBindingMatches(
+        { ...base, ownerBindingMode: "run_scoped_owner_contract", nativeAgentType: null },
+        { ...base, ownerBindingMode: "run_scoped_owner_contract", nativeAgentType: null },
+      ),
+      true,
+    );
+    assert.equal(
+      exactInvocationBindingMatches(
+        { ...base, ownerBindingMode: "native_custom_agent", nativeAgentType: "meta-prism" },
+        { ...base, ownerBindingMode: "run_scoped_owner_contract", nativeAgentType: null },
+      ),
+      false,
+    );
+    assert.equal(
+      exactInvocationBindingMatches(
+        { ...base, ownerBindingMode: "native_custom_agent", nativeAgentType: "meta-prism" },
+        { ...base, ownerBindingMode: "native_custom_agent", nativeAgentType: "different-agent" },
+      ),
+      false,
+    );
+    assert.equal(
+      exactInvocationBindingMatches(
+        { family: "mcp", providerId: "mcp.selected", bindingRef: "task:mcp:mcp.selected" },
+        { family: "mcp", providerId: "mcp.selected", bindingRef: "task:mcp:mcp.selected" },
+      ),
+      true,
+    );
+  });
+
   test("real invocation coverage ignores unavailable callable probes when exact bindings are observed", () => {
     const coverage = evaluateInvocationCoverage({
       missingBindings: [],
@@ -93,7 +129,86 @@ describe("32 — Meta-theory three product goals and support gates", () => {
       assert.equal(report.defaultRuntimePath.traceEvalControlPlane.stageTiming.length, 8);
       assert.equal(report.defaultRuntimePath.agUiStageEvents.eventCount, 8);
       assert.ok(report.defaultRuntimePath.performanceCostBudget.highUsePaths.length >= 6);
-      assert.equal(report.defaultRuntimePath.contextEngineeringBudget.status, "pass");
+      assert.equal(report.defaultRuntimePath.contextEngineeringBudget.status, "partial");
+      assert.equal(
+        report.defaultRuntimePath.contextEngineeringBudget.measurement.hostObservedContextLoad,
+        false,
+      );
+      assert.equal(
+        report.defaultRuntimePath.contextEngineeringBudget.measurement.actualInputTokens,
+        null,
+      );
+      assert.ok(
+        report.defaultRuntimePath.contextEngineeringBudget.blockedBy.includes(
+          "host_context_load_not_observed",
+        ),
+      );
+      assert.ok(
+        report.defaultRuntimePath.contextEngineeringBudget.blockedBy.includes(
+          "duplicate_rule_scan_not_run",
+        ),
+      );
+      const frameworkPromptContract = JSON.parse(
+        await readFile(
+          new URL(
+            "../../config/contracts/framework-prompt-architecture-contract.json",
+            import.meta.url,
+          ),
+          "utf8",
+        ),
+      );
+      const allowedContextEvidenceStates = new Set(
+        frameworkPromptContract.contextEngineeringBudget.sourceRecordEvidenceStateEnum,
+      );
+      const contextSources = [
+        ...report.defaultRuntimePath.contextEngineeringBudget.fixedContext,
+        ...report.defaultRuntimePath.contextEngineeringBudget.variableContext,
+      ];
+      assert.equal(
+        contextSources.every((source) =>
+          allowedContextEvidenceStates.has(source.evidenceState),
+        ),
+        true,
+        "context source evidenceState must be constrained by the framework contract enum",
+      );
+      assert.ok(
+        allowedContextEvidenceStates.has("host_observed_as_model_context"),
+        "the contract must define the observed state used by truthful public-ready fixtures",
+      );
+      assert.equal(
+        contextSources.some(
+          (source) => source.evidenceState === "host_observed_as_model_context",
+        ),
+        false,
+        "the default partial artifact must not exercise the host-observed evidence state",
+      );
+      assert.equal(report.publicReadyDecision.publicReady, false);
+      assert.equal(
+        report.publicReadyDecision.contextEngineeringBudgetStatus,
+        "partial",
+      );
+      assert.deepEqual(
+        report.publicReadyDecision.contextEngineeringBudgetBlockedBy,
+        report.contextEngineeringBudget.blockedBy,
+      );
+      assert.ok(
+        report.publicReadyDecision.blockedBy.includes(
+          "contextEngineeringBudget.status=partial.",
+        ),
+        "public-ready must be blocked by a non-pass context budget",
+      );
+      assert.equal(report.status, "partial");
+      assert.equal(report.defaultRuntimePath.status, "partial");
+      assert.ok(
+        report.partialReasons.includes("context_engineering_budget=partial"),
+        "final artifact partialReasons must include the context budget status",
+      );
+      for (const blocker of report.contextEngineeringBudget.blockedBy) {
+        assert.ok(
+          report.partialReasons.includes(`context_engineering_budget_blocked_by=${blocker}`),
+          `final artifact partialReasons missing context blocker ${blocker}`,
+        );
+      }
       assert.equal(report.defaultRuntimePath.langGraphRunPacket.status, "pass");
       assert.equal(report.defaultRuntimePath.peerAgentMeshPacket.status, "pass");
       assert.equal(report.defaultRuntimePath.agentTeamsPlaybookPacket.status, "pass");
@@ -132,9 +247,9 @@ describe("32 — Meta-theory three product goals and support gates", () => {
         report.defaultRuntimePath.agentTeamsPlaybookPacket.acceptance.noArbitraryMetaKimCap,
         true
       );
-      assert.equal(report.defaultRuntimePath.capabilityInvocationTruthPacket.status, "partial");
+      assert.equal(report.capabilityInvocationTruthPacket.status, "partial");
       const invocationByFamily = new Map(
-        report.defaultRuntimePath.capabilityInvocationTruthPacket.rows.map((row) => [
+        report.capabilityInvocationTruthPacket.rows.map((row) => [
           row.family,
           row,
         ])
@@ -147,7 +262,7 @@ describe("32 — Meta-theory three product goals and support gates", () => {
       assert.equal(invocationByFamily.get("agent_teams_playbook").state, "selected_not_invoked");
       assert.equal(report.defaultRuntimePath.capabilityInvocationProbePacket.status, "not_run");
       assert.equal(
-        report.defaultRuntimePath.capabilityInvocationTruthPacket.realInvocationCoverage.status,
+        report.capabilityInvocationTruthPacket.realInvocationCoverage.status,
         "partial"
       );
       assert.equal(report.defaultRuntimePath.hostInvocationRequestPacket.status, "partial");
@@ -206,8 +321,57 @@ describe("32 — Meta-theory three product goals and support gates", () => {
       assert.ok(["pass", "partial"].includes(report.defaultRuntimePath.visibleMetaTheorySurfacePacket.status));
       assert.equal(report.defaultRuntimePath.visibleMetaTheorySurfacePacket.capabilityInventory.notSkillOnly, true);
       assert.equal(
-        report.defaultRuntimePath.visibleMetaTheorySurfacePacket.capabilityInvocationTruth.status,
-        "partial"
+        report.defaultRuntimePath.visibleMetaTheorySurfacePacket.capabilityInvocationPresentation.executionState,
+        "not_confirmed"
+      );
+      assert.ok(
+        [
+          "completed",
+          "called",
+          "called_with_failures",
+          "failed",
+          "denied",
+          "blocked",
+          "not_confirmed",
+          "unavailable",
+        ].includes(
+          report.defaultRuntimePath.visibleMetaTheorySurfacePacket.capabilityInvocationPresentation
+            .executionState,
+        ),
+      );
+      assert.notEqual(
+        report.defaultRuntimePath.visibleMetaTheorySurfacePacket.capabilityInvocationPresentation
+          .executionState,
+        "unavailable",
+      );
+      assert.match(
+        report.defaultRuntimePath.visibleMetaTheorySurfacePacket.capabilityInvocationPresentation.userSummary,
+        /当前聊天中的实际调用结果为准/,
+      );
+      assert.deepEqual(
+        Object.keys(
+          report.defaultRuntimePath.visibleMetaTheorySurfacePacket.capabilityInvocationPresentation,
+        ).sort(),
+        ["executionLabel", "executionState", "schemaVersion", "userSummary"],
+      );
+      assert.equal(
+        Object.hasOwn(
+          report.defaultRuntimePath.visibleMetaTheorySurfacePacket,
+          "capabilityInvocationTruth",
+        ),
+        false,
+      );
+      assert.equal(
+        Object.hasOwn(
+          report.defaultRuntimePath.visibleMetaTheorySurfacePacket.capabilityInvocationPresentation,
+          "rows",
+        ),
+        false,
+      );
+      assert.ok(report.capabilityInvocationTruthPacket.rows.length >= 1);
+      assert.equal(
+        report.capabilityInvocationTruthPacket,
+        report.coreLoop.capabilityInvocationTruthPacket,
       );
       assert.equal(
         report.defaultRuntimePath.visibleMetaTheorySurfacePacket.dynamicWorkflow.status,
@@ -462,16 +626,17 @@ describe("32 — Meta-theory three product goals and support gates", () => {
       );
 
       const approvalPacket = {
-        schemaVersion: "warden-approval-v0.1",
+        schemaVersion: "warden-approval-v0.2",
         approvalId: "warden-approved-test-evidence",
         approver: "meta-warden",
         approvedAt: "2026-06-04T00:00:00.000Z",
-        scope: "temp canonical writeback test",
-        targets: [
-          `canonical/${candidateOnly.wardenWritebackFlow.candidates[0].targetRelativeToCanonical}`,
+        scope: "canonical_reverse_sync",
+        mutationBindings: [
+          candidateOnly.wardenWritebackFlow.candidates[0].mutationBinding,
         ],
         diffSummary: "Create one skill candidate in temp canonical root.",
-        rollbackPlan: "Remove the generated temp canonical file.",
+        rollbackPlan: { action: "remove_generated_temp_canonical_file" },
+        riskReview: { status: "accepted", owner: "meta-sentinel" },
       };
 
       const approved = await runMetaTheoryGovernedExecution({
@@ -512,7 +677,134 @@ describe("32 — Meta-theory three product goals and support gates", () => {
       );
       const written = await readFile(targetPath, "utf8");
       assert.match(written, /Generated by the Warden-approved Capability Gap writeback flow/);
-      assert.match(written, /approvalEvidence: warden-approved-test-evidence/);
+      assert.match(written, /approvalContract: warden-approval-v0\.2-exact-binding/);
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  test("T-003a atomic writeback restores the current and completed files after an injected batch failure", async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "meta-kim-writeback-atomic-"));
+    try {
+      const canonicalRoot = path.join(tempDir, "canonical");
+      const decisionResults = [
+        {
+          capabilityGap: { requestedCapability: "atomic rollback skill" },
+          gapDecision: { decision: "create_skill" },
+          candidateWriteback: { candidateType: "skill" },
+          decisionOutput: {
+            owner: "meta-artisan",
+            scope: "atomic rollback skill",
+            verification: { owner: "meta-prism" },
+          },
+        },
+        {
+          capabilityGap: { requestedCapability: "atomic rollback agent" },
+          gapDecision: { decision: "create_agent" },
+          candidateWriteback: { candidateType: "agent" },
+          decisionOutput: {
+            owner: "meta-genesis",
+            scope: "atomic rollback agent",
+            verification: { owner: "meta-prism" },
+          },
+        },
+      ];
+      const skillPath = path.join(canonicalRoot, "skills", "atomic-rollback-skill", "SKILL.md");
+      const agentPath = path.join(canonicalRoot, "agents", "atomic-rollback-agent.md");
+      const priorSkillBytes = Buffer.from("\uFEFFskill-before\r\n", "utf8");
+      const priorAgentBytes = Buffer.from("agent-before\r\nsecond-line\r\n", "utf8");
+      await mkdir(path.dirname(skillPath), { recursive: true });
+      await mkdir(path.dirname(agentPath), { recursive: true });
+      await writeFile(skillPath, priorSkillBytes);
+      await writeFile(agentPath, priorAgentBytes);
+
+      const preview = await buildWardenWritebackFlow({ decisionResults, canonicalRoot });
+      const approvalPacket = {
+        schemaVersion: "warden-approval-v0.2",
+        approvalId: "warden-approved-atomic-rollback-test",
+        approver: "meta-warden",
+        approvedAt: "2026-08-12T00:00:00.000Z",
+        scope: "canonical_reverse_sync",
+        mutationBindings: preview.candidates.map((candidate) => candidate.mutationBinding),
+        diffSummary: "Replace two temp canonical definitions atomically.",
+        rollbackPlan: { action: "restore_exact_prior_bytes_for_every_attempted_target" },
+        riskReview: { status: "accepted", owner: "meta-sentinel" },
+      };
+      let committedCount = 0;
+
+      await assert.rejects(
+        buildWardenWritebackFlow({
+          decisionResults,
+          canonicalRoot,
+          approvalPacket,
+          applyWriteback: true,
+          writebackFaultInjector: async ({ stage }) => {
+            if (stage === "after_atomic_rename" && ++committedCount === 2) {
+              throw new Error("injected canonical batch failure");
+            }
+          },
+        }),
+        /injected canonical batch failure/,
+      );
+
+      assert.deepEqual(await readFile(skillPath), priorSkillBytes);
+      assert.deepEqual(await readFile(agentPath), priorAgentBytes);
+      const pendingDirectories = [canonicalRoot];
+      const residue = [];
+      while (pendingDirectories.length > 0) {
+        const directory = pendingDirectories.pop();
+        for (const entry of await readdir(directory, { withFileTypes: true })) {
+          const entryPath = path.join(directory, entry.name);
+          if (entry.isDirectory()) pendingDirectories.push(entryPath);
+          if (entry.name.endsWith(".canonical-writeback.tmp")) residue.push(entryPath);
+        }
+      }
+      assert.deepEqual(residue, []);
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  test("T-003b atomic writeback refuses a concurrent edit after temp materialization", async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "meta-kim-writeback-race-"));
+    try {
+      const canonicalRoot = path.join(tempDir, "canonical");
+      const decisionResults = [{
+        capabilityGap: { requestedCapability: "concurrent edit skill" },
+        gapDecision: { decision: "create_skill" },
+        candidateWriteback: { candidateType: "skill" },
+        decisionOutput: { owner: "meta-artisan", scope: "race test", verification: { owner: "meta-prism" } },
+      }];
+      const target = path.join(canonicalRoot, "skills", "concurrent-edit-skill", "SKILL.md");
+      const before = Buffer.from("before\r\n", "utf8");
+      const concurrent = Buffer.from("concurrent user edit\r\n", "utf8");
+      await mkdir(path.dirname(target), { recursive: true });
+      await writeFile(target, before);
+      const preview = await buildWardenWritebackFlow({ decisionResults, canonicalRoot });
+      const approvalPacket = {
+        schemaVersion: "warden-approval-v0.2",
+        approvalId: "warden-approved-race-test",
+        approver: "meta-warden",
+        approvedAt: "2026-08-12T00:00:00.000Z",
+        scope: "canonical_reverse_sync",
+        mutationBindings: preview.candidates.map((candidate) => candidate.mutationBinding),
+        diffSummary: "Reject a concurrent canonical edit.",
+        rollbackPlan: { action: "preserve_concurrent_user_bytes" },
+        riskReview: { status: "accepted", owner: "meta-sentinel" },
+      };
+      await assert.rejects(
+        buildWardenWritebackFlow({
+          decisionResults,
+          canonicalRoot,
+          approvalPacket,
+          applyWriteback: true,
+          writebackFaultInjector: async ({ stage }) => {
+            if (stage === "before_atomic_rename") await writeFile(target, concurrent);
+          },
+        }),
+        /pre-state changed/u,
+      );
+      assert.deepEqual(await readFile(target), concurrent);
     } finally {
       await rm(tempDir, { recursive: true, force: true });
     }
@@ -536,10 +828,38 @@ describe("32 — Meta-theory three product goals and support gates", () => {
       assert.equal(readBack.artifact.runReport.status, "partial");
       assert.equal(readBack.artifact.runReportPanelContract.status, "partial");
       assert.equal(
-        readBack.artifact.runReportPanelContract.capabilityInvocationTruth.callableInvocationCoverage
-          .status,
+        readBack.artifact.runReportPanelContract.capabilityInvocationPresentation.executionState,
+        "not_confirmed",
+      );
+      assert.deepEqual(
+        Object.keys(
+          readBack.artifact.runReportPanelContract.capabilityInvocationPresentation,
+        ).sort(),
+        ["executionLabel", "executionState", "schemaVersion", "userSummary"],
+      );
+      assert.equal(
+        Object.hasOwn(readBack.artifact.runReportPanelContract, "capabilityInvocationTruth"),
+        false,
+      );
+      assert.equal(
+        Object.hasOwn(
+          readBack.artifact.runReportPanelContract.visibleMetaTheorySurface,
+          "capabilityInvocationTruth",
+        ),
+        false,
+      );
+      assert.equal(
+        Object.hasOwn(
+          readBack.artifact.runReportPanelContract.capabilityInvocationPresentation,
+          "rows",
+        ),
+        false,
+      );
+      assert.equal(
+        readBack.artifact.capabilityInvocationTruthPacket.callableInvocationCoverage.status,
         "not_run",
       );
+      assert.ok(readBack.artifact.capabilityInvocationTruthPacket.rows.length >= 1);
       assert.equal(
         readBack.artifact.runReportPanelContract.schemaVersion,
         "run-report-panel-contract-v0.1"
@@ -566,22 +886,23 @@ describe("32 — Meta-theory three product goals and support gates", () => {
         readBack.artifact.runReportPanelContract.deliverables.panelContract,
         "artifact.runReportPanelContract"
       );
-      const labels = getReportLabels("zh-CN");
-      const sectionLabels = labels.sections;
-      const toolList = labels.toolList(labels.toolNames);
       for (const section of [
-        sectionLabels.decisionSummary,
-        sectionLabels.whyDecision,
-        sectionLabels.ownerHandoff,
-        sectionLabels.toolEvidenceFull(toolList),
-        "三目标产品验收",
-        sectionLabels.capabilityUpgrade,
-        sectionLabels.wardenApproval,
-        sectionLabels.verificationStatus,
+        "用户目标",
+        "工作协调与调用情况",
+        "阶段进展",
+        "验证与下一步",
       ]) {
         assert.match(readBack.markdown, new RegExp(section));
-        assert.ok(readBack.artifact.runReport.sections.includes(section));
       }
+      assert.match(readBack.markdown, /调用记录/);
+      assert.match(readBack.markdown, /协作情况/);
+      assert.match(readBack.markdown, /工作流概览/);
+      assert.doesNotMatch(readBack.markdown, /调用记录[^\n]*不可用/);
+      const visibleChrome = readBack.markdown.slice(readBack.markdown.indexOf("## 用户目标"));
+      assert.doesNotMatch(
+        visibleChrome,
+        /selected_not_invoked|capabilityInvocationTruthPacket\.rows|exact[_ -]?binding|live[_ -]?certification|provider|lane|精确(?:绑定|认证)|实时认证/i,
+      );
       await stat(readBack.paths.json);
       await stat(readBack.paths.markdown);
     } finally {
@@ -619,7 +940,7 @@ describe("32 — Meta-theory three product goals and support gates", () => {
     assert.equal(output.dynamicWorkflow.skill, true);
     assert.equal(output.dynamicWorkflow.mcp, true);
     assert.equal(output.dynamicWorkflow.command, true);
-    assert.equal(output.dynamicWorkflow.tools, true);
+    assert.equal(output.dynamicWorkflow.tools, false);
     assert.equal(output.dynamicWorkflow.hooks, true);
     assert.ok(output.peers > 0);
     assert.equal(output.defaultBoundaryRun.capabilityInvocationTruth.status, "partial");
@@ -795,7 +1116,7 @@ describe("32 — Meta-theory three product goals and support gates", () => {
 
       assert.equal(report.status, "partial");
       assert.equal(report.coreLoop.hostInvocationRequestPacket.status, "partial");
-      assert.equal(report.coreLoop.capabilityInvocationTruthPacket.status, "partial");
+      assert.equal(report.capabilityInvocationTruthPacket.status, "partial");
       assert.ok(
         report.coreLoop.runtimeInvocationPlanPacket.evidence.every(
           (item) => item.passEligible === false,
@@ -855,9 +1176,9 @@ describe("32 — Meta-theory three product goals and support gates", () => {
       assert.equal(report.status, "partial");
       assert.equal(report.coreLoop.runtimeInvocationPlanPacket.status, "partial");
       assert.equal(report.coreLoop.hostInvocationRequestPacket.status, "partial");
-      assert.equal(report.coreLoop.capabilityInvocationTruthPacket.status, "partial");
+      assert.equal(report.capabilityInvocationTruthPacket.status, "partial");
       assert.equal(
-        report.coreLoop.capabilityInvocationTruthPacket.realInvocationCoverage.status,
+        report.capabilityInvocationTruthPacket.realInvocationCoverage.status,
         "partial",
       );
       assert.equal(report.coreLoop.productExperiencePacket.nativeChoiceSurfaceGate.status, "partial");
@@ -866,7 +1187,7 @@ describe("32 — Meta-theory three product goals and support gates", () => {
         "needs-host-invocation",
       );
       assert.ok(
-        report.coreLoop.capabilityInvocationTruthPacket.realInvocationCoverage.missingBindings.length > 0,
+        report.capabilityInvocationTruthPacket.realInvocationCoverage.missingBindings.length > 0,
       );
       assert.equal(
         report.coreLoop.productExperiencePacket.automationDecisionBoundary.status,
@@ -925,9 +1246,9 @@ describe("32 — Meta-theory three product goals and support gates", () => {
       assert.ok(
         report.coreLoop.hostInvocationRequestPacket.pendingFamilies.includes("agent_subagent")
       );
-      assert.equal(report.coreLoop.capabilityInvocationTruthPacket.status, "partial");
+      assert.equal(report.capabilityInvocationTruthPacket.status, "partial");
       assert.equal(
-        report.coreLoop.capabilityInvocationTruthPacket.realInvocationCoverage.status,
+        report.capabilityInvocationTruthPacket.realInvocationCoverage.status,
         "partial",
       );
       assert.ok(
@@ -941,7 +1262,7 @@ describe("32 — Meta-theory three product goals and support gates", () => {
         ),
       );
       assert.ok(
-        report.coreLoop.capabilityInvocationTruthPacket.realInvocationCoverage.missingFamilies.includes(
+        report.capabilityInvocationTruthPacket.realInvocationCoverage.missingFamilies.includes(
           "agent_subagent",
         ),
       );

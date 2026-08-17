@@ -34,12 +34,74 @@ test("core-loop contract binds the default governed execution path", () => {
   assert.equal(CORE_LOOP.defaultEntry.packageScript, "meta:theory:run");
   assert.equal(
     packageJson.scripts["meta:theory:run"],
-    "node scripts/run-meta-theory-governed-execution.mjs",
+    "node scripts/run-meta-theory-governed-execution.mjs --emit-conversation-notice",
+  );
+  assert.equal(
+    packageJson.scripts["meta:theory:run:notice"],
+    packageJson.scripts["meta:theory:run"],
+  );
+  assert.equal(
+    packageJson.scripts["meta:theory:run:json"],
+    "node scripts/run-meta-theory-governed-execution.mjs --no-emit-conversation-notice",
   );
   assert.deepEqual(
     CORE_LOOP.stages.map((stage) => stage.stage),
     EXPECTED_STAGES,
   );
+});
+
+test("default CLI keeps stdout machine-readable while progress uses stderr", () => {
+  const tempDir = mkdtempSync(path.join(os.tmpdir(), "meta-kim-cli-streams-"));
+  try {
+    const visible = spawnSync(
+      process.execPath,
+      [
+        "scripts/run-meta-theory-governed-execution.mjs",
+        "--emit-conversation-notice",
+        "--task",
+        "Build and review a configurable workflow",
+        "--run-id",
+        "stream-routing-visible",
+        "--output-language",
+        "en",
+        "--state-dir",
+        tempDir,
+        "--db",
+        path.join(tempDir, "visible.sqlite"),
+      ],
+      { cwd: process.cwd(), encoding: "utf8" },
+    );
+    assert.equal(visible.status, 0, visible.stderr);
+    const visibleSummary = JSON.parse(visible.stdout);
+    assert.equal(visibleSummary.runId, "stream-routing-visible");
+    for (const marker of ["[Critical]", "[Fetch]", "[Thinking]", "[Execution]", "[Review]", "[Closure]"]) {
+      assert.equal(visible.stderr.includes(marker), true, `missing stderr progress marker ${marker}`);
+    }
+
+    const machine = spawnSync(
+      process.execPath,
+      [
+        "scripts/run-meta-theory-governed-execution.mjs",
+        "--no-emit-conversation-notice",
+        "--task",
+        "Build a machine-readable workflow summary",
+        "--run-id",
+        "stream-routing-json",
+        "--output-language",
+        "en",
+        "--state-dir",
+        tempDir,
+        "--db",
+        path.join(tempDir, "json.sqlite"),
+      ],
+      { cwd: process.cwd(), encoding: "utf8" },
+    );
+    assert.equal(machine.status, 0, machine.stderr);
+    assert.equal(JSON.parse(machine.stdout).runId, "stream-routing-json");
+    assert.doesNotMatch(machine.stderr, /\[(?:Critical|Fetch|Thinking|Execution|Review|Closure)\]/u);
+  } finally {
+    rmSync(tempDir, { recursive: true, force: true });
+  }
 });
 
 test("core-loop stages have IO, skip, gate, and blocking policy", () => {
@@ -152,6 +214,11 @@ test("governed execution emits a coreLoop artifact summary", () => {
 
   const artifact = JSON.parse(readFileSync(path.join(tempDir, `${runId}.json`), "utf8"));
   assert.equal(artifact.runId, runId);
+  assert.deepEqual(
+    artifact.coreLoop.preDecisionOptionFrame,
+    artifact.preDecisionOptionFrame,
+    "coreLoop and workflow packaging must expose one plan-challenge frame without recomputation drift",
+  );
   assert.equal(artifact.coreLoop.contractRef, "config/contracts/core-loop-contract.json");
   assert.deepEqual(artifact.coreLoop.spine, EXPECTED_STAGES);
   for (const packetName of [
@@ -198,6 +265,19 @@ test("governed execution emits a coreLoop artifact summary", () => {
     }
   }
   assert.ok(artifact.coreLoop.intentPacket.realIntent);
+  assert.equal(artifact.coreLoop.stageDagPacket.status, "planned_not_invoked");
+  for (const stage of EXPECTED_STAGES) {
+    const summary = artifact.coreLoop.stageDagPacket.stageSummaries.find(
+      (item) => item.stage === stage,
+    );
+    assert.ok(summary, `${stage} must exist in the stage DAG`);
+    assert.ok(
+      summary.laneNodeIds.length >= (stage === "Execution" ? 1 : 2),
+      `${stage} must expose its materialized contract or worker lanes`,
+    );
+    const contractStage = CORE_LOOP.stages.find((item) => item.stage === stage);
+    assert.equal(summary.mergeAuthority, contractStage.parallelPolicy.mergeAuthority);
+  }
   assert.ok(artifact.coreLoop.fetchPacket.capabilityDiscovery.capabilityInventory.length > 250);
   const providerTypes = new Set(
     artifact.coreLoop.fetchPacket.capabilityDiscovery.capabilityInventory.map(
@@ -344,8 +424,15 @@ test("governed execution emits a coreLoop artifact summary", () => {
   assert.ok(["pass", "partial"].includes(artifact.coreLoop.visibleMetaTheorySurfacePacket.status));
   assert.equal(artifact.coreLoop.visibleMetaTheorySurfacePacket.capabilityInventory.notSkillOnly, true);
   assert.equal(
-    artifact.coreLoop.visibleMetaTheorySurfacePacket.capabilityInvocationTruth.status,
-    artifact.coreLoop.capabilityInvocationTruthPacket.status,
+    Object.hasOwn(
+      artifact.coreLoop.visibleMetaTheorySurfacePacket,
+      "capabilityInvocationTruth",
+    ),
+    false,
+  );
+  assert.deepEqual(
+    artifact.capabilityInvocationTruthPacket,
+    artifact.coreLoop.capabilityInvocationTruthPacket,
   );
   assert.equal(
     artifact.coreLoop.visibleMetaTheorySurfacePacket.dynamicWorkflow.status,
@@ -409,7 +496,7 @@ test("governed execution emits a coreLoop artifact summary", () => {
   rmSync(tempDir, { recursive: true, force: true });
 });
 
-test("host-visible subagents are observed, not relabeled as runner invocations", () => {
+test("caller-provided host-visible names remain unverified hints", () => {
   const tempDir = mkdtempSync(path.join(os.tmpdir(), "meta-kim-host-visible-"));
   const runId = "core-loop-host-visible-subagent-test";
   const result = spawnSync(
@@ -438,9 +525,15 @@ test("host-visible subagents are observed, not relabeled as runner invocations",
   const invocationByFamily = new Map(
     artifact.coreLoop.capabilityInvocationTruthPacket.rows.map((row) => [row.family, row]),
   );
-  assert.equal(invocationByFamily.get("app_visible_subagent").state, "host_visible_observed");
-  assert.equal(invocationByFamily.get("app_visible_subagent").observedCount, 2);
-  assert.equal(invocationByFamily.get("agent_subagent").state, "not_required");
+  assert.equal(invocationByFamily.get("app_visible_subagent").state, "not_required");
+  assert.equal(invocationByFamily.get("agent_subagent").state, "unavailable");
+  assert.equal(artifact.coreLoop.stageDagPacket.status, "planned_not_invoked");
+  assert.ok(
+    artifact.coreLoop.stageDagPacket.nodes.some(
+      (node) => node.stage === "Execution" && node.laneKind === "execution_worker",
+    ),
+  );
+  assert.equal(artifact.coreLoop.capabilityInvocationPresentationPacket.executionState, "not_confirmed");
   assert.equal(
     artifact.coreLoop.capabilityInvocationTruthPacket.truthAssertions.noHostUiSubagentOverclaim,
     true,
@@ -516,7 +609,7 @@ test("core-loop contract declares three product goals plus support gates", () =>
     (rule) => rule.includes("app-visible host subagent"),
   ));
   assert.ok(CORE_LOOP.productExperienceCoreGoals.supportGateRequirements["P-110"].some(
-    (rule) => rule.includes("agent-teams-playbook"),
+    (rule) => rule.includes("native Agent/Task/spawn_agent"),
   ));
 });
 
