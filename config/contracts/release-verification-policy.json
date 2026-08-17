@@ -2,8 +2,9 @@
   "schemaVersion": "meta-kim-release-verification-policy-v0.1",
   "timeoutEnvironmentPrefix": "META_KIM_VERIFY_TIMEOUT_",
   "packedUserAcceptance": {
-    "expectedDurationMs": 2100000,
+    "expectedDurationMs": 2400000,
     "commandTimeoutMs": 300000,
+    "globalUserInstallTimeoutMs": 600000,
     "globalUserUpdateTimeoutMs": 600000,
     "historicalUserUpdateTimeoutMs": 600000,
     "transientPackageInstallTimeoutMs": 600000,

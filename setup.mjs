@@ -9019,6 +9019,7 @@ async function runInstall() {
         language: currentLangCode,
         withGlobalHooks: setupWithGlobalHooks,
         saveProjectDirs: saveProjectDirsMode,
+        projectInstructionPolicy: resolveProjectInstructionPolicy(),
       },
       projectionPackageBoundary,
     );
@@ -9351,6 +9352,7 @@ async function runUpdate() {
         language: currentLangCode,
         withGlobalHooks: setupWithGlobalHooks,
         saveProjectDirs: saveProjectDirsMode,
+        projectInstructionPolicy: resolveProjectInstructionPolicy(),
       },
       projectionPackageBoundary,
     );

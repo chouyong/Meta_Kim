@@ -49,6 +49,7 @@ function input(overrides = {}) {
     language: "zh-CN",
     withGlobalHooks: true,
     saveProjectDirs: false,
+    projectInstructionPolicy: "managed",
     ...overrides,
   };
 }
@@ -161,6 +162,8 @@ test("application use case materializes and delegates once with exact stable arg
         "claude,codex",
         "--skills",
         "meta-theory",
+        "--project-instructions",
+        "managed",
         "--with-global-hooks",
         "--save-project-dirs",
       ],
@@ -269,6 +272,7 @@ test("stable argument and rejected-project result semantics remain deterministic
       language: "en",
       withGlobalHooks: false,
       saveProjectDirs: false,
+      projectInstructionPolicy: "portable",
     }),
     [
       "--silent",
@@ -280,7 +284,19 @@ test("stable argument and rejected-project result semantics remain deterministic
       "cursor",
       "--skills",
       "",
+      "--project-instructions",
+      "portable",
     ],
+  );
+  assert.throws(
+    () => buildStableGlobalSetupArgs({
+      mode: "install",
+      activeTargets: ["cursor"],
+      skillIds: [],
+      language: "en",
+      projectInstructionPolicy: "unknown",
+    }),
+    /project instruction policy is invalid/u,
   );
   assert.deepEqual(
     mergeDelegatedGlobalSetupResult(

@@ -17,6 +17,7 @@ The changelog explains the user-facing problem or risk each release solved, what
 ### Fixed
 
 - **Windows npm executable scripts use stable LF shebangs.** Repository attributes prevent checkout line-ending conversion from breaking the packaged `bin/*.mjs` entrypoints.
+- **Packed four-runtime global installs use a dedicated bounded Windows-safe timeout.** The immutable projection-package and durable MCP materialization chain may exceed the generic five-minute command budget on Windows, so current and historical global install lanes receive a fail-closed ten-minute allowance while ordinary commands remain capped at five minutes.
 - **Global Claude Code and Codex projections remain package-bound and reproducible.** The synchronized runtime assets continue to use the stable projection package and preserve user-owned configuration.
 
 ## [3.0.0] - 2026-08-12

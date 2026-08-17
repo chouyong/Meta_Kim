@@ -26,6 +26,19 @@ function requireBoundary(boundary) {
   return boundary;
 }
 
+const PROJECT_INSTRUCTION_POLICIES = new Set([
+  "preserve",
+  "portable",
+  "managed",
+]);
+
+function requireProjectInstructionPolicy(value) {
+  if (!PROJECT_INSTRUCTION_POLICIES.has(value)) {
+    throw new TypeError("stable global setup project instruction policy is invalid");
+  }
+  return value;
+}
+
 export function buildStableGlobalSetupArgs({
   mode,
   activeTargets,
@@ -33,6 +46,7 @@ export function buildStableGlobalSetupArgs({
   language,
   withGlobalHooks = false,
   saveProjectDirs = false,
+  projectInstructionPolicy = "preserve",
 }) {
   if (mode !== "install" && mode !== "update") {
     throw new TypeError("stable global setup mode must be install or update");
@@ -45,6 +59,9 @@ export function buildStableGlobalSetupArgs({
   if (typeof language !== "string" || language.length === 0) {
     throw new TypeError("stable global setup language is required");
   }
+  const instructionPolicy = requireProjectInstructionPolicy(
+    projectInstructionPolicy,
+  );
   return [
     ...(mode === "update" ? ["--update"] : []),
     "--silent",
@@ -56,6 +73,8 @@ export function buildStableGlobalSetupArgs({
     targets.join(","),
     "--skills",
     skills.join(","),
+    "--project-instructions",
+    instructionPolicy,
     ...(withGlobalHooks ? ["--with-global-hooks"] : []),
     ...(saveProjectDirs ? ["--save-project-dirs"] : []),
   ];
@@ -98,6 +117,7 @@ export async function ensureStableGlobalProjectionPackage(
     language,
     withGlobalHooks = false,
     saveProjectDirs = false,
+    projectInstructionPolicy = "preserve",
   },
   boundary,
 ) {
@@ -123,6 +143,7 @@ export async function ensureStableGlobalProjectionPackage(
     language,
     withGlobalHooks,
     saveProjectDirs,
+    projectInstructionPolicy,
   });
   const exitCode = await port.launchStableSetup(stablePackage, {
     args,

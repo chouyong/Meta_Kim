@@ -14,6 +14,7 @@ import test from "node:test";
 
 import {
   PACKED_GLOBAL_AGENT_TARGETS,
+  PACKED_GLOBAL_USER_INSTALL_TIMEOUT_MS,
   PACKED_GLOBAL_USER_UPDATE_TIMEOUT_MS,
   PACKED_HISTORICAL_USER_UPDATE_TIMEOUT_MS,
   PACKED_TRANSIENT_PACKAGE_INSTALL_TIMEOUT_MS,
@@ -171,6 +172,19 @@ test("packed user acceptance runs public install and update from an npm-packed c
   assert.match(acceptanceSource, /global-only CLI polluted ordinary cwd/u);
   assert.match(acceptanceSource, /second packed user update changed managed artifacts/u);
   assert.match(acceptanceSource, /global install manifest is missing required entries/u);
+});
+
+test("packed managed-text acceptance explicitly opts into managed project instructions", () => {
+  const projectInstallUpdate = acceptanceFunctionSource(
+    "runInstalledPublicProjectCli",
+    "runInstalledPublicGlobalUpdateFromProject",
+  );
+  const projectAwareGlobalUpdate = acceptanceFunctionSource(
+    "runInstalledPublicGlobalUpdateFromProject",
+    "runProjectCapabilityCopy",
+  );
+  assert.match(projectInstallUpdate, /"--project-instructions=managed"/u);
+  assert.match(projectAwareGlobalUpdate, /"--project-instructions=managed"/u);
 });
 
 test("packed user acceptance help is read-only and does not start install/update lanes", () => {
@@ -510,7 +524,31 @@ test("project-aware packed global update alone receives the policy-scoped extend
   );
 });
 
-test("ordinary packed global updates receive a bounded Windows-safe timeout without widening install", () => {
+test("ordinary packed global install receives a dedicated bounded Windows-safe timeout", () => {
+  assert.equal(
+    releaseVerificationPolicy.packedUserAcceptance.globalUserInstallTimeoutMs,
+    600_000,
+  );
+  assert.equal(PACKED_GLOBAL_USER_INSTALL_TIMEOUT_MS, 600_000);
+  const currentLane = acceptanceFunctionSource(
+    "runCurrentPackageLane",
+    "runHistoricalUpdateLane",
+  );
+  assert.match(
+    currentLane,
+    /mode === "install"[\s\S]*?PACKED_GLOBAL_USER_INSTALL_TIMEOUT_MS[\s\S]*?: PACKED_GLOBAL_USER_UPDATE_TIMEOUT_MS/u,
+  );
+  const historicalLane = acceptanceFunctionSource(
+    "runHistoricalUpdateLane",
+    "runPackedUserInstallUpdateAcceptance",
+  );
+  assert.match(
+    historicalLane,
+    /historicalDescriptor,[\s\S]*?"install",[\s\S]*?PACKED_GLOBAL_USER_INSTALL_TIMEOUT_MS/u,
+  );
+});
+
+test("ordinary packed global updates receive a dedicated bounded Windows-safe timeout", () => {
   assert.equal(
     releaseVerificationPolicy.packedUserAcceptance.globalUserUpdateTimeoutMs,
     600_000,
@@ -522,7 +560,7 @@ test("ordinary packed global updates receive a bounded Windows-safe timeout with
   );
   assert.match(
     currentLane,
-    /mode === "update" \? PACKED_GLOBAL_USER_UPDATE_TIMEOUT_MS : timeoutMs/u,
+    /: PACKED_GLOBAL_USER_UPDATE_TIMEOUT_MS/u,
   );
 });
 

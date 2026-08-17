@@ -95,6 +95,8 @@ export const PACKED_GLOBAL_AGENT_TARGETS = Object.freeze(
 );
 export const PACKED_USER_ACCEPTANCE_EXPECTED_DURATION_MS =
   PACKED_RELEASE_POLICY.packedUserAcceptance.expectedDurationMs;
+export const PACKED_GLOBAL_USER_INSTALL_TIMEOUT_MS =
+  PACKED_RELEASE_POLICY.packedUserAcceptance.globalUserInstallTimeoutMs;
 export const PACKED_GLOBAL_USER_UPDATE_TIMEOUT_MS =
   PACKED_RELEASE_POLICY.packedUserAcceptance.globalUserUpdateTimeoutMs;
 export const PACKED_HISTORICAL_USER_UPDATE_TIMEOUT_MS =
@@ -2490,6 +2492,7 @@ function runInstalledPublicProjectCli(descriptor, roots, env, mode, timeoutMs) {
     PACKED_USER_TARGETS.join(","),
     "--project-dir",
     roots.projectDir,
+    "--project-instructions=managed",
   ], {
     cwd: roots.ordinaryCwd,
     env,
@@ -2509,6 +2512,7 @@ function runInstalledPublicGlobalUpdateFromProject(descriptor, roots, env) {
     PACKED_USER_TARGETS.join(","),
     "--skills",
     ACCEPTANCE_SKILL_FILTER,
+    "--project-instructions=managed",
   ], {
     cwd: roots.projectDir,
     env,
@@ -3044,7 +3048,9 @@ function runCurrentPackageLane({
       roots,
       env,
       mode,
-      mode === "update" ? PACKED_GLOBAL_USER_UPDATE_TIMEOUT_MS : timeoutMs,
+      mode === "install"
+        ? PACKED_GLOBAL_USER_INSTALL_TIMEOUT_MS
+        : PACKED_GLOBAL_USER_UPDATE_TIMEOUT_MS,
     );
     const record = {
       mode,
@@ -3216,7 +3222,7 @@ function runHistoricalUpdateLane({
       roots,
       env,
       "install",
-      timeoutMs,
+      PACKED_GLOBAL_USER_INSTALL_TIMEOUT_MS,
     ),
   );
   const before = normalizedManifest(artifacts.manifest, roots.userHome);
