@@ -198,6 +198,35 @@ describe("Graphify upstream output sanitizer", () => {
     assert.equal(hasPrivateLocalPath("~/.meta-kim/../private"), true);
   });
 
+  test("redacts private paths extracted into node display text only", () => {
+    const graph = {
+      nodes: [{
+        id: "documented-path",
+        label: "C:/Users/Kim/private.txt",
+        norm_label: "C:\\Users\\Kim\\private.txt",
+        name: "/home/kim/private.txt",
+        description: "See \\\\server\\share\\private.txt",
+        metadata: { localPath: "C:/Users/Kim/must-remain-visible-to-validator" },
+      }],
+      links: [],
+    };
+
+    const first = sanitizeGraphifyOutput(graph);
+    assert.equal(first.changed, true);
+    assert.equal(first.redactedPrivateNodeTextFields, 4);
+    for (const field of ["label", "norm_label", "name", "description"]) {
+      assert.equal(graph.nodes[0][field], "<private-local-path>");
+    }
+    assert.equal(
+      graph.nodes[0].metadata.localPath,
+      "C:/Users/Kim/must-remain-visible-to-validator",
+    );
+
+    const second = sanitizeGraphifyOutput(graph);
+    assert.equal(second.changed, false);
+    assert.equal(second.redactedPrivateNodeTextFields, 0);
+  });
+
   test("report identity check flags real user paths but not documented home aliases", () => {
     // GRAPH_REPORT.md faithfully quotes comments from tracked repository files,
     // so a documented `~/.claude/...` reference must not fail the report gate.

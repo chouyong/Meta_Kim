@@ -238,6 +238,7 @@ export function sanitizeGraphifyOutput(
   };
   let redactedPrivateSourceUrls = 0;
   let sanitizedKnownHomeAliases = 0;
+  let redactedPrivateNodeTextFields = 0;
   for (const node of graph.nodes) {
     for (const field of ["label", "norm_label", "name", "description"]) {
       const current = node[field];
@@ -245,6 +246,10 @@ export function sanitizeGraphifyOutput(
       if (sanitized !== current) {
         node[field] = sanitized;
         sanitizedKnownHomeAliases += 1;
+      }
+      if (hasPrivateLocalPath(node[field])) {
+        node[field] = "<private-local-path>";
+        redactedPrivateNodeTextFields += 1;
       }
     }
     if (isPrivateNodeSourceUrl(node.source_url)) {
@@ -403,6 +408,7 @@ export function sanitizeGraphifyOutput(
       Object.values(sourceReclassifications).some((count) => count > 0) ||
       redactedPrivateSourceUrls > 0 ||
       sanitizedKnownHomeAliases > 0 ||
+      redactedPrivateNodeTextFields > 0 ||
       canonicalizedNodeIds > 0 ||
       canonicalizedHyperedgeIds > 0 ||
       rewrittenHyperedgeReferences > 0 ||
@@ -413,6 +419,7 @@ export function sanitizeGraphifyOutput(
     ...sourceReclassifications,
     redactedPrivateSourceUrls,
     sanitizedKnownHomeAliases,
+    redactedPrivateNodeTextFields,
     canonicalizedNodeIds,
     resolvedCanonicalCollisions,
     canonicalizedHyperedgeIds,
