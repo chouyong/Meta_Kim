@@ -9,8 +9,10 @@ import {
 } from "./runtime-capability-acceptance.mjs";
 import { observeClaudeJsonl, observeCodexJsonl } from "./live-acceptance/observe-host-events.mjs";
 import { readCodexDesktopEngineeringEvidence, readCodexDesktopSessionEvidence, readCodexTuiSessionEvidence } from "./live-acceptance/read-codex-session-evidence.mjs";
+import { readClaudeInteractiveSessionEvidence, readClaudeInteractiveSessionFailureObservation } from "./live-acceptance/read-claude-session-evidence.mjs";
 import { runCli } from "./live-acceptance/run-clean-room-live-acceptance.mjs";
 import { assertExactMarkerEventLifecycles } from "./live-acceptance/validate-marker-lifecycle.mjs";
+import { writeRuntimeCapabilityFailureObservation } from "./runtime-capability-failure-observations.mjs";
 import { loadSetupBoundRuntimeExecutable, revalidateRuntimeExecutableIdentity } from "./runtime-executable-binding.mjs";
 import { resolveClaudeLiveProviderEnvironmentSync } from "./claude-live-provider-env.mjs";
 import { resolveCodexLiveProviderConfigSync, revalidateCodexLiveProviderConfigSync } from "./codex-live-provider-config.mjs";
@@ -40,6 +42,12 @@ const CODEX_DESKTOP_ENGINEERING_PRODUCER = Object.freeze({
   version: "1.0.0",
   family: "runtime_tool",
   compositeFacets: ["shell", "filesystem", "apply_patch / edit"],
+});
+const CLAUDE_INTERACTIVE_SESSION_HANDOFF_PRODUCER = Object.freeze({
+  id: "meta-kim.claude-interactive-session.all-facets",
+  version: "1.0.0",
+  family: "interactive_session_handoff",
+  compositeFacets: ["agent", "subagent", "shell", "filesystem", "apply_patch / edit"],
 });
 
 function sha256(value) {
@@ -92,14 +100,14 @@ function acceptanceWriterFor(testOnly, internalWriter) {
 function promptFor(capability, runtime, nonce, marker) {
   const common = `This is a bounded Meta_Kim runtime capability probe ${nonce}. Capability marker: ${marker}. Do only the requested action inside the current temporary workspace and then stop.`;
   if (capability === "agent") {
-    if (runtime === "codex") return `${common} After a successful spawn returns a child id, use collaboration.wait_agent until that child reports completed; never call the waiting tool without a child id. Do not write ordinary text or imitate a tool call. Your first and immediate action must be collaboration.spawn_agent exactly once with task_name="meta_kim_probe" and message="Return exactly ${marker} as your entire final response." Call collaboration.spawn_agent now.`;
+    if (runtime === "codex") return `${common} Call the top-level native spawn_agent tool directly exactly once with task_name="meta_kim_probe", message="Return exactly ${marker} as your entire final response.", and fork_turns="none". Do not call spawn_agent from inside functions.exec. Do not use collaboration.spawn_agent or any namespace prefix. After spawn_agent returns its child id, call the top-level wait_agent tool for that exact child until it reports completed. Never call wait_agent before spawn_agent returns a child id. Do not substitute an empty wait, ordinary text, or an imitated tool call.`;
     return `${common} Use the runtime's native agent/subagent tool exactly once and wait for its successful completion. Require the child to return exactly the complete capability marker ${marker} as its entire final response; the nonce alone is not sufficient.`;
   }
   if (capability === "subagent") {
-    if (runtime === "codex") return `${common} After a successful spawn returns a child id, use collaboration.wait_agent until that child reports completed; never call the waiting tool without a child id. Do not write ordinary text or imitate a tool call. Your first and immediate action must be collaboration.spawn_agent exactly once with task_name="meta_kim_probe" and message="Return exactly ${marker} as your entire final response." Call collaboration.spawn_agent now.`;
+    if (runtime === "codex") return `${common} Call the top-level native spawn_agent tool directly exactly once with task_name="meta_kim_probe", message="Return exactly ${marker} as your entire final response.", and fork_turns="none". Do not call spawn_agent from inside functions.exec. Do not use collaboration.spawn_agent or any namespace prefix. After spawn_agent returns its child id, call the top-level wait_agent tool for that exact child until it reports completed. Never call wait_agent before spawn_agent returns a child id. Do not substitute an empty wait, ordinary text, or an imitated tool call.`;
     return `${common} Spawn exactly one native child subagent and wait for its successful completion. Require the child to return exactly the complete capability marker ${marker} as its entire final response; the nonce alone is not sufficient.`;
   }
-  if (capability === "shell") return `${common} Use the native shell tool to create meta-kim-probe.txt containing exactly shell-${marker}.`;
+  if (capability === "shell") return `${common} Use the native shell tool to create meta-kim-probe.txt containing exactly shell-${marker}. Wait for the create command to complete successfully. Then use the same native shell tool in a second command to read meta-kim-probe.txt. Do not finish until both shell calls have terminal item.completed evidence and the read result contains exactly shell-${marker}.`;
   if (capability === "filesystem") return `${common} Use the runtime's native file-reading capability to read meta-kim-probe.txt and report its exact existing content ${marker}; do not edit it.`;
   if (capability === "apply_patch / edit") {
     if (runtime === "claude_code") {
@@ -120,7 +128,7 @@ function prepareCodexProbeWorkspace(workspace, { capability = null } = {}) {
     path.join(workspace, "AGENTS.md"),
     "# Controlled Runtime Probe\n\nWork only inside this temporary repository. The caller authorizes exactly the native capability operation in the prompt. Do not replace native tool evidence with ordinary text.\n" +
       (["agent", "subagent"].includes(capability)
-        ? "For this probe, the waiting tool is forbidden until a child id exists. Do not write an assistant message before the first tool call. Start now by calling collaboration.spawn_agent.\n"
+        ? "For this probe: Start by calling the top-level native spawn_agent tool directly, use wait_agent only after spawn_agent returns a child id, and never route either call through functions.exec or a namespace prefix. Do not replace either native call with ordinary text or an empty wait.\n"
         : ""),
     "utf8",
   );
@@ -135,7 +143,7 @@ function commandFor(runtime, workspace, capability, executableIdentity = null, c
       "exec",
       ...(codexProviderBinding?.args ?? []),
       "-c", "features.multi_agent=true",
-      "-c", "features.multi_agent_v2=true",
+      "-c", "features.multi_agent_v2=false",
       "-c", "agents.max_threads=2",
       "-c", "agents.max_depth=1",
       ...(process.platform === "win32" ? ["-c", 'windows.sandbox="unelevated"'] : []),
@@ -277,7 +285,162 @@ export function runtimeCapabilityProducerRegistry() {
     codexDesktopAgentSubagent: CODEX_DESKTOP_COMPOSITE_PRODUCER,
     codexEngineeringComposite: CODEX_ENGINEERING_COMPOSITE_PRODUCER,
     codexDesktopEngineering: CODEX_DESKTOP_ENGINEERING_PRODUCER,
+    claudeInteractiveSessionHandoff: CLAUDE_INTERACTIVE_SESSION_HANDOFF_PRODUCER,
   });
+}
+
+export async function runClaudeInteractiveSessionHandoffProducer({
+  projectRoot,
+  profile,
+  sessionId,
+  marker,
+  workspacePath,
+  sinceMs,
+  capabilities = CLAUDE_INTERACTIVE_SESSION_HANDOFF_PRODUCER.compositeFacets,
+  reader = readClaudeInteractiveSessionEvidence,
+  failureReader = readClaudeInteractiveSessionFailureObservation,
+  _acceptanceWriter = null,
+  attemptBase = `${new Date().toISOString().replace(/[-:.]/gu, "")}-${randomUUID()}`,
+} = {}) {
+  const selected = [...new Set(capabilities)];
+  if (JSON.stringify(selected) !== JSON.stringify(CLAUDE_INTERACTIVE_SESSION_HANDOFF_PRODUCER.compositeFacets)) {
+    throw new Error("Claude interactive session handoff requires the exact five standard capability facets");
+  }
+  let evidence;
+  try {
+    evidence = await reader({ projectRoot, profile, sessionId, marker, workspacePath, sinceMs });
+  } catch (successError) {
+    let failureEvidence;
+    try {
+      failureEvidence = await failureReader({ projectRoot, profile, sessionId, marker, workspacePath, sinceMs });
+    } catch {
+      throw successError;
+    }
+    const persisted = writeRuntimeCapabilityFailureObservation({
+      projectRoot,
+      profile,
+      producer: CLAUDE_INTERACTIVE_SESSION_HANDOFF_PRODUCER,
+      evidence: failureEvidence,
+      testOnly: reader !== readClaudeInteractiveSessionEvidence || failureReader !== readClaudeInteractiveSessionFailureObservation,
+    });
+    return {
+      ...persisted,
+      evidence: failureEvidence,
+      outcome: "fail",
+      blockedFromRelease: true,
+      failureClass: failureEvidence.failureClass,
+      results: [],
+    };
+  }
+  if (evidence.sourceCategory !== "claude_interactive_session_file_handoff") throw new Error("Claude interactive session source category mismatch");
+  const nonce = String(marker).match(/^META_KIM_CAPABILITY_CLAUDE_HANDOFF_([0-9a-f-]{36})$/u)?.[1];
+  if (!nonce) throw new Error("Claude interactive session marker is invalid");
+  const paths = prepareRuntimeCapabilityAcceptanceStore({ projectRoot, profile });
+  const producerRoot = path.join(paths.profileRoot, "runtime-capability-producers");
+  const artifactsDir = path.join(producerRoot, "artifacts");
+  const receiptsDir = path.join(producerRoot, "receipts");
+  mkdirSync(artifactsDir, { recursive: true });
+  mkdirSync(receiptsDir, { recursive: true });
+  const rawPath = path.join(artifactsDir, `${attemptBase}-claude-interactive-handoff.json`);
+  const rawBytes = Buffer.from(`${JSON.stringify(evidence.sanitizedArtifact, null, 2)}\n`, "utf8");
+  atomicExclusiveWrite(rawPath, rawBytes);
+  const eventBindings = {
+    agent: [evidence.events.agent.eventId],
+    subagent: [evidence.events.subagent.eventId],
+    shell: [evidence.events.shell.eventId],
+    filesystem: [evidence.events.filesystemBefore.eventId, evidence.events.filesystemAfter.eventId],
+    "apply_patch / edit": [evidence.events.edit.eventId],
+  };
+  const allEvents = Object.values(evidence.events);
+  const lifecycle = {
+    allowlisted: true,
+    lifecycleId: evidence.lifecycleId,
+    facets: [...CLAUDE_INTERACTIVE_SESSION_HANDOFF_PRODUCER.compositeFacets],
+    sourceCategory: evidence.sourceCategory,
+    markerDigest: evidence.markerDigest,
+    observedAt: evidence.observedAt,
+    sessionId: evidence.sessionId,
+    childSessionId: evidence.childSessionId,
+    projectRootDigest: evidence.projectRootDigest,
+    workspaceDigest: evidence.workspaceDigest,
+    workspaceRef: evidence.workspaceRef,
+    sourceSessionRef: evidence.sourceSessionRef,
+    sourceSessionSnapshotSize: evidence.sourceSessionSnapshotSize,
+    sourceSessionSnapshotSha256: evidence.sourceSessionSnapshotSha256,
+    sourceSessionLines: evidence.sourceSessionLines,
+    evidenceWindowStartMs: sinceMs,
+    eventBindings,
+    orderedEventIds: evidence.eventOrder,
+    beforeContentSha256: evidence.beforeContentSha256,
+    finalContentSha256: evidence.finalContentSha256,
+    sanitizedArtifactDigest: sha256(rawBytes),
+  };
+  const request = {
+    runtime: "claude_code",
+    mode: "interactive_host",
+    sourceCategory: evidence.sourceCategory,
+    sessionId: evidence.sessionId,
+    lifecycleId: evidence.lifecycleId,
+    workspaceRef: evidence.workspaceRef,
+  };
+  const result = { status: 0, signal: null, stdoutSha256: sha256(rawBytes), stderrSha256: sha256("") };
+  const results = [];
+  for (const capability of selected) {
+    const attemptId = `${attemptBase}-${capability.replace(/[^a-z0-9]+/giu, "-").replace(/^-|-$/gu, "")}`;
+    const correlationId = randomUUID();
+    const selectedEvents = eventBindings[capability].map((eventId) => allEvents.find((entry) => entry.eventId === eventId));
+    const receiptWithoutHash = {
+      schemaVersion: PRODUCER_RECEIPT_SCHEMA_VERSION,
+      attestationAuthority: "controlled_producer",
+      producer: CLAUDE_INTERACTIVE_SESSION_HANDOFF_PRODUCER,
+      testOnly: reader !== readClaudeInteractiveSessionEvidence,
+      runtime: "claude_code",
+      runtimeVersion: evidence.cliVersion,
+      capability,
+      mode: "interactive_host",
+      attemptId,
+      correlationId,
+      observedAt: evidence.observedAt,
+      outcome: "pass",
+      hostInvocation: {
+        runtimeIsolation: "claude_interactive_existing_session_file_handoff",
+        request,
+        requestDigest: sha256(JSON.stringify(request)),
+        result,
+        resultDigest: sha256(JSON.stringify(result)),
+        exitCode: 0,
+        signal: null,
+      },
+      capabilityNonce: nonce,
+      capabilityMarker: marker,
+      compositeLifecycle: { ...lifecycle, facet: capability },
+      eventEvidence: selectedEvents,
+      rawArtifact: {
+        path: path.relative(paths.profileRoot, rawPath).replaceAll("\\", "/"),
+        sha256: sha256(rawBytes),
+      },
+      workspaceOutcome: ["agent", "subagent"].includes(capability)
+        ? { kind: "host_event_only", contentSha256: null }
+        : { kind: "bounded_file", contentSha256: evidence.finalContentSha256 },
+      flags: { fixture: false, recoveredFromTimeout: false, blockedFromRelease: false },
+      failureClass: null,
+    };
+    const receipt = { ...receiptWithoutHash, recordHash: sha256(JSON.stringify(receiptWithoutHash)) };
+    const receiptPath = path.join(receiptsDir, `${attemptId}.json`);
+    atomicExclusiveWrite(receiptPath, Buffer.from(`${JSON.stringify(receipt, null, 2)}\n`, "utf8"));
+    const acceptance = acceptanceWriterFor(receipt.testOnly, _acceptanceWriter)({
+      projectRoot: paths.projectRoot,
+      profile: paths.profile,
+      receiptPath,
+      runtime: "claude_code",
+      capability,
+      mode: "interactive_host",
+      attemptId,
+      correlationId,
+    });
+    results.push({ capability, receipt, receiptPath, acceptance });
+  }
+  return { rawPath, evidence, results };
 }
 
 /** Attests one explicitly selected Codex Desktop engineering tool chain. */
@@ -906,6 +1069,17 @@ export async function produceRuntimeCapabilityWithAcceptanceWriter(options, acce
       marker: options.marker,
       sinceMs: options.sinceMs,
       workspacePath: options.workspacePath,
+    });
+  }
+  if (options.source === "claude_interactive_session_handoff") {
+    if (options.runtime !== "claude_code") throw new Error("Claude interactive session handoff supports only claude_code");
+    return runClaudeInteractiveSessionHandoffProducer({
+      ...common,
+      sessionId: options.sessionId,
+      marker: options.marker,
+      sinceMs: options.sinceMs,
+      workspacePath: options.workspacePath,
+      capabilities: options.capabilities,
     });
   }
   if (options.source === "live_controlled") {

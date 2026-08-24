@@ -43,3 +43,25 @@ export function selectReportProviderBudget(providers, cap) {
   for (const p of list) take(p); // fill remaining slots in master order
   return picked;
 }
+
+export function selectRuntimeAgentBudget(agents, cap) {
+  const list = Array.isArray(agents) ? agents : [];
+  const limit = Number.isInteger(cap) && cap > 0 ? cap : 0;
+  const picked = [];
+  const seen = new Set();
+  const representedRuntimes = new Set();
+  const take = (agent) => {
+    if (!agent || seen.has(agent) || picked.length >= limit) return;
+    seen.add(agent);
+    picked.push(agent);
+  };
+
+  for (const agent of list) {
+    const runtime = typeof agent?.runtime === "string" ? agent.runtime : null;
+    if (!runtime || representedRuntimes.has(runtime)) continue;
+    representedRuntimes.add(runtime);
+    take(agent);
+  }
+  for (const agent of list) take(agent);
+  return picked;
+}

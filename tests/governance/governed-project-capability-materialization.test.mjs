@@ -23,10 +23,27 @@ function makeFixture(name, { projectMarker = true } = {}) {
   const userHome = path.join(root, "user-home");
   const stateDir = path.join(root, "state");
   const artifactDir = path.join(root, "artifacts");
+  const globalCapabilityIndexDir = path.join(
+    userHome,
+    ".meta-kim",
+    "state",
+    "default",
+    "capability-index",
+  );
   mkdirSync(projectDir, { recursive: true });
   mkdirSync(userHome, { recursive: true });
   mkdirSync(stateDir, { recursive: true });
   mkdirSync(artifactDir, { recursive: true });
+  mkdirSync(globalCapabilityIndexDir, { recursive: true });
+  writeFileSync(
+    path.join(globalCapabilityIndexDir, "global-capabilities.json"),
+    `${JSON.stringify({
+      generatedAt: new Date().toISOString(),
+      byCapabilityType: {},
+      byPlatform: {},
+    }, null, 2)}\n`,
+    "utf8",
+  );
   if (projectMarker) writeFileSync(path.join(projectDir, "package.json"), "{}\n", "utf8");
   return { root, projectDir, userHome, stateDir, artifactDir };
 }

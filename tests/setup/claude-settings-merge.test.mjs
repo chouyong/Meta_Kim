@@ -188,7 +188,8 @@ describe("Claude settings hook command rendering", () => {
 
     assert.match(promptHooks[0].command, /user-prompt-submit\.js/);
     assert.match(promptHooks[1].command, /activate-meta-theory-spine\.mjs/);
-    assert.match(promptHooks[2].command, /optional\.js/);
+    assert.match(promptHooks[2].command, /medusa-findings-surface\.mjs/);
+    assert.match(promptHooks[3].command, /optional\.js/);
   });
 
   test("global settings merge preserves unproven same-name retired hooks", () => {

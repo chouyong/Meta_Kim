@@ -46,7 +46,10 @@ function assertNativeCodexSpawn(
     binding.ownerDefinition.nativeCustomAgentEligible,
   );
   assert.equal(message.metaKimBinding.family, "agent_subagent");
-  assert.equal(message.metaKimBinding.providerId, `global:${ownerAgent}`);
+  const providerScope = String(binding?.ownerSource ?? "").startsWith(".codex/agents/")
+    ? "project"
+    : "global";
+  assert.equal(message.metaKimBinding.providerId, `${providerScope}:${ownerAgent}`);
   assert.equal(message.metaKimBinding.taskPacketId, message.taskPacketId);
   assert.equal(message.metaKimBinding.roleInstanceId, message.roleInstanceId);
   assert.equal(message.metaKimBinding.evidenceKind, "spawn_agent_result");
@@ -674,6 +677,26 @@ test("routing fixtures recall internal patterns and platform/OS matrices", () =>
     !String(claudeAgentSearch.recommendedRoute?.selectedCapabilityProviders?.agent?.sourceRef ?? "").startsWith(".codex/agents/"),
     "Claude Code agent search must not select .codex/agents adapters as callable Claude agents",
   );
+  if (!claudeAgentSearch.recommendedRoute?.selectedCapabilityProviders?.agent) {
+    assert.ok(
+      claudeAgentSearch.recommendedRoute?.blockedReasons?.includes("execution owner missing"),
+      "A missing Claude Code execution owner must remain explicit on the selected discovery route",
+    );
+    assert.equal(claudeAgentSearch.routeExecutionGate?.handoffStatus, "blocked");
+    assert.ok(
+      claudeAgentSearch.routeExecutionGate?.blockedBy?.includes("route_requires_confirmation_or_more_fetch"),
+      "A discovery route without an execution owner must remain fail-closed",
+    );
+    assert.ok(
+      claudeAgentSearch.capabilityGapPacket?.missing?.includes("execution owner missing"),
+      "A visible low-score discovery route must still emit a capabilityGapPacket when its owner is missing",
+    );
+    assert.equal(claudeAgentSearch.capabilityGapDetected, true);
+    assert.equal(
+      claudeAgentSearch.capabilityGapDecision?.source,
+      "insufficient_recommended_route",
+    );
+  }
 
   const codexAgentReuseComplaint = route(
     "Critical Thinking Fetch Deep Thinking Review 为什么 Codex 一直创建 agent 而不是找全局 agent",

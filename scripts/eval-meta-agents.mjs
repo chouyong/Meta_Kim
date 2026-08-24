@@ -4216,7 +4216,9 @@ async function collectOpenClawBaseStatus({ useMainConfig = false } = {}) {
 }
 
 function isMissingOpenClawAuthError(error) {
-  return String(error?.message ?? "").includes("Missing source OpenClaw auth file:");
+  return [error?.message, error?.stderr, error?.stdout].some((value) =>
+    String(value ?? "").includes("Missing source OpenClaw auth file:"),
+  );
 }
 
 async function runOpenClawStructuralSmoke(authError) {

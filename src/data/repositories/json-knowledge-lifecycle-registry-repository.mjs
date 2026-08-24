@@ -292,7 +292,8 @@ export function createJsonKnowledgeLifecycleRegistryRepository({
     const targetPath = path.resolve(root, ...targetRef.split("/"));
     if (!inside(targetPath, root)) fail("targetRef escapes allowedRoot");
     const content = readBoundText(targetPath, root);
-    return `sha256:${createHash("sha256").update(content, "utf8").digest("hex")}`;
+    const repositoryContent = content.replace(/\r\n/gu, "\n");
+    return `sha256:${createHash("sha256").update(repositoryContent, "utf8").digest("hex")}`;
   }
 
   function compareAndSwap({

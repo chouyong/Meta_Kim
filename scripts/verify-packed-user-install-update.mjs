@@ -167,6 +167,43 @@ function sha256(value) {
   return createHash("sha256").update(value).digest("hex");
 }
 
+export function classifyInstalledCliByteIdentity(
+  candidateBytes,
+  installedBytes,
+  { allowNpmBinShebangCrLfNormalization = false } = {},
+) {
+  const candidate = Buffer.from(candidateBytes);
+  const installed = Buffer.from(installedBytes);
+  if (candidate.equals(installed)) return "exact";
+  if (
+    !allowNpmBinShebangCrLfNormalization ||
+    candidate.length !== installed.length + 1 ||
+    candidate[0] !== 0x23 ||
+    candidate[1] !== 0x21
+  ) {
+    return null;
+  }
+  const firstLineFeed = candidate.indexOf(0x0a);
+  if (
+    firstLineFeed <= 2 ||
+    candidate[firstLineFeed - 1] !== 0x0d ||
+    installed[firstLineFeed - 1] !== 0x0a
+  ) {
+    return null;
+  }
+  if (
+    !candidate.subarray(0, firstLineFeed - 1).equals(
+      installed.subarray(0, firstLineFeed - 1),
+    ) ||
+    !candidate.subarray(firstLineFeed + 1).equals(
+      installed.subarray(firstLineFeed),
+    )
+  ) {
+    return null;
+  }
+  return "npm_bin_shebang_crlf_to_lf";
+}
+
 const PORTABILITY_PLACEHOLDERS = Object.freeze([
   "__REPO_ROOT__",
   "REPLACE_WITH_REPO_ROOT",
@@ -767,7 +804,12 @@ function makeIsolatedRoots(root, name) {
   return roots;
 }
 
-function packedCliDescriptor(packageInfo, roots, globalNodeModules) {
+function packedCliDescriptor(
+  packageInfo,
+  roots,
+  globalNodeModules,
+  { allowNpmBinShebangCrLfNormalization = false } = {},
+) {
   const packageManifest = JSON.parse(
     readFileSync(path.join(packageInfo.workspace, "package.json"), "utf8"),
   );
@@ -821,6 +863,8 @@ function packedCliDescriptor(packageInfo, roots, globalNodeModules) {
   const command = process.platform === "win32"
     ? path.join(binDir, `${binName}.cmd`)
     : path.join(binDir, binName);
+  const installedCliBytes = readFileSync(installedCliPath);
+  const extractedCliBytes = readFileSync(packedCliPath);
   return {
     binName,
     binDir,
@@ -831,12 +875,17 @@ function packedCliDescriptor(packageInfo, roots, globalNodeModules) {
     installedCliPath,
     identity,
     durableLayout,
-    packedCliSha256: sha256(readFileSync(installedCliPath)),
-    extractedCliSha256: sha256(readFileSync(packedCliPath)),
+    packedCliSha256: sha256(installedCliBytes),
+    extractedCliSha256: sha256(extractedCliBytes),
+    cliByteIdentity: classifyInstalledCliByteIdentity(
+      extractedCliBytes,
+      installedCliBytes,
+      { allowNpmBinShebangCrLfNormalization },
+    ),
   };
 }
 
-function installPackedCli(packageInfo, roots, env, timeoutMs) {
+function installPackedCli(packageInfo, roots, env, timeoutMs, options = {}) {
   requireSuccess(
     "packed candidate isolated global CLI install",
     runCli(
@@ -865,12 +914,14 @@ function installPackedCli(packageInfo, roots, env, timeoutMs) {
   if (!globalRoot || !path.isAbsolute(globalRoot)) {
     throw new Error("npm did not return an absolute isolated global package root");
   }
-  const descriptor = packedCliDescriptor(packageInfo, roots, globalRoot);
+  const descriptor = packedCliDescriptor(packageInfo, roots, globalRoot, options);
   if (!existsSync(descriptor.command)) {
     throw new Error(`isolated packed CLI bin is missing: ${descriptor.binName}`);
   }
-  if (descriptor.packedCliSha256 !== descriptor.extractedCliSha256) {
-    throw new Error("installed packed CLI bytes differ from the npm tarball candidate");
+  if (descriptor.cliByteIdentity === null) {
+    throw new Error(
+      `installed packed CLI bytes differ from the npm tarball candidate for ${descriptor.identity.packageVersion}`,
+    );
   }
   const pathKey = Object.hasOwn(env, "Path") ? "Path" : "PATH";
   const pathValue = env[pathKey] ?? env.PATH ?? env.Path ?? "";
@@ -3214,6 +3265,7 @@ function runHistoricalUpdateLane({
     roots,
     env,
     timeoutMs,
+    { allowNpmBinShebangCrLfNormalization: true },
   );
   requireSuccess(
     `${historicalRef} installed CLI global state seed`,
@@ -3253,6 +3305,8 @@ function runHistoricalUpdateLane({
     checkMethod: "current_update_internal_global_check_plus_exact_artifact_manifest_validation",
     beforeVersion: before.metaKimVersion,
     afterVersion: after.metaKimVersion,
+    historicalCliByteIdentity: historicalDescriptor.cliByteIdentity,
+    currentCliByteIdentity: currentDescriptor.cliByteIdentity,
     exitCode: update.status,
     artifactCount: Object.keys(proof).length,
     cwdBoundary: "ordinary_cwd_untouched",

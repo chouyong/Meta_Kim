@@ -1,6 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { selectReportProviderBudget } from "../../scripts/report-provider-budget.mjs";
+import {
+  selectReportProviderBudget,
+  selectRuntimeAgentBudget,
+} from "../../scripts/report-provider-budget.mjs";
 
 const config = (id) => ({ id, type: "hooks", source: "project_runtime_hook_config_inventory" });
 const rule = (id) => ({ id, type: "rules", source: "project_runtime_rule_inventory" });
@@ -51,4 +54,41 @@ test("empty / undersized inputs are safe", () => {
   assert.deepEqual(selectReportProviderBudget(null, 80), []);
   assert.deepEqual(selectReportProviderBudget([config("a")], 0), []);
   assert.equal(selectReportProviderBudget([config("a"), script("b")], 1).length, 1);
+});
+
+test("runtime agent budget keeps every runtime visible under earlier-runtime floods", () => {
+  const runtimeAgent = (runtime, id) => ({
+    id,
+    runtime,
+    type: "agents",
+    source: "project_runtime_agent_inventory",
+  });
+  const agents = [
+    ...Array.from({ length: 9 }, (_, index) => runtimeAgent("claude_code", `claude-${index}`)),
+    ...Array.from({ length: 18 }, (_, index) => runtimeAgent("codex", `codex-${index}`)),
+    ...Array.from({ length: 9 }, (_, index) => runtimeAgent("cursor", `cursor-${index}`)),
+    ...Array.from({ length: 9 }, (_, index) => runtimeAgent("openclaw", `openclaw-${index}`)),
+  ];
+
+  const picked = selectRuntimeAgentBudget(agents, 30);
+
+  assert.equal(picked.length, 30);
+  assert.deepEqual(
+    new Set(picked.map((agent) => agent.runtime)),
+    new Set(["claude_code", "codex", "cursor", "openclaw"]),
+  );
+  assert.ok(picked.some((agent) => agent.id === "openclaw-0"));
+});
+
+test("runtime agent budget handles empty, zero-cap, and single-runtime inputs", () => {
+  const agents = [
+    { id: "a", runtime: "codex" },
+    { id: "b", runtime: "codex" },
+  ];
+
+  assert.deepEqual(selectRuntimeAgentBudget([], 30), []);
+  assert.deepEqual(selectRuntimeAgentBudget(null, 30), []);
+  assert.deepEqual(selectRuntimeAgentBudget(agents, 0), []);
+  assert.deepEqual(selectRuntimeAgentBudget(agents, 1), [agents[0]]);
+  assert.deepEqual(selectRuntimeAgentBudget(agents, 30), agents);
 });

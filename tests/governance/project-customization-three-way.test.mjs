@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import {
@@ -61,6 +61,54 @@ test("a real project gap creates a project-native capability instead of a global
   assert.equal(result.decisions[0].copyPolicy, "create_project_local_capability");
   assert.match(result.decisions[0].targetPath, /^\.codex\/agents\//u);
   assert.equal(result.decisions[0].projectOwnershipClass, "runtime_sedimented_project_copy");
+});
+
+test("an inventory-refresh blocker cannot confirm or mutate a project capability route", () => {
+  const projectRoot = mkdtempSync(path.join(os.tmpdir(), "meta-kim-refresh-blocked-mutation-"));
+  try {
+    const blockedPacket = buildProjectCustomizationPacket({
+      task: "需要在本项目新建 agent project-auditor",
+      runId: "refresh-blocked",
+      runtime: "codex",
+      orchestrationReport: {
+        status: "blocked",
+        selectedExecutionRoute: {
+          recommendedRoute: { owner: "project-auditor" },
+          routeExecutionGate: {
+            routeCompatible: true,
+            blockedBy: ["global_capability_inventory_refresh_required"],
+          },
+          ownerDiscoveryPacket: {
+            localGlobalAgents: [],
+            projectRuntimeAgents: [],
+            localGlobalCapabilityProviders: [],
+            projectRuntimeCapabilityProviders: [],
+            candidateReusableCapabilityProviders: [],
+          },
+        },
+      },
+      runtimeInvocationPlanPacket: { requiredBindings: [] },
+      outputLanguage: "zh-CN",
+    });
+    assert.equal(blockedPacket.routeConfirmed, false);
+
+    const executed = executeProjectCustomizationPacket({
+      packet: blockedPacket,
+      runtime: "codex",
+      runId: "refresh-blocked",
+      projectRoot,
+      outputLanguage: "zh-CN",
+    });
+    assert.equal(executed.execution.appliedCount, 0);
+    assert.equal(executed.execution.failedCount, 1);
+    assert.equal(
+      executed.execution.results[0].reason,
+      "governed_route_not_execution_ready",
+    );
+    assert.equal(existsSync(path.join(projectRoot, ".codex", "agents")), false);
+  } finally {
+    rmSync(projectRoot, { recursive: true, force: true });
+  }
 });
 
 test("exact global Skill and Command reuse survives compacted provider packets", () => {

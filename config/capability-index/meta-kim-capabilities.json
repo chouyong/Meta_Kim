@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-08-17T04:16:49.344Z",
+  "generatedAt": "2026-08-17T17:29:43.673Z",
   "registryName": "meta-kim-capabilities",
   "scope": "repo-canonical",
   "canonicalProjection": "config/capability-index/meta-kim-capabilities.json",
@@ -22,7 +22,7 @@
     "totalSkills": 17,
     "totalHooks": 27,
     "totalMcpServers": 1,
-    "totalMcpTools": 1,
+    "totalMcpTools": 6,
     "totalPlugins": 4,
     "totalCommands": 7,
     "countSemantics": {
@@ -50,13 +50,13 @@
       },
       "cursor": {
         "projectionPresent": true,
-        "hookCommandEntries": 7,
-        "hookFiles": 19,
+        "hookCommandEntries": 15,
+        "hookFiles": 22,
         "commandFiles": 0
       },
       "openclaw": {
         "projectionPresent": true,
-        "hookCommandEntries": 0,
+        "hookCommandEntries": 1,
         "hookFiles": 0,
         "commandFiles": 0,
         "skillFiles": 0
@@ -678,8 +678,48 @@
       }
     },
     "mcpTools": {
-      "repo:repo-mcp:meta-kim-runtime:tools-unlisted": {
-        "id": "meta-kim-runtime:tools-unlisted",
+      "repo:repo-mcp:meta-kim-runtime:list_meta_agents": {
+        "id": "meta-kim-runtime:list_meta_agents",
+        "type": "mcpTools",
+        "namespace": "repo-mcp",
+        "path": "canonical/runtime-assets/claude/mcp.json",
+        "size": 219,
+        "modified": "2026-05-20T06:45:51.283Z"
+      },
+      "repo:repo-mcp:meta-kim-runtime:get_meta_agent": {
+        "id": "meta-kim-runtime:get_meta_agent",
+        "type": "mcpTools",
+        "namespace": "repo-mcp",
+        "path": "canonical/runtime-assets/claude/mcp.json",
+        "size": 219,
+        "modified": "2026-05-20T06:45:51.283Z"
+      },
+      "repo:repo-mcp:meta-kim-runtime:get_meta_runtime_capabilities": {
+        "id": "meta-kim-runtime:get_meta_runtime_capabilities",
+        "type": "mcpTools",
+        "namespace": "repo-mcp",
+        "path": "canonical/runtime-assets/claude/mcp.json",
+        "size": 219,
+        "modified": "2026-05-20T06:45:51.283Z"
+      },
+      "repo:repo-mcp:meta-kim-runtime:get_meta_runtime_evidence": {
+        "id": "meta-kim-runtime:get_meta_runtime_evidence",
+        "type": "mcpTools",
+        "namespace": "repo-mcp",
+        "path": "canonical/runtime-assets/claude/mcp.json",
+        "size": 219,
+        "modified": "2026-05-20T06:45:51.283Z"
+      },
+      "repo:repo-mcp:meta-kim-runtime:get_meta_effective_runtime_capabilities": {
+        "id": "meta-kim-runtime:get_meta_effective_runtime_capabilities",
+        "type": "mcpTools",
+        "namespace": "repo-mcp",
+        "path": "canonical/runtime-assets/claude/mcp.json",
+        "size": 219,
+        "modified": "2026-05-20T06:45:51.283Z"
+      },
+      "repo:repo-mcp:meta-kim-runtime:dispatch_meta_agent": {
+        "id": "meta-kim-runtime:dispatch_meta_agent",
         "type": "mcpTools",
         "namespace": "repo-mcp",
         "path": "canonical/runtime-assets/claude/mcp.json",

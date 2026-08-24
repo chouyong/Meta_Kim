@@ -135,6 +135,27 @@ test("79 — transition candidates are candidate-only and grant zero authority",
   );
 });
 
+test("79 — repository source identity is stable across LF and CRLF checkouts", async (t) => {
+  const { root, repository } = await tempRepository(t);
+  const targetPath = path.join(root, ...TARGET.split("/"));
+  const content = await fs.readFile(targetPath, "utf8");
+  await fs.writeFile(
+    targetPath,
+    content.replace(/\r\n?/gu, "\n").replace(/\n/gu, "\r\n"),
+    "utf8",
+  );
+  assert.equal(
+    repository.readSourceDigest(TARGET),
+    repository.read().registry.entries[TARGET].sourceDigest,
+  );
+
+  await fs.writeFile(targetPath, "a\rb", "utf8");
+  const isolatedCarriageReturnDigest = repository.readSourceDigest(TARGET);
+  await fs.writeFile(targetPath, "a\nb", "utf8");
+  const lineFeedDigest = repository.readSourceDigest(TARGET);
+  assert.notEqual(isolatedCarriageReturnDigest, lineFeedDigest);
+});
+
 test("79 — foundational capabilities can only retain, upgrade, or restore", async () => {
   const registry = validateKnowledgeLifecycleRegistry(await readJson(REGISTRY_SOURCE));
   assert.throws(

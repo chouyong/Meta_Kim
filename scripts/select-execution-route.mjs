@@ -5,7 +5,10 @@ import path from "node:path";
 import { GOVERNANCE_OWNERS, OS_TARGETS, RUNTIMES, annotateCrossScopeAgentCollisions, classifyTaskShape, exists, readJson, repoPath, scoreRoute, stateDir, supportScore, toPosix } from "./governance-lib.mjs";
 import { CAPABILITY_GAP_DECISION_CONTRACT, decideCapabilityGap } from "./capability-gap-mvp.mjs";
 import { classifyMetaTheoryEntry } from "./meta-theory-entry-classifier.mjs";
-import { selectReportProviderBudget } from "./report-provider-budget.mjs";
+import {
+  selectReportProviderBudget,
+  selectRuntimeAgentBudget,
+} from "./report-provider-budget.mjs";
 import { loadRuntimeProfiles, resolveRuntimeProjection } from "./meta-kim-sync-config.mjs";
 import {
   evaluateChoiceRequirement,
@@ -25,6 +28,14 @@ import {
 import {
   getGlobalProfilePaths,
 } from "./meta-kim-local-state.mjs";
+import {
+  parseClaudeAgentDefinition,
+  scanInstalledClaudePluginAgents,
+} from "./claude-plugin-agent-discovery.mjs";
+import {
+  capabilitySourceIsValid,
+  compareCapabilitySources,
+} from "./capability-source-order.mjs";
 
 function argValue(name, fallback = null) {
   const index = process.argv.indexOf(name);
@@ -409,6 +420,11 @@ function compactAgent(entry, source) {
     provenance: compactProviderMetadata(entry.provenance ?? []),
     collision: compactProviderMetadata(entry.collision ?? null),
     routeEligible: entry.routeEligible ?? true,
+    trustRequired: entry.trustRequired === true,
+    trustReview: entry.trustReview ?? null,
+    trustReviewStatus: entry.trustReviewStatus ?? null,
+    trustReviewReason: entry.trustReviewReason ?? null,
+    trustAdmissionRecord: entry.trustAdmissionRecord ?? null,
     sourceSelectedExplicitly: entry.sourceSelectedExplicitly === true,
     cacheEvidence: compactProviderMetadata(entry.cacheEvidence ?? null),
     cacheEvidenceOnly: entry.cacheEvidenceOnly === true,
@@ -474,6 +490,7 @@ async function projectRuntimeAgents() {
   ];
   const agents = [];
   for (const { runtime: runtimeName, dir, extension } of dirs) {
+    const platformId = runtimeName === "claude_code" ? "claudeCode" : runtimeName;
     const absDir = repoPath(dir);
     if (!(await exists(absDir))) continue;
     const entries = await fs.readdir(absDir, { withFileTypes: true });
@@ -498,6 +515,7 @@ async function projectRuntimeAgents() {
         layer,
         source: "project_runtime_agent_inventory",
         runtime: runtimeName,
+        platformId,
         sourceRef: toPosix(path.join(dir, entry.name)),
         executionBlock: layer === "meta",
         metadata,
@@ -526,6 +544,7 @@ async function projectRuntimeAgents() {
         layer,
         source: "project_runtime_agent_inventory",
         runtime: "openclaw",
+        platformId: "openclaw",
         sourceRef: toPosix(soulPath),
         executionBlock: layer === "meta",
       });
@@ -566,12 +585,18 @@ async function globalRuntimeAgentProviders() {
   if (!agentProjection?.supported) return [];
 
   const projection = resolveRuntimeProjection(profileId, "global");
-  const agentsDir = projection.agentsDir;
-  if (!agentsDir || !(await exists(agentsDir))) return [];
-  const userHome = process.env.USERPROFILE ?? process.env.HOME ?? projection.baseDir;
+  const runtimeBaseDir = runtime === "claude_code" && process.env.CLAUDE_CONFIG_DIR
+    ? path.resolve(process.env.CLAUDE_CONFIG_DIR)
+    : projection.baseDir;
+  const agentsDir = runtime === "claude_code"
+    ? path.join(runtimeBaseDir, "agents")
+    : projection.agentsDir;
+  const userHome = process.env.USERPROFILE ?? process.env.HOME ?? runtimeBaseDir;
 
   const providers = [];
-  const entries = await fs.readdir(agentsDir, { withFileTypes: true });
+  const entries = agentsDir && await exists(agentsDir)
+    ? await fs.readdir(agentsDir, { withFileTypes: true })
+    : [];
   for (const entry of entries) {
     if (!entry.isFile() || !entry.name.endsWith(agentProjection.fileExtension)) continue;
     const inventoryId = entry.name.slice(0, -agentProjection.fileExtension.length);
@@ -583,6 +608,13 @@ async function globalRuntimeAgentProviders() {
     const content = await fs.readFile(agentPath, "utf8");
     if (agentProjection.format === "codex_toml") {
       ({ metadata, errors: customAgentDefinitionErrors } = parseCodexAgentDefinition(content));
+      validCustomAgentDefinition = customAgentDefinitionErrors.length === 0;
+      if (validCustomAgentDefinition) id = metadata.name;
+    } else if (agentProjection.format === "markdown_frontmatter") {
+      ({ metadata, errors: customAgentDefinitionErrors } = parseClaudeAgentDefinition(
+        content,
+        inventoryId,
+      ));
       validCustomAgentDefinition = customAgentDefinitionErrors.length === 0;
       if (validCustomAgentDefinition) id = metadata.name;
     }
@@ -609,7 +641,38 @@ async function globalRuntimeAgentProviders() {
       metadata,
       validCustomAgentDefinition,
       customAgentDefinitionErrors,
+      sourceValid: validCustomAgentDefinition !== false,
     });
+  }
+  if (runtime === "claude_code") {
+    for (const agent of await scanInstalledClaudePluginAgents(runtimeBaseDir)) {
+      providers.push({
+        id: agent.id,
+        inventoryId: agent.inventoryId,
+        layer: agent.id.startsWith("meta-") ? "meta" : "execution",
+        source: "local_global_agent_inventory",
+        runtime,
+        platformId: "claudeCode",
+        sourceClass: agent.sourceClass,
+        sourceRoot: agent.sourceRoot,
+        sourceRef: agent.sourceRef,
+        sourcePriority: agent.sourcePriority,
+        nativeIdentity: agent.nativeAgentName ?? agent.id,
+        contentDigest: agent.contentDigest,
+        sourceKey: agent.sourceKey,
+        executionBlock: agent.executionBlock === true || agent.id.startsWith("meta-"),
+        routeEligible: agent.routeEligible,
+        trustRequired: agent.trustRequired,
+        trustReview: agent.trustReview,
+        trustReviewStatus: agent.trustReviewStatus,
+        trustReviewReason: agent.trustReviewReason,
+        trustAdmissionRecord: agent.trustAdmissionRecord,
+        metadata: agent.metadata,
+        validCustomAgentDefinition: agent.validCustomAgentDefinition,
+        customAgentDefinitionErrors: agent.customAgentDefinitionErrors,
+        sourceValid: agent.validCustomAgentDefinition !== false,
+      });
+    }
   }
   const byNativeIdentity = new Map();
   for (const provider of providers) {
@@ -618,12 +681,21 @@ async function globalRuntimeAgentProviders() {
     byNativeIdentity.set(provider.nativeIdentity, group);
   }
   return [...byNativeIdentity.values()].map((group) => {
-    const candidates = [...group].sort((left, right) =>
-      String(left.sourceRef).localeCompare(String(right.sourceRef)));
+    const candidates = [...group].sort(compareCapabilitySources);
     const winner = candidates[0];
     const distinctDigests = [...new Set(candidates.map((entry) => entry.contentDigest))];
     const exactDuplicate = candidates.length > 1 && distinctDigests.length === 1;
-    const ambiguous = runtime === "codex" && candidates.length > 1 && !exactDuplicate;
+    const equallyPreferredCandidates = candidates.filter(
+      (candidate) =>
+        candidate.sourcePriority === winner.sourcePriority &&
+        capabilitySourceIsValid(candidate) === capabilitySourceIsValid(winner),
+    );
+    const claudeSamePriorityConflict =
+      runtime === "claude_code" &&
+      new Set(equallyPreferredCandidates.map((entry) => entry.contentDigest)).size > 1;
+    const ambiguous =
+      (runtime === "codex" && candidates.length > 1 && !exactDuplicate) ||
+      claudeSamePriorityConflict;
     const provenance = candidates.map((entry) => ({
       id: entry.id,
       inventoryId: entry.inventoryId,
@@ -634,8 +706,12 @@ async function globalRuntimeAgentProviders() {
       nativeIdentity: entry.nativeIdentity,
       sourcePriority: entry.sourcePriority,
       sourceKey: entry.sourceKey,
-      sourceValid: entry.validCustomAgentDefinition !== false,
+      sourceValid: capabilitySourceIsValid(entry),
     }));
+    const winnerRouteEligible =
+      !ambiguous &&
+      capabilitySourceIsValid(winner) &&
+      winner.executionBlock !== true;
     const collision = {
       detected: candidates.length > 1,
       kind: candidates.length <= 1
@@ -649,7 +725,7 @@ async function globalRuntimeAgentProviders() {
       winnerSourceRef: winner.sourceRef,
       exactDuplicate,
       ambiguous,
-      routeEligible: !ambiguous && winner.validCustomAgentDefinition !== false,
+      routeEligible: winnerRouteEligible,
       evidenceSource: "live_filesystem",
     };
     return {
@@ -661,8 +737,9 @@ async function globalRuntimeAgentProviders() {
       })),
       provenance,
       collision,
-      routeEligible: !ambiguous && winner.validCustomAgentDefinition !== false,
+      routeEligible: winnerRouteEligible,
       ambiguousNativeIdentity: ambiguous,
+      executionBlock: winner.executionBlock === true || ambiguous,
     };
   });
 }
@@ -831,8 +908,7 @@ const exactLiveSourceAgents = liveFilesystemAgentCandidates
   .map((entry) => ({
     ...entry,
     sourceSelectedExplicitly: true,
-    routeEligible:
-      (entry.validCustomAgentDefinition ?? entry.metadata?.validCustomAgentDefinition) !== false,
+    routeEligible: capabilitySourceIsValid(entry) && entry.executionBlock !== true,
   }));
 const authoritativeFilesystemAgents = exactLiveSourceAgents.length > 0
   ? exactLiveSourceAgents
@@ -1193,7 +1269,7 @@ const ownerDiscoveryPacket = {
     { source: "cursor_project_inventory", checked: true, sourceRef: ".cursor/agents; .cursor/skills; .cursor/rules; .cursor/prompts; .cursor/hooks; .cursor/hooks.json; .cursor/mcp.json" },
     { source: "openclaw_project_inventory", checked: true, sourceRef: "openclaw/workspaces; openclaw/skills; openclaw/hooks; openclaw/openclaw.template.json" },
     { source: "local_global_inventory_cache", checked: true, sourceRef: globalCapabilityInventoryRef },
-    { source: "claude_global_inventory", checked: true, sourceRef: "~/.claude/agents; ~/.claude/skills; ~/.claude/commands; ~/.claude/hooks; ~/.claude/settings.json" },
+    { source: "claude_global_inventory", checked: true, sourceRef: "~/.claude/agents; ~/.claude/plugins/installed_plugins.json; enabled plugin agents; ~/.claude/skills; ~/.claude/commands; ~/.claude/hooks; ~/.claude/settings.json" },
     { source: "codex_global_inventory", checked: true, sourceRef: "~/.codex/agents; ~/.codex/skills; ~/.codex/commands; ~/.codex/hooks; ~/.codex/hooks.json; ~/.codex/config.toml; ~/.agents/skills" },
     { source: "codex_global_skill_filesystem_light_scan", checked: true, sourceRef: "~/.codex/skills; ~/.codex/plugins/cache" },
     { source: "cursor_global_inventory", checked: true, sourceRef: "~/.cursor/agents; ~/.cursor/skills; ~/.cursor/rules; ~/.cursor/prompts; ~/.cursor/hooks; ~/.cursor/hooks.json; ~/.cursor/mcp.json" },
@@ -2195,9 +2271,13 @@ function selectExecutionOwner() {
   return scored[0]?.score > 0 ? scored[0].id : null;
 }
 
-function capabilityDiscoveryTaskRequested() {
+function directCapabilityDiscoveryRequested() {
   const discoveryVerb = /find|discover|search|match|route|寻找|找|发现|搜索|检索|匹配|路由/.test(taskText);
   const discoveryTarget = /agent|subagent|owner|skill|provider|capability|mcp|tool|智能体|代理|技能|能力|工具/.test(taskText);
+  return (discoveryVerb && discoveryTarget) || agentProviderReuseConcernRequested();
+}
+
+function capabilityDiscoveryTaskRequested() {
   const executionFanoutDiscovery =
     concurrentDispatchIntentPresent && (
       taskShape === "engineering_execution" ||
@@ -2205,7 +2285,7 @@ function capabilityDiscoveryTaskRequested() {
       entrySignals.explicitMetaTheory === true ||
       entrySignals.structuredGovernanceChainRequest === true
     );
-  return (discoveryVerb && discoveryTarget) || agentProviderReuseConcernRequested() || executionFanoutDiscovery;
+  return directCapabilityDiscoveryRequested() || executionFanoutDiscovery;
 }
 
 // 9 类 owner 池（agent / skill / mcp / command / runtimeTool / hook / plugin / memory / dependency）。
@@ -2545,6 +2625,7 @@ function executionCapabilityDiscoveryRoute() {
       passCondition: "Execution capability discovery route has a runtime-valid non-governance owner plus discovered skill, MCP, command/tool, runtime, OS, and verification owner.",
     },
     score: routeScore,
+    explicitDiscoveryRequest: directCapabilityDiscoveryRequested(),
     scoreBand: routeScore >= 85 ? "execute" : "blocked",
     routeScoreBreakdown: {
       intentFitWeight: 20,
@@ -3223,17 +3304,32 @@ const rankedRoutes = [...candidateWeapons.map(routeForWeapon), ...syntheticRoute
     };
   })
   .sort((a, b) => b.score - a.score);
-const recommendedRoute = rankedRoutes.find((route) => route.score >= 85) ?? rankedRoutes.find((route) => route.score >= 70) ?? null;
-const capabilityGapPacket = recommendedRoute ? null : {
+const explicitDiscoveryRecommendation = rankedRoutes.find(
+  (route) => route.explicitDiscoveryRequest === true,
+);
+const recommendedRoute = explicitDiscoveryRecommendation ??
+  rankedRoutes.find((route) => route.score >= 85) ??
+  rankedRoutes.find((route) => route.score >= 70) ??
+  null;
+const selectedRouteRequiresCapabilityGap = Boolean(
+  !recommendedRoute ||
+  recommendedRoute.score < 70 ||
+  recommendedRoute.blockedReasons?.includes("execution owner missing"),
+);
+const capabilityGapPacket = selectedRouteRequiresCapabilityGap ? {
   gap: "No route has enough owner + weapon + dependency + runtime + OS + verification support.",
   taskShape,
   currentAgentsChecked: [...new Set([...ownerDiscoveryPacket.candidateExistingExecutionOwners, ...ownerDiscoveryPacket.governanceStageOwners])].slice(0, 60),
   currentProvidersChecked: ownerDiscoveryPacket.candidateReusableCapabilityProviders.slice(0, 80),
   ownerDiscoveryRef: "ownerDiscoveryPacket",
-  missing: rankedRoutes[0]?.blockedReasons?.length ? rankedRoutes[0].blockedReasons : ["owner_weapon_dependency_route"],
+  missing: recommendedRoute?.blockedReasons?.length
+    ? recommendedRoute.blockedReasons
+    : rankedRoutes[0]?.blockedReasons?.length
+      ? rankedRoutes[0].blockedReasons
+      : ["owner_weapon_dependency_route"],
   returnToStage: "Thinking",
-};
-const capabilityGapDetected = !recommendedRoute || explicitCapabilityGapRequested();
+} : null;
+const capabilityGapDetected = Boolean(capabilityGapPacket) || explicitCapabilityGapRequested();
 const capabilityGapDecision = capabilityGapDetected
   ? (() => {
       const result = decideCapabilityGap(task, {
@@ -3246,7 +3342,11 @@ const capabilityGapDecision = capabilityGapDetected
       });
       return {
         detected: true,
-        source: recommendedRoute ? "explicit_gap_signal" : "missing_recommended_route",
+        source: capabilityGapPacket
+          ? "insufficient_recommended_route"
+          : recommendedRoute
+            ? "explicit_gap_signal"
+            : "missing_recommended_route",
         decision: result.gapDecision.decision,
         gapDecision: result.gapDecision,
         decisionEvidence: result.decisionEvidence,
@@ -3737,7 +3837,13 @@ function compactProvider(provider) {
       ["provenance", provider.provenance],
       ["metadata", provider.metadata],
       ["collision", provider.collision],
+      ["executionBlock", provider.executionBlock],
       ["routeEligible", provider.routeEligible],
+      ["trustRequired", provider.trustRequired],
+      ["trustReview", provider.trustReview],
+      ["trustReviewStatus", provider.trustReviewStatus],
+      ["trustReviewReason", provider.trustReviewReason],
+      ["trustAdmissionRecord", provider.trustAdmissionRecord],
       ["sourceSelectedExplicitly", provider.sourceSelectedExplicitly],
       ["cacheEvidence", provider.cacheEvidence],
       ["cacheEvidenceOnly", provider.cacheEvidenceOnly],
@@ -3844,7 +3950,10 @@ function compactOwnerDiscoveryPacket(packet) {
     governanceStages: packet.governanceStages,
     evidenceRefs: (packet.evidenceRefs ?? []).slice(0, 80),
     repoCanonicalAgents: compactProviderCollection(packet.repoCanonicalAgents ?? [], 20),
-    projectRuntimeAgents: compactProviderCollection(packet.projectRuntimeAgents ?? [], 30),
+    projectRuntimeAgents: compactProviderCollection(
+      selectRuntimeAgentBudget(packet.projectRuntimeAgents ?? [], 30),
+      30,
+    ),
     localGlobalAgents: compactProviderCollection(packet.localGlobalAgents ?? [], 30),
     repoCanonicalSkillProviders: compactProviderCollection(
       packet.repoCanonicalSkillProviders ?? [],

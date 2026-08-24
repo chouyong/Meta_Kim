@@ -24,6 +24,7 @@ import {
   assertCurrentVersionTagAbsent,
   assertPackedAdvisoryEffectiveMatrix,
   buildPackedCommandDiagnostics,
+  classifyInstalledCliByteIdentity,
   collectNonPortablePackedReferences,
   durableMcpDefinitionMatches,
   referencedPersistentRuntimePaths,
@@ -62,6 +63,51 @@ const canonicalSpineHookSource = readFileSync(
   "canonical/runtime-assets/shared/hooks/activate-meta-theory-spine.mjs",
   "utf8",
 );
+
+test("packed CLI byte identity keeps current candidates exact and narrowly accepts historical npm shebang normalization", () => {
+  const exact = Buffer.from("#!/usr/bin/env node\nconsole.log('exact');\n", "utf8");
+  const historicalCandidate = Buffer.from(
+    "#!/usr/bin/env node\r\nconsole.log('historical');\r\n",
+    "utf8",
+  );
+  const npmInstalledHistorical = Buffer.from(
+    "#!/usr/bin/env node\nconsole.log('historical');\r\n",
+    "utf8",
+  );
+
+  assert.equal(classifyInstalledCliByteIdentity(exact, exact), "exact");
+  assert.equal(
+    classifyInstalledCliByteIdentity(
+      historicalCandidate,
+      npmInstalledHistorical,
+    ),
+    null,
+  );
+  assert.equal(
+    classifyInstalledCliByteIdentity(
+      historicalCandidate,
+      npmInstalledHistorical,
+      { allowNpmBinShebangCrLfNormalization: true },
+    ),
+    "npm_bin_shebang_crlf_to_lf",
+  );
+  assert.equal(
+    classifyInstalledCliByteIdentity(
+      historicalCandidate,
+      Buffer.from("#!/usr/bin/env node\nconsole.log('changed');\r\n", "utf8"),
+      { allowNpmBinShebangCrLfNormalization: true },
+    ),
+    null,
+  );
+  assert.equal(
+    classifyInstalledCliByteIdentity(
+      Buffer.from("console.log('first');\r\nconsole.log('second');\n", "utf8"),
+      Buffer.from("console.log('first');\nconsole.log('second');\n", "utf8"),
+      { allowNpmBinShebangCrLfNormalization: true },
+    ),
+    null,
+  );
+});
 
 test("canonical spine Hook does not contain a token that packed readback treats as unresolved", () => {
   assert.deepEqual(
@@ -575,6 +621,15 @@ test("historical packed upgrade receives its own bounded Windows-safe timeout", 
     "runPackedUserInstallUpdateAcceptance",
   );
   assert.match(historicalLane, /PACKED_HISTORICAL_USER_UPDATE_TIMEOUT_MS/u);
+  assert.equal(
+    (historicalLane.match(/allowNpmBinShebangCrLfNormalization:\s*true/gu) ?? [])
+      .length,
+    1,
+  );
+  assert.ok(
+    historicalLane.indexOf("allowNpmBinShebangCrLfNormalization: true") <
+      historicalLane.indexOf("const currentDescriptor"),
+  );
 });
 
 test("transient npx-shaped package install receives a bounded Windows-safe timeout", () => {

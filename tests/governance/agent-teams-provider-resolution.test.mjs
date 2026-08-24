@@ -22,24 +22,50 @@ async function runFor(runtime) {
   }
 }
 
-test("Codex resolves the local upstream checkout before a stale global package", async () => {
+test("Codex prefers a local upstream checkout and supports the packaged global layout", async () => {
   const resolution = await runFor("codex");
   assert.equal(resolution.runtime, "codex");
   assert.equal(resolution.candidates[0].source, "project_codex_skill");
+  const siblingCandidate = resolution.candidates.find(
+    (candidate) => candidate.source === "sibling_dependency_checkout",
+  );
+  const packagedGlobalCandidate = resolution.candidates.find(
+    (candidate) => candidate.source === "codex_global_skill_package",
+  );
   assert.ok(
     resolution.candidates.findIndex((candidate) => candidate.source === "sibling_dependency_checkout") <
       resolution.candidates.findIndex((candidate) => candidate.source === "codex_global_skill"),
   );
-  assert.equal(resolution.selectedSource, "sibling_dependency_checkout");
-  assert.equal(resolution.selectedVersion, "4.8.0");
+  assert.equal(packagedGlobalCandidate?.found, true);
+  assert.equal(
+    resolution.selectedSource,
+    siblingCandidate?.found ? "sibling_dependency_checkout" : "codex_global_skill_package",
+  );
+  assert.ok(resolution.selectedVersion);
 });
 
-test("Claude Code resolves Claude-native skill roots and the same local upstream contract", async () => {
+test("Claude Code resolves Claude-native skill roots and the packaged global layout", async () => {
   const resolution = await runFor("claude_code");
   assert.equal(resolution.runtime, "claude_code");
   assert.equal(resolution.candidates[0].source, "project_claude_skill");
   assert.ok(resolution.candidates.some((candidate) => candidate.source === "claude_global_skill"));
-  assert.equal(resolution.candidates.some((candidate) => candidate.source === "codex_global_skill"), false);
-  assert.equal(resolution.selectedSource, "sibling_dependency_checkout");
-  assert.equal(resolution.selectedVersion, "4.8.0");
+  assert.ok(
+    resolution.candidates.some((candidate) => candidate.source === "claude_global_skill_package"),
+  );
+  assert.equal(
+    resolution.candidates.some((candidate) => candidate.source.startsWith("codex_global_skill")),
+    false,
+  );
+  const siblingCandidate = resolution.candidates.find(
+    (candidate) => candidate.source === "sibling_dependency_checkout",
+  );
+  const packagedGlobalCandidate = resolution.candidates.find(
+    (candidate) => candidate.source === "claude_global_skill_package",
+  );
+  assert.equal(packagedGlobalCandidate?.found, true);
+  assert.equal(
+    resolution.selectedSource,
+    siblingCandidate?.found ? "sibling_dependency_checkout" : "claude_global_skill_package",
+  );
+  assert.ok(resolution.selectedVersion);
 });

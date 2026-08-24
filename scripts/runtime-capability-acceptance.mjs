@@ -23,6 +23,7 @@ import { canonicalJson, sha256 as auditSha256 } from "./release-binding-canonica
 import { resolveProjectRoot } from "../canonical/runtime-assets/shared/hooks/project-root.mjs";
 import { observeClaudeJsonl, observeCodexJsonl } from "./live-acceptance/observe-host-events.mjs";
 import { observeCodexDesktopEngineeringSlice } from "./live-acceptance/read-codex-session-evidence.mjs";
+import { readClaudeInteractiveSessionEvidence } from "./live-acceptance/read-claude-session-evidence.mjs";
 import { assertExactStandardRuntimeObservationSet } from "./runtime-execution-gate.mjs";
 import { assertExactMarkerEventLifecycles } from "./live-acceptance/validate-marker-lifecycle.mjs";
 import { packedProductProofComplete } from "./packed-product-proof.mjs";
@@ -56,6 +57,7 @@ const CONTROLLED_PRODUCER_BY_CAPABILITY = Object.freeze({
 const CODEX_DESKTOP_COMPOSITE_PRODUCER_ID = "meta-kim.codex-home-sessions.agent-subagent";
 const CODEX_ENGINEERING_COMPOSITE_PRODUCER_ID = "meta-kim.codex-engineering.shell-filesystem-edit";
 const CODEX_DESKTOP_ENGINEERING_PRODUCER_ID = "meta-kim.codex-desktop-engineering.shell-filesystem-edit";
+const CLAUDE_INTERACTIVE_SESSION_HANDOFF_PRODUCER_ID = "meta-kim.claude-interactive-session.all-facets";
 const CONTROLLED_WRITE_TOKEN = Symbol("meta-kim-controlled-producer-write");
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -427,7 +429,7 @@ function validateControlledProducerReceipt(receipt, runtime, capability, mode) {
   for (const [field, expected] of [["runtime", runtime], ["capability", capability], ["mode", mode]]) {
     if (receipt[field] !== expected) throw new Error(`controlled producer receipt ${field} binding mismatch`);
   }
-  const composite = [CODEX_DESKTOP_COMPOSITE_PRODUCER_ID, CODEX_ENGINEERING_COMPOSITE_PRODUCER_ID, CODEX_DESKTOP_ENGINEERING_PRODUCER_ID].includes(receipt.producer?.id);
+  const composite = [CODEX_DESKTOP_COMPOSITE_PRODUCER_ID, CODEX_ENGINEERING_COMPOSITE_PRODUCER_ID, CODEX_DESKTOP_ENGINEERING_PRODUCER_ID, CLAUDE_INTERACTIVE_SESSION_HANDOFF_PRODUCER_ID].includes(receipt.producer?.id);
   if (!composite && receipt.producer?.id !== CONTROLLED_PRODUCER_BY_CAPABILITY[capability]) {
     throw new Error("controlled producer id is not allowlisted");
   }
@@ -455,7 +457,9 @@ function validateControlledProducerReceipt(receipt, runtime, capability, mode) {
   )) throw new Error("controlled producer receipt lacks replay-complete event evidence");
   if (!receipt.rawArtifact?.path || !/^[a-f0-9]{64}$/iu.test(String(receipt.rawArtifact?.sha256 ?? ""))) throw new Error("controlled producer receipt lacks raw artifact binding");
   if (!/^[0-9a-f-]{36}$/iu.test(String(receipt.capabilityNonce ?? ""))) throw new Error("controlled producer receipt lacks capability nonce");
-  const expectedMarker = receipt.producer?.id === CODEX_DESKTOP_COMPOSITE_PRODUCER_ID
+  const expectedMarker = receipt.producer?.id === CLAUDE_INTERACTIVE_SESSION_HANDOFF_PRODUCER_ID
+    ? `META_KIM_CAPABILITY_CLAUDE_HANDOFF_${receipt.capabilityNonce}`
+    : receipt.producer?.id === CODEX_DESKTOP_COMPOSITE_PRODUCER_ID
     ? `${receipt.compositeLifecycle?.sourceCategory === "codex_tui_sessions" ? "META_KIM_CAPABILITY_AGENT_SUBAGENT" : "META_KIM_CAPABILITY_SUBAGENT"}_${receipt.capabilityNonce}`
     : [CODEX_ENGINEERING_COMPOSITE_PRODUCER_ID, CODEX_DESKTOP_ENGINEERING_PRODUCER_ID].includes(receipt.producer?.id)
       ? `META_KIM_CAPABILITY_ENGINEERING_${receipt.capabilityNonce}`
@@ -478,6 +482,7 @@ function validateControlledProducerReceipt(receipt, runtime, capability, mode) {
   if (receipt.producer?.id === CODEX_DESKTOP_COMPOSITE_PRODUCER_ID) validateCodexDesktopCompositeReceipt(receipt, runtime, capability);
   if (receipt.producer?.id === CODEX_ENGINEERING_COMPOSITE_PRODUCER_ID) validateCodexEngineeringCompositeReceipt(receipt, runtime, capability);
   if (receipt.producer?.id === CODEX_DESKTOP_ENGINEERING_PRODUCER_ID) validateCodexDesktopEngineeringReceipt(receipt, runtime, capability);
+  if (receipt.producer?.id === CLAUDE_INTERACTIVE_SESSION_HANDOFF_PRODUCER_ID) validateClaudeInteractiveSessionHandoffReceipt(receipt, runtime, capability);
   const flags = receipt.flags ?? {};
   for (const field of ["fixture", "recoveredFromTimeout", "blockedFromRelease"]) if (typeof flags[field] !== "boolean") throw new Error(`controlled producer receipt flag ${field} must be explicit`);
   if (flags.fixture || flags.recoveredFromTimeout || flags.blockedFromRelease || receipt.failureClass != null) throw new Error("controlled producer receipt is not promotion eligible");
@@ -607,6 +612,81 @@ function rawEventProvesCapability(runtime, capability, event, sourceText, marker
   }
   if (capability === "apply_patch / edit") return event?.family === "runtime_tool" && (runtime === "codex" ? /file_change|apply_patch|patch/u.test(surface) : /edit|write|patch/u.test(surface));
   return false;
+}
+
+function validateClaudeInteractiveSessionHandoffReceipt(receipt, runtime, capability) {
+  const lifecycle = receipt.compositeLifecycle;
+  const facets = ["agent", "subagent", "shell", "filesystem", "apply_patch / edit"];
+  const bindings = lifecycle?.eventBindings;
+  const expectedIds = bindings?.[capability] ?? [];
+  const receiptIds = receipt.eventEvidence?.map((entry) => entry.eventId) ?? [];
+  const allIds = facets.flatMap((facet) => bindings?.[facet] ?? []);
+  const eventById = new Map((receipt.eventEvidence ?? []).map((entry) => [entry.eventId, entry]));
+  const eventsHaveBoundLines = (receipt.eventEvidence ?? []).every((entry) => validLineBindings(entry.sourceLineBindings));
+  const facetValid = capability === "agent"
+    ? receipt.eventEvidence?.length === 1 && receipt.eventEvidence[0]?.family === "agent_subagent" && receipt.eventEvidence[0]?.hostSurface === "Agent" && receipt.eventEvidence[0]?.resultStatus === "accepted" && receipt.eventEvidence[0]?.sessionId === lifecycle?.sessionId && receipt.eventEvidence[0]?.childSessionId === lifecycle?.childSessionId
+    : capability === "subagent"
+      ? receipt.eventEvidence?.length === 1 && receipt.eventEvidence[0]?.family === "agent_subagent" && receipt.eventEvidence[0]?.hostSurface === "Agent.result" && receipt.eventEvidence[0]?.resultStatus === "completed" && receipt.eventEvidence[0]?.sessionId === lifecycle?.childSessionId && receipt.eventEvidence[0]?.childSessionId === lifecycle?.childSessionId
+      : capability === "shell"
+        ? receipt.eventEvidence?.length === 1 && receipt.eventEvidence[0]?.family === "runtime_tool" && receipt.eventEvidence[0]?.hostSurface === "Bash" && receipt.eventEvidence[0]?.resultStatus === "completed"
+        : capability === "filesystem"
+          ? receipt.eventEvidence?.length === 2 && receipt.eventEvidence.every((entry) => entry.family === "runtime_tool" && entry.hostSurface === "Read" && entry.resultStatus === "completed")
+          : receipt.eventEvidence?.length === 1 && receipt.eventEvidence[0]?.family === "runtime_tool" && receipt.eventEvidence[0]?.hostSurface === "Edit" && receipt.eventEvidence[0]?.resultStatus === "completed";
+  if (
+    runtime !== "claude_code" || !facets.includes(capability) || receipt.mode !== "interactive_host" ||
+    receipt.producer?.family !== "interactive_session_handoff" || JSON.stringify(receipt.producer?.compositeFacets) !== JSON.stringify(facets) ||
+    lifecycle?.allowlisted !== true || lifecycle?.facet !== capability || JSON.stringify(lifecycle?.facets) !== JSON.stringify(facets) ||
+    lifecycle?.sourceCategory !== "claude_interactive_session_file_handoff" || lifecycle?.markerDigest !== digest(receipt.capabilityMarker) ||
+    lifecycle?.observedAt !== receipt.observedAt || !Number.isFinite(Date.parse(lifecycle?.observedAt ?? "")) ||
+    !/^[0-9a-f-]{36}$/u.test(String(lifecycle?.sessionId ?? "")) || !/^[0-9a-f-]{36}$/u.test(String(lifecycle?.childSessionId ?? "")) ||
+    !/^[a-f0-9]{64}$/u.test(String(lifecycle?.projectRootDigest ?? "")) || !/^[a-f0-9]{64}$/u.test(String(lifecycle?.workspaceDigest ?? "")) ||
+    typeof lifecycle?.workspaceRef !== "string" || !lifecycle.workspaceRef || typeof lifecycle?.sourceSessionRef !== "string" || !lifecycle.sourceSessionRef ||
+    !Number.isSafeInteger(lifecycle?.sourceSessionSnapshotSize) || lifecycle.sourceSessionSnapshotSize <= 0 ||
+    !/^[a-f0-9]{64}$/u.test(String(lifecycle?.sourceSessionSnapshotSha256 ?? "")) || !validLineBindings(lifecycle?.sourceSessionLines) ||
+    !Number.isFinite(lifecycle?.evidenceWindowStartMs) || lifecycle.evidenceWindowStartMs < 0 ||
+    bindings?.agent?.length !== 1 || bindings?.subagent?.length !== 1 || bindings?.shell?.length !== 1 || bindings?.filesystem?.length !== 2 || bindings?.["apply_patch / edit"]?.length !== 1 ||
+    allIds.length !== 6 || new Set(allIds).size !== 6 || JSON.stringify(receiptIds) !== JSON.stringify(expectedIds) ||
+    JSON.stringify(lifecycle?.orderedEventIds) !== JSON.stringify([bindings.agent[0], bindings.subagent[0], bindings.shell[0], bindings.filesystem[0], bindings["apply_patch / edit"][0], bindings.filesystem[1]]) ||
+    [...eventById.values()].some((entry) => entry.facet !== capability || entry.sessionId == null) || !eventsHaveBoundLines || !facetValid ||
+    lifecycle?.beforeContentSha256 !== digest(`before-${receipt.capabilityMarker}\n`) || lifecycle?.finalContentSha256 !== digest(`after-${receipt.capabilityMarker}\n`) ||
+    lifecycle?.sanitizedArtifactDigest !== receipt.rawArtifact.sha256 ||
+    receipt.hostInvocation?.runtimeIsolation !== "claude_interactive_existing_session_file_handoff" ||
+    (!["agent", "subagent"].includes(capability) && (receipt.workspaceOutcome?.kind !== "bounded_file" || receipt.workspaceOutcome?.contentSha256 !== lifecycle.finalContentSha256))
+  ) throw new Error("Claude interactive session handoff producer lifecycle is invalid");
+}
+
+function validateClaudeInteractiveSessionHandoffRaw(receipt, rawText, profileRoot, claudeHome) {
+  let artifact;
+  try {
+    artifact = JSON.parse(rawText);
+  } catch {
+    throw new Error("Claude interactive session sanitized artifact is not valid JSON");
+  }
+  const { recordHash, ...withoutHash } = artifact ?? {};
+  if (
+    artifact?.schemaVersion !== "meta-kim-claude-interactive-session-handoff-v1" ||
+    artifact?.sourceCategory !== "claude_interactive_session_file_handoff" ||
+    artifact?.retainedMessageOrToolContent !== false ||
+    digest(JSON.stringify(withoutHash)) !== recordHash ||
+    artifact?.capabilityMarker !== receipt.capabilityMarker ||
+    artifact?.sourceSessionSnapshotSha256 !== receipt.compositeLifecycle?.sourceSessionSnapshotSha256 ||
+    artifact?.sourceSessionSnapshotSize !== receipt.compositeLifecycle?.sourceSessionSnapshotSize
+  ) throw new Error("Claude interactive session sanitized artifact binding is invalid");
+  const projectRoot = path.resolve(profileRoot, "..", "..", "..");
+  const refreshed = readClaudeInteractiveSessionEvidence({
+    ...(claudeHome ? { claudeHome } : {}),
+    projectRoot,
+    profile: path.basename(profileRoot),
+    sessionId: receipt.compositeLifecycle.sessionId,
+    marker: receipt.capabilityMarker,
+    workspacePath: path.resolve(projectRoot, receipt.compositeLifecycle.workspaceRef),
+    sinceMs: receipt.compositeLifecycle.evidenceWindowStartMs,
+    sessionRef: receipt.compositeLifecycle.sourceSessionRef,
+    sessionSnapshotSize: receipt.compositeLifecycle.sourceSessionSnapshotSize,
+  });
+  if (JSON.stringify(refreshed.sanitizedArtifact) !== JSON.stringify(artifact)) {
+    throw new Error("Claude interactive session source snapshot no longer matches the sanitized artifact");
+  }
 }
 
 function codexFileChangeBindsControlledProbe(sourceText, receipt) {
@@ -969,7 +1049,7 @@ export function writeTestOnlyControlledRuntimeCapabilityAcceptanceAttempt(option
 
 /** Formal product boundary. Callers choose a supported source; producer and writer stay fixed internally. */
 export async function produceRuntimeCapabilityAcceptance(options = {}) {
-  const allowed = new Set(["live_controlled", "codex_desktop_agent_subagent", "codex_tui_agent_subagent", "codex_desktop_engineering"]);
+  const allowed = new Set(["live_controlled", "codex_desktop_agent_subagent", "codex_tui_agent_subagent", "codex_desktop_engineering", "claude_interactive_session_handoff"]);
   if (!allowed.has(options.source)) throw new Error("unsupported controlled production source");
   if (Object.hasOwn(options, "executor") || Object.hasOwn(options, "reader") || Object.hasOwn(options, "codexHome")) {
     throw new Error("production capability API does not accept injected executor, reader, or codexHome");
@@ -1107,6 +1187,7 @@ export function validateRuntimeCapabilityAcceptanceAttemptEvidence(attempt, {
   freshnessMs,
   releaseFreshnessMs,
   portableAdvisorySnapshot = false,
+  claudeHome = null,
 } = {}) {
   const issues = [];
   if (!SUPPORTED_RUNTIME_ID_SET.has(attempt?.runtime)) {
@@ -1142,14 +1223,17 @@ export function validateRuntimeCapabilityAcceptanceAttemptEvidence(attempt, {
       if (raw.sha256 !== source.value.rawArtifact.sha256 || raw.sha256 !== attempt.rawArtifactSha256) issues.push("controlled producer raw artifact SHA-256 mismatch");
       const rawText = raw.bytes.toString("utf8");
       assertNoMarkerBoundFailure(rawText, source.value.capabilityMarker);
-      const observedEvents = attempt.runtime === "codex" ? observeCodexJsonl(rawText) : observeClaudeJsonl(rawText);
-      if (source.value.producer?.id === CODEX_DESKTOP_ENGINEERING_PRODUCER_ID) {
-        validateCodexDesktopEngineeringBindings(source.value, rawText, root, { portableAdvisorySnapshot });
-      } else if (source.value.producer?.id === CODEX_DESKTOP_COMPOSITE_PRODUCER_ID) {
-        validateCodexDesktopSourceBindings(source.value, rawText);
+      if (source.value.producer?.id === CLAUDE_INTERACTIVE_SESSION_HANDOFF_PRODUCER_ID) {
+        validateClaudeInteractiveSessionHandoffRaw(source.value, rawText, root, claudeHome);
       } else {
-        assertExactMarkerEventLifecycles(rawText, source.value.capabilityMarker);
-        for (const expected of source.value.eventEvidence) {
+        const observedEvents = attempt.runtime === "codex" ? observeCodexJsonl(rawText) : observeClaudeJsonl(rawText);
+        if (source.value.producer?.id === CODEX_DESKTOP_ENGINEERING_PRODUCER_ID) {
+        validateCodexDesktopEngineeringBindings(source.value, rawText, root, { portableAdvisorySnapshot });
+        } else if (source.value.producer?.id === CODEX_DESKTOP_COMPOSITE_PRODUCER_ID) {
+          validateCodexDesktopSourceBindings(source.value, rawText);
+        } else {
+          assertExactMarkerEventLifecycles(rawText, source.value.capabilityMarker);
+          for (const expected of source.value.eventEvidence) {
           const actual = observedEvents.find((entry) => entry.eventId === expected.eventId);
           const arraysMatch = (left, right) => JSON.stringify(left ?? []) === JSON.stringify(right ?? []);
           if (
@@ -1183,9 +1267,10 @@ export function validateRuntimeCapabilityAcceptanceAttemptEvidence(attempt, {
           );
           if (!markerBound) issues.push(`controlled producer event ${expected.eventId} is not capability-marker-bound`);
           if (!rawEventProvesCapability(attempt.runtime, attempt.capability, actual, sourceLines, source.value.capabilityMarker)) issues.push(`controlled producer event ${expected.eventId} does not prove ${attempt.capability}`);
+          }
         }
+        if (source.value.producer?.id === CODEX_ENGINEERING_COMPOSITE_PRODUCER_ID) validateCodexEngineeringCompositeRaw(source.value, observedEvents, rawText);
       }
-      if (source.value.producer?.id === CODEX_ENGINEERING_COMPOSITE_PRODUCER_ID) validateCodexEngineeringCompositeRaw(source.value, observedEvents, rawText);
     }
   } catch (error) {
     issues.push(error.message);
@@ -1251,7 +1336,15 @@ export function loadRuntimeCapabilityAcceptanceAttempts(options = {}) {
           prior.compositeLifecycle?.lifecycleId === attempt.compositeLifecycle?.lifecycleId &&
           prior.compositeLifecycle?.facet === prior.capability && attempt.compositeLifecycle?.facet === attempt.capability &&
           prior.capability !== attempt.capability && engineeringFacets.has(prior.capability) && engineeringFacets.has(attempt.capability);
-        if (!allowedDesktopReuse && !allowedEngineeringReuse) throw new Error("controlled producer raw artifact cannot be reused across capability claims");
+        const claudeHandoffFacets = new Set(["agent", "subagent", "shell", "filesystem", "apply_patch / edit"]);
+        const allowedClaudeHandoffReuse = prior.runtime === "claude_code" && attempt.runtime === "claude_code" &&
+          prior.mode === "interactive_host" && attempt.mode === "interactive_host" &&
+          prior.producer?.id === CLAUDE_INTERACTIVE_SESSION_HANDOFF_PRODUCER_ID && attempt.producer?.id === CLAUDE_INTERACTIVE_SESSION_HANDOFF_PRODUCER_ID &&
+          prior.compositeLifecycle?.allowlisted === true && attempt.compositeLifecycle?.allowlisted === true &&
+          prior.compositeLifecycle?.lifecycleId === attempt.compositeLifecycle?.lifecycleId &&
+          prior.compositeLifecycle?.facet === prior.capability && attempt.compositeLifecycle?.facet === attempt.capability &&
+          prior.capability !== attempt.capability && claudeHandoffFacets.has(prior.capability) && claudeHandoffFacets.has(attempt.capability);
+        if (!allowedDesktopReuse && !allowedEngineeringReuse && !allowedClaudeHandoffReuse) throw new Error("controlled producer raw artifact cannot be reused across capability claims");
       }
       rawArtifacts.set(attempt.rawArtifactSha256, attempt);
     }

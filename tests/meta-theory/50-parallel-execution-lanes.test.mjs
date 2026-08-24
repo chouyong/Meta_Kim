@@ -3,11 +3,11 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import process from "node:process";
 
-function route(task, runtime = "claude_code", os = "windows") {
+function route(task, runtime = "codex", os = "windows") {
   const result = spawnSync(
     process.execPath,
     ["scripts/select-execution-route.mjs", "--task", task, "--runtime", runtime, "--os", os, "--json"],
-    { encoding: "utf8" }
+    { encoding: "utf8", maxBuffer: 4 * 1024 * 1024 }
   );
   assert.equal(result.status, 0, result.stderr);
   return JSON.parse(result.stdout);

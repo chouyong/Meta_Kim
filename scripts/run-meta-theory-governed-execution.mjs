@@ -4646,18 +4646,44 @@ function agentTeamsCandidateSkillPaths(runtimeName) {
       }];
   const runtimeGlobalCandidates = runtimeName === "claude_code"
     ? (claudeSkillsRoot
-        ? [{
-            source: "claude_global_skill",
-            pathRef: "~/.claude/skills/agent-teams-playbook/SKILL.md",
-            filePath: path.join(claudeSkillsRoot, AGENT_TEAMS_PLAYBOOK_ID, "SKILL.md"),
-          }]
+        ? [
+            {
+              source: "claude_global_skill",
+              pathRef: "~/.claude/skills/agent-teams-playbook/SKILL.md",
+              filePath: path.join(claudeSkillsRoot, AGENT_TEAMS_PLAYBOOK_ID, "SKILL.md"),
+            },
+            {
+              source: "claude_global_skill_package",
+              pathRef: "~/.claude/skills/agent-teams-playbook/skills/agent-teams-playbook/SKILL.md",
+              filePath: path.join(
+                claudeSkillsRoot,
+                AGENT_TEAMS_PLAYBOOK_ID,
+                "skills",
+                AGENT_TEAMS_PLAYBOOK_ID,
+                "SKILL.md",
+              ),
+            },
+          ]
         : [])
     : (codexSkillsRoot
-        ? [{
-            source: "codex_global_skill",
-            pathRef: "~/.codex/skills/agent-teams-playbook/SKILL.md",
-            filePath: path.join(codexSkillsRoot, AGENT_TEAMS_PLAYBOOK_ID, "SKILL.md"),
-          }]
+        ? [
+            {
+              source: "codex_global_skill",
+              pathRef: "~/.codex/skills/agent-teams-playbook/SKILL.md",
+              filePath: path.join(codexSkillsRoot, AGENT_TEAMS_PLAYBOOK_ID, "SKILL.md"),
+            },
+            {
+              source: "codex_global_skill_package",
+              pathRef: "~/.codex/skills/agent-teams-playbook/skills/agent-teams-playbook/SKILL.md",
+              filePath: path.join(
+                codexSkillsRoot,
+                AGENT_TEAMS_PLAYBOOK_ID,
+                "skills",
+                AGENT_TEAMS_PLAYBOOK_ID,
+                "SKILL.md",
+              ),
+            },
+          ]
         : []);
   return [
     ...projectRuntimeCandidates,
@@ -7311,19 +7337,33 @@ function projectCustomizationCandidateSets(ownerDiscoveryPacket, candidateType, 
   };
 }
 
-function exactRequestedCandidate(candidates, request) {
+function exactRequestedCandidate(candidates, request, { allowTextFallback = true } = {}) {
   const sourceText = String(request?.sourceText ?? "").toLowerCase();
   const requested = String(request?.requestedCapability ?? "").toLowerCase();
-  return (candidates ?? [])
+  const candidateType = safeSlug(request?.candidateType ?? "");
+  const requestedWithoutType = candidateType && requested.endsWith(`-${candidateType}`)
+    ? requested.slice(0, -(candidateType.length + 1))
+    : requested;
+  const ordered = (candidates ?? [])
     .slice()
     .sort(
       (left, right) =>
         String(right?.id ?? right?.name ?? "").length -
         String(left?.id ?? left?.name ?? "").length,
-    )
-    .find((candidate) => {
+    );
+  const exact = ordered.find((candidate) => {
     const id = String(candidate?.id ?? candidate?.name ?? "").toLowerCase().trim();
-    return id.length >= 3 && (sourceText.includes(id) || requested === safeSlug(id));
+    const normalizedId = safeSlug(id);
+    return id.length >= 3 && (
+      requested === normalizedId ||
+      requestedWithoutType === normalizedId
+    );
+  });
+  if (exact) return exact;
+  if (!allowTextFallback) return null;
+  return ordered.find((candidate) => {
+    const id = String(candidate?.id ?? candidate?.name ?? "").toLowerCase().trim();
+    return id.length >= 3 && sourceText.includes(id);
     }) ?? null;
 }
 
@@ -7340,8 +7380,22 @@ export function buildProjectCustomizationPacket({
   const selectedBindings = runtimeInvocationPlanPacket?.requiredBindings ?? [];
   const decisions = requests.map((request) => {
     const candidates = projectCustomizationCandidateSets(ownerDiscoveryPacket, request.candidateType, runtime);
-    const projectCandidate = exactRequestedCandidate(candidates.project, request);
-    const globalCandidate = exactRequestedCandidate(candidates.global, request);
+    const exactProjectCandidate = exactRequestedCandidate(
+      candidates.project,
+      request,
+      { allowTextFallback: false },
+    );
+    const exactGlobalCandidate = exactRequestedCandidate(
+      candidates.global,
+      request,
+      { allowTextFallback: false },
+    );
+    const projectCandidate = exactProjectCandidate ?? (
+      exactGlobalCandidate ? null : exactRequestedCandidate(candidates.project, request)
+    );
+    const globalCandidate = exactGlobalCandidate ?? (
+      exactProjectCandidate ? null : exactRequestedCandidate(candidates.global, request)
+    );
     const explicitGlobalReuse = /全局|global/i.test(request.sourceText) &&
       /不要.{0,12}(?:复制|创建|生成|copy|create).{0,12}(?:项目|project)/i.test(request.sourceText);
     const noIterationGlobalReuse = /(?:全局|global).{0,40}(?:不需要|无需|without|no).{0,12}(?:迭代|修改|升级|定制|iteration|modify|upgrade|custom)|(?:不需要|无需).{0,12}(?:迭代|修改|升级|定制).{0,40}(?:全局|global)/iu.test(request.sourceText);

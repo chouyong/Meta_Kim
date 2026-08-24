@@ -35,6 +35,11 @@ import {
   isProtectedProjectCapabilityPath,
   loadProtectedProjectCapabilityPaths,
 } from "./project-capability-ownership.mjs";
+import {
+  parseClaudeAgentDefinition,
+  scanInstalledClaudePluginAgents,
+} from "./claude-plugin-agent-discovery.mjs";
+import { compareCapabilitySources } from "./capability-source-order.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, "..");
@@ -178,11 +183,14 @@ export async function checkCanonicalCapabilityIndex(
 const PLATFORMS = {
   claudeCode: {
     name: "Claude Code",
-    baseDir: () => path.join(os.homedir(), ".claude"),
+    baseDir: () => process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), ".claude"),
     // 每个类型的扫描函数
     scanners: {
       agents: async (baseDir) =>
-        scanMarkdownFiles(path.join(baseDir, "agents")),
+        mergeCapabilityLists(
+          await scanClaudeAgentFiles(path.join(baseDir, "agents")),
+          await scanInstalledClaudePluginAgents(baseDir),
+        ),
       skills: async (baseDir) => scanSkillFiles(path.join(baseDir, "skills")),
       hooks: async (baseDir) =>
         mergeCapabilityLists(
@@ -567,15 +575,6 @@ async function enrichCapabilitySource(capability, scan, type, ownershipIndex) {
   return enriched;
 }
 
-function compareCapabilitySources(left, right) {
-  return (
-    (right.sourcePriority ?? 0) - (left.sourcePriority ?? 0) ||
-    Number(right.sourceValid === true) - Number(left.sourceValid === true) ||
-    String(left.sourceRef ?? "").localeCompare(String(right.sourceRef ?? "")) ||
-    String(left.sourceKey ?? "").localeCompare(String(right.sourceKey ?? ""))
-  );
-}
-
 function provenanceEntry(capability) {
   return {
     id: capability.id,
@@ -593,6 +592,11 @@ function provenanceEntry(capability) {
     ownershipManifestRef: capability.ownershipManifestRef ?? null,
     ownershipManifestDigest: capability.ownershipManifestDigest ?? null,
     repairRoute: capability.repairRoute,
+    trustRequired: capability.trustRequired ?? false,
+    trustReview: capability.trustReview ?? null,
+    trustReviewStatus: capability.trustReviewStatus ?? null,
+    trustReviewReason: capability.trustReviewReason ?? null,
+    trustAdmissionRecord: capability.trustAdmissionRecord ?? null,
     automaticMutationAllowed: false,
   };
 }
@@ -760,6 +764,12 @@ function publishedCapabilityRecord(capability, sourceFields) {
     hookEvent: capability.hookEvent,
     layer: capability.layer,
     executionBlock: capability.executionBlock,
+    routeEligible: capability.routeEligible,
+    trustRequired: capability.trustRequired,
+    trustReview: capability.trustReview,
+    trustReviewStatus: capability.trustReviewStatus,
+    trustReviewReason: capability.trustReviewReason,
+    trustAdmissionRecord: capability.trustAdmissionRecord,
     inventoryId: capability.inventoryId,
     nativeAgentName: capability.nativeAgentName,
     validCustomAgentDefinition: capability.validCustomAgentDefinition,
@@ -769,7 +779,8 @@ function publishedCapabilityRecord(capability, sourceFields) {
     ...sourceFields,
   };
   return Object.fromEntries(
-    Object.entries(record).filter(([, value]) => value !== undefined && value !== null),
+    Object.entries(record).filter(([key, value]) =>
+      value !== undefined && (value !== null || key === "trustAdmissionRecord")),
   );
 }
 
@@ -852,6 +863,29 @@ async function scanMarkdownFiles(dir) {
     }
   } catch {}
   return results;
+}
+
+async function scanClaudeAgentFiles(dir) {
+  const results = await scanMarkdownFiles(dir);
+  return Promise.all(results.map(async (result) => {
+    const content = await fs.readFile(result.path, "utf8");
+    const { metadata, errors } = parseClaudeAgentDefinition(content, result.id);
+    const id = metadata.name ?? result.id;
+    return {
+      ...result,
+      id,
+      inventoryId: result.id,
+      metadata: {
+        ...metadata,
+        nativeAgentName: id,
+        validCustomAgentDefinition: errors.length === 0,
+        customAgentDefinitionErrors: errors,
+      },
+      nativeAgentName: id,
+      validCustomAgentDefinition: errors.length === 0,
+      customAgentDefinitionErrors: errors,
+    };
+  }));
 }
 
 async function scanMarkdownFilesRecursive(dir) {
@@ -1638,6 +1672,28 @@ async function scanPlatform(platformId, platform) {
             capability.metadata = item.metadata;
           }
 
+          for (const field of [
+            "sourceClass",
+            "sourceRoot",
+            "sourceRef",
+            "sourcePriority",
+            "sourceKey",
+            "contentDigest",
+            "nativeAgentName",
+            "validCustomAgentDefinition",
+            "customAgentDefinitionErrors",
+            "inventoryId",
+            "executionBlock",
+            "routeEligible",
+            "trustRequired",
+            "trustReview",
+            "trustReviewStatus",
+            "trustReviewReason",
+            "trustAdmissionRecord",
+          ]) {
+            if (item[field] !== undefined) capability[field] = item[field];
+          }
+
           // Pass through hook fields from skill hook extraction
           if (type === "hooks") {
             if (item.command !== undefined) {
@@ -1668,7 +1724,9 @@ async function scanPlatform(platformId, platform) {
               capability.executionBlock = true;
             } else {
               capability.layer = "execution";
-              capability.executionBlock = false;
+              capability.executionBlock =
+                item.executionBlock === true ||
+                item.trustReviewStatus === "trust_review_required";
             }
 
             if (item.path.endsWith(".md")) {
@@ -2269,8 +2327,21 @@ export async function buildGlobalCapabilityInventory(
       group.type === "agents" &&
       ["codex", "codexapp"].includes(String(group.platformId).toLowerCase()) &&
       candidates.length > 1;
-    const ambiguous = codexAgentCollision && !exactDuplicate;
+    const equallyPreferredCandidates = candidates.filter(
+      (candidate) =>
+        candidate.sourcePriority === winner.sourcePriority &&
+        candidate.sourceValid === winner.sourceValid,
+    );
+    const claudeAgentCollision =
+      group.type === "agents" &&
+      String(group.platformId).toLowerCase() === "claudecode" &&
+      new Set(equallyPreferredCandidates.map((entry) => entry.contentDigest)).size > 1;
+    const ambiguous = (codexAgentCollision && !exactDuplicate) || claudeAgentCollision;
     const provenance = candidates.map(provenanceEntry);
+    const winnerRouteEligible =
+      !ambiguous &&
+      winner.sourceValid !== false &&
+      winner.executionBlock !== true;
     const collision = {
       detected: candidates.length > 1,
       kind: candidates.length <= 1
@@ -2283,10 +2354,10 @@ export async function buildGlobalCapabilityInventory(
       winnerSourceKey: winner.sourceKey,
       winnerSourceRef: winner.sourceRef,
       deterministicSelectionPolicy:
-        "source_class_project_personal_shared_legacy_then_validity_then_source_ref",
+        "source_priority_then_validity_then_source_ref_then_source_key",
       exactDuplicate,
       ambiguous,
-      routeEligible: !ambiguous && winner.sourceValid !== false,
+      routeEligible: winnerRouteEligible,
     };
 
     for (const candidate of candidates) {
@@ -2297,6 +2368,7 @@ export async function buildGlobalCapabilityInventory(
       raw.collision = collision;
       raw.selectedAsWinner = candidate.sourceKey === winner.sourceKey;
       raw.routeEligible = collision.routeEligible;
+      raw.executionBlock = raw.executionBlock === true || ambiguous;
       raw.routesToSourceKey = exactDuplicate ? winner.sourceKey : null;
     }
 
@@ -2307,8 +2379,9 @@ export async function buildGlobalCapabilityInventory(
       collisionAliases: exactDuplicate
         ? candidates.map((entry) => entry.sourceKey)
         : [],
-      routeEligible: collision.routeEligible,
+      routeEligible: winnerRouteEligible,
       ambiguousNativeIdentity: ambiguous,
+      executionBlock: winner.executionBlock === true || ambiguous,
     };
     const legacyKey = `${group.platformId}:${group.nativeIdentity}`;
     index.byCapabilityType[group.type][legacyKey] = selected;

@@ -144,28 +144,28 @@ function injectedExecutor(request) {
     assert.doesNotMatch(request.prompt, /old_string|new_string/u);
     assert.doesNotMatch(request.prompt, /Do not call Write/u);
   }
+  if (request.runtime === "codex" && request.capability === "shell") {
+    assert.match(request.prompt, /Wait for the create command to complete successfully/u);
+    assert.match(request.prompt, /same native shell tool in a second command to read meta-kim-probe\.txt/u);
+    assert.match(request.prompt, /Do not finish until both shell calls have terminal item\.completed evidence/u);
+    assert.match(request.prompt, /read result contains exactly shell-META_KIM_CAPABILITY_SHELL_/u);
+  }
   if (request.runtime === "codex" && ["agent", "subagent"].includes(request.capability)) {
-    const spawnInstruction = request.prompt.split(/[.!?]/u).find((sentence) =>
-      sentence.includes("spawn_agent") && /exactly once/iu.test(sentence)
-    );
-    assert.ok(spawnInstruction, `${request.capability} must call native spawn_agent exactly once`);
-    assert.match(request.prompt, /collaboration\.spawn_agent/u);
+    assert.match(request.prompt, /Call the top-level native spawn_agent tool directly exactly once/u);
     assert.match(request.prompt, /task_name="meta_kim_probe"/u);
     assert.match(request.prompt, /message="Return exactly META_KIM_CAPABILITY_/u);
-    assert.match(request.prompt, /collaboration\.wait_agent/u);
+    assert.match(request.prompt, /Do not call spawn_agent from inside functions\.exec/u);
+    assert.match(request.prompt, /Do not use collaboration\.spawn_agent or any namespace prefix/u);
+    assert.match(request.prompt, /After spawn_agent returns its child id, call the top-level wait_agent tool/u);
+    assert.match(request.prompt, /Never call wait_agent before spawn_agent returns a child id/u);
+    assert.doesNotMatch(request.prompt, /multi_agent_v1__|tools\.multi_agent/u);
     assert.equal(readFileSync(path.join(request.workspace, ".git", "HEAD"), "utf8"), "ref: refs/heads/main\n");
     const probeInstructions = readFileSync(path.join(request.workspace, "AGENTS.md"), "utf8");
     assert.match(probeInstructions, /Controlled Runtime Probe/u);
-    assert.match(probeInstructions, /Start now by calling collaboration\.spawn_agent\./u);
-    assert.match(request.prompt, /After a successful spawn returns a child id/u);
-    assert.match(request.prompt, /wait_agent until that child reports completed/u);
-    const prohibitions = request.prompt.split(/[.!?]/u).map((sentence) => sentence.toLowerCase());
-    assert.match(request.prompt, /never call the waiting tool without a child id/u);
-    assert.match(request.prompt, /Call collaboration\.spawn_agent now\.$/u);
-    assert.ok(
-      prohibitions.some((sentence) => sentence.includes("do not") && sentence.includes("text") && /pretend|simulate|imitate|substitute|replace|claim/u.test(sentence)),
-      `${request.capability} must forbid textual imitation of the native tool lifecycle`,
-    );
+    assert.match(probeInstructions, /Start by calling the top-level native spawn_agent tool directly/u);
+    assert.match(probeInstructions, /wait_agent only after spawn_agent returns a child id/u);
+    assert.match(probeInstructions, /never route either call through functions\.exec/u);
+    assert.match(request.prompt, /Do not substitute an empty wait, ordinary text, or an imitated tool call/u);
   }
   if (request.runtime === "claude_code" && request.capability === "agent") {
     assert.match(request.prompt, /Use the runtime's native agent\/subagent tool exactly once and wait for its successful completion\./u);
@@ -427,7 +427,8 @@ test("controlled producer binds Claude to the fail-closed provider resolver whil
   assert.match(source, /resolveCodexLiveProviderConfigSync\(\)/u);
   assert.match(commandBuilder, /\.\.\.\(codexProviderBinding\?\.args \?\? \[\]\)/u);
   assert.match(commandBuilder, /"features\.multi_agent=true"/u);
-  assert.match(commandBuilder, /"features\.multi_agent_v2=true"/u);
+  assert.match(commandBuilder, /"features\.multi_agent_v2=false"/u);
+  assert.doesNotMatch(commandBuilder, /"features\.multi_agent_v2=true"/u);
   assert.match(commandBuilder, /"agents\.max_threads=2"/u);
   assert.match(commandBuilder, /"agents\.max_depth=1"/u);
   assert.match(commandBuilder, /windows\.sandbox/u);
