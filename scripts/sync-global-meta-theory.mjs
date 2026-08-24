@@ -1747,10 +1747,10 @@ async function isStaleMetaKimSkillAlias(target) {
 
 async function backupAndRemoveStaleSkillAlias(target) {
   assertHomeBound(target.dir);
-  await assertRealHomeBound(target.dir);
   if (!(await isStaleMetaKimSkillAlias(target))) {
     return false;
   }
+  await assertRealHomeBound(target.dir);
 
   const backupRoot = path.join(
     runtimeHomes[target.runtimeId].dir,

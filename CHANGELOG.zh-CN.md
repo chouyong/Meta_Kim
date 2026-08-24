@@ -21,10 +21,21 @@
 - **Codex 0.147 的受控运行时证据在 Windows 上保持来源准确。** 实时探针隔离显式 provider 覆盖，使用受支持的非提权 Windows sandbox，并且仅在工作区、会话、事件时间和能力 marker 精确绑定时重放当前 `file_change` 与 TUI 父子生命周期证据。
 - **Claude Code 与 Codex 全局投影继续绑定稳定包并可复现。** 同步后的运行时资产继续使用稳定投影包，同时保留用户自己的配置。
 
+## [3.0.1] - 2026-08-21
+
+### 新增内容
+
+- **ZCode、DeepSeek Harness、Qoder 与 Trae 现已作为 Beta 兼容 adapter 提供。** 四者随不可变安装包进入 install/update 校验链，公开优先级仅次于 Claude Code 与 Codex。
+
+### 变更
+
+- **公开 runtime 支持收敛为清晰的三层。** Claude Code 与 Codex 是 Primary，ZCode、DeepSeek Harness、Qoder 与 Trae 是 Beta，OpenClaw 与 Cursor 是 Compatibility。只有研究记录的平台继续留在内部 catalog，不再进入 README 的公开支持列表。
+
 ## [3.0.0] - 2026-08-12
 
 ### 新增内容
 
+- **3.0 runtime 支持明确分成三层。** Claude Code 与 Codex 是 Primary，ZCode 与 DeepSeek Harness 是 Beta，OpenClaw 与 Cursor 是 Compatibility。
 - **治理执行现在只有一套分层真相。** 纯 Domain 规则负责判断证据、继续/停止、依赖安全推进、调度候选、lease/claim、运行健康和额度观察，本身不写入、不授权；Application 负责编排用例，Data 负责耐久 SQLite/事务，Presentation 只生成只读视图。旧脚本入口保留为兼容门面，不再形成平行实现。
 - **A01-A12 用用户能理解的结果闭合了 3.0 架构。** A01-A03 分开已验证证据、继续建议和依赖安全候选；A04-A07 复用既有调度与执行权威，只投影 claim、health、quota，不创造第二控制器；A08 把同一份摘要绑定的运行渲染成原生面板、看板、Markdown 或 HTML；A09 统一耐久执行事件与仓储语义；A10 分开 setup 编排和 package/runtime 基础设施；A11 让知识生命周期变更可回滚、受审批约束；A12 让文档与发布声明只能来自当前合同、runtime 证据、打包真相和发布门。
 - **知识进化在 Warden 精确批准前始终只是候选。** 年龄、评分、生成建议或旧版 approval 都不能写入、删除或授权执行。批准必须绑定精确目标、操作、源摘要、候选摘要、回滚方案和 scope；源文件漂移会直接拒绝。退休只保留 tombstone，基础能力不能被退休，未知状态和用户状态会保留。
@@ -35,6 +46,7 @@
 - **安装和更新会先把精确打包产物固定到不可变目录，再写持久全局配置。** CLI 继续作为用户入口；Application 与 Infrastructure 边界负责验证 package receipt、稳定根目录、子进程、写入边界和安装结果。help、status、doctor 仍是不会物化安装包的诊断命令，check 仍只读。
 - **Codex agent fan-out 使用更稳妥的默认值。** 新装/默认配置最多同时运行 2 个 agent 线程、只允许 1 层嵌套；用户显式设置的其它上限会保留，Meta_Kim 旧默认值 6 会迁移到新默认值。
 - **工具端支持继续按证据分层。** Claude Code 和 Codex 是默认正式投影；OpenClaw 和 Cursor 是非默认兼容投影，工具端专属改造必须提供各自的严格证据。OpenClaw 仍没有 Meta_Kim typed-plugin 工具阻断 adapter，Cursor 的任意原生选择弹窗权威仍未验证。
+- **Beta adapter 纳入不可变安装包生命周期。** Global install 与 update 会在报告成功前校验 ZCode 与 DeepSeek Harness adapter bundle。
 
 ### 修复
 

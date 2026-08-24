@@ -74,12 +74,12 @@ describe("runtime compatibility catalog", () => {
     }
   });
 
-  test("Qoder stays a candidate probe with docs evidence and no ECC target", () => {
+  test("Qoder stays a non-formal beta adapter with docs evidence and no ECC target", () => {
     const qoder = catalog.products.find((product) => product.id === "qoder");
     const ecc = skillsManifest.skills.find((skill) => skill.id === "ecc");
 
     assert.ok(qoder);
-    assert.equal(qoder.tier, "candidate_probe");
+    assert.equal(qoder.tier, "beta_compatibility");
     assert.equal(qoder.formalProjection.inSyncManifest, false);
     assert.equal(qoder.dependencyInstall.ecc.support, "not_supported");
     assert.equal(qoder.genericCompatibility.status, "verified_current");
@@ -98,8 +98,6 @@ describe("runtime compatibility catalog", () => {
         .map((product) => [product.id, product]),
     );
     const requiredCandidates = [
-      "qoder",
-      "trae",
       "kiro",
       "windsurf",
       "cline",
@@ -134,6 +132,23 @@ describe("runtime compatibility catalog", () => {
         id,
       );
       assert.match(product.decision, /candidate_probe only/i, id);
+    }
+  });
+
+  test("four beta adapters stay below primary runtimes and outside formal sync", () => {
+    const byId = new Map(catalog.products.map((product) => [product.id, product]));
+
+    for (const id of ["zcode", "deepseek-harness", "qoder", "trae"]) {
+      const product = byId.get(id);
+      assert.ok(product, id);
+      assert.equal(product.tier, "beta_compatibility", id);
+      assert.equal(product.formalProjection.inSyncManifest, false, id);
+      assert.equal(product.formalProjection.hasRuntimeProfile, false, id);
+      assert.equal(product.formalProjection.hasProjectionLayout, false, id);
+      assert.equal(product.formalProjection.isDefaultTarget, false, id);
+      assert.equal(syncManifest.supportedTargets.includes(id), false, id);
+      assert.match(product.decision, /packed structural/i, id);
+      assert.match(product.decision, /not.*formal|forbid formal/i, id);
     }
   });
 
