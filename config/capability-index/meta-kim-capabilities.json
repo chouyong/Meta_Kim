@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-08-17T17:29:43.673Z",
+  "generatedAt": "2026-08-24T13:17:38.464Z",
   "registryName": "meta-kim-capabilities",
   "scope": "repo-canonical",
   "canonicalProjection": "config/capability-index/meta-kim-capabilities.json",
@@ -38,25 +38,25 @@
       },
       "claude": {
         "projectionPresent": true,
-        "hookCommandEntries": 18,
-        "hookFiles": 24,
-        "commandFiles": 3
+        "hookCommandEntries": 2,
+        "hookFiles": 18,
+        "commandFiles": 0
       },
       "codex": {
         "projectionPresent": true,
-        "hookCommandEntries": 19,
-        "hookFiles": 22,
-        "commandFiles": 3
+        "hookCommandEntries": 0,
+        "hookFiles": 19,
+        "commandFiles": 0
       },
       "cursor": {
         "projectionPresent": true,
-        "hookCommandEntries": 15,
-        "hookFiles": 22,
+        "hookCommandEntries": 0,
+        "hookFiles": 18,
         "commandFiles": 0
       },
       "openclaw": {
-        "projectionPresent": true,
-        "hookCommandEntries": 1,
+        "projectionPresent": false,
+        "hookCommandEntries": 0,
         "hookFiles": 0,
         "commandFiles": 0,
         "skillFiles": 0
