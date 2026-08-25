@@ -142,6 +142,8 @@ If you explicitly choose **Project directory updates**, setup asks which project
 
 Project files are still allowed, but they are not the default reusable capability store. Confirmed project bootstrap writes only project context/config/state plus proven project-specific overrides, preserving existing user config through managed blocks, add-only writes, protected JSON merge, backups, and manifests. Every applied project bootstrap records `.meta-kim/` state and backup files.
 
+Legacy 2.8.x bootstrap manifests that list managed files without content hashes can be inspected with `meta-kim project bootstrap repair-legacy-manifest --project-dir <dir> --json`. The command is read-only by default. Applying the repair requires both `--apply` and `--trust-current-bytes`; it hashes only the exact existing files named by the legacy manifest, writes through the project managed-file transaction, and retains a verified manifest backup under `.meta-kim/backups/project-bootstrap-legacy-repair/`.
+
 Update also treats third-party installers as untrusted configuration producers. For Codex, Meta_Kim restores the user's pre-install configuration and applies only its narrowly owned native controls. This prevents an upstream installer from resurrecting a third-party MCP server the user deleted, silently adopting a new server, or persisting known Meta_Kim benchmark/test project registrations. User-owned MCP servers, projects, hooks, agents, and unrelated settings remain intact.
 
 Codex agent fan-out has a bounded default of two threads and one nested level. Explicit user limits are preserved; only an absent value or Meta_Kim's former default of six threads is migrated.

@@ -51,6 +51,7 @@ ${status.usageHeading}:
   meta-kim runtime rebind [--targets claude,codex] [--scope global|project]
   meta-kim uninstall [--recover] [--yes] [--deep] [--scope=global|project|both]
   meta-kim project bootstrap [--project-dir <dir>] [--dry-run|--apply] [--json]
+  meta-kim project bootstrap repair-legacy-manifest [--project-dir <dir>] [--dry-run|--apply] [--trust-current-bytes] [--json]
   meta-kim project capability copy --project-dir <dir> --runtime <runtime> --type <agent|skill|command> --id <id> --source <path> --mode <create|iterate> [--apply] [--json]
 
 ${status.hooksNote}
@@ -274,6 +275,9 @@ switch (command) {
     break;
   case "project":
     if (commandArgs[0] === "bootstrap") {
+      if (commandArgs[1] === "repair-legacy-manifest") {
+        run("scripts/repair-legacy-project-bootstrap-manifest.mjs", commandArgs.slice(2));
+      }
       validateSetupOptions(commandArgs.slice(1));
       run("setup.mjs", ["--project-bootstrap", ...commandArgs.slice(1)]);
     }
