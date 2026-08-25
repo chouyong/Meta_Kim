@@ -504,7 +504,7 @@ test("caller-provided host-visible names remain unverified hints", () => {
     [
       "scripts/run-meta-theory-governed-execution.mjs",
       "--task",
-      "需要一次能产生多 worker 的 meta-theory governed run。",
+      "请并行派发两个独立 worker：一个审查路由正确性，另一个验证测试完整性，然后汇总结果。",
       "--run-id",
       runId,
       "--state-dir",

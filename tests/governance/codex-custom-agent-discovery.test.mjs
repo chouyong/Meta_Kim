@@ -13,6 +13,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import process from "node:process";
 import test from "node:test";
+import { parseCodexAgentDefinition } from "../../scripts/codex-agent-definition.mjs";
 import { annotateCrossScopeAgentCollisions } from "../../scripts/governance-lib.mjs";
 
 function writeAgent(agentsDir, filename, content) {
@@ -48,7 +49,21 @@ test("Codex project and global agent collisions cannot claim an exact native sou
   assert.ok(candidates.every((candidate) => candidate.provenance.length === 2));
 });
 
-test("Codex TOML discovery validates multiline instructions, required fields, and declared owner name", () => {
+test("Codex TOML parsing keeps project projections strict and accepts native global profiles", () => {
+  const content = 'developer_instructions = "Do bounded work."';
+  const strictProjection = parseCodexAgentDefinition(content, "runtime-native");
+  assert.deepEqual(strictProjection.errors, ["missing_name", "missing_description"]);
+
+  const runtimeNative = parseCodexAgentDefinition(content, "runtime-native", {
+    allowRuntimeNativeProfile: true,
+  });
+  assert.deepEqual(runtimeNative.errors, []);
+  assert.equal(runtimeNative.nativeAgentName, "runtime-native");
+  assert.equal(runtimeNative.metadata.name, null);
+  assert.equal(runtimeNative.metadata.description, null);
+});
+
+test("Codex TOML discovery validates instructions and preserves native or declared owner identity", () => {
   const home = mkdtempSync(join(tmpdir(), "meta-kim-codex-agent-discovery-"));
   const agentsDir = join(home, ".codex", "agents");
   const profile = `codex-agent-discovery-${process.pid}-${Date.now()}`;
@@ -81,6 +96,11 @@ developer_instructions = "Do bounded work."
   writeAgent(agentsDir, "missing-instructions.toml", `
 name = "missing-instructions"
 description = "Missing instructions"
+  `);
+  writeAgent(agentsDir, "runtime-native.toml", `
+model = "gpt-5.5"
+model_reasoning_effort = "medium"
+developer_instructions = "Use the runtime-native filename as the owner identity."
   `);
   writeAgent(agentsDir, "filename-owner.toml", `
 name = "search-specialist"
@@ -121,10 +141,19 @@ developer_instructions = "Do not use the filename as agent_type. OPENAI_API_KEY=
     assert.match(valid?.metadata?.developerInstructions?.contentDigest ?? "", /^[a-f0-9]{64}$/u);
     assert.equal(discovery.stdout.includes("Review the bounded task."), false);
 
+    const filenameBacked = byId.get("missing-name");
+    assert.equal(filenameBacked?.metadata?.validCustomAgentDefinition, true);
+    assert.equal(filenameBacked?.metadata?.nativeAgentName, "missing-name");
+    const descriptionOptional = byId.get("missing-description");
+    assert.equal(descriptionOptional?.metadata?.validCustomAgentDefinition, true);
+    assert.equal(descriptionOptional?.metadata?.nativeAgentName, "missing-description");
+    const runtimeNative = byId.get("runtime-native");
+    assert.equal(runtimeNative?.metadata?.validCustomAgentDefinition, true);
+    assert.equal(runtimeNative?.metadata?.nativeAgentName, "runtime-native");
+    assert.equal(runtimeNative?.metadata?.description, null);
+
     const invalidCases = [
       ["empty-instructions", "missing_developer_instructions"],
-      ["missing-name", "missing_name"],
-      ["missing-description", "missing_description"],
       ["missing-instructions", "missing_developer_instructions"],
     ];
     for (const [id, error] of invalidCases) {

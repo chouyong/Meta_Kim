@@ -36,6 +36,7 @@ import {
   capabilitySourceIsValid,
   compareCapabilitySources,
 } from "./capability-source-order.mjs";
+import { parseCodexAgentDefinition } from "./codex-agent-definition.mjs";
 
 function argValue(name, fallback = null) {
   const index = process.argv.indexOf(name);
@@ -506,9 +507,10 @@ async function projectRuntimeAgents() {
       if (runtimeName === "codex") {
         const content = await fs.readFile(path.join(absDir, entry.name), "utf8");
         contentDigest = createHash("sha256").update(content).digest("hex");
-        ({ metadata, errors: customAgentDefinitionErrors } = parseCodexAgentDefinition(content));
+        const parsed = parseCodexAgentDefinition(content, inventoryId);
+        ({ metadata, errors: customAgentDefinitionErrors } = parsed);
         validCustomAgentDefinition = customAgentDefinitionErrors.length === 0;
-        if (validCustomAgentDefinition) id = metadata.name;
+        if (validCustomAgentDefinition) id = parsed.nativeAgentName;
       }
       agents.push({
         id,
@@ -553,30 +555,6 @@ async function projectRuntimeAgents() {
   return agents;
 }
 
-function parseCodexAgentDefinition(content) {
-  const scalar = (key) => {
-    const triple = content.match(
-      new RegExp(`^${key}\\s*=\\s*(?:\"\"\"|''')([\\s\\S]*?)(?:\"\"\"|''')`, "mu"),
-    );
-    if (triple) return triple[1].trim();
-    const single = content.match(new RegExp(`^${key}\\s*=\\s*[\"']([^\"']+)[\"']`, "mu"));
-    return single?.[1]?.trim() ?? null;
-  };
-  const metadata = {
-    name: scalar("name"),
-    description: scalar("description"),
-    developer_instructions: scalar("developer_instructions"),
-  };
-  return {
-    metadata,
-    errors: [
-      ...(!metadata.name ? ["missing_name"] : []),
-      ...(!metadata.description ? ["missing_description"] : []),
-      ...(!metadata.developer_instructions ? ["missing_developer_instructions"] : []),
-    ],
-  };
-}
-
 async function globalRuntimeAgentProviders() {
   const profileId = runtime === "claude_code" ? "claude" : runtime;
   const profiles = await loadRuntimeProfiles();
@@ -607,9 +585,12 @@ async function globalRuntimeAgentProviders() {
     const agentPath = path.join(agentsDir, entry.name);
     const content = await fs.readFile(agentPath, "utf8");
     if (agentProjection.format === "codex_toml") {
-      ({ metadata, errors: customAgentDefinitionErrors } = parseCodexAgentDefinition(content));
+      const parsed = parseCodexAgentDefinition(content, inventoryId, {
+        allowRuntimeNativeProfile: true,
+      });
+      ({ metadata, errors: customAgentDefinitionErrors } = parsed);
       validCustomAgentDefinition = customAgentDefinitionErrors.length === 0;
-      if (validCustomAgentDefinition) id = metadata.name;
+      if (validCustomAgentDefinition) id = parsed.nativeAgentName;
     } else if (agentProjection.format === "markdown_frontmatter") {
       ({ metadata, errors: customAgentDefinitionErrors } = parseClaudeAgentDefinition(
         content,
@@ -2222,7 +2203,7 @@ function selectExecutionOwner() {
     }] : []),
     {
       terms: ["agent", "subagent", "owner", "search", "discover", "find", "智能体", "代理", "搜索", "寻找", "发现"],
-      owners: ["codebase-search", "search-specialist", "analysis", "worker", "backend"],
+      owners: ["codebase-search", "search-specialist", "explorer", "analysis", "worker", "backend"],
     },
     {
       terms: ["test", "smoke", "verify", "validation", "qa", "测试", "验证"],
@@ -2251,6 +2232,7 @@ function selectExecutionOwner() {
     if (owner) return owner;
   }
   const genericOwner = findInAvailable([
+    "explorer",
     "worker",
     "backend",
     "code-reviewer",

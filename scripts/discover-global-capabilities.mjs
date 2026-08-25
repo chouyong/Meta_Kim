@@ -40,6 +40,7 @@ import {
   scanInstalledClaudePluginAgents,
 } from "./claude-plugin-agent-discovery.mjs";
 import { compareCapabilitySources } from "./capability-source-order.mjs";
+import { parseCodexAgentDefinition } from "./codex-agent-definition.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, "..");
@@ -1557,38 +1558,24 @@ async function extractAgentMetadata(filePath) {
   return {};
 }
 
-export async function extractCodexAgentMetadata(filePath) {
+export async function extractCodexAgentMetadata(
+  filePath,
+  inventoryId = path.basename(filePath, ".toml"),
+) {
   try {
     const content = await fs.readFile(filePath, "utf8");
-    const scalar = (key) => {
-      const doubleTriple = content.match(
-        new RegExp(`^${key}\\s*=\\s*\"\"\"([\\s\\S]*?)\"\"\"`, "mu"),
-      );
-      if (doubleTriple) return doubleTriple[1].trim();
-      const singleTriple = content.match(
-        new RegExp(`^${key}\\s*=\\s*'''([\\s\\S]*?)'''`, "mu"),
-      );
-      if (singleTriple) return singleTriple[1].trim();
-      const singleLine = content.match(
-        new RegExp(`^${key}\\s*=\\s*[\"']([^\"']+)[\"']`, "mu"),
-      );
-      return singleLine?.[1]?.trim() ?? null;
-    };
-    const metadata = {
-      name: scalar("name"),
-      description: scalar("description"),
-      developer_instructions: scalar("developer_instructions"),
-    };
-    const customAgentDefinitionErrors = [
-      ...(!metadata.name ? ["missing_name"] : []),
-      ...(!metadata.description ? ["missing_description"] : []),
-      ...(!metadata.developer_instructions ? ["missing_developer_instructions"] : []),
-    ];
+    const {
+      metadata,
+      errors: customAgentDefinitionErrors,
+      nativeAgentName,
+    } = parseCodexAgentDefinition(content, inventoryId, {
+      allowRuntimeNativeProfile: true,
+    });
     return {
       ...metadata,
       validCustomAgentDefinition: customAgentDefinitionErrors.length === 0,
       customAgentDefinitionErrors,
-      nativeAgentName: metadata.name,
+      nativeAgentName,
     };
   } catch {}
   return {
@@ -1735,7 +1722,7 @@ async function scanPlatform(platformId, platform) {
                 ...(await extractAgentMetadata(item.path)),
               };
             } else if (item.path.endsWith(".toml")) {
-              const codexMetadata = await extractCodexAgentMetadata(item.path);
+              const codexMetadata = await extractCodexAgentMetadata(item.path, item.id);
               capability.metadata = {
                 ...capability.metadata,
                 ...codexMetadata,
@@ -2008,7 +1995,6 @@ async function collectRepoCanonicalCapabilities() {
 async function buildRepoCapabilityIndex() {
   const capabilities = await collectRepoCanonicalCapabilities();
   const metaSkillProviderContract = buildMetaSkillProviderContract();
-  const runtimeActualCounts = await buildRuntimeActualCounts(capabilities);
   const index = {
     generatedAt: new Date().toISOString(),
     registryName: "meta-kim-capabilities",
@@ -2035,7 +2021,6 @@ async function buildRepoCapabilityIndex() {
         totalHooks: "canonical_inventory_entries",
         totalCommands: "canonical_inventory_entries",
       },
-      runtimeActualCounts,
     },
     ...metaSkillProviderContract,
     byCapabilityType: {
@@ -2143,101 +2128,6 @@ async function readJsonIfExists(filePath) {
   } catch {
     return null;
   }
-}
-
-async function listFilesIfExists(relativeDir, predicate = () => true) {
-  try {
-    const entries = await fs.readdir(path.join(repoRoot, relativeDir), {
-      withFileTypes: true,
-    });
-    return entries
-      .filter((entry) => entry.isFile() && predicate(entry.name))
-      .map((entry) => entry.name)
-      .sort();
-  } catch {
-    return [];
-  }
-}
-
-function countCommandFields(value) {
-  if (!value || typeof value !== "object") return 0;
-  if (Array.isArray(value)) {
-    return value.reduce((sum, item) => sum + countCommandFields(item), 0);
-  }
-  let count = typeof value.command === "string" ? 1 : 0;
-  for (const item of Object.values(value)) {
-    count += countCommandFields(item);
-  }
-  return count;
-}
-
-async function buildRuntimeActualCounts(capabilities) {
-  const readRuntimeJson = (relativePath) =>
-    readJsonIfExists(path.join(repoRoot, relativePath));
-  const [claudeSettings, codexHooks, cursorHooks, openclawTemplate] =
-    await Promise.all([
-      readRuntimeJson(".claude/settings.json"),
-      readRuntimeJson(".codex/hooks.json"),
-      readRuntimeJson(".cursor/hooks.json"),
-      readRuntimeJson("openclaw/openclaw.template.json"),
-    ]);
-  const markdownFiles = (relativeDir) =>
-    listFilesIfExists(relativeDir, (name) => name.endsWith(".md"));
-  const hookFiles = (relativeDir) =>
-    listFilesIfExists(relativeDir, (name) => name.endsWith(".mjs"));
-
-  const [
-    claudeCommandFiles,
-    claudeHookFiles,
-    codexCommandFiles,
-    codexHookFiles,
-    cursorCommandFiles,
-    cursorHookFiles,
-    openclawSkillFiles,
-  ] = await Promise.all([
-    markdownFiles(".claude/commands"),
-    hookFiles(".claude/hooks"),
-    markdownFiles(".codex/commands"),
-    hookFiles(".codex/hooks"),
-    markdownFiles(".cursor/commands"),
-    hookFiles(".cursor/hooks"),
-    markdownFiles("openclaw/skills"),
-  ]);
-
-  return {
-    scope: "local_project_projection_when_present",
-    note:
-      "Canonical totals count source inventory entries; runtimeActualCounts counts generated local projection files/settings when those gitignored runtime folders exist.",
-    canonicalInventory: {
-      hooks: capabilities.hooks.length,
-      commands: capabilities.commands.length,
-    },
-    claude: {
-      projectionPresent: claudeSettings !== null || claudeHookFiles.length > 0,
-      hookCommandEntries: countCommandFields(claudeSettings?.hooks ?? {}),
-      hookFiles: claudeHookFiles.length,
-      commandFiles: claudeCommandFiles.length,
-    },
-    codex: {
-      projectionPresent: codexHooks !== null || codexHookFiles.length > 0,
-      hookCommandEntries: countCommandFields(codexHooks ?? {}),
-      hookFiles: codexHookFiles.length,
-      commandFiles: codexCommandFiles.length,
-    },
-    cursor: {
-      projectionPresent: cursorHooks !== null || cursorHookFiles.length > 0,
-      hookCommandEntries: countCommandFields(cursorHooks ?? {}),
-      hookFiles: cursorHookFiles.length,
-      commandFiles: cursorCommandFiles.length,
-    },
-    openclaw: {
-      projectionPresent: openclawTemplate !== null || openclawSkillFiles.length > 0,
-      hookCommandEntries: countCommandFields(openclawTemplate?.hooks ?? {}),
-      hookFiles: 0,
-      commandFiles: 0,
-      skillFiles: openclawSkillFiles.length,
-    },
-  };
 }
 
 export async function buildGlobalCapabilityInventory(

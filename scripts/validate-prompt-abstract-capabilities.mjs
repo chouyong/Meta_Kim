@@ -2,12 +2,12 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { assert, exists, listFiles, readJson, repoPath, toPosix } from "./governance-lib.mjs";
-import { getProfilePaths } from "./meta-kim-local-state.mjs";
+import { getGlobalProfilePaths } from "./meta-kim-local-state.mjs";
 
-const activeProfileDir = getProfilePaths({ repoPath: repoPath(".") }).profileDir;
+const activeProfileDir = getGlobalProfilePaths().profileDir;
 const activeProfileRef = toPosix(path.relative(repoPath("."), activeProfileDir));
 const resolveProfileSource = (source) => String(source)
-  .replaceAll("{profile}", getProfilePaths().profile)
+  .replaceAll("{profile}", getGlobalProfilePaths().profile)
   .replace(/^\.meta-kim\/state\/default(?=\/|$)/u, activeProfileRef);
 
 const contract = await readJson("config/contracts/prompt-abstract-capability-contract.json");
