@@ -38,6 +38,7 @@ describe("stable package CLI UX", () => {
     assert.match(help.stdout, /meta-kim doctor hooks/);
     assert.match(help.stdout, /meta-kim release audit/);
     assert.match(help.stdout, /meta-kim release close/);
+    assert.match(help.stdout, /project bootstrap repair-legacy-manifest/);
 
     const releaseAuditHelp = run(cli, ["release", "audit", "--help"]);
     assert.equal(releaseAuditHelp.status, 0, releaseAuditHelp.stderr);
@@ -145,6 +146,7 @@ describe("stable package CLI UX", () => {
     assert.match(source, /case "uninstall"[\s\S]*?scripts\/uninstall\.mjs/);
     assert.match(source, /case "check"[\s\S]*?setup\.mjs/);
     assert.match(source, /case "update"[\s\S]*?setup\.mjs/);
+    assert.match(source, /repair-legacy-manifest[\s\S]*?repair-legacy-project-bootstrap-manifest\.mjs/);
   });
 
   test("status runs from an unrelated current directory", () => {

@@ -182,31 +182,15 @@ export function hookCommand(command, timeout, extra = {}) {
   };
 }
 
-const PROJECT_META_KIM_HOOK_FILES = new Set([
-  "project-root.mjs",
-  "utils.mjs",
-  "skip-reminder.mjs",
-  "spine-state-utils.mjs",
-  "spine-state-gates.mjs",
-  "spine-state.mjs",
-  "activate-meta-theory-spine.mjs",
-  "bash-readonly-whitelist.mjs",
-  "block-dangerous-bash.mjs",
+const PROJECT_RUNTIME_ADAPTER_HOOK_FILES = Object.freeze([
   "codex_hook_adapter.py",
   "codex_hook_runner.mjs",
-  "enforce-agent-dispatch.mjs",
-  "graphify-context.mjs",
-  "hook-i18n.mjs",
   "hookprompt-adapter.mjs",
-  "meta-kim-memory-save.mjs",
   "permission_request.py",
   "planning-with-files-adapter.mjs",
-  "post-console-log-warn.mjs",
-  "post-format.mjs",
   "post-tool-use.ps1",
   "post-tool-use.sh",
   "post_tool_use.py",
-  "post-typecheck.mjs",
   "pre-compact.sh",
   "pre-git-push-confirm.mjs",
   "pre-tool-use.ps1",
@@ -215,17 +199,17 @@ const PROJECT_META_KIM_HOOK_FILES = new Set([
   "resolve-plan-dir.sh",
   "session-start.sh",
   "session_start.py",
-  "stop-compaction.mjs",
-  "stop-completion-guard.mjs",
-  "stop-console-log-audit.mjs",
-  "stop-save-progress.mjs",
-  "stop-spine-cleanup.mjs",
   "stop.ps1",
   "stop.py",
   "stop.sh",
-  "subagent-context.mjs",
   "user-prompt-submit.sh",
   "user_prompt_submit.py",
+]);
+
+const PROJECT_META_KIM_HOOK_FILES = new Set([
+  ...SHARED_RUNTIME_HOOK_FILES,
+  ...Object.keys(RUNTIME_HOOK_SOURCE_OWNERS),
+  ...PROJECT_RUNTIME_ADAPTER_HOOK_FILES,
 ]);
 
 export function isProjectMetaKimHookCommand(command) {

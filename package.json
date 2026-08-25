@@ -109,6 +109,7 @@
     "meta:setup:update": "node setup.mjs --update",
     "meta:setup:check": "node setup.mjs --check",
     "meta:project:bootstrap": "node setup.mjs --project-bootstrap",
+    "meta:project:bootstrap:repair-legacy-manifest": "node scripts/repair-legacy-project-bootstrap-manifest.mjs",
     "meta:project:capability:copy": "node scripts/project-capability-copy.mjs",
     "meta:install-scope:verify": "node scripts/verify-install-scope-matrix.mjs",
     "meta:project-cache:verify": "node scripts/verify-project-cache-generation.mjs",

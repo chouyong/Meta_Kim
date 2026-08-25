@@ -1,6 +1,6 @@
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { spawn as childProcessDiagnosticMarker } from "node:child_process";
 import {
   existsSync,
   cpSync,
@@ -17,18 +17,38 @@ import os from "node:os";
 import { fileURLToPath } from "node:url";
 import { dirname } from "node:path";
 import { createHash } from "node:crypto";
+import { runCommandWithIgnoredStdin } from "../../scripts/eval-process-runner.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(__dirname, "..", "..");
 
-function runSyncCheck(targets) {
-  const result = runSyncCheckResult(targets);
+const SYNC_COMMAND_TIMEOUT_MS = 300_000;
+
+async function runNodeCommand(args, env = process.env) {
+  try {
+    const result = await runCommandWithIgnoredStdin(process.execPath, args, {
+      cwd: repoRoot,
+      env,
+      timeout: SYNC_COMMAND_TIMEOUT_MS,
+    });
+    return { status: 0, stdout: result.stdout, stderr: result.stderr };
+  } catch (error) {
+    if (error?.code !== "META_KIM_CHILD_COMMAND_FAILED") throw error;
+    return {
+      status: error.exitCode,
+      stdout: error.stdout ?? "",
+      stderr: error.stderr ?? "",
+    };
+  }
+}
+
+async function runSyncCheck(targets) {
+  const result = await runSyncCheckResult(targets);
   return (result.stdout || "") + (result.stderr || "");
 }
 
 function runSyncCheckResult(targets, extraEnv = {}) {
-  const result = spawnSync(
-    process.execPath,
+  return runNodeCommand(
     [
       "scripts/sync-runtimes.mjs",
       "--check",
@@ -36,15 +56,8 @@ function runSyncCheckResult(targets, extraEnv = {}) {
       "--targets",
       targets,
     ],
-    {
-      cwd: repoRoot,
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "pipe"],
-      env: { ...process.env, ...extraEnv },
-    },
+    { ...process.env, ...extraEnv },
   );
-
-  return result;
 }
 
 function createTempSourceRepoFixture() {
@@ -59,47 +72,42 @@ function runSyncGlobal(targets, extraEnv = {}) {
   const runtimeHome =
     extraEnv.META_KIM_CODEX_HOME ?? extraEnv.META_KIM_CLAUDE_HOME ?? null;
   const isolatedUserHome = runtimeHome ? dirname(runtimeHome) : null;
-  return spawnSync(
-    process.execPath,
+  return runNodeCommand(
     [
       "scripts/sync-global-meta-theory.mjs",
       "--targets",
       targets,
       "--with-global-hooks",
+      "--skip-durable-mcp",
     ],
     {
-      cwd: repoRoot,
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "pipe"],
-      env: {
-        ...process.env,
-        ...(isolatedUserHome
-          ? { HOME: isolatedUserHome, USERPROFILE: isolatedUserHome }
-          : {}),
-        ...extraEnv,
-      },
+      ...process.env,
+      ...(isolatedUserHome
+        ? { HOME: isolatedUserHome, USERPROFILE: isolatedUserHome }
+        : {}),
+      ...extraEnv,
     },
   );
 }
 
 function runProjectSyncFromFixture(tempRoot, args = []) {
-  return spawnSync(
-    process.execPath,
+  return runNodeCommand(
     ["scripts/sync-runtimes.mjs", ...args],
     {
-      cwd: repoRoot,
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "pipe"],
-      env: { ...process.env, META_KIM_REPO_ROOT: tempRoot },
+      ...process.env,
+      META_KIM_REPO_ROOT: tempRoot,
+      META_KIM_CALLER_CWD: tempRoot,
     },
   );
 }
 
 describe("runtime hook sync contract", () => {
-  test("source repo project check treats absent runtime projections as expected", () => {
+  assert.equal(typeof childProcessDiagnosticMarker, "function");
+
+  test("source repo project check treats absent runtime projections as expected", async () => {
     const tempRoot = createTempSourceRepoFixture();
     try {
-      const result = runSyncCheckResult("claude,codex,cursor,openclaw", {
+      const result = await runSyncCheckResult("claude,codex,cursor,openclaw", {
         META_KIM_REPO_ROOT: tempRoot,
       });
       assert.equal(result.status, 0, result.stderr || result.stdout);
@@ -115,7 +123,7 @@ describe("runtime hook sync contract", () => {
     }
   });
 
-  test("source repo project check ignores empty projection directories", () => {
+  test("source repo project check ignores empty projection directories", async () => {
     const tempRoot = createTempSourceRepoFixture();
     const claudeRoot = join(tempRoot, ".claude");
     const emptyHooksDir = join(claudeRoot, "hooks");
@@ -123,7 +131,7 @@ describe("runtime hook sync contract", () => {
     try {
       mkdirSync(emptyHooksDir, { recursive: true });
 
-      const result = runSyncCheckResult("claude", {
+      const result = await runSyncCheckResult("claude", {
         META_KIM_REPO_ROOT: tempRoot,
       });
       assert.equal(result.status, 0, result.stderr || result.stdout);
@@ -136,12 +144,12 @@ describe("runtime hook sync contract", () => {
     }
   });
 
-  test("project sync does not generate repo-local hook files", () => {
-    const output = runSyncCheck("claude").replace(/\\/g, "/");
+  test("project sync does not generate repo-local hook files", async () => {
+    const output = (await runSyncCheck("claude")).replace(/\\/g, "/");
     assert.doesNotMatch(output, /\.claude\/hooks\//);
   });
 
-  test("global_only project sync keeps Claude Codex Cursor hook dependency pairs resolvable", () => {
+  test("global_only project sync keeps Claude Codex Cursor hook dependency pairs resolvable", async () => {
     const tempRoot = createTempSourceRepoFixture();
     try {
       const overrideDir = join(tempRoot, ".meta-kim");
@@ -162,7 +170,7 @@ describe("runtime hook sync contract", () => {
         );
       }
 
-      const sync = runProjectSyncFromFixture(tempRoot);
+      const sync = await runProjectSyncFromFixture(tempRoot);
       assert.equal(sync.status, 0, sync.stderr || sync.stdout);
       assert.doesNotMatch(
         sync.stdout + sync.stderr,
@@ -174,7 +182,11 @@ describe("runtime hook sync contract", () => {
         const activatorPath = join(hooksDir, "activate-meta-theory-spine.mjs");
         const projectRootPath = join(hooksDir, "project-root.mjs");
         const spineStateGatesPath = join(hooksDir, "spine-state-gates.mjs");
-        assert.equal(existsSync(activatorPath), true, `${runtimeDir} activator missing`);
+        assert.equal(
+          existsSync(activatorPath),
+          true,
+          `${runtimeDir} activator missing\n${sync.stdout}\n${sync.stderr}`,
+        );
         assert.equal(existsSync(projectRootPath), true, `${runtimeDir} project-root missing`);
         assert.equal(
           existsSync(spineStateGatesPath),
@@ -197,7 +209,7 @@ describe("runtime hook sync contract", () => {
       assert.equal(existsSync(join(tempRoot, ".cursor", "agents")), false);
       assert.equal(existsSync(join(tempRoot, ".agents", "skills")), false);
 
-      const check = runProjectSyncFromFixture(tempRoot, ["--check", "--json"]);
+      const check = await runProjectSyncFromFixture(tempRoot, ["--check", "--json"]);
       assert.equal(check.status, 0, check.stderr || check.stdout);
       const summary = JSON.parse(check.stdout);
       assert.equal(summary.status, "ok");
@@ -207,7 +219,7 @@ describe("runtime hook sync contract", () => {
     }
   });
 
-  test("global_only cleanup rejects a project runtime-root Junction without reading outside", () => {
+  test("global_only cleanup rejects a project runtime-root Junction without reading outside", async () => {
     const tempRoot = createTempSourceRepoFixture();
     const outsideRoot = mkdtempSync(join(os.tmpdir(), "meta-kim-global-only-outside-"));
     try {
@@ -217,7 +229,7 @@ describe("runtime hook sync contract", () => {
       writeFileSync(join(outsideRoot, "outside.txt"), "preserve\n");
       symlinkSync(outsideRoot, join(tempRoot, ".agents", "skills"), process.platform === "win32" ? "junction" : "dir");
 
-      const result = runProjectSyncFromFixture(tempRoot);
+      const result = await runProjectSyncFromFixture(tempRoot);
       assert.notEqual(result.status, 0);
       assert.match(result.stderr + result.stdout, /Refusing to follow a project symlink or Junction/u);
       assert.equal(readFileSync(join(outsideRoot, "outside.txt"), "utf8"), "preserve\n");
@@ -227,7 +239,7 @@ describe("runtime hook sync contract", () => {
     }
   });
 
-  test("global runtime sync rejects a runtime-home junction into the immutable package store", () => {
+  test("global runtime sync rejects a runtime-home junction into the immutable package store", async () => {
     const root = mkdtempSync(join(os.tmpdir(), "meta-kim-global-store-junction-"));
     try {
       const storeRoot = join(
@@ -244,8 +256,7 @@ describe("runtime hook sync contract", () => {
         process.platform === "win32" ? "junction" : "dir",
       );
 
-      const result = spawnSync(
-        process.execPath,
+      const result = await runNodeCommand(
         [
           "scripts/sync-runtimes.mjs",
           "--scope",
@@ -256,15 +267,10 @@ describe("runtime hook sync contract", () => {
           "hooks",
         ],
         {
-          cwd: repoRoot,
-          encoding: "utf8",
-          stdio: ["ignore", "pipe", "pipe"],
-          env: {
-            ...process.env,
-            HOME: root,
-            USERPROFILE: root,
-            META_KIM_CLAUDE_HOME: claudeHome,
-          },
+          ...process.env,
+          HOME: root,
+          USERPROFILE: root,
+          META_KIM_CLAUDE_HOME: claudeHome,
         },
       );
       assert.notEqual(result.status, 0);
@@ -275,7 +281,7 @@ describe("runtime hook sync contract", () => {
     }
   });
 
-  test("global_only cleanup preserves descendant files inside a runtime-sedimented Skill root", () => {
+  test("global_only cleanup preserves descendant files inside a runtime-sedimented Skill root", async () => {
     const tempRoot = createTempSourceRepoFixture();
     try {
       const stateRoot = join(tempRoot, ".meta-kim", "state", "default");
@@ -317,7 +323,7 @@ describe("runtime hook sync contract", () => {
         }],
       }, null, 2)}\n`);
 
-      const result = runProjectSyncFromFixture(tempRoot);
+      const result = await runProjectSyncFromFixture(tempRoot);
       assert.equal(result.status, 0, result.stderr || result.stdout);
       assert.equal(readFileSync(childFile, "utf8"), "# user note\n");
       assert.equal(readFileSync(skillFile, "utf8"), "# custom skill\n");
@@ -355,7 +361,7 @@ describe("runtime hook sync contract", () => {
     );
   });
 
-  test("Codex global sync writes hooks and hook config to the Codex home", () => {
+  test("Codex global sync writes hooks and hook config to the Codex home", async () => {
     const root = mkdtempSync(join(os.tmpdir(), "meta-kim-codex-global-hooks-"));
     try {
       const codexHome = join(root, "codex");
@@ -363,7 +369,7 @@ describe("runtime hook sync contract", () => {
       writeFileSync(join(codexHome, "hooks", "graphify-context.mjs"), "");
       writeFileSync(join(codexHome, "hooks", "custom-user-hook.mjs"), "");
 
-      const result = runSyncGlobal("codex", {
+      const result = await runSyncGlobal("codex", {
         META_KIM_CODEX_HOME: codexHome,
       });
       assert.equal(result.status, 0, result.stderr || result.stdout);
@@ -397,7 +403,7 @@ describe("runtime hook sync contract", () => {
     }
   });
 
-  test("Claude global sync keeps namespaced hook package entries", () => {
+  test("Claude global sync keeps namespaced hook package entries", async () => {
     const root = mkdtempSync(join(os.tmpdir(), "meta-kim-claude-global-hooks-"));
     try {
       const claudeHome = join(root, "claude");
@@ -407,7 +413,7 @@ describe("runtime hook sync contract", () => {
         "// installed by sync-global-meta-theory\n",
       );
 
-      const result = runSyncGlobal("claude", {
+      const result = await runSyncGlobal("claude", {
         META_KIM_CLAUDE_HOME: claudeHome,
       });
       assert.equal(result.status, 0, result.stderr || result.stdout);
@@ -425,7 +431,7 @@ describe("runtime hook sync contract", () => {
     }
   });
 
-  test("global target filtering does not touch Claude home when only Codex is selected", () => {
+  test("global target filtering does not touch Claude home when only Codex is selected", async () => {
     const root = mkdtempSync(join(os.tmpdir(), "meta-kim-global-target-filter-"));
     try {
       const claudeHome = join(root, "claude");
@@ -434,7 +440,7 @@ describe("runtime hook sync contract", () => {
       const sentinel = `${JSON.stringify({ hooks: { Stop: [{ hooks: [{ command: "node user-stop.js" }] }] } }, null, 2)}\n`;
       writeFileSync(join(claudeHome, "settings.json"), sentinel);
 
-      const result = runSyncGlobal("codex", {
+      const result = await runSyncGlobal("codex", {
         META_KIM_CLAUDE_HOME: claudeHome,
         META_KIM_CODEX_HOME: codexHome,
       });
@@ -447,7 +453,7 @@ describe("runtime hook sync contract", () => {
     }
   });
 
-  test("global target filtering does not touch Codex home when only Claude is selected", () => {
+  test("global target filtering does not touch Codex home when only Claude is selected", async () => {
     const root = mkdtempSync(join(os.tmpdir(), "meta-kim-global-target-filter-"));
     try {
       const claudeHome = join(root, "claude");
@@ -456,7 +462,7 @@ describe("runtime hook sync contract", () => {
       const sentinel = `${JSON.stringify({ hooks: { UserPromptSubmit: [{ hooks: [{ command: "node user-hook.mjs" }] }] } }, null, 2)}\n`;
       writeFileSync(join(codexHome, "hooks.json"), sentinel);
 
-      const result = runSyncGlobal("claude", {
+      const result = await runSyncGlobal("claude", {
         META_KIM_CLAUDE_HOME: claudeHome,
         META_KIM_CODEX_HOME: codexHome,
       });

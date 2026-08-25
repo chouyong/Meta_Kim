@@ -1,4 +1,5 @@
 import { spawnSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { describe, test } from "node:test";
@@ -26,6 +27,16 @@ function assertNoWholeTreeClaim(value) {
 }
 
 describe("cross-platform process runner contract", () => {
+  test("runtime Hook sync diagnostics use the guarded process runner", () => {
+    const source = readFileSync(
+      path.join(repoRoot, "tests", "setup", "sync-runtimes-hooks.test.mjs"),
+      "utf8",
+    );
+
+    assert.match(source, /runCommandWithIgnoredStdin/u);
+    assert.doesNotMatch(source, /\bspawnSync\b/u);
+  });
+
   test("caller redaction composes before mandatory host and credential redaction", async () => {
     assert.equal(typeof spawnSync, "function");
     const emitted = [
