@@ -1,0 +1,52 @@
+{
+  "schemaVersion": 1,
+  "skill": "project-model-chain-concurrency",
+  "triggerCases": {
+    "shouldTrigger": [
+      "Have Codex invoke Claude to review this project's branch.",
+      "Let Claude Code call Codex for a bounded implementation in this repository.",
+      "Run cross-model verification without blocking reviews in another project.",
+      "Make same-project Claude and Codex CLI calls mutually exclusive.",
+      "Use one project identity lock for external model chains across runtimes."
+    ],
+    "shouldNotTrigger": [
+      "Run the unit tests in this repository.",
+      "Commit and push the current branch.",
+      "Review this diff in the current Codex session.",
+      "Delete a task-owned temporary directory after release verification.",
+      "Wait for a human reviewer to write a receipt."
+    ],
+    "nearMiss": [
+      "Spawn a native Codex subagent that does not launch another CLI.",
+      "Prepare a review notice but do not start the external reviewer yet.",
+      "Check whether a model-chain lock is currently available."
+    ],
+    "ambiguous": [
+      "Ask another model to look at this.",
+      "Run two reviews at once.",
+      "Keep the terminals from conflicting."
+    ]
+  },
+  "runtimeRegression": [
+    "same physical project blocks across independent processes",
+    "different physical projects overlap",
+    "path aliases and junctions share a key",
+    "raw paths never enter mutex names",
+    "legacy V2 and runtime-neutral consumers mutually exclude",
+    "partial dual-lock acquisition releases the first lock",
+    "abandoned ownership recovers",
+    "wrong-thread release preserves the lease for owner-thread recovery",
+    "either recursion marker fails before side effects",
+    "invalid project roots fail closed"
+  ],
+  "baseline": {
+    "withoutSkill": "three copied runtime-specific helpers with a Codex/Claude namespace and drift risk",
+    "withSkill": "one canonical helper, a dual-lock migration bridge, global runtime projections, and process-level regression evidence"
+  },
+  "forbidden": [
+    "invoke a model during regression",
+    "claim POSIX physical-identity support",
+    "hold the lock while waiting for human action",
+    "use this skill for temporary-asset cleanup"
+  ]
+}

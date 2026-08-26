@@ -12,7 +12,12 @@ const repoRoot = join(import.meta.dirname, "..", "..");
 function runGlobalSync(env) {
   const result = spawnSync(
     process.execPath,
-    ["scripts/sync-global-meta-theory.mjs", "--targets", "claude,codex"],
+    [
+      "scripts/sync-global-meta-theory.mjs",
+      "--targets",
+      "claude,codex",
+      "--skip-durable-mcp",
+    ],
     {
       cwd: repoRoot,
       env,
@@ -43,8 +48,10 @@ test("global skill and command sync is a content-identical mtime no-op", async (
     };
     const files = {
       claudeSkill: join(claudeHome, "skills", "meta-theory", "SKILL.md"),
+      claudeConcurrencySkill: join(claudeHome, "skills", "project-model-chain-concurrency", "SKILL.md"),
       claudeCommand: join(claudeHome, "commands", "meta-theory.md"),
       codexSkill: join(codexHome, "skills", "meta-theory", "SKILL.md"),
+      codexConcurrencySkill: join(codexHome, "skills", "project-model-chain-concurrency", "SKILL.md"),
       codexCommand: join(codexHome, "commands", "meta-theory.md"),
     };
 

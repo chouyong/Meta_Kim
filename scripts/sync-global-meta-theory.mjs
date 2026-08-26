@@ -24,6 +24,7 @@ import {
   canonicalAgentsDir,
   canonicalRuntimeAssetsDir,
   canonicalSkillRoot,
+  canonicalProjectModelChainSkillRoot,
   globalAgentProjectionFileName,
   resolveGlobalAgentProjectionTargets,
   resolveTargetContext,
@@ -114,8 +115,18 @@ const C = {
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, "..");
-const sourceDir = canonicalSkillRoot;
-const sourceSkillFile = path.join(sourceDir, "SKILL.md");
+const globalSkillSpecs = Object.freeze([
+  {
+    id: "meta-theory",
+    sourceDir: canonicalSkillRoot,
+    targetIds: null,
+  },
+  {
+    id: "project-model-chain-concurrency",
+    sourceDir: canonicalProjectModelChainSkillRoot,
+    targetIds: new Set(["claude", "codex"]),
+  },
+]);
 
 const cliArgs = process.argv.slice(2);
 
@@ -1504,11 +1515,19 @@ async function resolveTargets() {
   }));
   globalManifestSnapshot = readManifest(manifestPathFor("global"));
 
-  activeTargets = selectedTargetIds.map((targetId) => ({
-    targetId,
-    label: `${targetContext.profiles[targetId]?.label ?? targetId} global skill`,
-    dir: path.join(runtimeHomes[targetId].dir, "skills", "meta-theory"),
-  }));
+  activeTargets = selectedTargetIds.flatMap((targetId) =>
+    globalSkillSpecs
+      .filter((spec) => spec.targetIds === null || spec.targetIds.has(targetId))
+      .map((spec) => ({
+        targetId,
+        skillId: spec.id,
+        sourceDir: spec.sourceDir,
+        label: spec.id === "meta-theory"
+          ? `${targetContext.profiles[targetId]?.label ?? targetId} global skill`
+          : `${targetContext.profiles[targetId]?.label ?? targetId} global ${spec.id} skill`,
+        dir: path.join(runtimeHomes[targetId].dir, "skills", spec.id),
+      }))
+  );
 
   const legacyFlatSkillLabels = {
     claude: "legacy Claude Code flat skill",
@@ -1605,20 +1624,20 @@ function renderGlobalSkillContent(content, targetId, relativePath) {
     : projected;
 }
 
-async function fingerprintSourceForTarget(targetId) {
-  if (!(await pathExists(sourceDir))) {
+async function fingerprintSourceForTarget(targetId, skillSourceDir) {
+  if (!(await pathExists(skillSourceDir))) {
     return null;
   }
 
   const filePaths = [];
-  for await (const filePath of walkFiles(sourceDir)) {
+  for await (const filePath of walkFiles(skillSourceDir)) {
     filePaths.push(filePath);
   }
   filePaths.sort((left, right) => left.localeCompare(right));
 
   const hash = createHash("sha256");
   for (const filePath of filePaths) {
-    const relativePath = path.relative(sourceDir, filePath).replace(/\\/g, "/");
+    const relativePath = path.relative(skillSourceDir, filePath).replace(/\\/g, "/");
     const content = await fs.readFile(filePath, "utf8");
     hash.update(relativePath);
     hash.update("\n");
@@ -1733,15 +1752,15 @@ async function fingerprintInstalledGlobalHooks(rootDir) {
   };
 }
 
-async function copyCanonicalSkill(targetDir, targetId) {
+async function copyCanonicalSkill(targetDir, targetId, skillId, skillSourceDir) {
   assertHomeBound(targetDir);
   await assertRealHomeBound(targetDir);
   await fs.mkdir(path.dirname(targetDir), { recursive: true });
   await fs.mkdir(targetDir, { recursive: true });
 
   const expectedFiles = new Set();
-  for await (const sourcePath of walkFiles(sourceDir)) {
-    const relativePath = path.relative(sourceDir, sourcePath).replace(/\\/g, "/");
+  for await (const sourcePath of walkFiles(skillSourceDir)) {
+    const relativePath = path.relative(skillSourceDir, sourcePath).replace(/\\/g, "/");
     expectedFiles.add(relativePath);
     const targetPath = path.join(targetDir, ...relativePath.split("/"));
     assertHomeBound(targetPath);
@@ -1766,19 +1785,24 @@ async function copyCanonicalSkill(targetDir, targetId) {
   recordSafe((rec) =>
     rec.recordDir(targetDir, {
       source: "sync-global-meta-theory",
-      purpose: `${targetId ?? "runtime"}-global-skill`,
+      purpose: skillId === "meta-theory"
+        ? `${targetId ?? "runtime"}-global-skill`
+        : `${targetId ?? "runtime"}-global-skill:${skillId}`,
       category: CATEGORIES.A,
     }),
   );
 }
 
 async function assertCanonicalSkillFrontmatter() {
-  const raw = await fs.readFile(sourceSkillFile, "utf8");
-  const validation = validateSkillFrontmatter(raw);
-  if (!validation.ok) {
-    throw new Error(
-      `Invalid canonical skill frontmatter in ${sourceSkillFile}: ${validation.message}`,
-    );
+  for (const spec of globalSkillSpecs) {
+    const sourceSkillFile = path.join(spec.sourceDir, "SKILL.md");
+    const raw = await fs.readFile(sourceSkillFile, "utf8");
+    const validation = validateSkillFrontmatter(raw);
+    if (!validation.ok) {
+      throw new Error(
+        `Invalid canonical skill frontmatter in ${sourceSkillFile}: ${validation.message}`,
+      );
+    }
   }
 }
 
@@ -2704,6 +2728,7 @@ async function runCheck() {
   for (const target of activeTargets) {
     const sourceFingerprint = await fingerprintSourceForTarget(
       target.targetId,
+      target.sourceDir,
     );
     const targetFingerprint = await fingerprintDir(target.dir);
     const inSync =
@@ -2992,8 +3017,11 @@ async function runSync() {
   try {
   // Leading newline to separate from parent's progress message
   console.log("");
-  if (!(await pathExists(sourceSkillFile))) {
-    throw new Error(`Missing canonical skill source: ${sourceSkillFile}`);
+  for (const spec of globalSkillSpecs) {
+    const sourceSkillFile = path.join(spec.sourceDir, "SKILL.md");
+    if (!(await pathExists(sourceSkillFile))) {
+      throw new Error(`Missing canonical skill source: ${sourceSkillFile}`);
+    }
   }
   await assertCanonicalSkillFrontmatter();
   const agentPlan = await buildGlobalAgentPlan();
@@ -3032,7 +3060,12 @@ async function runSync() {
   }
 
   for (const target of activeTargets) {
-    await copyCanonicalSkill(target.dir, target.targetId);
+    await copyCanonicalSkill(
+      target.dir,
+      target.targetId,
+      target.skillId,
+      target.sourceDir,
+    );
     console.log(
       `${C.green}✓${C.reset} ${C.dim}Synced ${target.label}: ${target.dir}${C.reset}`,
     );

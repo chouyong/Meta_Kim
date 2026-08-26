@@ -15,6 +15,10 @@ export const canonicalSkillRoot = path.join(
   canonicalSkillsDir,
   "meta-theory",
 );
+export const canonicalProjectModelChainSkillRoot = path.join(
+  canonicalSkillsDir,
+  "project-model-chain-concurrency",
+);
 export const canonicalSkillPath = path.join(canonicalSkillRoot, "SKILL.md");
 export const canonicalSkillReferencesDir = path.join(
   canonicalSkillRoot,
