@@ -1,2 +1,3 @@
 graphify-out/graph.json merge=graphify
 bin/*.mjs text eol=lf
+config/capability-index/meta-kim-capabilities.json text eol=lf
