@@ -15,7 +15,10 @@ export async function readJsonFromStdin() {
     raw += chunk;
   }
   try {
-    return raw.trim() ? JSON.parse(raw) : {};
+    const parsed = raw.trim() ? JSON.parse(raw) : {};
+    return parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)
+      ? parsed
+      : {};
   } catch {
     return {};
   }
@@ -31,7 +34,10 @@ export function readJsonFromStdinSync() {
     raw += chunk;
   }
   try {
-    return raw.trim() ? JSON.parse(raw) : {};
+    const parsed = raw.trim() ? JSON.parse(raw) : {};
+    return parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)
+      ? parsed
+      : {};
   } catch {
     return {};
   }
@@ -42,21 +48,26 @@ export function readJsonFromStdinSync() {
  * Handles various field names across different hook types.
  */
 export function extractFilePath(input) {
-  return (
-    input.file_path ||
-    input.filePath ||
-    input.path ||
-    input.target_path ||
-    input.targetPath ||
-    input.tool_input?.file_path ||
-    input.tool_input?.filePath ||
-    input.tool_input?.path ||
-    input.tool_input?.target_path ||
-    input.tool_input?.targetPath ||
-    input.tool_response?.filePath ||
-    input.tool_response?.file_path ||
-    input.tool_response?.target_path ||
-    input.tool_response?.targetPath ||
-    ""
-  );
+  if (input === null || typeof input !== "object") return "";
+
+  const candidates = [
+    input.file_path,
+    input.filePath,
+    input.path,
+    input.target_path,
+    input.targetPath,
+    input.tool_input?.file_path,
+    input.tool_input?.filePath,
+    input.tool_input?.path,
+    input.tool_input?.target_path,
+    input.tool_input?.targetPath,
+    input.tool_response?.filePath,
+    input.tool_response?.file_path,
+    input.tool_response?.target_path,
+    input.tool_response?.targetPath,
+  ];
+
+  return candidates.find(
+    (candidate) => typeof candidate === "string" && candidate.length > 0,
+  ) ?? "";
 }
