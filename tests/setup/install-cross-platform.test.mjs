@@ -2,7 +2,7 @@ import { describe, test } from "node:test";
 import assert from "node:assert/strict";
 import {
   mkdtempSync,
-  readFileSync,
+  readFileSync as readFileSyncRaw,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -16,6 +16,14 @@ import {
   resolveManifestSkillSubdir,
   shouldUseCliShell,
 } from "../../scripts/install-platform-config.mjs";
+
+function readFileSync(filePath, options) {
+  const content = readFileSyncRaw(filePath, options);
+  if (options === "utf8" && typeof content === "string") {
+    return content.replace(/\r\n/gu, "\n");
+  }
+  return content;
+}
 import {
   buildCodexHookRunnerMjs,
   collectWindowsPythonCandidatePaths,
@@ -181,6 +189,7 @@ describe("install platform config", () => {
     assert.match(commandFunction, /codex_hook_runner\.mjs/);
     assert.match(commandFunction, /process\.execPath/);
     assert.match(commandFunction, /shellToken/);
+    assert.match(commandFunction, /replace\(\/\\\\\/gu, "\/"\)/);
     assert.match(commandFunction, /return `\$\{shellToken\(nodePath\)\}/);
     assert.doesNotMatch(commandFunction, /os\.platform\(\) === "win32"/);
     assert.doesNotMatch(commandFunction, /return `node |return `"\$\{nodePath\}"|python3|2>\/dev\/null|\|\| true/);
@@ -416,12 +425,36 @@ describe("install platform config", () => {
     assert.ok(stopWrapper);
     assert.match(stopWrapper, /decision = result\.get\("decision"\)/);
     assert.match(stopWrapper, /adapter\.emit_json\(result\)/);
-    assert.match(stopWrapper, /adapter\.emit_json\(\{"systemMessage": message\}\)/);
+    assert.match(
+      stopWrapper,
+      /adapter\.emit_json\(\{"hookSpecificOutput": \{"hookEventName": "Stop", "additionalContext": message\}\}\)/,
+    );
+    assert.doesNotMatch(stopWrapper, /systemMessage/);
     assert.ok(stopWrapper.includes('if "(0/0" in message:'));
     assert.doesNotMatch(
       stopWrapper,
       /adapter\.emit_json\(\{"decision": "block", "reason": message\}\)/,
     );
+  });
+
+  test("Codex planning lifecycle wrappers emit event-specific additional context", () => {
+    const source = readFileSync(
+      path.join(repoRoot, "scripts", "install-global-skills-all-runtimes.mjs"),
+      "utf8",
+    );
+    const wrapper = source.match(
+      /function buildCodexWrapperPy\([\s\S]*?\n}\n/,
+    )?.[0];
+
+    assert.ok(wrapper);
+    assert.match(wrapper, /hookSpecificOutput/);
+    assert.match(wrapper, /hookEventName/);
+    assert.match(wrapper, /additionalContext/);
+    assert.doesNotMatch(wrapper, /systemMessage/);
+    assert.match(source, /buildCodexWrapperPy\("session-start\.sh", "SessionStart"\)/);
+    assert.match(source, /buildCodexWrapperPy\("user-prompt-submit\.sh", "UserPromptSubmit"\)/);
+    assert.match(source, /buildCodexWrapperPy\("post-tool-use\.sh", "PostToolUse"\)/);
+    assert.match(source, /hookEventName": "PreToolUse"/);
   });
 
   test("Codex planning hook registration preserves existing hooks.json entries", () => {
@@ -447,7 +480,8 @@ describe("install platform config", () => {
     assert.doesNotMatch(deployFunction, /await fs\.copyFile\(srcPath, destPath\);\s*console\.log/);
     assert.match(mergeFunction, /existingBlocks/);
     assert.match(mergeFunction, /missingHooks/);
-    assert.match(mergeFunction, /hookCommandContains/);
+    assert.match(mergeFunction, /hookCommandTargetsScript/);
+    assert.match(mergeFunction, /replacedHooks/);
     assert.match(patchFunction, /existingHooksJson/);
     assert.match(patchFunction, /mergeCodexPlanningHooksJson/);
     assert.doesNotMatch(

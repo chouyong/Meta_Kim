@@ -2401,6 +2401,7 @@ function buildCodexGlobalHooksTemplate() {
     medusaSurfaceHookPath: path.join(absHooks, "medusa-findings-surface.mjs"),
     hookPromptAdapterPath: codexGlobalHookPromptAdapterPath(),
     stopSpineCleanupHookPath: path.join(absHooks, "stop-spine-cleanup.mjs"),
+    nodeExecutable: process.execPath,
   });
 }
 
@@ -2554,13 +2555,17 @@ function flattenHookFragments(hooks = {}) {
 }
 
 function hookCommandScriptPath(command) {
-  const trimmed = String(command ?? "").trim();
-  const quoted = trimmed.match(/^node\s+"([^"]+)"/u);
-  if (quoted) {
-    return quoted[1];
+  const tokens = [];
+  const tokenPattern = /"((?:\\.|[^"])*)"|([^\s]+)/gu;
+  for (const match of String(command ?? "").trim().matchAll(tokenPattern)) {
+    tokens.push(match[1] ?? match[2]);
+    if (tokens.length === 2) break;
   }
-  const unquoted = trimmed.match(/^node\s+([^\s]+)/u);
-  return unquoted?.[1] ?? null;
+  if (tokens.length < 2) return null;
+  const executable = tokens[0].replaceAll("\\", "/");
+  const executableName = path.posix.basename(executable).toLowerCase();
+  if (executableName !== "node" && executableName !== "node.exe") return null;
+  return tokens[1];
 }
 
 async function checkClaudeGlobalSettingsHooks() {

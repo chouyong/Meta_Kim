@@ -19,7 +19,7 @@
   ],
   "summary": {
     "totalAgents": 9,
-    "totalSkills": 17,
+    "totalSkills": 18,
     "totalHooks": 27,
     "totalMcpServers": 1,
     "totalMcpTools": 6,
@@ -213,6 +213,14 @@
         "path": "canonical/skills/meta-theory/SKILL.md",
         "size": 87778,
         "modified": "2026-08-17T03:22:58.720Z"
+      },
+      "repo:canonical:project-model-chain-concurrency": {
+        "id": "project-model-chain-concurrency",
+        "type": "skills",
+        "namespace": "canonical",
+        "path": "canonical/skills/project-model-chain-concurrency/SKILL.md",
+        "size": 2951,
+        "modified": "2026-08-26T08:26:47.629Z"
       },
       "repo:canonical:same-set-reusable-flow-for-project-file-inventor": {
         "id": "same-set-reusable-flow-for-project-file-inventor",

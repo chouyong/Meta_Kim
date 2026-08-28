@@ -4749,8 +4749,10 @@ function codexPlanningHookCommand(runtimeHome, scriptName) {
   const nodePath = process.execPath;
   const scriptPath = path.join(runtimeHome, "hooks", scriptName);
   const runnerPath = path.join(runtimeHome, "hooks", "codex_hook_runner.mjs");
-  const shellToken = (value) =>
-    /[\s"]/u.test(value) ? JSON.stringify(value) : value;
+  const shellToken = (value) => {
+    const normalized = String(value).replace(/\\/gu, "/");
+    return /[\s"]/u.test(normalized) ? JSON.stringify(normalized) : normalized;
+  };
   return `${shellToken(nodePath)} ${shellToken(runnerPath)} ${shellToken(scriptPath)}`;
 }
 
@@ -4821,10 +4823,10 @@ function buildCodexPlanningHooksJson(runtimeHome) {
   };
 }
 
-function hookCommandContains(block, marker) {
-  return (block.hooks ?? [block]).some((hook) =>
-    String(hook.command ?? "").includes(marker),
-  );
+function hookCommandTargetsScript(command, scriptName) {
+  const normalized = String(command ?? "").replace(/\\/gu, "/").trim();
+  const marker = `/${scriptName}`;
+  return normalized.endsWith(marker) || normalized.includes(`${marker} `);
 }
 
 function mergeCodexPlanningHooksJson(existing, generated) {
@@ -4836,17 +4838,51 @@ function mergeCodexPlanningHooksJson(existing, generated) {
     for (const generatedBlock of generatedBlocks) {
       const generatedHooks = generatedBlock.hooks ?? [generatedBlock];
       const missingHooks = generatedHooks.filter((hook) => {
-        const marker = path.basename(String(hook.command ?? ""));
-        return marker && !existingBlocks.some((block) => hookCommandContains(block, marker));
+        const marker = path.basename(
+          String(hook.command ?? "").replace(/\\/gu, "/"),
+        );
+        return marker && !existingBlocks.some((block) =>
+          (block.hooks ?? [block]).some((candidate) =>
+            hookCommandTargetsScript(candidate?.command, marker),
+          ),
+        );
       });
-      if (missingHooks.length === 0) {
-        continue;
-      }
 
       const matcher = generatedBlock.matcher;
       const targetIndex = existingBlocks.findIndex((block) =>
         matcher ? block.matcher === matcher : !block.matcher,
       );
+      const targetBlock = targetIndex >= 0 ? existingBlocks[targetIndex] : null;
+      if (targetBlock) {
+        const targetHooks = targetBlock.hooks ?? [targetBlock];
+        const replacedHooks = targetHooks.map((existingHook) => {
+          const generatedHook = generatedHooks.find((candidate) =>
+            hookCommandTargetsScript(
+              existingHook?.command,
+              path.basename(
+                String(candidate?.command ?? "").replace(/\\/gu, "/"),
+              ),
+            ),
+          );
+          return generatedHook
+            ? { ...existingHook, ...generatedHook }
+            : existingHook;
+        });
+        const existingCommands = new Set(
+          replacedHooks.map((hook) => normalizeHookCommand(hook?.command)),
+        );
+        const uniqueMissingHooks = missingHooks.filter(
+          (hook) => !existingCommands.has(normalizeHookCommand(hook?.command)),
+        );
+        existingBlocks[targetIndex] = {
+          ...targetBlock,
+          hooks: [...replacedHooks, ...uniqueMissingHooks],
+        };
+        continue;
+      }
+
+      if (missingHooks.length === 0) continue;
+
       if (targetIndex >= 0) {
         const target = existingBlocks[targetIndex];
         existingBlocks[targetIndex] = {
@@ -5218,7 +5254,7 @@ export function buildCodexHookRunnerMjs(pythonHint = null) {
   ].join("\n");
 }
 
-function buildCodexWrapperPy(scriptName) {
+function buildCodexWrapperPy(scriptName, hookEventName) {
   return [
     "#!/usr/bin/env python3",
     "from __future__ import annotations",
@@ -5231,7 +5267,12 @@ function buildCodexWrapperPy(scriptName) {
     "    root = adapter.cwd_from_payload(payload)",
     `    stdout, _ = adapter.run_shell_script("${scriptName}", root)`,
     "    if stdout:",
-    '        adapter.emit_json({"systemMessage": stdout})',
+    "        adapter.emit_json({",
+    '            "hookSpecificOutput": {',
+    `                "hookEventName": "${hookEventName}",`,
+    '                "additionalContext": stdout,',
+    "            },",
+    "        })",
     "",
     "",
     'if __name__ == "__main__":',
@@ -5260,7 +5301,7 @@ function buildCodexPreToolUseWrapperPy() {
     "        return",
     "",
     "    if stderr:",
-    '        adapter.emit_json({"systemMessage": stderr})',
+    '        adapter.emit_json({"hookSpecificOutput": {"hookEventName": "PreToolUse", "additionalContext": stderr}})',
     "",
     "",
     'if __name__ == "__main__":',
@@ -5295,7 +5336,7 @@ function buildCodexStopWrapperPy() {
     '    if "(0/0" in message:',
     "        return",
     "",
-    '    adapter.emit_json({"systemMessage": message})',
+    '    adapter.emit_json({"hookSpecificOutput": {"hookEventName": "Stop", "additionalContext": message}})',
     "",
     "",
     'if __name__ == "__main__":',
@@ -5421,12 +5462,12 @@ async function patchCodexPlanningHooksForPlatform(spec, runtimeHome, runtimeId) 
   );
   await fs.writeFile(
     path.join(hooksDir, "session_start.py"),
-    buildCodexWrapperPy("session-start.sh"),
+    buildCodexWrapperPy("session-start.sh", "SessionStart"),
     "utf8",
   );
   await fs.writeFile(
     path.join(hooksDir, "user_prompt_submit.py"),
-    buildCodexWrapperPy("user-prompt-submit.sh"),
+    buildCodexWrapperPy("user-prompt-submit.sh", "UserPromptSubmit"),
     "utf8",
   );
   await fs.writeFile(
@@ -5436,7 +5477,7 @@ async function patchCodexPlanningHooksForPlatform(spec, runtimeHome, runtimeId) 
   );
   await fs.writeFile(
     path.join(hooksDir, "post_tool_use.py"),
-    buildCodexWrapperPy("post-tool-use.sh"),
+    buildCodexWrapperPy("post-tool-use.sh", "PostToolUse"),
     "utf8",
   );
   await fs.writeFile(
@@ -5488,6 +5529,7 @@ async function patchCodexHookPromptForPlatform(spec, runtimeHome, runtimeId) {
         (await pathExists(spineHookPath)) ? spineHookPath : "activate-meta-theory-spine.mjs",
     }),
     hookPromptAdapterPath,
+    nodeExecutable: process.execPath,
   });
 
   const next = { ...existing, hooks: { ...(existing.hooks ?? {}) } };

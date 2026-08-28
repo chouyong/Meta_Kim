@@ -79,7 +79,8 @@ describe("project deploy protection", () => {
     assert.match(mergeBody, /plannedProtectedProjectDeployJson\(srcPath, destPath, relPath, targetDir\)/);
     assert.match(plannedMergeBody, /mergeRepoClaudeSettings\(base, generated, targetDir\)/);
     assert.match(plannedMergeBody, /mergeMcpConfigPreserveBase\(base, generated\)/);
-    assert.match(plannedMergeBody, /mergeHookConfigPreserveBase\(base, generated\)/);
+    assert.match(plannedMergeBody, /stripProjectMetaKimHooksFromHookConfig\(base\)/);
+    assert.match(plannedMergeBody, /mergeHookConfigPreserveBase\(/);
   });
 
   test("project deploy protects existing AGENTS.md and CLAUDE.md with managed text blocks", () => {

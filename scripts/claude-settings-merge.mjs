@@ -69,20 +69,21 @@ export function isRetiredMetaKimHookCommand(command) {
  * path directly; `JSON.stringify` applied at settings-write time handles
  * escaping once, correctly.
  */
-export function hookCommandNode(absScriptPath) {
-  return `node "${absScriptPath.replace(/\\/g, "/")}"`;
+export function hookCommandNode(absScriptPath, nodeExecutable = "node") {
+  const executable = String(nodeExecutable).replace(/\\/g, "/");
+  return `${/\s|"/u.test(executable) ? JSON.stringify(executable) : executable} "${absScriptPath.replace(/\\/g, "/")}"`;
 }
 
 /** Hook blocks matching Meta_Kim canonical runtime (absolute paths under meta-kim/). */
 export function buildMetaKimHooksTemplate(
   absHooksDir,
   packageRoot = null,
-  { hookPromptAdapter = false, hookPromptCommand = null } = {},
+  { hookPromptAdapter = false, hookPromptCommand = null, nodeExecutable = "node" } = {},
 ) {
   const cmd = (name, args = []) => ({
     type: "command",
     command: [
-      hookCommandNode(path.join(absHooksDir, name)),
+      hookCommandNode(path.join(absHooksDir, name), nodeExecutable),
       ...args.map((arg) => JSON.stringify(String(arg).replace(/\\/g, "/"))),
     ].join(" "),
   });

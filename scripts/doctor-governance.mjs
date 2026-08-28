@@ -67,11 +67,8 @@ const FIXTURE = path.join(
  * and absolute Windows paths (node "C:\...\graphify-context.mjs").
  */
 function normalizeHookName(command) {
-  const trimmed = command.trim();
-  // Strip the leading "node" and any quotes around the path
-  const withoutNode = trimmed
-    .replace(/^node\s+/, "")
-    .replace(/^["']|["']$/g, "");
+  const scriptPath = hookCommandScriptPath(command);
+  const withoutNode = scriptPath ?? command.trim();
   // Drop CLI args (everything after the first whitespace) so commands like
   // `node .claude/hooks/foo.mjs --event session-start` collapse to `foo`.
   const scriptOnly = withoutNode.split(/\s+/, 1)[0] || withoutNode;
@@ -102,13 +99,17 @@ function collectClaudeHookCommands(hooksRoot) {
 }
 
 function hookCommandScriptPath(command) {
-  const trimmed = String(command ?? "").trim();
-  const quoted = trimmed.match(/^node\s+"([^"]+)"/u);
-  if (quoted) {
-    return quoted[1];
+  const tokens = [];
+  const tokenPattern = /"((?:\\.|[^"])*)"|([^\s]+)/gu;
+  for (const match of String(command ?? "").trim().matchAll(tokenPattern)) {
+    tokens.push(match[1] ?? match[2]);
+    if (tokens.length === 2) break;
   }
-  const unquoted = trimmed.match(/^node\s+([^\s]+)/u);
-  return unquoted?.[1] ?? null;
+  if (tokens.length < 2) return null;
+  const executable = tokens[0].replaceAll("\\", "/");
+  const executableName = path.posix.basename(executable).toLowerCase();
+  if (executableName !== "node" && executableName !== "node.exe") return null;
+  return tokens[1];
 }
 
 async function fileExists(filePath) {

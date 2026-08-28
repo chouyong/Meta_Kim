@@ -166,11 +166,12 @@ export function runtimeHookSourceOwner(runtimeId, fileName) {
 }
 
 export function commandToken(value) {
-  return /[\s"]/u.test(String(value)) ? JSON.stringify(String(value)) : String(value);
+  const normalized = String(value).replace(/\\/gu, "/");
+  return /[\s"]/u.test(normalized) ? JSON.stringify(normalized) : normalized;
 }
 
-export function nodeHookCommand(scriptPath, args = []) {
-  return ["node", scriptPath, ...args].map(commandToken).join(" ");
+export function nodeHookCommand(scriptPath, args = [], nodeExecutable = "node") {
+  return [nodeExecutable, scriptPath, ...args].map(commandToken).join(" ");
 }
 
 export function hookCommand(command, timeout, extra = {}) {
@@ -340,7 +341,7 @@ export function buildHookPromptAdapterSource(runtimeId) {
     "const prompt = promptFromPayload(payload);",
     "const script = findHookPromptScript();",
     "if (prompt && script) {",
-    '  const result = spawnSync("node", [script], {',
+    '  const result = spawnSync(process.execPath, [script], {',
     '    input: JSON.stringify({ prompt }),',
     '    encoding: "utf8",',
     '    windowsHide: true,',
@@ -365,24 +366,27 @@ export function buildCodexHooksJson({
   medusaSurfaceHookPath = ".codex/hooks/medusa-findings-surface.mjs",
   hookPromptAdapterPath = null,
   stopSpineCleanupHookPath = null,
+  nodeExecutable = "node",
 } = {}) {
+  const nodeCommand = (scriptPath, args = []) =>
+    nodeHookCommand(scriptPath, args, nodeExecutable);
   const userPromptHooks = [];
   const spineHookArgs = packageRoot ? ["--package-root", packageRoot] : [];
   if (spineHookPath) {
-    userPromptHooks.push(hookCommand(nodeHookCommand(spineHookPath, spineHookArgs), 5));
+    userPromptHooks.push(hookCommand(nodeCommand(spineHookPath, spineHookArgs), 5));
   }
   if (memoryHookPath) {
     userPromptHooks.push(
-      hookCommand(nodeHookCommand(memoryHookPath, ["--event", "user-prompt"]), 10),
+      hookCommand(nodeCommand(memoryHookPath, ["--event", "user-prompt"]), 10),
     );
   }
   if (medusaSurfaceHookPath) {
     userPromptHooks.push(
-      hookCommand(nodeHookCommand(medusaSurfaceHookPath, ["--event", "user-prompt"]), 5),
+      hookCommand(nodeCommand(medusaSurfaceHookPath, ["--event", "user-prompt"]), 5),
     );
   }
   if (hookPromptAdapterPath) {
-    userPromptHooks.push(hookCommand(nodeHookCommand(hookPromptAdapterPath), 10));
+    userPromptHooks.push(hookCommand(nodeCommand(hookPromptAdapterPath), 10));
   }
 
   const hooks = {
@@ -398,20 +402,20 @@ export function buildCodexHooksJson({
         matcher: "Bash|apply_patch|Edit|Write|MultiEdit|NotebookEdit|Agent|spawn_agent|followup_task|collaboration\\.spawn_agent|collaboration\\.followup_task",
         hooks: [
           hookCommand(
-            nodeHookCommand(enforceAgentDispatchHookPath, ["--runtime", "codex"]),
+            nodeCommand(enforceAgentDispatchHookPath, ["--runtime", "codex"]),
             10,
           ),
         ],
       },
       {
         matcher: "Bash",
-        hooks: [hookCommand(nodeHookCommand(graphifyHookPath))],
+        hooks: [hookCommand(nodeCommand(graphifyHookPath))],
       },
     ],
     Skill: [
       {
         matcher: "meta-theory",
-        hooks: [hookCommand(nodeHookCommand(spineHookPath, spineHookArgs), 5)],
+        hooks: [hookCommand(nodeCommand(spineHookPath, spineHookArgs), 5)],
       },
     ],
   };
@@ -422,7 +426,7 @@ export function buildCodexHooksJson({
       // worker is spawned detached and writes findings asynchronously.
       {
         matcher: "Edit|Write|MultiEdit|NotebookEdit|apply_patch",
-        hooks: [hookCommand(nodeHookCommand(medusaEnqueueHookPath), 5)],
+        hooks: [hookCommand(nodeCommand(medusaEnqueueHookPath), 5)],
       },
     ];
   }
@@ -432,7 +436,7 @@ export function buildCodexHooksJson({
       {
         matcher: "startup|resume",
         hooks: [
-          hookCommand(nodeHookCommand(memoryHookPath, ["--event", "session-start"]), 10, {
+          hookCommand(nodeCommand(memoryHookPath, ["--event", "session-start"]), 10, {
             statusMessage: "Loading Meta_Kim memory",
           }),
         ],
@@ -442,11 +446,11 @@ export function buildCodexHooksJson({
   const stopHooks = [];
   if (memoryHookPath) {
     stopHooks.push(
-      hookCommand(nodeHookCommand(memoryHookPath, ["--event", "stop"]), 10),
+      hookCommand(nodeCommand(memoryHookPath, ["--event", "stop"]), 10),
     );
   }
   if (stopSpineCleanupHookPath) {
-    stopHooks.push(hookCommand(nodeHookCommand(stopSpineCleanupHookPath), 10));
+    stopHooks.push(hookCommand(nodeCommand(stopSpineCleanupHookPath), 10));
   }
   if (stopHooks.length > 0) {
     hooks.Stop = [
@@ -458,11 +462,11 @@ export function buildCodexHooksJson({
   }
   if (medusaSurfaceHookPath) {
     const surfaceSessionStart = hookCommand(
-      nodeHookCommand(medusaSurfaceHookPath, ["--event", "session-start"]),
+      nodeCommand(medusaSurfaceHookPath, ["--event", "session-start"]),
       5,
     );
     const surfaceStop = hookCommand(
-      nodeHookCommand(medusaSurfaceHookPath, ["--event", "stop"]),
+      nodeCommand(medusaSurfaceHookPath, ["--event", "stop"]),
       5,
     );
     if (hooks.SessionStart) {
@@ -496,27 +500,30 @@ export function buildCursorHooksJson({
   medusaEnqueueHookPath = ".cursor/hooks/medusa-postscan-enqueue.mjs",
   medusaSurfaceHookPath = ".cursor/hooks/medusa-findings-surface.mjs",
   hookPromptAdapterPath = null,
+  nodeExecutable = "node",
 } = {}) {
+  const nodeCommand = (scriptPath, args = []) =>
+    nodeHookCommand(scriptPath, args, nodeExecutable);
   const spineHookArgs = packageRoot ? ["--package-root", packageRoot] : [];
   const beforeSubmitPromptHooks = [
     {
-      command: nodeHookCommand(spineHookPath, spineHookArgs),
+      command: nodeCommand(spineHookPath, spineHookArgs),
       timeout: 5,
     },
     {
-      command: nodeHookCommand(medusaSurfaceHookPath, ["--event", "user-prompt"]),
+      command: nodeCommand(medusaSurfaceHookPath, ["--event", "user-prompt"]),
       timeout: 5,
     },
   ];
   if (memoryHookPath) {
     beforeSubmitPromptHooks.push({
-      command: nodeHookCommand(memoryHookPath, ["--event", "user-prompt"]),
+      command: nodeCommand(memoryHookPath, ["--event", "user-prompt"]),
       timeout: 10,
     });
   }
   if (hookPromptAdapterPath) {
     beforeSubmitPromptHooks.push({
-      command: nodeHookCommand(hookPromptAdapterPath),
+      command: nodeCommand(hookPromptAdapterPath),
       timeout: 10,
     });
   }
@@ -527,25 +534,25 @@ export function buildCursorHooksJson({
       // Capability-first + meta-readonly deny gate. failClosed=true ensures
       // Cursor honors the deny payload even if the hook crashes.
       {
-        command: nodeHookCommand(enforceAgentDispatchHookPath, ["--runtime", "cursor"]),
+        command: nodeCommand(enforceAgentDispatchHookPath, ["--runtime", "cursor"]),
         timeout: 10,
         failClosed: true,
       },
       {
-        command: nodeHookCommand(graphifyHookPath),
+        command: nodeCommand(graphifyHookPath),
       },
     ],
   };
   if (memoryHookPath) {
     hooks.sessionStart = [
       {
-        command: nodeHookCommand(memoryHookPath, ["--event", "session-start"]),
+        command: nodeCommand(memoryHookPath, ["--event", "session-start"]),
         timeout: 10,
       },
     ];
     hooks.stop = [
       {
-        command: nodeHookCommand(memoryHookPath, ["--event", "stop"]),
+        command: nodeCommand(memoryHookPath, ["--event", "stop"]),
         timeout: 10,
       },
     ];
@@ -555,18 +562,18 @@ export function buildCursorHooksJson({
     // failClosed flag — a slow/missing Python must never block edits.
     hooks.postToolUse = [
       {
-        command: nodeHookCommand(medusaEnqueueHookPath),
+        command: nodeCommand(medusaEnqueueHookPath),
         timeout: 5,
       },
     ];
   }
   if (medusaSurfaceHookPath) {
     const surfaceSessionStart = {
-      command: nodeHookCommand(medusaSurfaceHookPath, ["--event", "session-start"]),
+      command: nodeCommand(medusaSurfaceHookPath, ["--event", "session-start"]),
       timeout: 5,
     };
     const surfaceStop = {
-      command: nodeHookCommand(medusaSurfaceHookPath, ["--event", "stop"]),
+      command: nodeCommand(medusaSurfaceHookPath, ["--event", "stop"]),
       timeout: 5,
     };
     hooks.sessionStart = [...(hooks.sessionStart || []), surfaceSessionStart];

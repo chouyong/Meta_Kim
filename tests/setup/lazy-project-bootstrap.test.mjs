@@ -1815,6 +1815,42 @@ test("lazy project bootstrap merges managed project hook commands into hooks.jso
   }
 });
 
+test("lazy project bootstrap replaces stale relative Meta_Kim hook commands", () => {
+  const projectDir = tempProject();
+  const hooksJsonPath = path.join(projectDir, ".codex", "hooks.json");
+  try {
+    mkdirSync(path.dirname(hooksJsonPath), { recursive: true });
+    writeFileSync(
+      hooksJsonPath,
+      JSON.stringify(
+        {
+          hooks: {
+            UserPromptSubmit: [
+              {
+                hooks: [
+                  { command: "node .codex/hooks/activate-meta-theory-spine.mjs" },
+                  { command: "node user-hook.mjs" },
+                ],
+              },
+            ],
+          },
+        },
+        null,
+        2,
+      ) + "\n",
+      "utf8",
+    );
+
+    runBootstrapForTargets(projectDir, "codex", ["--apply"]);
+    const merged = readFileSync(hooksJsonPath, "utf8");
+    assert.doesNotMatch(merged, /command": "node \.codex\/hooks\//);
+    assert.match(merged, /command": "node [A-Za-z]:\//);
+    assert.match(merged, /user-hook\.mjs/);
+  } finally {
+    rmSync(projectDir, { recursive: true, force: true });
+  }
+});
+
 test("lazy project bootstrap retargeting strips stale project hook config and preserves user hooks", () => {
   const projectDir = tempProject();
   const hooksJsonPath = path.join(projectDir, ".codex", "hooks.json");

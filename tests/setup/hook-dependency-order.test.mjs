@@ -94,3 +94,17 @@ test("Codex and Cursor manual copy dependencies before the spine-state facade", 
   assertDependenciesBeforeFacade(codexCopy, "Codex manual copy");
   assertDependenciesBeforeFacade(cursorCopy, "Cursor manual copy");
 });
+
+test("Codex and Cursor project PostToolUse hooks copy from canonical owners", () => {
+  const syncSource = readSource("scripts/sync-runtimes.mjs");
+  for (const runtime of ["codex", "cursor"]) {
+    const runtimeBlock = syncSource.slice(
+      syncSource.indexOf(`canonicalGlobalHookSource(hookName, "${runtime}")`),
+    );
+    assert.match(
+      runtimeBlock,
+      /"post-format\.mjs"[\s\S]*"post-typecheck\.mjs"[\s\S]*"post-console-log-warn\.mjs"/u,
+      `${runtime} project PostToolUse hook list must include all three hooks`,
+    );
+  }
+});

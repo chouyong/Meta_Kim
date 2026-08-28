@@ -641,16 +641,74 @@ describe("sync-runtimes / Codex project hooks", () => {
     });
     const command = config.hooks.SessionStart[0].hooks[0].command;
 
-    assert.equal(command, `node ${JSON.stringify(hookPath)} --event session-start`);
+    assert.equal(command, `node ${JSON.stringify(hookPath.replaceAll("\\", "/"))} --event session-start`);
     assert.doesNotMatch(command, /Program Files/);
     assert.doesNotMatch(command, /^"/);
+  });
+
+  test("Codex hook commands can use an absolute Node executable", () => {
+    const nodeExecutable = "D:\\Program Files\\nodejs\\node.exe";
+    const config = buildCodexProjectHooksJson({ nodeExecutable });
+    const commands = config.hooks.UserPromptSubmit[0].hooks.map((hook) => hook.command);
+
+    const expectedExecutable = JSON.stringify(nodeExecutable.replaceAll("\\", "/"));
+    assert.ok(commands.every((command) => command.startsWith(`${expectedExecutable} `)));
+    assert.ok(commands.every((command) => !command.includes("\\\\Program Files")));
+    assert.ok(commands.length > 0);
+  });
+
+  test("project Codex hook commands stay valid when launched from a subdirectory", () => {
+    const projectRoot = path.resolve("D:/Meta_Kim");
+    const config = buildCodexProjectHooksJson({ projectRoot });
+    const commands = Object.values(config.hooks)
+      .flatMap((entries) => entries.flatMap((entry) => entry.hooks ?? []))
+      .map((hook) => hook.command)
+      .filter((command) => /\.codex[\\/]hooks[\\/]/.test(command));
+    const normalizedRoot = projectRoot.replace(/\\/gu, "/");
+
+    assert.ok(commands.length > 0);
+    for (const command of commands) {
+      const normalized = command.replace(/\\/gu, "/");
+      assert.doesNotMatch(
+        normalized,
+        /(?:^|\s)(?:"[^"]*"\s+)?\.codex\/hooks\//,
+        `project hook must not be cwd-relative: ${command}`,
+      );
+      assert.match(
+        normalized,
+        new RegExp(`${normalizedRoot.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")}/\\.codex/hooks/`),
+        `project hook must bind to its project root: ${command}`,
+      );
+    }
+  });
+
+  test("canonical Codex project hooks bind scripts to the project root placeholder", async () => {
+    const canonical = JSON.parse(
+      await readFsFile("canonical/runtime-assets/codex/hooks.json", "utf8"),
+    );
+    const commands = Object.values(canonical.hooks)
+      .flatMap((entries) => entries.flatMap((entry) => entry.hooks ?? []))
+      .map((hook) => hook.command)
+      .filter((command) => /\.codex[\\/]hooks[\\/]/.test(command));
+
+    assert.ok(commands.length > 0);
+    for (const command of commands) {
+      assert.match(
+        command.replace(/\\/gu, "/"),
+        /__REPO_ROOT__\/.codex\/hooks\//,
+        `canonical project hook must be target-root-bound: ${command}`,
+      );
+    }
   });
 
   test("graphify hook script exits cleanly when no graph exists", () => {
     const source = buildCodexGraphifyContextHook();
 
     assert.match(source, /existsSync\(graphPath\)/);
-    assert.match(source, /systemMessage/);
+    assert.match(source, /hookSpecificOutput/);
+    assert.match(source, /hookEventName: "PreToolUse"/);
+    assert.match(source, /additionalContext/);
+    assert.doesNotMatch(source, /systemMessage/);
     assert.match(source, /graphify query/);
     assert.match(source, /graphify path/);
     assert.match(source, /graphify explain/);

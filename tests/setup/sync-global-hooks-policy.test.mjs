@@ -113,10 +113,10 @@ function hookCommandsFromMap(hooks = {}) {
 }
 
 function nodeScriptPath(command) {
-  const quoted = String(command ?? "").match(/^node\s+"([^"]+)"/u);
-  if (quoted) return quoted[1];
-  const unquoted = String(command ?? "").match(/^node\s+([^\s]+)/u);
-  return unquoted?.[1] ?? null;
+  const matched = String(command ?? "").match(
+    /^(?:"[^"]+"|[^\s]+)\s+(?:"([^"]+\.mjs)"|([^\s]+\.mjs))(?:\s|$)/u,
+  );
+  return matched?.[1] ?? matched?.[2] ?? null;
 }
 
 function eventArgs(command) {
@@ -1040,6 +1040,20 @@ description: Meta_Kim executable governance dispatcher
           return true;
         },
       );
+    });
+  });
+
+  test("global hook checks resolve absolute Node executables with spaces", async () => {
+    await withTempRuntimeHomes(async ({ env }) => {
+      await runScript(["--targets", "codex", "--with-global-hooks"], env);
+
+      const check = await runScript(
+        ["--check", "--targets", "codex", "--with-global-hooks"],
+        env,
+      );
+
+      assert.doesNotMatch(check.stdout, /Missing registered Meta_Kim Codex hook scripts/u);
+      assert.match(check.stdout, /Codex global hooks\.json/);
     });
   });
 

@@ -673,6 +673,19 @@ describe("Codex config merge", () => {
     assert.doesNotMatch(out, /openai-bundled/);
   });
 
+  test("preserves an explicitly disabled Codex plugin feature on Windows", () => {
+    const input = [
+      "[features]",
+      "plugins = false",
+      "",
+    ].join("\n");
+
+    const out = ensureCodexAppNativeControls(input, { platformName: "win32" });
+
+    assert.match(out, /plugins = false/);
+    assert.doesNotMatch(out, /\[plugins\."(?:browser|chrome|computer-use)@openai-bundled"\]/u);
+  });
+
   test("merges ECC overwrite output add-only into the original user config", () => {
     const originalUserConfig = [
       'approval_policy = "never"',

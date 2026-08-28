@@ -2838,7 +2838,10 @@ export function buildCodexGraphifyContextHook() {
     "if (existsSync(graphPath)) {",
     "  console.log(",
     "    JSON.stringify({",
-    '      systemMessage: "graphify: Knowledge graph exists. For focused questions, run `graphify query \\"<question>\\" --budget 1000` first; use `graphify path`/`graphify explain` for relationships or concepts. Treat graph results as candidate file anchors and verify route-changing claims against source files; fall back to targeted `rg` when results are generic or stale. Read GRAPH_REPORT.md only for broad architecture context; never inject full graph.json or full GRAPH_REPORT.md.",',
+    '      hookSpecificOutput: {',
+    '        hookEventName: "PreToolUse",',
+    '        additionalContext: "graphify: Knowledge graph exists. For focused questions, run `graphify query \\"<question>\\" --budget 1000` first; use `graphify path`/`graphify explain` for relationships or concepts. Treat graph results as candidate file anchors and verify route-changing claims against source files; fall back to targeted `rg` when results are generic or stale. Read GRAPH_REPORT.md only for broad architecture context; never inject full graph.json or full GRAPH_REPORT.md.",',
+    "      },",
     "    }),",
     "  );",
     "}",
@@ -2851,34 +2854,51 @@ export function buildCodexProjectHooksJson({
   memoryHookPath = ".codex/hooks/meta-kim-memory-save.mjs",
   spineHookPath = ".codex/hooks/activate-meta-theory-spine.mjs",
   enforceAgentDispatchHookPath = ".codex/hooks/enforce-agent-dispatch.mjs",
+  medusaEnqueueHookPath = ".codex/hooks/medusa-postscan-enqueue.mjs",
+  medusaSurfaceHookPath = ".codex/hooks/medusa-findings-surface.mjs",
   hookPromptAdapterPath = null,
   stopSpineCleanupHookPath = ".codex/hooks/stop-spine-cleanup.mjs",
   packageRoot = null,
+  projectRoot = null,
+  nodeExecutable = "node",
 } = {}) {
+  const absoluteProjectRoot =
+    typeof projectRoot === "string" && path.isAbsolute(projectRoot)
+      ? path.resolve(projectRoot)
+      : null;
+  const resolveProjectHookPath = (scriptPath) => {
+    if (!absoluteProjectRoot || typeof scriptPath !== "string") return scriptPath;
+    const normalized = scriptPath.replace(/\\/gu, "/");
+    if (!normalized.startsWith(".codex/hooks/")) return scriptPath;
+    return path.join(absoluteProjectRoot, ...normalized.split("/"));
+  };
   const config = buildCodexHooksJson({
-    graphifyHookPath,
-    memoryHookPath,
-    spineHookPath,
-    enforceAgentDispatchHookPath,
-    hookPromptAdapterPath,
-    stopSpineCleanupHookPath,
+    graphifyHookPath: resolveProjectHookPath(graphifyHookPath),
+    memoryHookPath: resolveProjectHookPath(memoryHookPath),
+    spineHookPath: resolveProjectHookPath(spineHookPath),
+    enforceAgentDispatchHookPath: resolveProjectHookPath(enforceAgentDispatchHookPath),
+    medusaEnqueueHookPath: resolveProjectHookPath(medusaEnqueueHookPath),
+    medusaSurfaceHookPath: resolveProjectHookPath(medusaSurfaceHookPath),
+    hookPromptAdapterPath: resolveProjectHookPath(hookPromptAdapterPath),
+    stopSpineCleanupHookPath: resolveProjectHookPath(stopSpineCleanupHookPath),
     packageRoot,
+    nodeExecutable,
   });
   config.hooks.PostToolUse = [
     ...(config.hooks.PostToolUse ?? []),
     {
       matcher: "Edit|Write",
       hooks: [
-        hookCommand(nodeHookCommand(".codex/hooks/post-format.mjs")),
-        hookCommand(nodeHookCommand(".codex/hooks/post-typecheck.mjs")),
-        hookCommand(nodeHookCommand(".codex/hooks/post-console-log-warn.mjs")),
+        hookCommand(nodeHookCommand(resolveProjectHookPath(".codex/hooks/post-format.mjs"), [], nodeExecutable)),
+        hookCommand(nodeHookCommand(resolveProjectHookPath(".codex/hooks/post-typecheck.mjs"), [], nodeExecutable)),
+        hookCommand(nodeHookCommand(resolveProjectHookPath(".codex/hooks/post-console-log-warn.mjs"), [], nodeExecutable)),
       ],
     },
   ];
   config.hooks.SubagentStart = [
     {
       matcher: "*",
-      hooks: [hookCommand(nodeHookCommand(".codex/hooks/subagent-context.mjs"))],
+      hooks: [hookCommand(nodeHookCommand(resolveProjectHookPath(".codex/hooks/subagent-context.mjs"), [], nodeExecutable))],
     },
   ];
   const baseStopHooks = (config.hooks.Stop ?? [])
@@ -2890,9 +2910,9 @@ export function buildCodexProjectHooksJson({
     ...baseStopHooks.filter((hook) =>
       !hook.command?.includes("stop-spine-cleanup.mjs"),
     ),
-    hookCommand(nodeHookCommand(".codex/hooks/stop-compaction.mjs")),
-    hookCommand(nodeHookCommand(".codex/hooks/stop-console-log-audit.mjs")),
-    hookCommand(nodeHookCommand(".codex/hooks/stop-completion-guard.mjs")),
+    hookCommand(nodeHookCommand(resolveProjectHookPath(".codex/hooks/stop-compaction.mjs"), [], nodeExecutable)),
+    hookCommand(nodeHookCommand(resolveProjectHookPath(".codex/hooks/stop-console-log-audit.mjs"), [], nodeExecutable)),
+    hookCommand(nodeHookCommand(resolveProjectHookPath(".codex/hooks/stop-completion-guard.mjs"), [], nodeExecutable)),
     ...lifecycleCleanupHooks,
   ];
   const seenStopCommands = new Set();
@@ -2914,6 +2934,7 @@ export function buildCursorProjectHooksJson({
   enforceAgentDispatchHookPath = ".cursor/hooks/enforce-agent-dispatch.mjs",
   hookPromptAdapterPath = null,
   packageRoot = null,
+  nodeExecutable = "node",
 } = {}) {
   const config = buildCursorHooksJson({
     graphifyHookPath,
@@ -2922,29 +2943,30 @@ export function buildCursorProjectHooksJson({
     enforceAgentDispatchHookPath,
     hookPromptAdapterPath,
     packageRoot,
+    nodeExecutable,
   });
   config.hooks.postToolUse = [
     ...(config.hooks.postToolUse ?? []),
     {
       matcher: "Edit|Write",
       hooks: [
-        { command: nodeHookCommand(".cursor/hooks/post-format.mjs") },
-        { command: nodeHookCommand(".cursor/hooks/post-typecheck.mjs") },
-        { command: nodeHookCommand(".cursor/hooks/post-console-log-warn.mjs") },
+        { command: nodeHookCommand(".cursor/hooks/post-format.mjs", [], nodeExecutable) },
+        { command: nodeHookCommand(".cursor/hooks/post-typecheck.mjs", [], nodeExecutable) },
+        { command: nodeHookCommand(".cursor/hooks/post-console-log-warn.mjs", [], nodeExecutable) },
       ],
     },
   ];
   config.hooks.subagentStart = [
     {
-      command: nodeHookCommand(".cursor/hooks/subagent-context.mjs"),
+      command: nodeHookCommand(".cursor/hooks/subagent-context.mjs", [], nodeExecutable),
     },
   ];
   config.hooks.stop = [
     ...(config.hooks.stop ?? []),
-    { command: nodeHookCommand(".cursor/hooks/stop-compaction.mjs") },
-    { command: nodeHookCommand(".cursor/hooks/stop-console-log-audit.mjs") },
-    { command: nodeHookCommand(".cursor/hooks/stop-completion-guard.mjs") },
-    { command: nodeHookCommand(".cursor/hooks/stop-spine-cleanup.mjs") },
+    { command: nodeHookCommand(".cursor/hooks/stop-compaction.mjs", [], nodeExecutable) },
+    { command: nodeHookCommand(".cursor/hooks/stop-console-log-audit.mjs", [], nodeExecutable) },
+    { command: nodeHookCommand(".cursor/hooks/stop-completion-guard.mjs", [], nodeExecutable) },
+    { command: nodeHookCommand(".cursor/hooks/stop-spine-cleanup.mjs", [], nodeExecutable) },
   ];
   return config;
 }
@@ -4030,6 +4052,27 @@ Examples:
           changedFiles.push(`${dp.codexHooks}/${hookName}`);
         }
       }
+      for (const hookName of [
+        "post-format.mjs",
+        "post-typecheck.mjs",
+        "post-console-log-warn.mjs",
+      ]) {
+        const sourcePath = await canonicalGlobalHookSource(hookName, "codex");
+        if (!sourcePath) {
+          throw new Error(`Missing canonical Hook source for codex:${hookName}`);
+        }
+        const hookContent = await fs.readFile(sourcePath, "utf8");
+        if (
+          (
+            await writeGeneratedFile(
+              path.join(dirs.codexHooksDir, hookName),
+              hookContent,
+            )
+          ).changed
+        ) {
+          changedFiles.push(`${dp.codexHooks}/${hookName}`);
+        }
+      }
       if (scope === "global") {
         const codexHookPromptAdapterPath = path.join(
           path.dirname(dirs.codexHooksDir),
@@ -4120,6 +4163,8 @@ Examples:
               hookPromptAdapterPath: codexHookPromptAdapterPath,
               stopSpineCleanupHookPath: codexStopSpineCleanupHookPath,
               packageRoot: repoRoot,
+              projectRoot: repoRoot,
+              nodeExecutable: process.execPath,
             }),
           )
         ).changed
@@ -4323,6 +4368,27 @@ Examples:
       ) {
         changedFiles.push(`${dp.cursorHooks}/bash-readonly-whitelist.mjs`);
       }
+      for (const hookName of [
+        "post-format.mjs",
+        "post-typecheck.mjs",
+        "post-console-log-warn.mjs",
+      ]) {
+        const sourcePath = await canonicalGlobalHookSource(hookName, "cursor");
+        if (!sourcePath) {
+          throw new Error(`Missing canonical Hook source for cursor:${hookName}`);
+        }
+        const hookContent = await fs.readFile(sourcePath, "utf8");
+        if (
+          (
+            await writeGeneratedFile(
+              path.join(dirs.cursorHooksDir, hookName),
+              hookContent,
+            )
+          ).changed
+        ) {
+          changedFiles.push(`${dp.cursorHooks}/${hookName}`);
+        }
+      }
       if (scope === "global") {
         const cursorHookPromptAdapterPath = path.join(
           path.dirname(dirs.cursorHooksDir),
@@ -4409,6 +4475,7 @@ Examples:
               enforceAgentDispatchHookPath,
               hookPromptAdapterPath: cursorHookPromptAdapterPath,
               packageRoot: repoRoot,
+              nodeExecutable: process.execPath,
             }),
           )
         ).changed

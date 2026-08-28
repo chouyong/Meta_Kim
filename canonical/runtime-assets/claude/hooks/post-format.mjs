@@ -8,6 +8,8 @@
  */
 
 import { execFile } from "node:child_process";
+import { existsSync } from "node:fs";
+import path from "node:path";
 import process from "node:process";
 import { readJsonFromStdin, extractFilePath } from "./utils.mjs";
 
@@ -18,15 +20,23 @@ const filePath = extractFilePath(input.tool_input || input);
 if (!["Edit", "Write"].includes(toolName)) process.exit(0);
 if (!filePath.match(/\.(js|ts|jsx|tsx|mjs|cjs)$/)) process.exit(0);
 
+const cwd = typeof input.cwd === "string" && input.cwd ? input.cwd : process.cwd();
+const prettierEntry = [
+  path.join(cwd, "node_modules", "prettier", "bin", "prettier.cjs"),
+  path.join(cwd, "node_modules", "prettier", "bin-prettier.js"),
+  path.join(cwd, "node_modules", "prettier", "bin", "prettier.js"),
+].find((candidate) => existsSync(candidate));
+
+if (!prettierEntry) process.exit(0);
+
 try {
-  const command = process.platform === "win32" ? "npx.cmd" : "npx";
   execFile(
-    command,
-    ["prettier", "--write", filePath],
+    process.execPath,
+    [prettierEntry, "--write", filePath],
     {
       stdio: "ignore",
-      timeout: 10000,
-      cwd: input.cwd || process.cwd(),
+      timeout: 5000,
+      cwd,
       windowsHide: true,
     },
     () => {},

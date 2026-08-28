@@ -774,8 +774,10 @@ export function ensureCodexAppNativeControls(configText = "", options = {}) {
     ensureSectionSetting(lines, "windows", "sandbox", tomlString("unelevated"));
     ensureOpenAiBundledMarketplace(lines, { ...options, platformName });
 
-    for (const pluginId of CODEX_APP_NATIVE_PLUGIN_IDS) {
-      ensureSectionSetting(lines, `plugins."${pluginId}"`, "enabled", "true");
+    if (sectionSettingValue(lines, "features", "plugins") !== "false") {
+      for (const pluginId of CODEX_APP_NATIVE_PLUGIN_IDS) {
+        ensureSectionSetting(lines, `plugins."${pluginId}"`, "enabled", "true");
+      }
     }
   }
 
@@ -1271,12 +1273,16 @@ export function planCodexAppNativeControls(configText = "", options = {}) {
     settings.push(
       ["windows", "sandbox", tomlString("unelevated")],
       ["marketplaces.openai-bundled", "source_type", tomlString("local")],
-      ...CODEX_APP_NATIVE_PLUGIN_IDS.map((pluginId) => [
-        `plugins."${pluginId}"`,
-        "enabled",
-        "true",
-      ]),
     );
+    if (sectionSettingValue(initialLines, "features", "plugins") !== "false") {
+      settings.push(
+        ...CODEX_APP_NATIVE_PLUGIN_IDS.map((pluginId) => [
+          `plugins."${pluginId}"`,
+          "enabled",
+          "true",
+        ]),
+      );
+    }
   }
   for (const [table, key, value] of settings) {
     const planned = planCodexSettingMutation(text, table, key, value);

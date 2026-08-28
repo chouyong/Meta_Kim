@@ -5,12 +5,12 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node .codex/hooks/activate-meta-theory-spine.mjs --package-root __REPO_ROOT__",
+            "command": "node __REPO_ROOT__/.codex/hooks/activate-meta-theory-spine.mjs --package-root __REPO_ROOT__",
             "timeout": 5
           },
           {
             "type": "command",
-            "command": "node .codex/hooks/meta-kim-memory-save.mjs --event user-prompt",
+            "command": "node __REPO_ROOT__/.codex/hooks/meta-kim-memory-save.mjs --event user-prompt",
             "timeout": 10
           }
         ]
@@ -22,7 +22,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node .codex/hooks/meta-kim-memory-save.mjs --event session-start",
+            "command": "node __REPO_ROOT__/.codex/hooks/meta-kim-memory-save.mjs --event session-start",
             "timeout": 10,
             "statusMessage": "Loading Meta_Kim memory"
           }
@@ -35,7 +35,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node .codex/hooks/enforce-agent-dispatch.mjs --runtime codex",
+            "command": "node __REPO_ROOT__/.codex/hooks/enforce-agent-dispatch.mjs --runtime codex",
             "timeout": 10
           }
         ]
@@ -45,7 +45,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node .codex/hooks/graphify-context.mjs"
+            "command": "node __REPO_ROOT__/.codex/hooks/graphify-context.mjs"
           }
         ]
       }
@@ -56,15 +56,15 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node .codex/hooks/post-format.mjs"
+            "command": "node __REPO_ROOT__/.codex/hooks/post-format.mjs"
           },
           {
             "type": "command",
-            "command": "node .codex/hooks/post-typecheck.mjs"
+            "command": "node __REPO_ROOT__/.codex/hooks/post-typecheck.mjs"
           },
           {
             "type": "command",
-            "command": "node .codex/hooks/post-console-log-warn.mjs"
+            "command": "node __REPO_ROOT__/.codex/hooks/post-console-log-warn.mjs"
           }
         ]
       }
@@ -75,7 +75,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node .codex/hooks/subagent-context.mjs"
+            "command": "node __REPO_ROOT__/.codex/hooks/subagent-context.mjs"
           }
         ]
       }
@@ -86,7 +86,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node .codex/hooks/activate-meta-theory-spine.mjs --package-root __REPO_ROOT__",
+            "command": "node __REPO_ROOT__/.codex/hooks/activate-meta-theory-spine.mjs --package-root __REPO_ROOT__",
             "timeout": 5
           }
         ]
@@ -98,24 +98,24 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node .codex/hooks/meta-kim-memory-save.mjs --event stop",
+            "command": "node __REPO_ROOT__/.codex/hooks/meta-kim-memory-save.mjs --event stop",
             "timeout": 10
           },
           {
             "type": "command",
-            "command": "node .codex/hooks/stop-compaction.mjs"
+            "command": "node __REPO_ROOT__/.codex/hooks/stop-compaction.mjs"
           },
           {
             "type": "command",
-            "command": "node .codex/hooks/stop-console-log-audit.mjs"
+            "command": "node __REPO_ROOT__/.codex/hooks/stop-console-log-audit.mjs"
           },
           {
             "type": "command",
-            "command": "node .codex/hooks/stop-completion-guard.mjs"
+            "command": "node __REPO_ROOT__/.codex/hooks/stop-completion-guard.mjs"
           },
           {
             "type": "command",
-            "command": "node .codex/hooks/stop-spine-cleanup.mjs"
+            "command": "node __REPO_ROOT__/.codex/hooks/stop-spine-cleanup.mjs"
           }
         ]
       }
