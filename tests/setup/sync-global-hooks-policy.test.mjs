@@ -1383,9 +1383,17 @@ description: Meta_Kim executable governance dispatcher
     });
   });
 
-  test("global hook checks resolve absolute Node executables with spaces", async () => {
-    await withTempRuntimeHomes(async ({ env }) => {
+  test("global Codex hooks use PowerShell-safe Node commands", async () => {
+    await withTempRuntimeHomes(async ({ env, root }) => {
       await runScript(["--targets", "codex", "--with-global-hooks"], env);
+
+      const config = JSON.parse(
+        await readFile(path.join(root, "codex", "hooks.json"), "utf8"),
+      );
+      const commands = hookCommands(config);
+      assert.ok(commands.length > 0);
+      assert.ok(commands.every((command) => command.startsWith("node ")));
+      assert.ok(commands.every((command) => !command.startsWith('"')));
 
       const check = await runScript(
         ["--check", "--targets", "codex", "--with-global-hooks"],

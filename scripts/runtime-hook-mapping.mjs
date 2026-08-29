@@ -403,10 +403,9 @@ export function buildCodexHooksJson({
   hookPromptAdapterPath = null,
   planningContinuityHookPath = ".codex/hooks/planning-continuity.mjs",
   stopSpineCleanupHookPath = null,
-  nodeExecutable = "node",
 } = {}) {
   const nodeCommand = (scriptPath, args = []) =>
-    nodeHookCommand(scriptPath, args, nodeExecutable);
+    nodeHookCommand(scriptPath, args);
   const userPromptHooks = [];
   const spineHookArgs = ["--runtime", "codex", ...(packageRoot ? ["--package-root", packageRoot] : [])];
   const lifecycleHook = () => hookCommand(nodeHookCommand(spineHookPath, spineHookArgs), 5);
