@@ -1,7 +1,14 @@
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import os from "node:os";
 import path from "node:path";
-import { readFile as readFsFile } from "node:fs/promises";
+import {
+  mkdtemp,
+  readFile as readFsFile,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 
 import {
   CODEX_BUSINESS_ROLE_AGENTS,
@@ -672,16 +679,35 @@ describe("sync-runtimes / Codex project hooks", () => {
     assert.doesNotMatch(command, /^"/);
   });
 
-  test("Codex hook commands can use an absolute Node executable", () => {
-    const nodeExecutable = "D:\\Program Files\\nodejs\\node.exe";
-    const config = buildCodexProjectHooksJson({ nodeExecutable });
-    const commands = config.hooks.UserPromptSubmit[0].hooks.map((hook) => hook.command);
+  test(
+    "Codex hook commands execute through PowerShell when Node is installed under a path with spaces",
+    { skip: process.platform !== "win32" },
+    async () => {
+      const tempRoot = await mkdtemp(path.join(os.tmpdir(), "meta kim codex hook-"));
+      const hookPath = path.join(tempRoot, "passing hook.mjs");
+      try {
+        await writeFile(hookPath, "process.exit(0);\n", "utf8");
+        const config = buildCodexProjectHooksJson({
+          spineHookPath: hookPath,
+          nodeExecutable: process.execPath,
+        });
+        const command = config.hooks.UserPromptSubmit[0].hooks[0].command;
+        const result = spawnSync(
+          "powershell.exe",
+          ["-NoProfile", "-NonInteractive", "-Command", command],
+          { encoding: "utf8" },
+        );
 
-    const expectedExecutable = JSON.stringify(nodeExecutable.replaceAll("\\", "/"));
-    assert.ok(commands.every((command) => command.startsWith(`${expectedExecutable} `)));
-    assert.ok(commands.every((command) => !command.includes("\\\\Program Files")));
-    assert.ok(commands.length > 0);
-  });
+        assert.equal(
+          result.status,
+          0,
+          `PowerShell could not execute ${command}: ${result.stderr}`,
+        );
+      } finally {
+        await rm(tempRoot, { recursive: true, force: true });
+      }
+    },
+  );
 
   test("project Codex hook commands stay valid when launched from a subdirectory", () => {
     const projectRoot = path.resolve("D:/Meta_Kim");
