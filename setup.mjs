@@ -381,17 +381,19 @@ const RUNTIME_CHOICES = Object.freeze(
 
 const skillsManifest = {
   skillOwner: metaKimConfig.skills.skillOwner,
-  skills: metaKimConfig.skills.skills.map((skill) => ({
-    name: skill.id,
-    repo: skill.repository.source,
-    repoUrl: skill.repository.cloneUrl,
-    subdir: resolveManifestSkillSubdir(skill, platform(), {
-      fallbackToFindskillPack: true,
-    }),
-    claudePlugin: skill.claudePlugin,
-    defaultSelected: skill.defaultSelected ?? true,
-    targets: skill.targets,
-  })),
+  skills: metaKimConfig.skills.skills
+    .filter((skill) => skill.installPolicy !== "explicit_reference_opt_in")
+    .map((skill) => ({
+      name: skill.id,
+      repo: skill.repository.source,
+      repoUrl: skill.repository.cloneUrl,
+      subdir: resolveManifestSkillSubdir(skill, platform(), {
+        fallbackToFindskillPack: true,
+      }),
+      claudePlugin: skill.claudePlugin,
+      defaultSelected: skill.defaultSelected ?? true,
+      targets: skill.targets,
+    })),
 };
 const SKILL_OWNER = skillsManifest.skillOwner;
 const SKILLS = skillsManifest.skills;
@@ -1212,6 +1214,7 @@ const GLOBAL_HOOK_PACKAGE_FILES_LIST = [
   "project-root.mjs",
   "utils.mjs",
   "skip-reminder.mjs",
+  "conversation-binding.mjs",
   "spine-state-utils.mjs",
   "spine-state-gates.mjs",
   "spine-state.mjs",
@@ -1309,6 +1312,7 @@ const PROJECT_HOOK_SOURCE_CANDIDATES = {
     "project-root.mjs",
     "utils.mjs",
     "skip-reminder.mjs",
+    "conversation-binding.mjs",
     "spine-state-utils.mjs",
     "spine-state-gates.mjs",
     "spine-state.mjs",
@@ -1331,6 +1335,7 @@ const PROJECT_HOOK_SOURCE_CANDIDATES = {
     "project-root.mjs",
     "utils.mjs",
     "skip-reminder.mjs",
+    "conversation-binding.mjs",
     "spine-state-utils.mjs",
     "spine-state-gates.mjs",
     "spine-state.mjs",
@@ -3973,6 +3978,7 @@ const PROJECT_HOOK_FILE_WHITELIST_BY_PLATFORM = {
     "project-root.mjs",
     "utils.mjs",
     "skip-reminder.mjs",
+    "conversation-binding.mjs",
     "spine-state-utils.mjs",
     "spine-state-gates.mjs",
     "spine-state.mjs",
@@ -3999,6 +4005,7 @@ const PROJECT_HOOK_FILE_WHITELIST_BY_PLATFORM = {
     "project-root.mjs",
     "utils.mjs",
     "skip-reminder.mjs",
+    "conversation-binding.mjs",
     "spine-state-utils.mjs",
     "spine-state-gates.mjs",
     "spine-state.mjs",
@@ -4038,6 +4045,7 @@ const PROJECT_HOOK_FILE_WHITELIST_BY_PLATFORM = {
     "project-root.mjs",
     "utils.mjs",
     "skip-reminder.mjs",
+    "conversation-binding.mjs",
     "spine-state-utils.mjs",
     "spine-state-gates.mjs",
     "spine-state.mjs",

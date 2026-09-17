@@ -66,6 +66,25 @@ function payloadOf(record) {
   return record?.payload ?? record;
 }
 
+// Preserve raw rollout rows for hashing; normalize only the event view used by
+// both live observation and later receipt replay.
+export function codexDesktopEventPayload(record) {
+  const payload = payloadOf(record);
+  if (record?.type !== "event_msg" || payload?.type !== "item_completed" ||
+      typeof payload.thread_id !== "string" || !payload.thread_id) return payload;
+  const item = payload.item;
+  if (item?.type === "SubAgentActivity" && typeof item.id === "string" && item.id) {
+    return { ...item, type: "sub_agent_activity", event_id: item.id,
+      session_id: payload.thread_id, status: item.kind === "completed" ? "completed" : item.status };
+  }
+  if (item?.type === "AgentMessage" && Array.isArray(item.content) &&
+      item.content.every((part) => part?.type === "Text" && typeof part.text === "string")) {
+    return { ...item, type: "agent_message", session_id: payload.thread_id,
+      message: item.content.map((part) => part.text).join("") };
+  }
+  return payload;
+}
+
 function validateMetaKimBinding(candidate) {
   if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) return null;
   const keys = Object.keys(candidate).sort();
@@ -523,10 +542,40 @@ function codexCollaborationArguments(item) {
   const raw = item?.arguments ?? item?.input ?? item?.tool_input;
   const parsed = boundedJsonObject(raw);
   const synthesized = parsed ? { ...parsed } : {};
-  for (const key of ["agent_type", "task_name", "message", "fork_turns"]) {
+  for (const key of ["agent_type", "task_name", "message", "fork_turns", "prompt"]) {
     if (synthesized[key] == null && item?.[key] != null) synthesized[key] = item[key];
   }
   return Object.keys(synthesized).length > 0 ? synthesized : raw ?? {};
+}
+
+function codexCollaborationExpectedMarker(input) {
+  const parsed = boundedJsonObject(input);
+  const candidates = typeof parsed?.prompt === "string" ? [parsed.prompt] : [];
+  const markerPattern = /\bMETA_KIM_CAPABILITY_[A-Z0-9_]+_[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\b/iu;
+  for (const candidate of candidates) {
+    const marker = candidate.match(markerPattern)?.[0];
+    if (marker) return marker;
+  }
+  return null;
+}
+
+function codexCollaborationChildFinal(completion, childSessionId) {
+  const item = completion?.payload;
+  if (
+    item?.type !== "collab_tool_call" ||
+    String(item.tool ?? "").toLowerCase() !== "wait" ||
+    item.status !== "completed" ||
+    !Array.isArray(item.receiver_thread_ids) ||
+    item.receiver_thread_ids.length !== 1 ||
+    item.receiver_thread_ids[0] !== childSessionId
+  ) return null;
+  const childState = item.agents_states?.[childSessionId];
+  if (childState?.status !== "completed" || typeof childState.message !== "string") return null;
+  return {
+    text: childState.message,
+    sourceLine: completion.line,
+    messageId: `${item.id}:${childSessionId}`,
+  };
 }
 
 function codexCollaborationName(item) {
@@ -771,15 +820,24 @@ export function observeCodexJsonl(text) {
     callSessions.set(callId, sessionId);
   };
   for (const record of records) {
-    const payload = payloadOf(record.value);
+    const payload = codexDesktopEventPayload(record.value);
+    if (record.value?.type === "event_msg" && payload?.type === "sub_agent_activity" &&
+        payload.session_id && threadId && payload.session_id !== threadId) {
+      crossSessionCorrelationDetected = true;
+      continue;
+    }
+    // Codex TUI's SubAgentActivity item never carries a payload.thread_id (only
+    // item.agent_thread_id), so codexDesktopEventPayload leaves it unnormalized.
+    // Bridge that shape here rather than widening the shared Desktop normalizer.
     const tuiActivity = record.value?.type === "event_msg" &&
-      payload?.type === "item_completed" &&
-      payload?.item?.type === "SubAgentActivity"
+      record.value?.payload?.type === "item_completed" &&
+      record.value?.payload?.item?.type === "SubAgentActivity" &&
+      !record.value?.payload?.thread_id
       ? {
-          ...payload.item,
-          event_id: payload.item.id,
-          agent_thread_id: payload.item.agent_thread_id ?? payload.item.child_thread_id,
-          agent_path: payload.item.agent_path ?? payload.item.task_path ?? payload.item.path,
+          ...record.value.payload.item,
+          event_id: record.value.payload.item.id,
+          agent_thread_id: record.value.payload.item.agent_thread_id ?? record.value.payload.item.child_thread_id,
+          agent_path: record.value.payload.item.agent_path ?? record.value.payload.item.task_path ?? record.value.payload.item.path,
         }
       : null;
     if (record.value?.type === "session_meta") {
@@ -1058,10 +1116,14 @@ export function observeCodexJsonl(text) {
     const family = call.payload.itemType === "mcp_tool_call"
       ? "mcp"
       : classifyTool(name, namespace);
+    const directCodexCollaboration = call.payload.itemType === "collab_tool_call";
+    if (directCodexCollaboration && name === "wait") continue;
     const agentStart = agentStarts.get(callId);
     const childSessionId = agentStart?.payload?.agent_thread_id ?? agentStart?.payload?.child_thread_id ?? null;
     const taskPath = agentStart?.payload?.agent_path ?? agentStart?.payload?.task_path ?? agentStart?.payload?.path ?? null;
-    const agentCompletion = agentCompletions.get(callId) ??
+    const agentCompletion = (directCodexCollaboration && childSessionId
+      ? agentCompletions.get(`child:${childSessionId}`) ?? agentCompletions.get(callId)
+      : agentCompletions.get(callId)) ??
       (childSessionId ? agentCompletions.get(`child:${childSessionId}`) : null) ??
       (taskPath ? agentCompletions.get(`path:${taskPath}`) : null);
     const storedAgentMessage = agentMessages.get(`call:${callId}`) ??
@@ -1106,10 +1168,22 @@ export function observeCodexJsonl(text) {
       !desktopCollaborationLifecycle &&
       !agentCompletion
     ) continue;
+    const codexChildFinal = family === "agent_subagent" && directCodexCollaboration
+      ? codexCollaborationChildFinal(agentCompletion, childSessionId)
+      : null;
+    const expectedCodexMarker = family === "agent_subagent" && directCodexCollaboration
+      ? codexCollaborationExpectedMarker(call.payload.arguments ?? call.payload.input ?? null)
+      : null;
+    if (
+      family === "agent_subagent" &&
+      directCodexCollaboration &&
+      expectedCodexMarker &&
+      (!codexChildFinal || codexChildFinal.text !== expectedCodexMarker)
+    ) continue;
     const callSessionId = call.payload.session_id ?? null;
     const outputSessionId = output.payload.session_id ?? callSessionId;
     if (callSessionId && outputSessionId && callSessionId !== outputSessionId) continue;
-    const resultOutput = returnedAgentMessage?.text ?? output.payload.output ?? output.payload.result ?? "";
+    const resultOutput = codexChildFinal?.text ?? returnedAgentMessage?.text ?? output.payload.output ?? output.payload.result ?? "";
     const exactResultText = String(resultOutput).trim();
     const toolInput = call.payload.arguments ?? call.payload.input ?? null;
     const ownerBindingObservation = family === "agent_subagent"
@@ -1129,12 +1203,12 @@ export function observeCodexJsonl(text) {
       taskPath,
       parentAgentPath,
       sessionId: call.payload.session_id ?? output.payload.session_id ?? null,
-      resultMessageId: returnedAgentMessage?.messageId ?? returnedAgentMessage?.item?.id ?? null,
+      resultMessageId: codexChildFinal?.messageId ?? returnedAgentMessage?.messageId ?? returnedAgentMessage?.item?.id ?? null,
       resultTextSha256: family === "agent_subagent" && exactResultText
         ? sha256(exactResultText)
         : null,
       resultSourceLines: family === "agent_subagent"
-        ? [returnedAgentMessage?.line ?? output.line].filter(Boolean)
+        ? [codexChildFinal?.sourceLine ?? returnedAgentMessage?.line ?? output.line].filter(Boolean)
         : [],
       sourceLines: [
         call.line,
@@ -1143,12 +1217,16 @@ export function observeCodexJsonl(text) {
         agentCompletion?.line,
         returnedAgentMessage?.line,
       ].filter(Boolean),
-      lifecycleEvidence: desktopCollaborationLifecycle
-        ? "desktop_collaboration_returned_agent_message"
-        : "host_call_and_child_completion",
-      completionBoundary: desktopCollaborationLifecycle
-        ? "returned_child_final"
-        : "completed_activity_observed",
+      lifecycleEvidence: codexChildFinal
+        ? "codex_cli_wait_child_state"
+        : desktopCollaborationLifecycle
+          ? "desktop_collaboration_returned_agent_message"
+          : "host_call_and_child_completion",
+      completionBoundary: codexChildFinal
+        ? "wait_child_completed"
+        : desktopCollaborationLifecycle
+          ? "returned_child_final"
+          : "completed_activity_observed",
       activityCompletionObserved: Boolean(agentCompletion),
       ...ownerBindingObservation,
     };

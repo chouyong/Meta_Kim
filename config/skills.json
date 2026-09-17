@@ -91,7 +91,7 @@
         "claude": {
           "event": "UserPromptSubmit",
           "hookFile": "user-prompt-submit.js",
-          "timeout": 10000
+          "timeout": 60
         }
       },
       "targets": [
@@ -202,31 +202,6 @@
       ]
     },
     {
-      "id": "planning-with-files",
-      "repo": "OthmanAdi/planning-with-files",
-      "installMethod": "subdirExtraction",
-      "subdir": "skills/planning-with-files",
-      "pluginHookCompat": true,
-      "globalHookSubdirs": {
-        "codex": [
-          "~/.codex/hooks/meta-kim"
-        ],
-        "cursor": [
-          "~/.cursor/hooks/meta-kim"
-        ]
-      },
-      "globalHookConfigFiles": {
-        "codex": "~/.codex/hooks.json",
-        "cursor": "~/.cursor/hooks.json"
-      },
-      "targets": [
-        "claude",
-        "codex",
-        "openclaw",
-        "cursor"
-      ]
-    },
-    {
       "id": "cli-anything",
       "repo": "HKUDS/CLI-Anything",
       "installMethod": "pluginMarketplace",
@@ -242,6 +217,8 @@
       "id": "gstack",
       "repo": "garrytan/gstack",
       "installMethod": "gitCloneInstallScript",
+      "dependencyClass": "third_party_reference",
+      "installPolicy": "explicit_reference_opt_in",
       "targets": [
         "claude",
         "codex",

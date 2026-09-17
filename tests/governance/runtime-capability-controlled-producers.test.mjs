@@ -5,11 +5,11 @@ import { mkdtempSync, mkdirSync, readFileSync, rmSync, utimesSync, writeFileSync
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test, { after } from "node:test";
-import { runCodexCompositeEngineeringProducer, runCodexDesktopEngineeringSessionProducer, runCodexDesktopSessionCapabilityProducer, runControlledRuntimeCapabilityProducer } from "../../scripts/runtime-capability-producers.mjs";
+import { codexLiveInvocationArgs, runCodexCompositeEngineeringProducer, runCodexDesktopEngineeringSessionProducer, runCodexDesktopSessionCapabilityProducer, runControlledRuntimeCapabilityProducer } from "../../scripts/runtime-capability-producers.mjs";
 import { readCodexDesktopEngineeringEvidence, readCodexDesktopSessionEvidence, readCodexTuiSessionEvidence } from "../../scripts/live-acceptance/read-codex-session-evidence.mjs";
 import { loadEffectiveRuntimeCapabilityClaims } from "../../scripts/effective-runtime-capability-claims.mjs";
 import { evaluateRouteExecutionGate } from "../../scripts/runtime-execution-gate.mjs";
-import { controlledProducerStageFromVerification, selectVerificationBoundControlledAttempts, writeRuntimeCapabilityAcceptanceAttempt } from "../../scripts/runtime-capability-acceptance.mjs";
+import { controlledProducerStageFromVerification, selectVerificationBoundControlledAttempts, validateRuntimeCapabilityAcceptanceAttemptEvidence, writeRuntimeCapabilityAcceptanceAttempt } from "../../scripts/runtime-capability-acceptance.mjs";
 import { parseRuntimeAcceptanceCliArgs } from "../../scripts/attest-runtime-capability-acceptance.mjs";
 import { loadSetupBoundRuntimeExecutable, recordSetupRuntimeExecutableBindings } from "../../scripts/runtime-executable-binding.mjs";
 import { observeClaudeJsonl } from "../../scripts/live-acceptance/observe-host-events.mjs";
@@ -26,6 +26,32 @@ function fixtureProject() {
   temporaryRoots.add(root);
   mkdirSync(path.join(root, ".meta-kim", "state", "default", "imports"), { recursive: true });
   return root;
+}
+
+const skillVisibilityProbeScript = `
+  const fs = require("node:fs");
+  const os = require("node:os");
+  const path = require("node:path");
+  let cursor = process.cwd();
+  let ancestorSkill = false;
+  while (true) {
+    if (fs.existsSync(path.join(cursor, ".agents", "skills", "project-ancestor", "SKILL.md"))) {
+      ancestorSkill = true;
+      break;
+    }
+    const parent = path.dirname(cursor);
+    if (parent === cursor) break;
+    cursor = parent;
+  }
+  const homeSkill = fs.existsSync(path.join(os.homedir(), ".agents", "skills", "ambient-user", "SKILL.md"));
+  const tempExists = fs.existsSync(process.env.TEMP || process.env.TMP || "");
+  process.stdout.write(JSON.stringify({ home: os.homedir(), homeSkill, ancestorSkill, tempExists }));
+`;
+
+function runSkillVisibilityProbe(cwd, env) {
+  const result = spawnSync(process.execPath, ["-e", skillVisibilityProbeScript], { cwd, env, encoding: "utf8" });
+  assert.equal(result.status, 0, result.stderr);
+  return JSON.parse(result.stdout);
 }
 
 function assertHostHandoffOnly(gate, handoffStatus = "ready_for_host_handoff") {
@@ -114,20 +140,22 @@ function injectedExecutor(request) {
     assert.equal(path.dirname(mcpConfigPath), request.workspace);
     assert.deepEqual(JSON.parse(readFileSync(mcpConfigPath, "utf8")), { mcpServers: {} });
     const expectedTool = request.capability === "shell"
-      ? "Bash"
+      ? "Bash,PowerShell"
       : request.capability === "filesystem"
         ? "Read"
         : request.capability === "apply_patch / edit"
           ? "Read,Edit"
-          : "Agent";
-    const toolsIndex = request.args.indexOf("--tools");
-    assert.equal(request.args[toolsIndex + 1], expectedTool);
+          : "Agent,Task";
+    // Claude Code 2.1.236 resolves `--tools <name>` to an EMPTY tool set
+    // (verified live: init event tools:[] with the flag, full tool list
+    // without it), which made every probe model report "no shell tool
+    // available". The probe must therefore rely on `--allowedTools` for the
+    // permission grant and never pass `--tools`.
+    assert.equal(request.args.includes("--tools"), false);
     const allowedToolsIndex = request.args.indexOf("--allowedTools");
     assert.equal(request.args[allowedToolsIndex + 1], expectedTool);
     if (request.capability === "apply_patch / edit") {
-      assert.equal(request.args[toolsIndex + 1], "Read,Edit");
       assert.equal(request.args[allowedToolsIndex + 1], "Read,Edit");
-      assert.doesNotMatch(request.args[toolsIndex + 1], /Write/u);
       assert.doesNotMatch(request.args[allowedToolsIndex + 1], /Write/u);
       assert.match(request.prompt, /First call the native Read tool/u);
       assert.match(request.prompt, /Then call the native Edit tool exactly once/u);
@@ -307,17 +335,18 @@ function injectedCodexEngineeringExecutor(request) {
   assert.equal(request.runtime, "codex");
   assert.equal(request.capability, "engineering_composite");
   const marker = request.prompt.match(/META_KIM_CAPABILITY_ENGINEERING_[0-9a-f-]{36}/u)?.[0];
-  writeFileSync(path.join(request.workspace, "meta-kim-engineering-probe.txt"), `after-${marker}`, "utf8");
+  writeFileSync(path.join(request.workspace, "meta-kim-engineering-probe.txt"), `after-${marker}\n`, "utf8");
   const records = [{ type: "thread.started", thread_id: "engineering-thread" }];
   const addCommand = (id, command, output) => {
     records.push({ type: "item.started", item: { id, type: "command_execution", command, status: "in_progress" } });
     records.push({ type: "item.completed", item: { id, type: "command_execution", command, status: "completed", exit_code: 0, aggregated_output: output } });
   };
   addCommand("engineering-write", `Set-Content -LiteralPath meta-kim-engineering-probe.txt -Value 'before-${marker}' -NoNewline`, `wrote before-${marker}`);
-  addCommand("engineering-read-before", "Get-Content -LiteralPath meta-kim-engineering-probe.txt", `before-${marker}`);
-  records.push({ type: "item.started", item: { id: "engineering-edit", type: "file_change", status: "in_progress", changes: [{ path: "meta-kim-engineering-probe.txt", before: `before-${marker}`, after: `after-${marker}` }] } });
-  records.push({ type: "item.completed", item: { id: "engineering-edit", type: "file_change", status: "completed", result: { path: "meta-kim-engineering-probe.txt", before: `before-${marker}`, after: `after-${marker}` } } });
-  addCommand("engineering-read-after", "Get-Content -LiteralPath meta-kim-engineering-probe.txt", `after-${marker}`);
+  addCommand("engineering-read-before", "Get-Content -LiteralPath meta-kim-engineering-probe.txt", `before-${marker}\r\n`);
+  const engineeringFile = path.join(request.workspace, "meta-kim-engineering-probe.txt");
+  records.push({ type: "item.started", item: { id: "engineering-edit", type: "file_change", status: "in_progress", changes: [{ path: engineeringFile, kind: "update" }] } });
+  records.push({ type: "item.completed", item: { id: "engineering-edit", type: "file_change", status: "completed", changes: [{ path: engineeringFile, kind: "update" }] } });
+  addCommand("engineering-read-after", "Get-Content -LiteralPath meta-kim-engineering-probe.txt", `after-${marker}\n\r\n`);
   return { status: 0, signal: null, stdout: `${jsonl(records)}\n`, stderr: "", runtimeVersion: "codex-engineering-test" };
 }
 
@@ -378,6 +407,27 @@ function injectedCodexV147ApplyPatchExecutor({ wrongPath = false } = {}) {
   };
 }
 
+function injectedCodexEngineeringRuntimeShapeExecutor(request, changePaths = [path.join(request.workspace, "meta-kim-engineering-probe.txt")], { finalTrailingNewline = true, nonRawReadOutput = false } = {}) {
+  assert.equal(request.runtime, "codex");
+  assert.equal(request.capability, "engineering_composite");
+  const marker = request.prompt.match(/META_KIM_CAPABILITY_ENGINEERING_[0-9a-f-]{36}/u)?.[0];
+  const file = path.join(request.workspace, "meta-kim-engineering-probe.txt");
+  writeFileSync(file, `after-${marker}${finalTrailingNewline ? "\n" : ""}`, "utf8");
+  const records = [{ type: "thread.started", thread_id: "engineering-runtime-shape-thread" }];
+  const addCommand = (id, command, output) => {
+    records.push({ type: "item.started", item: { id, type: "command_execution", command, status: "in_progress" } });
+    records.push({ type: "item.completed", item: { id, type: "command_execution", command, status: "completed", exit_code: 0, aggregated_output: output } });
+  };
+  addCommand("runtime-shape-write", `[System.IO.File]::WriteAllText('meta-kim-engineering-probe.txt', 'before-${marker}')`, "");
+  addCommand("runtime-shape-read-before", nonRawReadOutput ? "Get-Content -LiteralPath '.\\meta-kim-engineering-probe.txt'" : "Get-Content -Raw -LiteralPath '.\\meta-kim-engineering-probe.txt'", `before-${marker}\r\n`);
+  records.push(
+    { type: "item.started", item: { id: "runtime-shape-edit", type: "file_change", changes: changePaths.map((changePath) => ({ path: changePath, kind: "update" })), status: "in_progress" } },
+    { type: "item.completed", item: { id: "runtime-shape-edit", type: "file_change", changes: changePaths.map((changePath) => ({ path: changePath, kind: "update" })), status: "completed" } },
+  );
+  addCommand("runtime-shape-read-after", nonRawReadOutput ? "Get-Content -LiteralPath '.\\meta-kim-engineering-probe.txt'" : "Get-Content -Raw -LiteralPath '.\\meta-kim-engineering-probe.txt'", nonRawReadOutput ? `after-${marker}\r\n` : `after-${marker}\n\r\n`);
+  return { status: 0, signal: null, stdout: `${jsonl(records)}\n`, stderr: "", runtimeVersion: "codex-engineering-runtime-shape-test" };
+}
+
 test("controlled receipts stay advisory while compatible routes hand off to the current host", () => {
   for (const runtime of ["claude_code", "codex"]) {
     const projectRoot = fixtureProject();
@@ -401,12 +451,16 @@ test("controlled producer binds Claude to the fail-closed provider resolver whil
     source.indexOf("function commandFor("),
   );
   const commandBuilder = source.slice(
-    source.indexOf("function commandFor("),
+    source.indexOf("export function codexLiveInvocationArgs("),
     source.indexOf("function productionExecutor("),
   );
   const producerExecutor = source.slice(
     source.indexOf("function productionExecutor(request)"),
     source.indexOf("function eventMatches("),
+  );
+  const runtimeIsolationHelper = source.slice(
+    source.indexOf("export function withRuntimeIsolation("),
+    source.indexOf("function productionExecutor(request)"),
   );
 
   assert.match(source, /import \{ resolveClaudeLiveProviderEnvironmentSync \} from "\.\/claude-live-provider-env\.mjs";/u);
@@ -414,15 +468,15 @@ test("controlled producer binds Claude to the fail-closed provider resolver whil
   assert.match(promptBuilder, /native Edit tool exactly once/u);
   assert.match(promptBuilder, /Do not call Write or any other write tool/u);
   assert.match(promptBuilder, /native edit\/apply-patch capability/u);
-  assert.match(producerExecutor, /if \(request\.runtime === "claude_code"\) \{\s*env = resolveClaudeLiveProviderEnvironmentSync\(\);/u);
+  assert.match(producerExecutor, /withRuntimeIsolation\(request, \(\{ env \}\) =>/u);
+  assert.match(runtimeIsolationHelper, /if \(request\.runtime === "claude_code"\) \{\s*env = resolveClaudeLiveProviderEnvironmentSync\(\);/u);
   assert.match(producerExecutor, /runCli\(request\.command, request\.args, \{\s*cwd: request\.workspace,\s*env,/u);
   assert.match(producerExecutor, /revalidateCodexLiveProviderConfigSync\(request\.codexProviderBinding\)/u);
-  assert.match(producerExecutor, /isolated_auth_provider_and_probe_rules_only/u);
+  assert.match(producerExecutor, /runtimeIsolation: request\.runtime === "codex" \? "ephemeral_auth_home_and_rules_isolated" : "empty_setting_sources_strict_mcp_current_auth"/u);
   assert.match(commandBuilder, /"--setting-sources",\s*"",/u);
   assert.match(commandBuilder, /"--strict-mcp-config",/u);
   assert.match(commandBuilder, /"--mcp-config", path\.join\(workspace, "meta-kim-empty-mcp\.json"\),/u);
 
-  assert.match(producerExecutor, /isolatedRuntimeHome = mkdtempSync\(path\.join\(os\.tmpdir\(\), "meta-kim-codex-probe-"\)\)/u);
   assert.match(source, /import \{ resolveCodexLiveProviderConfigSync, revalidateCodexLiveProviderConfigSync \} from "\.\/codex-live-provider-config\.mjs";/u);
   assert.match(source, /resolveCodexLiveProviderConfigSync\(\)/u);
   assert.match(commandBuilder, /\.\.\.\(codexProviderBinding\?\.args \?\? \[\]\)/u);
@@ -432,13 +486,359 @@ test("controlled producer binds Claude to the fail-closed provider resolver whil
   assert.match(commandBuilder, /"agents\.max_threads=2"/u);
   assert.match(commandBuilder, /"agents\.max_depth=1"/u);
   assert.match(commandBuilder, /windows\.sandbox/u);
-  assert.doesNotMatch(commandBuilder, /"--ephemeral"/u);
-  assert.doesNotMatch(commandBuilder, /"--ignore-user-config"/u);
-  assert.doesNotMatch(commandBuilder, /"--skip-git-repo-check"/u);
-  assert.match(producerExecutor, /const authSource = request\.codexProviderBinding\.authPath;/u);
-  assert.match(producerExecutor, /copyFileSync\(authSource, path\.join\(isolatedRuntimeHome, "auth\.json"\)\);/u);
-  assert.match(producerExecutor, /CODEX_HOME: isolatedRuntimeHome,/u);
-  assert.match(producerExecutor, /CODEX_SKILLS_DIR: path\.join\(isolatedRuntimeHome, "skills"\),/u);
+  assert.match(runtimeIsolationHelper, /isolatedRuntimeHome = mkdtemp\(path\.join\(tempRoot, "meta-kim-codex-probe-"\)\)/u);
+  assert.match(runtimeIsolationHelper, /const authSource = path\.join\(sourceRuntimeHome, "auth\.json"\);/u);
+  assert.match(runtimeIsolationHelper, /copyFile\(authSource, authTarget\);/u);
+  assert.match(runtimeIsolationHelper, /env = isolatedCodexChildEnvironment\(inheritedEnv, isolatedRuntimeHome, \{ mkdir \}\);/u);
+  assert.match(source, /function isolatedCodexChildEnvironment\(inheritedEnv, isolatedRuntimeHome, \{ mkdir = mkdirSync \} = \{\}\)/u);
+  assert.match(runtimeIsolationHelper, /finally \{\s*if \(isolatedRuntimeHome\) cleanupIsolatedCodexRuntimeHome/u);
+});
+
+test("controlled native probes do not load unrelated host skills or project instructions", () => {
+  const args = codexLiveInvocationArgs({ workspace: '/isolated/probe', platform: 'win32' });
+  assert.equal(args[args.indexOf('--enable') + 1], 'skip_host_skill_discovery');
+  assert.ok(args.includes('project_doc_max_bytes=0'));
+  assert.equal(args[args.indexOf('-s') + 1], 'workspace-write');
+  assert.ok(args.includes('--ignore-rules'));
+});
+
+test("Codex isolated child replaces inherited user-home discovery roots", async () => {
+  const { withRuntimeIsolation } = await import("../../scripts/runtime-capability-producers.mjs");
+  const inheritedEnv = {
+    ...process.env,
+    HOME: "C:/ambient-user",
+    Home: "C:/stale-case-variant",
+    USERPROFILE: "C:/ambient-user",
+    UserProfile: "C:/stale-case-variant",
+    HOMEDRIVE: "C:",
+    HOMEPATH: "\\Users\\Kim",
+    APPDATA: "C:/ambient-user/AppData/Roaming",
+    AppData: "C:/stale-case-variant/AppData/Roaming",
+    LOCALAPPDATA: "C:/ambient-user/AppData/Local",
+    LocalAppData: "C:/stale-case-variant/AppData/Local",
+    TEMP: "C:/ambient-user/AppData/Local/Temp",
+    Temp: "C:/stale-case-variant/Temp",
+    TMP: "C:/ambient-user/AppData/Local/Temp",
+    Tmp: "C:/stale-case-variant/Temp",
+  };
+  const isolatedHome = "C:/synthetic/meta-kim-codex-probe-isolated";
+  let observed;
+  const createdDirectories = [];
+  withRuntimeIsolation({ runtime: "codex" }, ({ env, isolatedRuntimeHome }) => {
+    observed = { env, isolatedRuntimeHome };
+  }, {
+    tempRoot: "C:/synthetic",
+    sourceRuntimeHome: "C:/synthetic/source-codex",
+    inheritedEnv,
+    mkdtemp: () => isolatedHome,
+    mkdir: (target) => { createdDirectories.push(target); },
+    exists: () => true,
+    copyFile: () => {},
+    remove: () => {},
+  });
+  assert.equal(observed.env.HOME, isolatedHome);
+  assert.equal(observed.env.USERPROFILE, isolatedHome);
+  assert.equal(observed.env.APPDATA, path.join(isolatedHome, "AppData", "Roaming"));
+  assert.equal(observed.env.LOCALAPPDATA, path.join(isolatedHome, "AppData", "Local"));
+  assert.equal(observed.env.CODEX_HOME, isolatedHome);
+  assert.equal(observed.env.HOMEDRIVE, "C:");
+  assert.equal(observed.env.HOMEPATH, path.win32.normalize(isolatedHome).slice(2));
+  assert.deepEqual(createdDirectories, [path.join(isolatedHome, "tmp")]);
+  assert.notEqual(observed.env.HOME, inheritedEnv.HOME);
+  assert.notEqual(observed.env.USERPROFILE, inheritedEnv.USERPROFILE);
+  for (const name of ["HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "TEMP", "TMP"]) {
+    assert.deepEqual(Object.keys(observed.env).filter((key) => key.toLowerCase() === name.toLowerCase()), [name], `${name} must have one canonical child key`);
+  }
+});
+
+test("Codex isolated child cannot discover ambient user skills", async () => {
+  const { withRuntimeIsolation } = await import("../../scripts/runtime-capability-producers.mjs");
+  const ambientHome = mkdtempSync(path.join(tmpdir(), "meta-kim-ambient-home-"));
+  const sourceHome = mkdtempSync(path.join(tmpdir(), "meta-kim-source-home-"));
+  const childWorkspace = mkdtempSync(path.join(tmpdir(), "meta-kim-codex-child-workspace-"));
+  temporaryRoots.add(ambientHome);
+  temporaryRoots.add(sourceHome);
+  temporaryRoots.add(childWorkspace);
+  mkdirSync(path.join(ambientHome, ".agents", "skills", "ambient-user"), { recursive: true });
+  writeFileSync(path.join(ambientHome, ".agents", "skills", "ambient-user", "SKILL.md"), "ambient sentinel\n", "utf8");
+  writeFileSync(path.join(sourceHome, "auth.json"), "{}\n", "utf8");
+  const inheritedEnv = { ...process.env, HOME: ambientHome, USERPROFILE: ambientHome };
+  let observed;
+  withRuntimeIsolation({ runtime: "codex" }, ({ env, isolatedRuntimeHome }) => {
+    observed = { isolatedRuntimeHome, visibility: runSkillVisibilityProbe(childWorkspace, env) };
+  }, { sourceRuntimeHome: sourceHome, inheritedEnv });
+  assert.equal(observed.visibility.home, observed.isolatedRuntimeHome);
+  assert.equal(observed.visibility.homeSkill, false);
+  assert.equal(observed.visibility.ancestorSkill, false);
+  assert.equal(observed.visibility.tempExists, true);
+});
+
+test("Codex child home variables derive from Windows root or clear stale POSIX values", async () => {
+  const { withRuntimeIsolation } = await import("../../scripts/runtime-capability-producers.mjs");
+  for (const scenario of [
+    { home: "\\\\server\\share\\meta-kim", drive: "\\\\server\\share", homePath: "\\meta-kim" },
+    { home: "/tmp/meta-kim-posix", drive: undefined, homePath: undefined },
+  ]) {
+    let observed;
+    withRuntimeIsolation({ runtime: "codex" }, ({ env }) => { observed = env; }, {
+      tempRoot: "C:/synthetic",
+      sourceRuntimeHome: "C:/synthetic/source-codex",
+      inheritedEnv: { ...process.env, HOMEDRIVE: "C:", HOMEPATH: "\\Users\\Kim" },
+      mkdtemp: () => scenario.home,
+      mkdir: () => {},
+      exists: () => true,
+      copyFile: () => {},
+      remove: () => {},
+    });
+    assert.equal(observed.HOMEDRIVE, scenario.drive);
+    assert.equal(observed.HOMEPATH, scenario.homePath);
+  }
+});
+
+test("Codex controlled engineering workspace is outside the project ancestor discovery tree", () => {
+  const projectRoot = fixtureProject();
+  mkdirSync(path.join(projectRoot, ".agents", "skills", "project-ancestor"), { recursive: true });
+  writeFileSync(path.join(projectRoot, ".agents", "skills", "project-ancestor", "SKILL.md"), "project sentinel\n", "utf8");
+  const emptyHome = mkdtempSync(path.join(tmpdir(), "meta-kim-empty-home-"));
+  temporaryRoots.add(emptyHome);
+  let visibility;
+  let capturedRequest;
+  runCodexCompositeEngineeringProducer({
+    projectRoot,
+    executor: (request) => {
+      capturedRequest = request;
+      visibility = runSkillVisibilityProbe(request.workspace, { ...process.env, HOME: emptyHome, USERPROFILE: emptyHome });
+      return injectedCodexEngineeringExecutor(request);
+    },
+  });
+  const relative = path.relative(projectRoot, capturedRequest.workspace);
+  assert.ok(relative === ".." || relative.startsWith(`..${path.sep}`), `workspace remained under project root: ${relative}`);
+  assert.equal(visibility.ancestorSkill, false);
+});
+
+test("Codex setup failures clean the temporary home without reading real authentication", async () => {
+  const { withRuntimeIsolation } = await import("../../scripts/runtime-capability-producers.mjs");
+  assert.equal(typeof withRuntimeIsolation, "function");
+  for (const scenario of [
+    {
+      name: "missing auth",
+      exists: () => false,
+      copyFile: () => { throw new Error("copy must not run when auth is absent"); },
+      expected: /auth\.json is required/u,
+    },
+    {
+      name: "auth copy failure",
+      exists: () => true,
+      copyFile: () => { throw new Error("synthetic auth copy failure"); },
+      expected: /synthetic auth copy failure/u,
+    },
+  ]) {
+    const temporaryHome = `C:/synthetic/meta-kim-codex-probe-${scenario.name.replaceAll(" ", "-")}`;
+    const removed = [];
+    assert.throws(() => withRuntimeIsolation({ runtime: "codex" }, () => {
+      throw new Error("callback must not run after auth setup failure");
+    }, {
+      tempRoot: "C:/synthetic",
+      sourceRuntimeHome: "C:/synthetic/source-codex",
+      mkdtemp: () => temporaryHome,
+      exists: scenario.exists,
+      copyFile: scenario.copyFile,
+      remove: (target) => { removed.push(target); },
+    }), scenario.expected, scenario.name);
+    assert.deepEqual(removed, [temporaryHome], scenario.name);
+  }
+});
+
+test("failed child invocation diagnostics retain safe exit, signal, and error code", async () => {
+  const { runtimeHostInvocationError } = await import("../../scripts/runtime-capability-producers.mjs");
+  const error = runtimeHostInvocationError("codex", "version probe", {
+    status: null,
+    signal: "SIGTERM",
+    error: { code: "ENOENT", message: "secret environment should not escape" },
+  });
+  assert.equal(error.exitCode, null);
+  assert.equal(error.signal, "SIGTERM");
+  assert.equal(error.childErrorCode, "ENOENT");
+  assert.equal(error.errorCode, "ENOENT");
+  assert.match(error.message, /exit=unknown.*signal=SIGTERM.*errorCode=ENOENT/u);
+  assert.doesNotMatch(error.message, /secret environment/u);
+});
+
+test("controlled producer preserves child diagnostics when exit is unknown", () => {
+  const projectRoot = fixtureProject();
+  const attemptId = "unknown-exit-diagnostics";
+  assert.throws(() => runControlledRuntimeCapabilityProducer({
+    projectRoot,
+    runtime: "codex",
+    capability: "shell",
+    attemptId,
+    executor: () => ({
+      status: null,
+      signal: "SIGTERM",
+      error: { code: "ENOENT", message: "secret environment should not escape" },
+      stdout: "bounded raw host output\n",
+      stderr: "secret stderr should not escape",
+    }),
+  }), (error) => {
+    assert.equal(error.exitCode, null);
+    assert.equal(error.signal, "SIGTERM");
+    assert.equal(error.childErrorCode, "ENOENT");
+    assert.match(error.message, /exit=unknown.*signal=SIGTERM.*errorCode=ENOENT/u);
+    assert.doesNotMatch(error.message, /secret/u);
+    return true;
+  });
+  const artifact = path.join(
+    projectRoot,
+    ".meta-kim",
+    "state",
+    "default",
+    "runtime-capability-producers",
+    "artifacts",
+    `${attemptId}.jsonl`,
+  );
+  assert.equal(readFileSync(artifact, "utf8"), "bounded raw host output\n");
+});
+
+test("the codex controlled invocation keeps workspace-write while isolating host rules and selecting a supported sandbox flavor", () => {
+  const workspace = path.join(packageRoot, "codex-invocation-probe-workspace");
+  const win32Args = codexLiveInvocationArgs({ workspace, platform: "win32" });
+  const posixArgs = codexLiveInvocationArgs({ workspace, platform: "linux" });
+
+  for (const args of [win32Args, posixArgs]) {
+    assert.equal(args[0], "exec");
+    assert.equal(args[args.indexOf("-s") + 1], "workspace-write");
+    assert.equal(args[args.indexOf("-C") + 1], workspace);
+    assert.equal(args.at(-1), "-");
+    assert.ok(args.includes("--ignore-user-config"));
+    assert.ok(!args.includes("--ephemeral"), "--ephemeral withholds the collaboration thread spawn_agent needs, so agent and subagent can never complete; isolation comes from the temporary CODEX_HOME instead");
+    assert.ok(!args.includes("--dangerously-bypass-approvals-and-sandbox"));
+    assert.ok(!args.includes("--dangerously-bypass-hook-trust"));
+    assert.ok(args.includes("--ignore-rules"), "the controlled probe must ignore unrelated user/project execpolicy rules");
+    assert.ok(!args.some((arg) => String(arg).includes("danger-full-access")));
+  }
+
+  const overrideIndex = win32Args.indexOf("windows.sandbox=unelevated");
+  assert.ok(overrideIndex > 0, "win32 must pin a host-supported Windows sandbox flavor instead of inheriting the discarded user config");
+  assert.equal(win32Args[overrideIndex - 1], "-c");
+  assert.ok(!posixArgs.some((arg) => String(arg).includes("windows.sandbox")));
+  assert.equal(codexLiveInvocationArgs({ workspace, argsPrefix: ["--prefix-probe"], platform: "win32" })[0], "--prefix-probe");
+});
+
+test("the codex invocation can pin an explicit model and reasoning effort without changing defaults", () => {
+  const workspace = path.join(packageRoot, "codex-model-invocation-probe-workspace");
+  const defaultArgs = codexLiveInvocationArgs({ workspace, platform: "win32" });
+  assert.equal(defaultArgs.includes("-m"), false);
+  assert.equal(defaultArgs.some((arg) => String(arg).includes("model_reasoning_effort")), false);
+
+  const pinnedArgs = codexLiveInvocationArgs({
+    workspace,
+    platform: "win32",
+    model: "gpt-5.6-luna",
+    reasoningEffort: "max",
+  });
+  assert.equal(pinnedArgs[pinnedArgs.indexOf("-m") + 1], "gpt-5.6-luna");
+  assert.equal(pinnedArgs[pinnedArgs.indexOf("-c") + 1], 'model_reasoning_effort="max"');
+  assert.equal(pinnedArgs[pinnedArgs.indexOf("-s") + 1], "workspace-write");
+});
+
+test("Codex isolates native tool probes with ephemeral sessions while preserving collaboration sessions", () => {
+  const projectRoot = fixtureProject();
+  const requests = new Map();
+  for (const capability of ["shell", "filesystem", "apply_patch / edit", "agent", "subagent"]) {
+    runControlledRuntimeCapabilityProducer({
+      projectRoot,
+      runtime: "codex",
+      capability,
+      executor: (request) => {
+        requests.set(capability, request);
+        return injectedExecutor(request);
+      },
+    });
+  }
+  for (const capability of ["shell", "filesystem", "apply_patch / edit"]) {
+    assert.ok(requests.get(capability).args.includes("--ephemeral"), `${capability} must isolate its native tool session`);
+  }
+  for (const capability of ["agent", "subagent"]) {
+    assert.equal(requests.get(capability).args.includes("--ephemeral"), false, `${capability} must retain collaboration session state`);
+  }
+});
+
+test("live controlled Codex forwards explicit model and reasoning effort to the host request", () => {
+  const projectRoot = fixtureProject();
+  let captured = null;
+  runControlledRuntimeCapabilityProducer({
+    projectRoot,
+    runtime: "codex",
+    capability: "shell",
+    codexModel: "gpt-5.6-luna",
+    codexReasoningEffort: "max",
+    executor: (request) => {
+      captured = request;
+      return injectedExecutor(request);
+    },
+  });
+  assert.ok(captured);
+  assert.equal(captured.args[captured.args.indexOf("-m") + 1], "gpt-5.6-luna");
+  assert.equal(captured.args[captured.args.indexOf("-c") + 1], 'model_reasoning_effort="max"');
+});
+
+test("the production codex composite path builds its invocation through the shared codex builder", () => {
+  const projectRoot = fixtureProject();
+  const captured = [];
+  runCodexCompositeEngineeringProducer({
+    projectRoot,
+    executor: (request) => {
+      captured.push(request);
+      return injectedCodexEngineeringExecutor(request);
+    },
+  });
+  assert.equal(captured.length, 1);
+  assert.equal(captured[0].executableIdentity?.realpath, "<test-only:codex>");
+  const args = captured[0].args;
+  assert.deepEqual(args, codexLiveInvocationArgs({ workspace: captured[0].workspace, platform: process.platform, ephemeral: true }));
+  assert.equal(args[args.indexOf("-s") + 1], "workspace-write");
+  if (process.platform === "win32") assert.ok(args.includes("windows.sandbox=unelevated"));
+});
+
+test("the Codex composite producer forwards explicit model and reasoning effort", () => {
+  const projectRoot = fixtureProject();
+  let captured = null;
+  runCodexCompositeEngineeringProducer({
+    projectRoot,
+    codexModel: "gpt-5.6-luna",
+    codexReasoningEffort: "max",
+    executor: (request) => {
+      captured = request;
+      return injectedCodexEngineeringExecutor(request);
+    },
+  });
+  assert.ok(captured);
+  assert.equal(captured.args[captured.args.indexOf("-m") + 1], "gpt-5.6-luna");
+  assert.equal(captured.args[captured.args.indexOf("-c") + 1], 'model_reasoning_effort="max"');
+});
+
+test("runtime producer CLI exposes explicit Codex model and reasoning options", () => {
+  const result = spawnSync(process.execPath, ["scripts/run-runtime-capability-producers.mjs", "--help"], {
+    cwd: packageRoot,
+    encoding: "utf8",
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /--codex-model <MODEL>/u);
+  assert.match(result.stdout, /--codex-reasoning-effort <EFFORT>/u);
+});
+
+test("explicit Codex model options reject mixed runtimes before any host invocation", () => {
+  const result = spawnSync(process.execPath, [
+    "scripts/run-runtime-capability-producers.mjs",
+    "--source", "live_controlled",
+    "--codex-model", "gpt-5.6-luna",
+    "--codex-reasoning-effort", "max",
+  ], {
+    cwd: packageRoot,
+    encoding: "utf8",
+  });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /require --runtimes codex/u);
 });
 
 test("Claude 2.1.202 async Agent and subagent producers accept only marker-bound closed child lifecycles", () => {
@@ -633,6 +1033,112 @@ test("Codex 0.147 file_change binds marker evidence to the exact controlled prob
     capability: "apply_patch / edit",
     executor: injectedCodexV147ApplyPatchExecutor({ wrongPath: true }),
   }), /did not observe a capability-specific completed host event/u);
+});
+
+test("Codex engineering accepts the native file_change path shape without requiring synthetic marker payload", () => {
+  const projectRoot = fixtureProject();
+  const produced = runCodexCompositeEngineeringProducer({ projectRoot, executor: injectedCodexEngineeringRuntimeShapeExecutor });
+  assert.deepEqual(produced.results.map((entry) => entry.capability), ["shell", "filesystem", "apply_patch / edit"]);
+  assert.equal(produced.results.every((entry) => entry.receipt.eventEvidence.length > 0), true);
+  assert.equal(produced.results.find((entry) => entry.capability === "apply_patch / edit").receipt.eventEvidence[0].hostSurface, "codex_cli.file_change");
+});
+
+test("acceptance validator accepts the native file_change path shape without synthetic marker payload", () => {
+  const projectRoot = fixtureProject();
+  const produced = runCodexCompositeEngineeringProducer({ projectRoot, executor: injectedCodexEngineeringRuntimeShapeExecutor });
+  const edit = produced.results.find((entry) => entry.capability === "apply_patch / edit");
+  const validation = validateRuntimeCapabilityAcceptanceAttemptEvidence(edit.acceptance.record, {
+    profileRoot: edit.acceptance.paths.profileRoot,
+  });
+  assert.equal(validation.valid, true, validation.issues.join("\n"));
+});
+
+test("acceptance validator separates non-Raw read output from the final file LF contract", () => {
+  const projectRoot = fixtureProject();
+  const produced = runCodexCompositeEngineeringProducer({
+    projectRoot,
+    executor: (request) => injectedCodexEngineeringRuntimeShapeExecutor(request, undefined, { nonRawReadOutput: true }),
+  });
+  const edit = produced.results.find((entry) => entry.capability === "apply_patch / edit");
+  const validation = validateRuntimeCapabilityAcceptanceAttemptEvidence(edit.acceptance.record, {
+    profileRoot: edit.acceptance.paths.profileRoot,
+  });
+  assert.equal(validation.valid, true, validation.issues.join("\n"));
+  assert.equal(edit.receipt.workspaceOutcome.contentSha256, createHash("sha256").update(`after-${produced.marker}\n`).digest("hex"));
+});
+
+test("acceptance validator rejects a rehashed native file_change for a different path", () => {
+  const projectRoot = fixtureProject();
+  const produced = runCodexCompositeEngineeringProducer({ projectRoot, executor: injectedCodexEngineeringRuntimeShapeExecutor });
+  const target = produced.results.find((entry) => entry.capability === "apply_patch / edit");
+  const rawRecords = readFileSync(produced.rawPath, "utf8").split(/\r?\n/u).filter(Boolean).map((line) => JSON.parse(line));
+  for (const record of rawRecords) {
+    if (record.type !== "item.started" && record.type !== "item.completed") continue;
+    if (record.item?.type !== "file_change") continue;
+    record.item.changes = [{ path: path.join(target.receipt.hostInvocation.request.args[target.receipt.hostInvocation.request.args.indexOf("-C") + 1], "other", "meta-kim-engineering-probe.txt"), kind: "update" }];
+  }
+  const rawText = `${jsonl(rawRecords)}\n`;
+  writeFileSync(produced.rawPath, rawText, "utf8");
+  const rawSha256 = createHash("sha256").update(rawText).digest("hex");
+
+  const receipt = JSON.parse(readFileSync(target.receiptPath, "utf8"));
+  receipt.rawArtifact.sha256 = rawSha256;
+  receipt.hostInvocation.result.stdoutSha256 = rawSha256;
+  receipt.hostInvocation.resultDigest = createHash("sha256").update(JSON.stringify(receipt.hostInvocation.result)).digest("hex");
+  const { recordHash: _receiptHash, ...receiptBody } = receipt;
+  receipt.recordHash = createHash("sha256").update(JSON.stringify(receiptBody)).digest("hex");
+  const receiptBytes = `${JSON.stringify(receipt, null, 2)}\n`;
+  writeFileSync(target.receiptPath, receiptBytes, "utf8");
+
+  const attempt = JSON.parse(readFileSync(target.acceptance.recordPath, "utf8"));
+  attempt.sourceReport.sha256 = createHash("sha256").update(receiptBytes).digest("hex");
+  attempt.rawArtifactSha256 = rawSha256;
+  const { recordHash: _attemptHash, ...attemptBody } = attempt;
+  attempt.recordHash = createHash("sha256").update(JSON.stringify(attemptBody)).digest("hex");
+  const validation = validateRuntimeCapabilityAcceptanceAttemptEvidence(attempt, {
+    profileRoot: target.acceptance.paths.profileRoot,
+  });
+  assert.equal(validation.valid, false);
+  assert.match(validation.issues.join("\n"), /not capability-marker-bound|engineering composite raw lifecycle is invalid/u);
+});
+
+test("Codex engineering accepts the native file_change final file as one marker line with one LF", () => {
+  const projectRoot = fixtureProject();
+  const produced = runCodexCompositeEngineeringProducer({
+    projectRoot,
+    executor: (request) => injectedCodexEngineeringRuntimeShapeExecutor(request, undefined, { finalTrailingNewline: true }),
+  });
+  const edit = produced.results.find((entry) => entry.capability === "apply_patch / edit");
+  assert.equal(
+    edit.receipt.compositeLifecycle.finalContentSha256,
+    createHash("sha256").update(`after-${produced.marker}\n`).digest("hex"),
+  );
+});
+
+test("Codex engineering rejects file_change events for another path, a suffix, or multiple files", () => {
+  for (const scenario of [
+    {
+      name: "another directory",
+      changePaths: (workspace) => [path.join(workspace, "other", "meta-kim-engineering-probe.txt")],
+    },
+    {
+      name: "backup suffix",
+      changePaths: (workspace) => [path.join(workspace, "meta-kim-engineering-probe.txt.bak")],
+    },
+    {
+      name: "multiple files",
+      changePaths: (workspace) => [
+        path.join(workspace, "meta-kim-engineering-probe.txt"),
+        path.join(workspace, "meta-kim-engineering-probe.txt.bak"),
+      ],
+    },
+  ]) {
+    const projectRoot = fixtureProject();
+    assert.throws(() => runCodexCompositeEngineeringProducer({
+      projectRoot,
+      executor: (request) => injectedCodexEngineeringRuntimeShapeExecutor(request, scenario.changePaths(request.workspace)),
+    }), /one exact write\/read\/edit\/final-read chain/u, scenario.name);
+  }
 });
 
 test("recomputing receipt, attempt and index hashes can only forge advisory status", () => {
@@ -926,6 +1432,35 @@ test("Codex TUI reader rejects a Desktop source masquerade", async () => {
   }
 });
 
+test("Desktop readers accept a uniquely fresh resumed segment without relaxing identity or ambiguity checks", async (context) => {
+  for (const kind of ["agent", "engineering"]) await context.test(kind, async () => {
+    const fixture = kind === "agent" ? codexDesktopFixture() : codexDesktopEngineeringFixture(fixtureProject());
+    const reader = kind === "agent" ? readCodexDesktopSessionEvidence : readCodexDesktopEngineeringEvidence;
+    const dir = path.join(fixture.codexHome, "sessions", "2026", "07", "28");
+    const original = path.join(dir, `rollout-${kind === "agent" ? "parent" : "desktop"}-${fixture.threadId}.jsonl`);
+    const resumed = path.join(dir, `rollout-resumed-${fixture.threadId}_aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa.jsonl`);
+    try {
+      const bytes = readFileSync(original);
+      writeFileSync(resumed, bytes);
+      utimesSync(original, new Date(0), new Date(0));
+      const evidence = await reader(fixture);
+      assert.ok(evidence.parentSessionRef.includes("_aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa.jsonl"));
+      const records = bytes.toString().split(/\r?\n/u);
+      const meta = JSON.parse(records[0]);
+      meta.payload.id = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+      records[0] = JSON.stringify(meta);
+      writeFileSync(resumed, records.join("\n"));
+      await assert.rejects(() => reader(fixture), /source_invalid|parent_invalid/u);
+      writeFileSync(resumed, bytes);
+      writeFileSync(original, bytes);
+      await assert.rejects(() => reader(fixture), /codex_parent_session_not_unique/u);
+    } finally {
+      rmSync(fixture.codexHome, { recursive: true, force: true });
+      if (fixture.workspacePath) rmSync(fixture.workspacePath, { recursive: true, force: true });
+    }
+  });
+});
+
 test("one Codex Desktop session chain produces three engineering receipts from five distinct events", async () => {
   const projectRoot = fixtureProject();
   const fixture = codexDesktopEngineeringFixture(projectRoot);
@@ -1093,6 +1628,95 @@ test("Codex Desktop session producer rejects a mismatched child backlink", async
   }
 });
 
+test("Desktop readers use fresh bound events when an open Windows rollout keeps an old mtime", async () => {
+  for (const kind of ["agent", "engineering"]) {
+    const fixture = kind === "agent" ? codexDesktopFixture() : codexDesktopEngineeringFixture(fixtureProject());
+    const dir = path.join(fixture.codexHome, "sessions", "2026", "07", "28");
+    const prefix = kind === "agent" ? "parent" : "desktop";
+    const parent = path.join(dir, `rollout-${prefix}-${fixture.threadId}.jsonl`);
+    utimesSync(parent, new Date(0), new Date(0));
+    const reader = kind === "agent" ? readCodexDesktopSessionEvidence : readCodexDesktopEngineeringEvidence;
+    const evidence = await reader(fixture);
+    assert.ok(Date.parse(evidence.observedAt) >= fixture.sinceMs);
+    await assert.rejects(() => reader({ ...fixture, sinceMs: Date.now() + 60_000 }), /stale|timestamp|chain_invalid/u);
+  }
+});
+
+test("Desktop item completion records preserve exact parent-child and final-marker replay", async () => {
+  const fixture = codexDesktopFixture();
+  const projectRoot = fixtureProject();
+  const dir = path.join(fixture.codexHome, "sessions", "2026", "07", "28");
+  const parentFile = path.join(dir, `rollout-parent-${fixture.threadId}.jsonl`);
+  const childFile = path.join(dir, `rollout-child-${fixture.childSessionId}.jsonl`);
+  const parent = readFileSync(parentFile, "utf8").trim().split("\n").map(JSON.parse);
+  const child = readFileSync(childFile, "utf8").trim().split("\n").map(JSON.parse);
+  const activity = parent.find((record) => record.payload.type === "sub_agent_activity");
+  const original = activity.payload;
+  activity.payload = { type: "item_completed", thread_id: fixture.threadId,
+    item: { type: "SubAgentActivity", id: original.event_id, kind: "started", agent_thread_id: original.agent_thread_id, agent_path: original.agent_path } };
+  parent.push({ timestamp: activity.timestamp, type: "event_msg", payload: {
+    type: "item_completed", thread_id: fixture.threadId,
+    item: { ...activity.payload.item, id: "subagent-completed-fixture", kind: "completed" },
+  } });
+  const final = child.find((record) => record.payload.type === "agent_message");
+  final.payload = { type: "item_completed", thread_id: fixture.childSessionId,
+    item: { type: "AgentMessage", id: "child-final-item", phase: "final_answer", content: [{ type: "Text", text: fixture.marker }] } };
+  const save = () => {
+    writeFileSync(parentFile, `${jsonl(parent)}\n`);
+    writeFileSync(childFile, `${jsonl(child)}\n`);
+  };
+  save();
+  const previousHome = process.env.CODEX_HOME;
+  process.env.CODEX_HOME = fixture.codexHome;
+  try {
+    const produced = await runCodexDesktopSessionCapabilityProducer({ projectRoot, ...fixture, reader: (options) => readCodexDesktopSessionEvidence(options) });
+    assert.equal(produced.results.length, 2);
+    const state = loadEffectiveRuntimeCapabilityClaims({ packageRoot, projectRoot, allowTestReceipts: true });
+    assert.equal(state.overlayStatus.applied.length, 2, JSON.stringify(state.overlayStatus.rejected));
+    activity.payload.thread_id = fixture.childSessionId;
+    save();
+    await assert.rejects(() => readCodexDesktopSessionEvidence(fixture), /lifecycle|binding/u);
+    activity.payload.thread_id = fixture.threadId;
+    final.payload.thread_id = fixture.threadId;
+    save();
+    await assert.rejects(() => readCodexDesktopSessionEvidence(fixture), /child_final/u);
+  } finally {
+    if (previousHome === undefined) delete process.env.CODEX_HOME;
+    else process.env.CODEX_HOME = previousHome;
+  }
+});
+
+test("Desktop engineering binds completed FileChange items and rejects failed or unrelated items", async () => {
+  const fixture = codexDesktopEngineeringFixture(fixtureProject());
+  const file = path.join(fixture.codexHome, "sessions", "2026", "07", "28", `rollout-desktop-${fixture.threadId}.jsonl`);
+  const records = readFileSync(file, "utf8").trim().split("\n").map(JSON.parse);
+  for (const record of records) {
+    if (record.payload.type !== "patch_apply_end") continue;
+    const patch = record.payload;
+    record.payload = {
+      type: "item_completed", thread_id: fixture.threadId,
+      item: { type: "FileChange", id: `exec-${records.indexOf(record)}`, status: "completed", changes: patch.changes, stdout: patch.stdout, stderr: "" },
+    };
+  }
+  const save = () => writeFileSync(file, `${jsonl(records)}\n`);
+  save();
+  const evidence = await readCodexDesktopEngineeringEvidence(fixture);
+  assert.equal(evidence.events.patchUpdate.resultStatus, "completed");
+  const patch = records.find((record) => record.payload.item?.type === "FileChange");
+  patch.payload.item.status = "failed";
+  save();
+  await assert.rejects(() => readCodexDesktopEngineeringEvidence(fixture), /chain_invalid/u);
+  patch.payload.item.status = "completed";
+  patch.payload.thread_id = "99999999-9999-4999-8999-999999999999";
+  save();
+  await assert.rejects(() => readCodexDesktopEngineeringEvidence(fixture), /chain_invalid/u);
+  patch.payload.thread_id = fixture.threadId;
+  const [originalPath, change] = Object.entries(patch.payload.item.changes)[0];
+  patch.payload.item.changes = { [`${originalPath}.unrelated`]: change };
+  save();
+  await assert.rejects(() => readCodexDesktopEngineeringEvidence(fixture), /chain_invalid/u);
+});
+
 test("Codex Desktop session reader rejects wrong marker, stale, and ambiguous parent evidence", async (context) => {
   await context.test("wrong marker", async () => {
     const fixture = codexDesktopFixture();
@@ -1164,6 +1788,32 @@ test("production controlled acceptance writer is not publicly exported", async (
   assert.equal(module.writeControlledRuntimeCapabilityAcceptanceAttempt, undefined);
   await assert.rejects(() => module.produceRuntimeCapabilityAcceptance({ source: "live_controlled", runtime: "codex", capabilities: ["shell"], projectRoot: fixtureProject(), executor: () => ({}) }), /does not accept injected executor/u);
   await assert.rejects(() => module.produceRuntimeCapabilityAcceptance({ source: "codex_desktop_agent_subagent", runtime: "codex", capabilities: ["agent"], projectRoot: fixtureProject(), codexHome: "C:/forged" }), /does not accept injected executor, reader, or codexHome/u);
+});
+
+test("live controlled routing selects composite only for the exact Codex engineering facets", async () => {
+  const { selectLiveControlledProducerRoute } = await import("../../scripts/runtime-capability-producers.mjs");
+  const engineering = ["shell", "filesystem", "apply_patch / edit"];
+  assert.equal(selectLiveControlledProducerRoute({ runtime: "codex", capabilities: engineering }), "codex_engineering_composite");
+  assert.equal(selectLiveControlledProducerRoute({ runtime: "codex", capabilities: ["filesystem", "shell", "apply_patch / edit"] }), "codex_engineering_composite");
+  for (const capabilities of [
+    ["shell", "filesystem"],
+    ["shell", "filesystem", "apply_patch / edit", "agent"],
+    ["shell", "filesystem", "apply_patch / edit", "apply_patch / edit"],
+  ]) {
+    assert.equal(selectLiveControlledProducerRoute({ runtime: "codex", capabilities }), "capability_specific");
+  }
+  assert.equal(selectLiveControlledProducerRoute({ runtime: "claude_code", capabilities: engineering }), "capability_specific");
+});
+
+test("formal live engineering routing still rejects injected executors", async () => {
+  const module = await import("../../scripts/runtime-capability-acceptance.mjs");
+  await assert.rejects(() => module.produceRuntimeCapabilityAcceptance({
+    source: "live_controlled",
+    runtime: "codex",
+    capabilities: ["shell", "filesystem", "apply_patch / edit"],
+    projectRoot: fixtureProject(),
+    executor: () => ({ status: 0 }),
+  }), /does not accept injected executor, reader, or codexHome/u);
 });
 
 test("rewriting every self-hash cannot forge raw host event evidence", () => {

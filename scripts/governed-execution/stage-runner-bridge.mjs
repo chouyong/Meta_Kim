@@ -10,6 +10,7 @@ import {
   observeCodexJsonl,
 } from "../live-acceptance/observe-host-events.mjs";
 import { spawnCli } from "../runtime-cli-invocation.mjs";
+import { HOST_INHERITED_ENV_NAMES } from "./host-runtime-provenance.mjs";
 import { assertDurableRunRepositoryPort } from "../../src/application/ports/durable-run-repository-port.mjs";
 import { openDurableRunRepository } from "../../src/application/run/open-durable-run-repository.mjs";
 import { buildEvidenceTransitionShadowProjection } from "./evidence-transition-shadow-adapter.mjs";
@@ -37,12 +38,7 @@ import {
 const SUPPORTED_RUNTIMES = new Set(["codex", "claude"]);
 const nativeRuntimeBridgeAttestations = new WeakSet();
 const MAX_RESULT_TEXT = 16_000;
-const MANAGED_PARENT_MARKERS = Object.freeze([
-  "CLAUDECODE",
-  "CLAUDE_CODE_ENTRYPOINT",
-  "CODEX_THREAD_ID",
-  "CODEX_PERMISSION_PROFILE",
-]);
+const MANAGED_PARENT_MARKERS = HOST_INHERITED_ENV_NAMES;
 const CHILD_ENV_SYSTEM_ALLOWLIST = new Set([
   "PATH", "Path", "PATHEXT", "SystemRoot", "SYSTEMROOT", "WINDIR", "ComSpec",
   "HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "TEMP", "TMP",
@@ -385,7 +381,11 @@ function runtimeInvocation(runtime, workspaceRoot) {
       "--safe-mode",
       "--permission-mode",
       "plan",
-      "--tools",
+      // No `--tools`: Claude Code 2.1.236 resolves `--tools <list>` to an
+      // empty tool set (live-verified), which leaves the stage runner unable
+      // to read anything. Read-only shape stays enforced by permission-mode
+      // "plan" plus this allowlist; the capability gate hooks remain armed.
+      "--allowedTools",
       "Read,Glob,Grep",
       "--no-session-persistence",
     ],

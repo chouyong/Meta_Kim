@@ -17,7 +17,9 @@ export const RUNTIME_HOOK_CAPABILITIES = {
       sessionStart: "SessionStart",
       preToolUse: "PreToolUse",
       postToolUse: "PostToolUse",
+      preCompact: "PreCompact",
       subagentStart: "SubagentStart",
+      subagentStop: "SubagentStop",
       stop: "Stop",
     },
   },
@@ -31,7 +33,9 @@ export const RUNTIME_HOOK_CAPABILITIES = {
       sessionStart: "SessionStart",
       preToolUse: "PreToolUse",
       postToolUse: "PostToolUse",
+      preCompact: "PreCompact",
       subagentStart: "SubagentStart",
+      subagentStop: "SubagentStop",
       skill: "Skill",
       stop: "Stop",
     },
@@ -93,11 +97,13 @@ export const SHARED_RUNTIME_HOOK_FILES = Object.freeze([
   "project-root.mjs",
   "utils.mjs",
   "skip-reminder.mjs",
+  "conversation-binding.mjs",
   "spine-state-utils.mjs",
   "spine-state-gates.mjs",
   "spine-state.mjs",
   "activate-meta-theory-spine.mjs",
   "medusa-findings-surface.mjs",
+  "planning-continuity.mjs",
 ]);
 
 const CLAUDE_COMPATIBLE_HOOK_FILES = Object.freeze([
@@ -183,15 +189,35 @@ export function hookCommand(command, timeout, extra = {}) {
   };
 }
 
-const PROJECT_RUNTIME_ADAPTER_HOOK_FILES = Object.freeze([
+export const PROJECT_META_KIM_HOOK_FILES = new Set([
+  "project-root.mjs",
+  "utils.mjs",
+  "skip-reminder.mjs",
+  "conversation-binding.mjs",
+  "spine-state-utils.mjs",
+  "spine-state-gates.mjs",
+  "spine-state.mjs",
+  "activate-meta-theory-spine.mjs",
+  "bash-readonly-whitelist.mjs",
+  "block-dangerous-bash.mjs",
   "codex_hook_adapter.py",
   "codex_hook_runner.mjs",
+  "enforce-agent-dispatch.mjs",
+  "graphify-context.mjs",
+  "hook-i18n.mjs",
   "hookprompt-adapter.mjs",
+  "medusa-findings-surface.mjs",
+  "medusa-postscan-enqueue.mjs",
+  "meta-kim-memory-save.mjs",
   "permission_request.py",
+  "planning-continuity.mjs",
   "planning-with-files-adapter.mjs",
+  "post-console-log-warn.mjs",
+  "post-format.mjs",
   "post-tool-use.ps1",
   "post-tool-use.sh",
   "post_tool_use.py",
+  "post-typecheck.mjs",
   "pre-compact.sh",
   "pre-git-push-confirm.mjs",
   "pre-tool-use.ps1",
@@ -200,17 +226,17 @@ const PROJECT_RUNTIME_ADAPTER_HOOK_FILES = Object.freeze([
   "resolve-plan-dir.sh",
   "session-start.sh",
   "session_start.py",
+  "stop-compaction.mjs",
+  "stop-completion-guard.mjs",
+  "stop-console-log-audit.mjs",
+  "stop-save-progress.mjs",
+  "stop-spine-cleanup.mjs",
   "stop.ps1",
   "stop.py",
   "stop.sh",
+  "subagent-context.mjs",
   "user-prompt-submit.sh",
   "user_prompt_submit.py",
-]);
-
-const PROJECT_META_KIM_HOOK_FILES = new Set([
-  ...SHARED_RUNTIME_HOOK_FILES,
-  ...Object.keys(RUNTIME_HOOK_SOURCE_OWNERS),
-  ...PROJECT_RUNTIME_ADAPTER_HOOK_FILES,
 ]);
 
 export function isProjectMetaKimHookCommand(command) {
@@ -323,6 +349,16 @@ export function buildHookPromptAdapterSource(runtimeId) {
     "  }",
     "}",
     "",
+    "// A starved inner hook is indistinguishable from one that produced no",
+    "// context: both leave the adapter silent. 10s protects an interactive",
+    "// prompt, but a loaded CI host can starve a healthy hook past it, so the",
+    "// ceiling is overridable. An unparseable or non-positive override falls",
+    "// back to the default rather than being clamped into a different value.",
+    "function innerTimeoutMs() {",
+    '  const raw = Number.parseInt(process.env.META_KIM_HOOKPROMPT_INNER_TIMEOUT_MS ?? "", 10);',
+    "  return Number.isFinite(raw) && raw > 0 ? raw : 10000;",
+    "}",
+    "",
     "function emitAdditionalContext(additionalContext) {",
     `  const runtimeId = ${JSON.stringify(runtimeId)};`,
     '  if (runtimeId === "cursor") {',
@@ -345,7 +381,7 @@ export function buildHookPromptAdapterSource(runtimeId) {
     '    input: JSON.stringify({ prompt }),',
     '    encoding: "utf8",',
     '    windowsHide: true,',
-    '    timeout: 10000,',
+    '    timeout: innerTimeoutMs(),',
     "  });",
     "  const additionalContext = parseClaudeAdditionalContext(result.stdout || '');",
     "  if (additionalContext) {",
@@ -365,15 +401,22 @@ export function buildCodexHooksJson({
   medusaEnqueueHookPath = ".codex/hooks/medusa-postscan-enqueue.mjs",
   medusaSurfaceHookPath = ".codex/hooks/medusa-findings-surface.mjs",
   hookPromptAdapterPath = null,
+  planningContinuityHookPath = ".codex/hooks/planning-continuity.mjs",
   stopSpineCleanupHookPath = null,
   nodeExecutable = "node",
 } = {}) {
   const nodeCommand = (scriptPath, args = []) =>
     nodeHookCommand(scriptPath, args, nodeExecutable);
   const userPromptHooks = [];
-  const spineHookArgs = packageRoot ? ["--package-root", packageRoot] : [];
+  const spineHookArgs = ["--runtime", "codex", ...(packageRoot ? ["--package-root", packageRoot] : [])];
+  const lifecycleHook = () => hookCommand(nodeHookCommand(spineHookPath, spineHookArgs), 5);
   if (spineHookPath) {
     userPromptHooks.push(hookCommand(nodeCommand(spineHookPath, spineHookArgs), 5));
+  }
+  if (planningContinuityHookPath) {
+    userPromptHooks.push(hookCommand(nodeHookCommand(planningContinuityHookPath, [
+      "--event", "user-prompt", "--runtime", "codex",
+    ]), 10));
   }
   if (memoryHookPath) {
     userPromptHooks.push(
@@ -408,8 +451,30 @@ export function buildCodexHooksJson({
         ],
       },
       {
+        matcher: "Agent|spawn_agent|followup_task|collaboration\\.spawn_agent|collaboration\\.followup_task",
+        hooks: [lifecycleHook()],
+      },
+      {
         matcher: "Bash",
         hooks: [hookCommand(nodeCommand(graphifyHookPath))],
+      },
+    ],
+    PostToolUse: [
+      {
+        matcher: "Agent|spawn_agent|followup_task|collaboration\\.spawn_agent|collaboration\\.followup_task",
+        hooks: [lifecycleHook()],
+      },
+    ],
+    SubagentStart: [
+      {
+        matcher: "*",
+        hooks: [lifecycleHook()],
+      },
+    ],
+    SubagentStop: [
+      {
+        matcher: "*",
+        hooks: [lifecycleHook()],
       },
     ],
     Skill: [
@@ -431,19 +496,48 @@ export function buildCodexHooksJson({
     ];
   }
 
-  if (memoryHookPath) {
+  if (memoryHookPath || planningContinuityHookPath) {
+    const sessionHooks = [];
+    if (planningContinuityHookPath) {
+      sessionHooks.push(hookCommand(nodeHookCommand(planningContinuityHookPath, [
+        "--event", "session-start", "--runtime", "codex",
+      ]), 10, { statusMessage: "Loading Meta_Kim planning continuity" }));
+    }
+    if (memoryHookPath) {
+      sessionHooks.push(
+        hookCommand(nodeCommand(memoryHookPath, ["--event", "session-start"]), 10, {
+          statusMessage: "Loading Meta_Kim memory",
+        }),
+      );
+    }
     hooks.SessionStart = [
       {
         matcher: "startup|resume",
-        hooks: [
-          hookCommand(nodeCommand(memoryHookPath, ["--event", "session-start"]), 10, {
-            statusMessage: "Loading Meta_Kim memory",
-          }),
-        ],
+        hooks: sessionHooks,
       },
     ];
   }
+  if (planningContinuityHookPath) {
+    hooks.PreCompact = [{
+      matcher: "*",
+      hooks: [hookCommand(nodeHookCommand(planningContinuityHookPath, [
+        "--event", "pre-compact", "--runtime", "codex",
+      ]), 10)],
+    }];
+    hooks.PostToolUse = [...(hooks.PostToolUse ?? []), {
+      matcher: "Edit|Write",
+      hooks: [hookCommand(nodeHookCommand(planningContinuityHookPath, [
+        "--event", "post-tool", "--runtime", "codex",
+      ]), 10)],
+    }];
+  }
   const stopHooks = [];
+  if (spineHookPath) stopHooks.push(lifecycleHook());
+  if (planningContinuityHookPath) {
+    stopHooks.push(hookCommand(nodeHookCommand(planningContinuityHookPath, [
+      "--event", "stop", "--runtime", "codex",
+    ]), 10));
+  }
   if (memoryHookPath) {
     stopHooks.push(
       hookCommand(nodeCommand(memoryHookPath, ["--event", "stop"]), 10),
@@ -500,11 +594,16 @@ export function buildCursorHooksJson({
   medusaEnqueueHookPath = ".cursor/hooks/medusa-postscan-enqueue.mjs",
   medusaSurfaceHookPath = ".cursor/hooks/medusa-findings-surface.mjs",
   hookPromptAdapterPath = null,
+  planningContinuityHookPath = null,
   nodeExecutable = "node",
 } = {}) {
   const nodeCommand = (scriptPath, args = []) =>
     nodeHookCommand(scriptPath, args, nodeExecutable);
-  const spineHookArgs = packageRoot ? ["--package-root", packageRoot] : [];
+  const spineHookArgs = ["--runtime", "cursor", ...(packageRoot ? ["--package-root", packageRoot] : [])];
+  const lifecycleHook = () => ({
+    command: nodeCommand(spineHookPath, spineHookArgs),
+    timeout: 5,
+  });
   const beforeSubmitPromptHooks = [
     {
       command: nodeCommand(spineHookPath, spineHookArgs),
@@ -515,6 +614,14 @@ export function buildCursorHooksJson({
       timeout: 5,
     },
   ];
+  if (planningContinuityHookPath) {
+    beforeSubmitPromptHooks.push({
+      command: nodeCommand(planningContinuityHookPath, [
+        "--event", "user-prompt", "--runtime", "cursor",
+      ]),
+      timeout: 10,
+    });
+  }
   if (memoryHookPath) {
     beforeSubmitPromptHooks.push({
       command: nodeCommand(memoryHookPath, ["--event", "user-prompt"]),
@@ -541,26 +648,57 @@ export function buildCursorHooksJson({
       {
         command: nodeCommand(graphifyHookPath),
       },
+      lifecycleHook(),
     ],
-  };
-  if (memoryHookPath) {
-    hooks.sessionStart = [
+    // Cursor declares the command directly on the event and carries the matcher
+    // as a sibling field. A nested `hooks` array is Claude's shape: Cursor reads
+    // no command out of it, so the lifecycle hook would be registered on paper
+    // and never invoked. Every other event in this builder is already flat.
+    postToolUse: [
       {
+        ...lifecycleHook(),
+        matcher: "Agent|spawn_agent|followup_task|collaboration\\.spawn_agent|collaboration\\.followup_task",
+      },
+    ],
+    subagentStart: [lifecycleHook()],
+    stop: [lifecycleHook()],
+  };
+  if (memoryHookPath || planningContinuityHookPath) {
+    hooks.sessionStart = [];
+    if (planningContinuityHookPath) {
+      hooks.sessionStart.push({
+        command: nodeCommand(planningContinuityHookPath, [
+          "--event", "session-start", "--runtime", "cursor",
+        ]),
+        timeout: 10,
+      });
+    }
+    if (memoryHookPath) {
+      hooks.sessionStart.push({
         command: nodeCommand(memoryHookPath, ["--event", "session-start"]),
         timeout: 10,
-      },
-    ];
-    hooks.stop = [
-      {
+      });
+    }
+    if (planningContinuityHookPath) {
+      hooks.stop.push({
+        command: nodeCommand(planningContinuityHookPath, [
+          "--event", "stop", "--runtime", "cursor",
+        ]),
+        timeout: 10,
+      });
+    }
+    if (memoryHookPath) {
+      hooks.stop.push({
         command: nodeCommand(memoryHookPath, ["--event", "stop"]),
         timeout: 10,
-      },
-    ];
+      });
+    }
   }
   if (medusaEnqueueHookPath) {
     // Medusa AI-context content scan, enqueue path. Stays fail-open: no
     // failClosed flag — a slow/missing Python must never block edits.
     hooks.postToolUse = [
+      ...(hooks.postToolUse ?? []),
       {
         command: nodeCommand(medusaEnqueueHookPath),
         timeout: 5,

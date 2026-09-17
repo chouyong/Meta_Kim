@@ -16,6 +16,9 @@ import { fileURLToPath } from "node:url";
 import { createServer } from "node:http";
 
 import {
+  buildCodexHooksJson,
+  buildCursorHooksJson,
+  isProjectMetaKimHookCommand,
   runtimeHookSourceOwner,
   SHARED_RUNTIME_HOOK_FILES,
 } from "../../scripts/runtime-hook-mapping.mjs";
@@ -153,11 +156,13 @@ test("cross-runtime hook core has one canonical owner", () => {
     "project-root.mjs",
     "utils.mjs",
     "skip-reminder.mjs",
+    "conversation-binding.mjs",
     "spine-state-utils.mjs",
     "spine-state-gates.mjs",
     "spine-state.mjs",
     "activate-meta-theory-spine.mjs",
     "medusa-findings-surface.mjs",
+    "planning-continuity.mjs",
   ]);
 
   for (const fileName of SHARED_RUNTIME_HOOK_FILES) {
@@ -172,6 +177,42 @@ test("cross-runtime hook core has one canonical owner", () => {
     assert.ok(adapter.split(/\r?\n/u).filter(Boolean).length <= 2, `${fileName} must stay thin`);
     assert.notEqual(adapter, readFileSync(join(SHARED_HOOK_DIR, fileName), "utf8"));
   }
+});
+
+test("every projected project hook command is strippable on retarget", () => {
+  const claudeSettings = JSON.parse(
+    readFileSync(join(REPO_ROOT, "canonical", "runtime-assets", "claude", "settings.json"), "utf8"),
+  );
+  const collect = (config, into = []) => {
+    for (const entries of Object.values(config?.hooks ?? {})) {
+      if (!Array.isArray(entries)) continue;
+      for (const entry of entries) {
+        const hooks = Array.isArray(entry?.hooks) ? entry.hooks : [entry];
+        for (const hook of hooks) {
+          if (typeof hook?.command === "string") into.push(hook.command);
+        }
+      }
+    }
+    return into;
+  };
+
+  const projected = [
+    ...collect(claudeSettings),
+    ...collect(buildCodexHooksJson({})),
+    ...collect(
+      buildCursorHooksJson({
+        planningContinuityHookPath: ".cursor/hooks/planning-continuity.mjs",
+      }),
+    ),
+  ];
+  assert.ok(projected.length >= 16, `expected projected hook commands, got ${projected.length}`);
+
+  const unstrippable = projected.filter((command) => !isProjectMetaKimHookCommand(command));
+  assert.deepEqual(
+    unstrippable,
+    [],
+    `these projected hook commands survive retargeting after their file is deleted: ${unstrippable.join(", ")}`,
+  );
 });
 
 test("spine-state keeps its original gate exports as a compatibility facade", () => {
@@ -347,9 +388,15 @@ test("global hook sync projects universal core and runtime-owned memory entrypoi
         META_KIM_PROFILE: profile,
         META_KIM_DISABLE_MEMORY_AUTOSTART: "1",
         META_KIM_POST_COPY_AUTO: "off",
+        // The subject here is the projected hook lifecycle, not the minting
+        // policy. A bare activation is `activation_only` and earns no run
+        // directory by default, so the run envelopes read below need minting
+        // forced on the same way 20-run-status-envelope.test.mjs forces it.
+        META_KIM_RUN_DIRECTORY_MINTING: "always",
       };
       for (const dependency of [
         "activate-meta-theory-spine.mjs",
+        "conversation-binding.mjs",
         "project-root.mjs",
         "spine-state-gates.mjs",
         "spine-state.mjs",

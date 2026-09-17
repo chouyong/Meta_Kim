@@ -539,6 +539,30 @@ describe("sync-runtimes / Codex project hooks", () => {
     );
     assert.ok(Array.isArray(config.hooks.Stop));
     assert.match(JSON.stringify(config.hooks.Stop), /stop-compaction\.mjs/);
+    assert.ok(
+      config.hooks.PostToolUse.some((entry) =>
+        entry.hooks?.some((hook) => hook.command.includes("activate-meta-theory-spine.mjs")),
+      ),
+      "Codex project PostToolUse must preserve worker lifecycle writeback",
+    );
+    assert.ok(
+      config.hooks.PostToolUse.some((entry) =>
+        entry.hooks?.some((hook) => hook.command.includes("post-format.mjs")),
+      ),
+      "Codex project PostToolUse must still append formatting hooks",
+    );
+    assert.ok(
+      config.hooks.SubagentStart.some((entry) =>
+        entry.hooks?.some((hook) => hook.command.includes("activate-meta-theory-spine.mjs")),
+      ),
+      "Codex project SubagentStart must preserve worker lifecycle binding",
+    );
+    assert.ok(
+      config.hooks.SubagentStart.some((entry) =>
+        entry.hooks?.some((hook) => hook.command.includes("subagent-context.mjs")),
+      ),
+      "Codex project SubagentStart must still append context injection",
+    );
     const stopCommands = config.hooks.Stop.flatMap((entry) => entry.hooks ?? [])
       .map((hook) => hook.command);
     assert.equal(stopCommands.filter((command) => command.includes("meta-kim-memory-save.mjs")).length, 1);
@@ -639,7 +663,9 @@ describe("sync-runtimes / Codex project hooks", () => {
     const config = buildCodexProjectHooksJson({
       memoryHookPath: hookPath,
     });
-    const command = config.hooks.SessionStart[0].hooks[0].command;
+    const command = config.hooks.SessionStart[0].hooks.find((hook) =>
+      hook.command.includes("meta-kim-memory-save.mjs"),
+    ).command;
 
     assert.equal(command, `node ${JSON.stringify(hookPath.replaceAll("\\", "/"))} --event session-start`);
     assert.doesNotMatch(command, /Program Files/);
@@ -920,6 +946,11 @@ describe("sync-runtimes / Cursor project hooks", () => {
       config.hooks.beforeSubmitPrompt[0].command,
       /activate-meta-theory-spine\.mjs/,
     );
+    // beforeSubmitPrompt also carries the medusa surface hook (fork-specific
+    // integration); upstream has no medusa hooks so it only checks for one.
+    assert.doesNotMatch(JSON.stringify(config), /planning-continuity\.mjs/);
+    assert.ok(config.hooks.postToolUse.every((hook) => hook.command));
+    assert.ok(config.hooks.postToolUse.every((hook) => hook.hooks === undefined));
 
     const preToolUse = config.hooks.preToolUse;
 
@@ -950,6 +981,36 @@ describe("sync-runtimes / Cursor project hooks", () => {
 
     // sessionStart/stop may exist for the medusa surface hook, but must carry
     // no memory/adapter commands.
+    assert.ok(
+      config.hooks.postToolUse.some((entry) =>
+        entry.command?.includes("activate-meta-theory-spine.mjs"),
+      ),
+      "Cursor project postToolUse must preserve exact lifecycle observation",
+    );
+    assert.ok(
+      config.hooks.postToolUse.some((entry) =>
+        entry.command?.includes("post-format.mjs"),
+      ),
+      "Cursor project postToolUse must still append formatting hooks",
+    );
+    assert.ok(
+      config.hooks.subagentStart.some((entry) =>
+        entry.command?.includes("activate-meta-theory-spine.mjs"),
+      ),
+      "Cursor project subagentStart must preserve exact lifecycle observation",
+    );
+    assert.ok(
+      config.hooks.subagentStart.some((entry) =>
+        entry.command?.includes("subagent-context.mjs"),
+      ),
+      "Cursor project subagentStart must still append context injection",
+    );
+    assert.equal(
+      config.hooks.subagentStop,
+      undefined,
+      "Cursor must not claim a SubagentStop surface that Meta_Kim has not verified",
+    );
+
     assert.ok(Array.isArray(config.hooks.stop));
     assert.match(JSON.stringify(config.hooks.stop), /stop-compaction\.mjs/);
     assert.doesNotMatch(JSON.stringify(config), /meta-kim-memory-save\.mjs/);

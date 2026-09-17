@@ -23,6 +23,10 @@
             "type": "command",
             "command": "node .claude/hooks/medusa-findings-surface.mjs --event session-start",
             "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "node .claude/hooks/planning-continuity.mjs --event session-start --runtime claude"
           }
         ]
       }
@@ -42,7 +46,11 @@
           },
           {
             "type": "command",
-            "command": "node .claude/hooks/activate-meta-theory-spine.mjs"
+            "command": "node .claude/hooks/activate-meta-theory-spine.mjs --runtime claude"
+          },
+          {
+            "type": "command",
+            "command": "node .claude/hooks/planning-continuity.mjs --event user-prompt --runtime claude"
           }
         ]
       }
@@ -67,16 +75,43 @@
         ]
       },
       {
+        "matcher": "Agent|Task",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node .claude/hooks/activate-meta-theory-spine.mjs --runtime claude"
+          }
+        ]
+      },
+      {
         "matcher": "Skill",
         "hooks": [
           {
             "type": "command",
-            "command": "node .claude/hooks/activate-meta-theory-spine.mjs"
+            "command": "node .claude/hooks/activate-meta-theory-spine.mjs --runtime claude"
           }
         ]
       }
     ],
     "PostToolUse": [
+      {
+        "matcher": "Agent|Task",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node .claude/hooks/activate-meta-theory-spine.mjs --runtime claude"
+          }
+        ]
+      },
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node .claude/hooks/planning-continuity.mjs --event post-tool --runtime claude"
+          }
+        ]
+      },
       {
         "matcher": "Edit|Write",
         "hooks": [
@@ -105,7 +140,27 @@
         ]
       }
     ],
+    "PreCompact": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node .claude/hooks/planning-continuity.mjs --event pre-compact --runtime claude"
+          }
+        ]
+      }
+    ],
     "SubagentStart": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node .claude/hooks/activate-meta-theory-spine.mjs --runtime claude"
+          }
+        ]
+      },
       {
         "matcher": "meta-*",
         "hooks": [
@@ -116,10 +171,25 @@
         ]
       }
     ],
+    "SubagentStop": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node .claude/hooks/activate-meta-theory-spine.mjs --runtime claude"
+          }
+        ]
+      }
+    ],
     "Stop": [
       {
         "matcher": "*",
         "hooks": [
+          {
+            "type": "command",
+            "command": "node .claude/hooks/planning-continuity.mjs --event stop --runtime claude"
+          },
           {
             "type": "command",
             "command": "node .claude/hooks/stop-compaction.mjs"

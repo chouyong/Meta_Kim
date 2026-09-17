@@ -10,7 +10,7 @@ import { assertExactStandardRuntimeObservationSet, standardRuntimeObservationSet
 
 const SUPPORTED_RUNTIMES = new Set(["claude_code", "codex"]);
 const SUPPORTED_CAPABILITIES = new Set(["agent", "subagent", "shell", "filesystem", "apply_patch / edit"]);
-const VALUE_OPTIONS = new Set(["--runtimes", "--capabilities", "--project-root", "--profile", "--source", "--codex-thread-id", "--codex-child-session-id", "--codex-marker", "--since", "--codex-desktop-engineering-workspace", "--claude-session-id", "--claude-marker", "--claude-runtime-workspace"]);
+const VALUE_OPTIONS = new Set(["--runtimes", "--capabilities", "--project-root", "--profile", "--source", "--codex-thread-id", "--codex-child-session-id", "--codex-marker", "--since", "--codex-desktop-engineering-workspace", "--codex-model", "--codex-reasoning-effort", "--claude-session-id", "--claude-marker", "--claude-runtime-workspace"]);
 const BOOLEAN_OPTIONS = new Set(["--status", "--require-fresh"]);
 
 function printHelp() {
@@ -24,7 +24,9 @@ function printHelp() {
     `  --status                Read fresh accepted production evidence; never invoke a runtime\n` +
     `  --require-fresh         Exit nonzero when any requested claim is missing/stale\n` +
     `  --source <kind>         live_controlled|codex_desktop_agent_subagent|codex_tui_agent_subagent|codex_desktop_engineering|claude_interactive_session_handoff\n` +
-    `  --codex-thread-id <id>  Use one explicit Codex parent session\n` +
+    `  --codex-model <MODEL>   Explicit Codex model for live_controlled production\n` +
+    `  --codex-reasoning-effort <EFFORT>  Explicit Codex model reasoning effort\n` +
+    `  --codex-thread-id <id>  Use one explicit Codex Desktop parent session\n` +
     `  --codex-child-session-id <id>  Bind the exact spawned child session\n` +
     `  --codex-marker <token>   Exact child-final capability marker\n` +
     `  --since <ISO time>       Reject Desktop evidence older than this time\n` +
@@ -89,6 +91,8 @@ const workspacePath = option(args, "--codex-desktop-engineering-workspace", unde
 const claudeSessionId = option(args, "--claude-session-id", undefined);
 const claudeMarker = option(args, "--claude-marker", undefined);
 const claudeWorkspacePath = option(args, "--claude-runtime-workspace", undefined);
+const codexModel = option(args, "--codex-model", undefined);
+const codexReasoningEffort = option(args, "--codex-reasoning-effort", undefined);
 if (source && statusRequested) failCli("--status cannot be combined with --source");
 if (sinceRaw && !Number.isFinite(sinceMs)) failCli("--since must be a valid timestamp");
 if (source === "claude_interactive_session_handoff") {
@@ -99,6 +103,9 @@ if (source === "claude_interactive_session_handoff") {
   if (!claudeSessionId || !claudeMarker || !claudeWorkspacePath || !Number.isFinite(sinceMs)) {
     failCli("Claude interactive session handoff requires session, marker, workspace, and since");
   }
+}
+if ((codexModel || codexReasoningEffort) && runtimes.some((runtime) => runtime !== "codex")) {
+  failCli("--codex-model/--codex-reasoning-effort require --runtimes codex to avoid invoking another runtime");
 }
 try {
   if (statusRequested) {
@@ -159,6 +166,8 @@ try {
         workspacePath: source === "claude_interactive_session_handoff"
           ? path.resolve(claudeWorkspacePath)
           : workspacePath ? path.resolve(workspacePath) : undefined,
+        codexModel,
+        codexReasoningEffort,
       });
       if (produced.outcome === "fail") {
         failureObservations.push({

@@ -90,13 +90,14 @@ function runSyncGlobal(targets, extraEnv = {}) {
   );
 }
 
-function runProjectSyncFromFixture(tempRoot, args = []) {
+function runProjectSyncFromFixture(tempRoot, args = [], extraEnv = {}) {
   return runNodeCommand(
     ["scripts/sync-runtimes.mjs", ...args],
     {
       ...process.env,
       META_KIM_REPO_ROOT: tempRoot,
       META_KIM_CALLER_CWD: tempRoot,
+      ...extraEnv,
     },
   );
 }
@@ -214,6 +215,39 @@ describe("runtime hook sync contract", () => {
       const summary = JSON.parse(check.stdout);
       assert.equal(summary.status, "ok");
       assert.deepEqual(summary.targets, []);
+    } finally {
+      rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("global_only explicit targets limit the Hook runtime without materializing durable projections", async () => {
+    const tempRoot = createTempSourceRepoFixture();
+    try {
+      const overrideDir = join(tempRoot, ".meta-kim");
+      mkdirSync(overrideDir, { recursive: true });
+      writeFileSync(
+        join(overrideDir, "local.overrides.json"),
+        `${JSON.stringify({ projectProjectionMode: "global_only" }, null, 2)}\n`,
+      );
+
+      const userAgentDir = join(tempRoot, ".claude", "agents");
+      mkdirSync(userAgentDir, { recursive: true });
+      const userAgent = join(userAgentDir, "user-owned.md");
+      writeFileSync(userAgent, "user-owned\n", "utf8");
+
+      const sync = await runProjectSyncFromFixture(
+        tempRoot,
+        ["--targets", "claude"],
+        { META_KIM_CALLER_CWD: tempRoot },
+      );
+      assert.equal(sync.status, 0, sync.stderr || sync.stdout);
+
+      assert.equal(existsSync(join(tempRoot, ".claude", "hooks", "activate-meta-theory-spine.mjs")), true);
+      assert.equal(existsSync(join(tempRoot, ".codex", "hooks")), false);
+      assert.equal(existsSync(join(tempRoot, ".cursor", "hooks")), false);
+      assert.equal(existsSync(join(tempRoot, ".claude", "skills")), false);
+      assert.equal(existsSync(join(tempRoot, ".claude", "commands")), false);
+      assert.equal(readFileSync(userAgent, "utf8"), "user-owned\n");
     } finally {
       rmSync(tempRoot, { recursive: true, force: true });
     }

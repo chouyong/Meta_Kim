@@ -6,6 +6,119 @@ This file is the reader-facing release history for Meta_Kim.
 
 The changelog explains the user-facing problem or risk each release solved, what changed to solve it, and why the change matters. It intentionally avoids long internal task ledgers, low-signal backlog ids, and implementation trivia. When exact evidence is needed, use the repository history, tests, generated reports, and PRD artifacts.
 
+## Unreleased
+
+## [3.2.0] - 2026-09-14
+
+### Added
+
+- **Opt-in industry Agent discovery from Kim Service.** An explicitly bound Kim Service checkout supplies fifteen standalone roles for creators, ecommerce, career and workplace writing, education, and side businesses. Meta_Kim checks each contract and component's contents before selecting an owner through its existing route. The packages remain in Kim Service; selection does not claim native loading or verified model delivery.
+
+### Fixed
+
+- **Existing managed HookPrompt registrations receive the one-minute timeout.** Install/update and template refresh now agree on 60 seconds and refresh old managed entries in place. User commands, unrelated scripts with the same filename, matcher order, and unrelated fields are preserved (issue #81).
+- **Everyday deliverables enter the execution route.** Requests for resumes, weekly reports, customer replies, and similar confirmed industry tasks now reach the shared entry classifier. Serialized work orders preserve ordinary separators such as “search / recommendations” while still redacting private paths and credentials.
+- **Desktop acceptance recognizes current Codex completion events.** Native file changes, subagent activity, and child finals are read from both supported event formats. Freshness follows the bound event timestamps when Windows defers a live rollout's file modification time; stale events, mismatched sessions, failed changes, and altered source records remain rejected.
+
+## [3.1.2] - 2026-09-10
+
+### Fixed
+
+- **Concurrent global projection no longer fails on npm 10.** When two workers materialized the same package at once, the loser compared its bundle byte-for-byte against the winner's and always found a difference, so the install aborted. The difference was npm's own bookkeeping: on npm 10 `npm install <archive>` records the archive's absolute staged path as a `file:` dependency, and that path carries a per-worker process id and uuid. The staged segment is now collapsed before the bundle is hashed, so two workers building from the same source produce identical bundles. Nothing resolves those `file:` URLs — the archive is deleted right after install — so the rewrite costs nothing. npm 11 records a prefix-relative path and was never affected, which is why the report only reached users on the older npm (PR #80).
+- **A missing lockfile no longer aborts materialization.** The same path read three bundle metadata files unconditionally; npm version decides which of them exist. A file that was never written is now skipped, while every other read or write error still stops the install rather than letting a half-written bundle reach the receipt.
+- **The planning stop hook says which condition is unmet.** It previously refused with `planning_not_verified_or_closed` and a bounded-block count of zero, which named neither the failing condition nor the next action. It now reports the specific unmet completion condition, and the no-op path for a run with no bound plan is covered on every lifecycle event.
+- **The prompt hook budget uses Claude Code's unit.** The hook timeout was written as a millisecond figure in a field Claude Code reads as seconds, which turned an intended one-minute ceiling into an effectively unbounded one.
+
+## [3.1.1] - 2026-09-08
+
+### Fixed
+
+- **`--roll-review` now completes the valid review-roll path instead of crashing during re-validation.** The command read `validateRuntimeCapabilityClaims`'s array return as `{ issues }` and threw after printing its planned updates. The read/roll/re-validate/write sequence is now tested through the file and CLI entry points. The command updates applicable bindings in both the capability matrix and evidence ledger and refuses to write if any problem it cannot repair survives. Review dates still require an explicit maintainer action and rationale; this release does not re-date existing evidence (PR #75).
+- **The roller is reachable through npm.** `npm run meta:runtime:evidence:roll-review` replaces having to type the script path.
+
+## [3.1.0] - 2026-09-08
+
+### Added
+
+- **Materially different alternatives require a choice.** Decision policy now recognizes explicit alternatives and mutually exclusive routes that change scope, risk, or acceptance. Complementary parallel work alone does not trigger a question. The runtime must invoke its supported choice surface before treating a required choice as answered; policy checks do not certify live popup behavior on every host.
+- **Evidence pins can be refreshed officially.** `npm run meta:runtime:evidence:refresh-pins` recomputes `repo_projection` source digests after source edits (with a `:check` variant for CI), so a touched pinned file no longer requires a hand-written one-off script (issue #61).
+- **Clean-room acceptance keeps its sandbox for forensics.** `--keep-temp` (or `META_KIM_CLEAN_ROOM_KEEP_TEMP=1`) preserves the sandbox temp root, and a dependency step that exits 0 with empty output and no artifact now emits an explicit multi-line silent-noop diagnostic into the report instead of failing without a cause.
+- **Compatibility follows verified host capabilities.** Model selection does not merge governance stages, remove necessary native choices, or imply that a runtime has been tested. Compatibility research remains separate from live acceptance.
+
+### Changed
+
+- **The execution graph gets a quieter frame.** The task heading appears once, with the full description and run identifier available on demand. Navigation and the footer no longer repeat it, and overview node labels retain body-sized screen text while preserving complete-card geometry for zooming.
+- **Routine graph rebuilding no longer invokes a model automatically.** Code extraction and community grouping run locally, preserving the existing semantic layer without silently refreshing documents or images. Identity and freshness checks still apply.
+- **Activation receipts are not execution reports.** A run that only registered startup now says it has no execution report; the header and footer use the same public state.
+- **Hook context injection is now digest-gated, not turn-gated.** Planning continuity degrades repeat injections to a one-line pointer when the plan is byte-identical to the last injection, and stops injecting entirely once the work is closed — reopening any item restores the full projection. Memory recall skips re-emitting an identical selection, the graphify usage tip fires once per session instead of per search command, and the subagent rule set is deduplicated per session and agent. New kill switches: `META_KIM_GRAPHIFY_CONTEXT=off`, `META_KIM_SUBAGENT_CONTEXT=off`, `META_KIM_DISABLE_RECALL_DEDUPE=1`. On Codex, the subagent governance rules now target `meta-*` agents instead of every spawned subagent (issue #57).
+- **The Live panel tells the truth about running work.** Observed invocation evidence now promotes a declared-queued worker to a visible running state (labeled `运行中·observed`) without manufacturing lifecycle proof; runs and sessions derive activity the same way, and stale observed evidence decays back to the declared state. Declared-but-never-started work renders with a dashed border and an explicit "声明未执行" chip instead of looking like executed work.
+- **The Live panel actually polls when the stream is unavailable.** The "Polling snapshot" badge now backs a real 10-second snapshot refresh that suspends while hidden and dismantles itself when the stream returns, instead of promising polling that never happened.
+- **Live layout re-chooses columns after measuring real cards.** When measured card metrics materially disagree with what the arrangement assumed, one corrective re-layout runs — bounded to a single pass, never a loop.
+- **Initial-state graph lines have stronger contrast.** Idle, queued, and structural edges use brighter strokes while running work retains teal emphasis; the legend covers observed running and declared-not-started states.
+- **`gstack` is now a third-party reference, not an installable dependency.** Default install no longer clones it; explicit opt-in prints a warning. The dependency registry marks it `reference_only` — the first step of the gradual peel of non-first-party dependencies.
+
+### Fixed
+
+- **Runtime selection respects installation scope.** Explicit targets in a `global_only` project limit the Hook package without materializing durable project agents, skills, or commands (issue #76).
+- **Planning hooks handle ordinary folders without repeated errors.** Automatic lifecycle hooks silently skip an unbound project; Claude's explicit project directory is honored only on Claude. Explicit planning commands and integrity protections remain enforced.
+- **Run boundaries no longer appear as pending tasks.** Live separates non-goal constraints from historical task packets while retaining the original record. Work with execution evidence stays visible, with a conflict marker when it contradicts a boundary.
+- **Global checks explain what needs repair.** Stale hooks list missing and changed files with their runtime-specific source. Package checks distinguish source evolution from an invalid installed bundle and retain diagnostic-only failure when authority is unavailable (issues #77, #78).
+
+- **Windows global sync no longer fails on byte-exact package checks.** Package staging installs with `--no-bin-links`, which keeps extracted bytes equal to `npm pack` truth instead of letting bin linking rewrite a CRLF shebang (issue #74).
+- **Projection-package unit tests no longer read the user's real store.** `META_KIM_PROJECTION_PACKAGE_STORE_ROOT` isolates the digest root, so same-digest retry and concurrency cases no longer fail on machines with existing digests (issue #60).
+- **The Live hub starts reliably on loaded Windows machines.** A PowerShell identity probe that returns null under load no longer kills daemon startup; the failure is classified explicitly instead of surfacing as an opaque exit.
+- **Installers announce themselves.** Direct invocations of the global skill installer print an ack line (mode, targets, skills, flags), so a silent exit-0-with-no-output path can be told apart from a real no-op (issue #59).
+- **A redirected runtime home no longer means two installers disagree.** The dependency installer rejected every root junction while global sync accepted a configured whole-runtime-home redirect, so the same `~/.claude/agents` directory was valid to one and invalid to the other. Both now capture each configured runtime's lexical and real root and enforce that binding through preflight, writes, transaction retries, rollback, cleanup, and explicit dependency retirement. Redirects that escape the configured root, root rebinding, and immutable-store writes stay rejected, and the source project synchronizer no longer requires home agent symlinks. Verified with Windows directory junctions; macOS and Linux redirects were not exercised (issue #62).
+- **`meta-kim release close` accepts the queue ids the private queue actually uses.** The closure step recognized only `P-NNN`, so it had been unrunnable since the queue moved to milestone ids such as `M3-L05`, and the documented final release step silently stopped being taken. Both the flag check and the PRD `ACTIVE` row matcher now share one id grammar; ids outside that grammar are still rejected.
+
+## [3.0.9] - 2026-09-05
+
+### Changed
+
+- **Live lays out work by its dependencies and rendered size.** Graph placement follows dependency depth, while card and capability-row measurements inform spacing and readable zoom levels. Closing the inspector restores the previous camera scale.
+- **Live keeps historical runs easier to navigate.** Configurable retention, consistent session ordering, stale-projection backfill and visible catch-up after a pause help distinguish current work from older records without rescanning the catalog on every click.
+- **Worker lifecycle observations retain their evidence limits.** Run records distinguish Hook observations, session stops and completed work; observing a worker event does not manufacture proof of host execution.
+
+### Fixed
+
+- **Windows installs retry short-lived file locks.** Managed-file transactions reuse the shared retry helper when moving files, including publishing a newly created or replacement file. Errors outside the Windows lock set still fail the transaction and preserve the reported cause. Global Hook replacement also retries transient rename failures.
+- **Packaged commands retain the caller's project context.** Launching from the stable package store no longer uses the package directory as the caller's project, which could narrow runtime target selection.
+- **Package extraction handles Windows drive paths.** Archive extraction uses a local filename from its parent directory, avoiding drive-letter interpretation as a remote host across the supported tar implementations.
+- **Runtime Hook wiring preserves lifecycle and planning handlers together.** Codex retains both sets of handlers, and Cursor receives its native flat event format. Codex configuration cleanup also respects keys the host has deleted.
+- **Saved progress records what the user asked for, not the client's injected header.** Claude Code's stop Hook strips known harness wrappers and label prefixes before deciding whether a prompt is a real goal, so an injected preamble no longer becomes the recorded task. A wrapper whose separator was lost to truncation is dropped rather than filed, and a bracket the Hook does not recognize is left untouched so genuine requests that open with `[` survive.
+
+### Maintenance
+
+- Updated GitHub Actions checkout and Node setup dependencies to v7.
+
+## [3.0.8] - 2026-08-30
+
+### Fixed
+
+- **Claude Code planning continuity now reads Hook JSON correctly on native Windows.** The Hook consumes stdin as a stream instead of using a file-descriptor read that could discard a valid `session_id` and report `planning_run_identifier_missing` during `SessionStart`.
+- **Planning context uses the real Claude Code Hook event name.** `SessionStart`, `UserPromptSubmit`, and `PreCompact` context output now matches Claude Code's official `hookSpecificOutput` contract; unbound Hook input safely exits without creating shared authority or showing a startup error.
+
+## [3.0.7] - 2026-08-30
+
+### Added
+
+- **Planning continuity is now first-party.** Meta_Kim preserves run-scoped plans, progress, checkpoints, recovery evidence, and bounded completion without installing or invoking `planning-with-files`.
+- **Meta_Kim Live is now a global local Hub.** One loopback-only process lists explicitly registered projects and their governed Sessions / Runs, with project and run deep links into the existing graph, evidence, and replay experience.
+- **The first governed request lazily starts Live.** The normal conversation receives a clickable current-run link; later prompts reuse the same verified process instead of creating per-project or per-session servers.
+- **Live now opens in Chinese by default with a persistent English switch.** The complete navigation, graph chrome, evidence, replay, empty states, and accessibility labels are bilingual while project/session content stays in its original language.
+- **A verified governed project joins the Hub catalog on first use.** Explicitly opening Live or entering a governed run makes the current marker-backed project immediately selectable without a disk scan; an existing explicit skip remains respected.
+
+### Changed
+
+- **The first dependency-absorption cycle is closed.** `planning-with-files` remains only as historical research evidence; install, update, discovery, provider routing, and runtime projections no longer depend on it.
+- **Live now explains the run before exposing implementation detail.** The first screen leads with the current task, overall progress, active workers, and a readable eight-stage progress rail; protocol labels are moved out of the primary hierarchy, and graph cards keep only information that helps identify the work.
+- **Historical Sessions are distinguishable at a glance.** Catalog labels combine local time, governed stage, safe public title, and a unique run suffix instead of repeating the same run-id prefix across hundreds of entries.
+
+### Security
+
+- **Dependency retirement now fails closed.** Install and update preserve unknown or drifted hooks, aliases, caches, and junction-backed paths instead of deleting content that Meta_Kim cannot prove it owns.
+- **The Hub never scans the disk or republishes private conversations.** Public catalog responses use opaque project IDs, bounded sanitized run summaries, and an explicit field allowlist; repository roots, source paths, raw prompts, outputs, and secrets remain server-side.
+
 ## [3.0.6] - 2026-08-26
 
 ### Changed

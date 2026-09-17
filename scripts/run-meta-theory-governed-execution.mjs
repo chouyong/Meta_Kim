@@ -33,6 +33,7 @@ import { buildAgentProjectionTargets } from "./runtime-tool-profiles.mjs";
 import { getProfilePaths } from "./meta-kim-local-state.mjs";
 import { resolveRuntimeHomeDir } from "./meta-kim-sync-config.mjs";
 import { copyProjectCapability } from "./project-capability-copy.mjs";
+import { durableCapabilityRequestsFromTask, safeSlug } from "./capability-request-intent.mjs";
 import {
   buildPlanChallengeState,
   parsePlanChallengeControl,
@@ -74,6 +75,7 @@ import {
   buildGovernanceRequirementPlan,
 } from "../src/domain/governance/governance-requirement-cutover.mjs";
 import { openDurableRunRepository } from "../src/application/run/open-durable-run-repository.mjs";
+import { prepareLiveProjectionRecord } from "../src/application/live/prepare-live-projection-record.mjs";
 import {
   digestKnowledgeLifecycleValue,
   validateWardenWritebackApproval as validateExactWardenWritebackApproval,
@@ -81,8 +83,22 @@ import {
 import { resolveReadySetExecutor } from "./governed-execution/ready-set-adapters.mjs";
 import {
   readMetaRunStatus,
+  readSpineState,
+  readSpineStateIncludingInactive,
   sanitizeStateProfile,
+  writeSpineState,
+  validateRunId as validateSpineCanonicalRunId,
 } from "../canonical/runtime-assets/shared/hooks/spine-state.mjs";
+import {
+  detectHostSessionConversationId,
+  governedRunStateProfile,
+  resolveGovernedRunProvenance,
+  resolveSpineConversationBinding,
+} from "./governed-execution/host-runtime-provenance.mjs";
+import {
+  conversationRuntimeFamily,
+  CONVERSATION_RUNTIME_UNAVAILABLE,
+} from "../src/application/live/live-conversation-link-vocabulary.mjs";
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(scriptDir, "..");
@@ -140,6 +156,155 @@ const RUN_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u;
 const SELECT_EXECUTION_ROUTE_SCRIPT = path.join(scriptDir, "select-execution-route.mjs");
 const WINDOWS_TRANSIENT_RENAME_ERRORS = new Set(["EACCES", "EBUSY", "EPERM"]);
 const WINDOWS_RENAME_RETRY_DELAYS_MS = Object.freeze([10, 25, 50, 100]);
+
+function spineWorkerTaskPacket(packet) {
+  if (!packet || typeof packet !== "object" || Array.isArray(packet)) return null;
+  const taskPacketId = typeof packet.taskPacketId === "string" ? packet.taskPacketId.trim() : "";
+  if (!/^[a-z0-9][a-z0-9:._-]{2,239}$/iu.test(taskPacketId)) return null;
+  const text = (value, maximum = 160) => typeof value === "string" && value.trim() && value.trim().length <= maximum
+    ? value.trim()
+    : null;
+  const values = {
+    taskPacketId,
+    roleInstanceId: text(packet.roleInstanceId),
+    roleDisplayName: text(packet.roleDisplayName, 96),
+    businessRoleId: text(packet.businessRoleId, 96),
+    ownerAgent: text(packet.ownerAgent || packet.owner, 120),
+    stage: text(packet.stage, 32) || "execution",
+  };
+  return Object.fromEntries(Object.entries(values).filter(([, value]) => value != null));
+}
+
+function spineCanonicalRunId(runId) {
+  try {
+    return validateSpineCanonicalRunId(runId);
+  } catch {
+    return null;
+  }
+}
+
+function mergeSpineWorkerTaskPackets(existingPackets, runnerPackets) {
+  const merged = Array.isArray(existingPackets)
+    ? existingPackets.filter((packet) => spineWorkerTaskPacket(packet) != null)
+    : [];
+  const known = new Set(merged.map((packet) => packet.taskPacketId));
+  // enforce-agent-dispatch matches a live dispatch against these packet IDs, so an
+  // already recorded identity keeps its exact fields and the runner may only widen
+  // the set. Replacing a recorded packet would move the gate under an in-flight
+  // dispatch.
+  return [...merged, ...runnerPackets.filter((packet) => !known.has(packet.taskPacketId))];
+}
+
+async function publishRunnerWorkerBindingsToSpine({ projectRoot, runId, runtime, workerTaskPackets }) {
+  const packets = (Array.isArray(workerTaskPackets) ? workerTaskPackets : [])
+    .map(spineWorkerTaskPacket)
+    .filter(Boolean);
+  if (packets.length === 0) return { status: "not_published", reason: "no_valid_worker_task_packets" };
+  // A governed artifact runId only has to be a safe file identity, so it accepts
+  // shapes the spine rejects. Publishing means spine runId and artifact runId are
+  // the same join key, so a runId outside the canonical spine namespace cannot be
+  // published under a shared identity and is reported instead of coerced.
+  const spineRunId = spineCanonicalRunId(runId);
+  if (spineRunId == null) {
+    return { status: "not_published", reason: "run_id_outside_canonical_spine_namespace", runId: String(runId ?? "") };
+  }
+  const existing = await readSpineState(projectRoot);
+  // The runner enriches a spine run that the host already activated. Minting one
+  // here would arm the dispatch gate in a project that never triggered the spine,
+  // and stage or lifecycle edits belong to the spine's own stage machine.
+  if (!existing) return { status: "not_published", reason: "no_active_spine_run" };
+  if (existing.runId !== spineRunId) {
+    return { status: "not_published", reason: "different_active_run", activeRunId: existing.runId };
+  }
+  const now = new Date().toISOString();
+  const state = {
+    ...existing,
+    workerTaskPackets: mergeSpineWorkerTaskPackets(existing.workerTaskPackets, packets),
+    runnerDispatchBindingEnvelope: {
+      schemaVersion: "governed-runner-spine-bindings-v1",
+      runId: spineRunId,
+      runtime,
+      taskPacketIds: packets.map((packet) => packet.taskPacketId),
+      publishedAt: now,
+      source: "run-meta-theory-governed-execution",
+    },
+  };
+  const write = await writeSpineState(projectRoot, state, { expectedRunId: spineRunId });
+  return write.written === true
+    ? { status: "published", taskPacketIds: packets.map((packet) => packet.taskPacketId) }
+    : { status: "not_published", reason: write.reason || "compare_and_swap_failed", activeRunId: write.runId || null };
+}
+
+/**
+ * Which host produced this run, and does a live chat belong to it.
+ *
+ * Both answers come out of one read of spine state so they cannot disagree: the
+ * binding that lends the chat is also the strongest available evidence of the
+ * host, and resolving them independently would let a run file one host's chat
+ * under another host's name.
+ */
+async function resolveGovernedRunHostProvenance({ projectRoot, runId, declaredRuntime, hostEnv }) {
+  const spineState = await readSpineStateIncludingInactive(projectRoot);
+  const binding = resolveSpineConversationBinding({
+    spineState,
+    runId,
+    runProfile: governedRunStateProfile(hostEnv),
+    hostSessionId: detectHostSessionConversationId(hostEnv),
+  });
+  const provenance = resolveGovernedRunProvenance({
+    declaredRuntime,
+    spineRuntime: binding.linked ? binding.sourceRuntime : null,
+    spineBindingBasis: binding.bindingBasis,
+    env: hostEnv,
+  });
+  return {
+    sourceRuntime: provenance.sourceRuntime,
+    provenanceBasis: provenance.basis,
+    observedHostMarkers: provenance.observedMarkers,
+    conversationLinkState: binding.linked ? "verified" : "unlinked",
+    sourceConversation: binding.sourceConversation,
+    conversationBindingRefusal: binding.refusal,
+    conversationBindingBasis: binding.bindingBasis,
+    spineRunId: binding.spineRunId,
+  };
+}
+
+/**
+ * The read surface treats a `sourceConversation` carrying this run's id as a
+ * proven link, so the field is written only when the spine binding proved one. A
+ * record written without that proof is indistinguishable on the panel from a
+ * verified link, which is why nothing here fills the gap with a guess.
+ *
+ * The refusal comes from the existing reader-facing vocabulary: an unproven host
+ * is `runtime_not_identified` ("the tool that started this run did not identify
+ * itself"), which is the fact, and a known host with no live binding is
+ * `conversation_id_not_identified`.
+ */
+function governedRunConversationFields(hostProvenance) {
+  const refusal = hostProvenance.sourceRuntime === CONVERSATION_RUNTIME_UNAVAILABLE
+    ? "runtime_not_identified"
+    : hostProvenance.conversationLinkState === "verified"
+      ? null
+      : "conversation_id_not_identified";
+  return {
+    sourceRuntime: hostProvenance.sourceRuntime,
+    conversationLinkState: hostProvenance.conversationLinkState,
+    ...(hostProvenance.sourceConversation
+      ? { sourceConversation: hostProvenance.sourceConversation }
+      : {}),
+    ...(refusal ? { conversationLinkRefusal: refusal } : {}),
+    hostProvenancePacket: {
+      schemaVersion: "governed-run-host-provenance-v1",
+      sourceRuntime: hostProvenance.sourceRuntime,
+      provenanceBasis: hostProvenance.provenanceBasis,
+      observedHostMarkers: [...hostProvenance.observedHostMarkers],
+      conversationLinkState: hostProvenance.conversationLinkState,
+      conversationBindingRefusal: hostProvenance.conversationBindingRefusal,
+      conversationBindingBasis: hostProvenance.conversationBindingBasis,
+      spineRunId: hostProvenance.spineRunId,
+    },
+  };
+}
 
 const RUNTIME_FAILURE_TAXONOMY = Object.freeze({
   pass: "pass",
@@ -1419,14 +1584,6 @@ async function readJsonIfExists(filePath) {
   } catch {
     return null;
   }
-}
-
-function safeSlug(value) {
-  return String(value ?? "")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-|-$/g, "")
-    .slice(0, 48) || "capability";
 }
 
 function nowIso() {
@@ -4553,143 +4710,6 @@ function capabilityProviderRefs(providers) {
   return uniqueStrings((providers ?? []).map((provider) => capabilityProviderRef(provider)));
 }
 
-function asksOnlyForCapabilityCreationDecision(line) {
-  const text = String(line ?? "");
-  const explicitlyForbidsMutation =
-    /(?:只做|仅做|只需|仅需)(?:判断|评估|分析|检查|审查)|不要(?:写入|创建|新建|生成|修改|落盘|执行)|不(?:要|需)(?:写入|创建|新建|生成|修改|落盘|执行)|只读|read[- ]?only|do\s+not\s+(?:write|create|modify|apply)|without\s+(?:writing|creating|modifying|applying)/iu.test(text);
-  if (explicitlyForbidsMutation) return true;
-  const asksWhether =
-    /是否(?:需要|应该|要)?(?:创建|新建|生成|固化|沉淀)|需不需要(?:创建|新建|生成|固化|沉淀)|要不要(?:创建|新建|生成|固化|沉淀)|有没有必要(?:创建|新建|生成|固化|沉淀)|whether\s+(?:we\s+)?(?:need|should)\s+to\s+(?:create|add|persist|generate)|do\s+we\s+need\s+to\s+(?:create|add|persist|generate)/iu.test(text);
-  if (!asksWhether) return false;
-  const alsoAuthorizesMutation =
-    /(?:请|直接|立即|马上|务必)(?:把|将)?\s*(?:创建|新建|生成|固化|沉淀|写入|安装|新增|添加|升级)|(?:创建|新建|生成|固化|沉淀|写入|安装|新增|添加|升级)(?:到|至|在)(?:当前|本)?项目|项目(?:里|内)长期维护|(?:please\s+)?(?:create|add|persist|generate)\s+(?:it|this|the\s+capability)\s+(?:now|in\s+the\s+project)/iu.test(text);
-  return !alsoAuthorizesMutation;
-}
-
-function explicitCapabilityIdFromLine(line, decision) {
-  const keyword = decision === "create_agent"
-    ? "agent|智能体|代理"
-    : decision === "create_skill"
-      ? "skill|技能"
-      : decision === "create_command"
-        ? "command|命令"
-        : null;
-  if (!keyword) return null;
-  const match = String(line ?? "").match(
-    new RegExp(`(?:${keyword})\\s*(?:名为|叫做|called|named|:|：)?\\s*[\\x60'\"]?([a-z0-9][a-z0-9._-]{1,79})`, "iu"),
-  );
-  return match?.[1]?.toLowerCase() ?? null;
-}
-
-function durableCapabilitySpecificationReady(line, explicitCapabilityId) {
-  if (!explicitCapabilityId) return false;
-  const text = String(line ?? "");
-  return (
-    text.length >= explicitCapabilityId.length + 16 &&
-    /负责|用于|处理|审查|审核|验证|生成|同步|检查|执行|维护|拒绝|边界|responsib|purpose|handles?|reviews?|verif|generat|sync|check|execute|maintain|refus|boundary/iu.test(text)
-  );
-}
-
-function explicitlyRequestsDurableCapabilityAction(line, decision) {
-  const text = String(line ?? "")
-    .replace(
-      /(?:不要|不需要|无需|不应|禁止|拒绝)\s*(?:再|进行|执行)?\s*(?:新建|创建|生成|固化|沉淀|写入|安装|新增|添加|复制|迭代|修改|升级|定制|复用)/giu,
-      "",
-    )
-    .replace(
-      /(?:do\s+not|don't|without|no\s+need\s+to|refuse\s+to)\s*(?:create|add|persist|generate|install|copy|iterate|modify|upgrade|customize|reuse)/giu,
-      "",
-    );
-  const chineseAction = "新建|创建|固化|沉淀|写入|安装|新增|添加|复制|迭代|修改|升级|定制|复用";
-  const capabilityType = decision === "create_agent"
-    ? "agent|智能体|代理"
-    : decision === "create_skill"
-      ? "skill|技能"
-      : decision === "create_command"
-        ? "command|命令"
-        : decision === "create_hook"
-          ? "hook|钩子"
-          : decision === "create_mcp_provider"
-            ? "mcp(?:\\s+provider)?|mcp服务|mcp工具"
-            : "script|脚本";
-  const chineseContext = "(?:(?:在|于|把|将|对|为|当前|本|这个|该|全局|项目|仓库)\\s*){0,6}";
-  const englishContext = "(?:(?:the|this|a|an|global|project|repository|repo)\\s+){0,5}";
-  return (
-    new RegExp(`(?:请|需要|需|应当|应该|务必|直接|立即|马上|帮我)\\s*${chineseContext}(?:${chineseAction}|生成)\\s*${chineseContext}(?:${capabilityType})`, "iu").test(text) ||
-    new RegExp(`(?:^|[。；;\\n])\\s*(?:${chineseAction}|生成)\\s*(?:一个|新的?)?\\s*(?:${capabilityType})`, "iu").test(text) ||
-    new RegExp(`(?:please|need\\s+to|should|must|help\\s+me)\\s+${englishContext}(?:create|add|persist|generate|install|copy|iterate|modify|upgrade|customize|reuse)\\s+${englishContext}(?:${capabilityType})`, "iu").test(text) ||
-    new RegExp(`(?:^|[.;\\n])\\s*(?:create|add|persist|generate|install|copy|iterate|modify|upgrade|customize|reuse)\\s+(?:an?\\s+|the\\s+)?(?:${capabilityType})`, "iu").test(text)
-  );
-}
-
-function durableCapabilityRequestsFromTask(task, runId = "meta-run") {
-  const lines = String(task ?? "")
-    .split(/\r?\n|。|；|;/u)
-    .map((line) => line.trim())
-    .filter(Boolean);
-  const requests = [];
-  for (const [index, line] of lines.entries()) {
-    if (asksOnlyForCapabilityCreationDecision(line)) continue;
-    const lower = line.toLowerCase();
-    const explicitDeclaredDecision = /(?:\bagent\b|智能体|代理)\s*(?:名为|叫做|called|named|:|：)?\s*[\x60'"]?[a-z0-9][a-z0-9._-]{1,79}/iu.test(line)
-      ? "create_agent"
-      : /(?:\bskill\b|技能)\s*(?:名为|叫做|called|named|:|：)?\s*[\x60'"]?[a-z0-9][a-z0-9._-]{1,79}/iu.test(line)
-        ? "create_skill"
-        : /(?:\bcommand\b|命令)\s*(?:名为|叫做|called|named|:|：)?\s*[\x60'"]?[a-z0-9][a-z0-9._-]{1,79}/iu.test(line)
-          ? "create_command"
-          : null;
-    const decision = explicitDeclaredDecision ?? (/\bmcp\b|mcp provider|mcp 工具|mcp服务|mcp provider 边界/i.test(line)
-      ? "create_mcp_provider"
-      : /\bhook\b|钩子/i.test(line)
-        ? "create_hook"
-        : /\bcommand\b|命令/i.test(line)
-          ? "create_command"
-      : /脚本|script|json/.test(lower)
-        ? "create_script"
-        : /\bagent\b|智能体|代理|owner|负责人|长期/u.test(lower)
-          ? "create_agent"
-          : /\bskill\b|技能|标准|standard|沉淀|可复用|reusable|recurring|重复/.test(lower)
-            ? "create_skill"
-            : null);
-    if (!decision) continue;
-    const explicitNeed = /需要|should|candidate|沉淀|可复用|直接复用|复用|reusable|reuse|recurring|重复|长期|迭代|修改|升级|定制|新建|创建|keeps recurring|iterate|modify|upgrade|customize|create/i.test(line);
-    if (!explicitNeed) continue;
-    const explicitCapabilityId = explicitCapabilityIdFromLine(line, decision);
-    const requestedCapability =
-      decision === "create_skill" && /prd\s*review\s*standard/i.test(line)
-        ? "prd-review-standard-skill"
-        : explicitCapabilityId ?? (safeSlug(line).slice(0, 80) || `${decision}-${index + 1}`);
-    requests.push({
-      requestId: `${runId}-durable-${index + 1}`,
-      sourceText: line,
-      requestedCapability,
-      explicitCapabilityId,
-      specificationReady: durableCapabilitySpecificationReady(line, explicitCapabilityId),
-      mutationAuthorized: explicitlyRequestsDurableCapabilityAction(line, decision),
-      decision,
-      requestedAction:
-        /迭代|修改|升级|定制|iterate|modify|upgrade|customize/i.test(line)
-          ? "iterate"
-          : /新建|创建|create|new project/i.test(line)
-            ? "create"
-            : "reuse",
-      candidateType:
-        decision === "create_agent"
-          ? "agent"
-          : decision === "create_skill"
-            ? "skill"
-            : decision === "create_command"
-              ? "command"
-              : decision === "create_hook"
-                ? "hook"
-            : decision === "create_script"
-              ? "script"
-              : "mcp_provider",
-    });
-  }
-  return requests;
-}
-
 function parseAgentTeamsVersion(skillText) {
   const match = String(skillText ?? "").match(/^version:\s*["']?([^"'\n]+)["']?/m);
   return match?.[1]?.trim() ?? null;
@@ -4702,7 +4722,7 @@ function parseEnvList(value) {
     .filter(Boolean);
 }
 
-function agentTeamsCandidateSkillPaths(runtimeName) {
+export function agentTeamsCandidateSkillPaths(runtimeName) {
   const rootParent = path.dirname(REPO_ROOT);
   const codexSkillsRoot =
     process.env.CODEX_SKILLS_DIR ||
@@ -4775,10 +4795,18 @@ function agentTeamsCandidateSkillPaths(runtimeName) {
       pathRef: `META_KIM_DEP_ROOTS[${index}]/agent-teams-playbook/SKILL.md`,
       filePath: path.join(root, AGENT_TEAMS_PLAYBOOK_ID, "SKILL.md"),
     })),
+    // The sibling probe reads the maintainer's disk beside the repo. Hermetic
+    // validators (default-evidence runs whose assertions pin the orchestration
+    // packet) suppress that read so a machine-local checkout cannot flip
+    // selection; explicit META_KIM_DEP_ROOTS fixtures stay available in that
+    // mode. Suppression removes the disk read, not the declaration: the search
+    // order is itself a contract, and callers assert where the sibling sits
+    // relative to the env roots and the runtime-global root.
     {
       source: "sibling_dependency_checkout",
       pathRef: "../agent-teams-playbook/SKILL.md",
       filePath: path.join(rootParent, AGENT_TEAMS_PLAYBOOK_ID, "SKILL.md"),
+      probeSuppressed: process.env.META_KIM_DISABLE_SIBLING_DEP_PROBE === "1",
     },
     ...runtimeGlobalCandidates,
   ];
@@ -4865,7 +4893,7 @@ function resolveAgentTeamsParallelBudget(executableLaneCount) {
   };
 }
 
-async function resolveAgentTeamsPlaybookProvider(runtimeName) {
+export async function resolveAgentTeamsPlaybookProvider(runtimeName) {
   const skillConfig = await readJsonIfExists(path.join(REPO_ROOT, "config", "skills.json"));
   const dependencyRegistry = await readJsonIfExists(
     path.join(REPO_ROOT, "config", "capability-index", "dependency-project-registry.json")
@@ -4887,12 +4915,17 @@ async function resolveAgentTeamsPlaybookProvider(runtimeName) {
   );
   const candidates = [];
   for (const candidate of agentTeamsCandidateSkillPaths(runtimeName)) {
-    const skillText = await readTextIfExists(candidate.filePath);
+    const skillText = candidate.probeSuppressed
+      ? null
+      : await readTextIfExists(candidate.filePath);
     candidates.push({
       source: candidate.source,
       pathRef: candidate.pathRef,
       found: Boolean(skillText),
       version: parseAgentTeamsVersion(skillText),
+      // A suppressed probe reports the same `found: false` as a genuinely
+      // missing file, so the record says which one produced it.
+      probeSuppressed: candidate.probeSuppressed === true,
     });
   }
   const selectedCandidate = candidates.find((candidate) => candidate.found) ?? null;
@@ -6886,9 +6919,9 @@ function buildCapabilityInvocationTruthPacket({
       state:
         familyFullyObserved("agent_teams_playbook")
           ? "invoked"
-          : agentTeamsPlaybookPacket?.status === "pass"
+          : agentTeamsPlaybookPacket?.selected === true
           ? "selected_not_invoked"
-          : agentTeamsPlaybookPacket?.status === "not_required"
+          : ["pass", "not_required"].includes(agentTeamsPlaybookPacket?.status)
             ? "not_required"
             : "unavailable",
       selectedCount: agentTeamsPlaybookPacket?.selected ? 1 : 0,
@@ -9020,6 +9053,7 @@ function buildCoreLoopArtifact({
   outputLanguage = "zh-CN",
   executionAllowed = false,
   preDecisionOptionFrame = null,
+  hostProvenance = null,
 }) {
   const routeRuntime = normalizeRouteRuntime(runtime);
   const routeOs = normalizeOsTarget(osTarget);
@@ -9493,7 +9527,13 @@ function buildCoreLoopArtifact({
       entry: "meta:theory:run",
       requestType: "ordinary natural-language durable task or explicit meta-theory shortcut",
       runtimeContext: {
-        runtimeFamily: routeRuntime,
+        // Which host produced this record, and which runtime the route plans
+        // against, are two different questions. They were the same field, and
+        // the route's `"codex"` default is what filed every run started from a
+        // Claude Code session under Codex on the Live panel. An unproven host is
+        // `unavailable`, never a vendor name.
+        runtimeFamily: conversationRuntimeFamily(hostProvenance?.sourceRuntime),
+        routeTarget: routeRuntime,
         os: routeOs,
       },
       entryClassification,
@@ -9887,6 +9927,49 @@ function workflowCapabilityBinding(match) {
   };
 }
 
+export function buildRouteBranchingOptions(orchestrationReport) {
+  const route = orchestrationReport?.selectedExecutionRoute;
+  const decisionCard = route?.decisionCard;
+  const routeOptions = Array.isArray(decisionCard?.options) ? decisionCard.options : [];
+  if (routeOptions.length < 2) return [];
+
+  // A completed native route choice must not be reopened when a later
+  // workflow-contract builder runs without the earlier preview. The route
+  // selector already owns this state; worker packets never participate here.
+  if (["ready_for_host_handoff", "not_applicable"].includes(route?.routeExecutionGate?.handoffStatus)) {
+    return [];
+  }
+
+  const options = [];
+  const seenLabels = new Set();
+  const recommendedDefault = String(decisionCard.recommendedDefault ?? "").trim();
+  for (const routeOption of routeOptions) {
+    if (!routeOption || typeof routeOption !== "object") continue;
+    const label = String(routeOption.label ?? routeOption.id ?? "").trim();
+    if (!label || seenLabels.has(label)) {
+      continue;
+    }
+    seenLabels.add(label);
+    const summary = [
+      routeOption.bestFor,
+      routeOption.benefit,
+      routeOption.cost,
+      routeOption.risk,
+      routeOption.expectedResult,
+      routeOption.verification,
+    ]
+      .map((value) => String(value ?? "").trim())
+      .filter(Boolean)
+      .join("；") || null;
+    options.push({
+      label,
+      summary,
+      recommended: String(routeOption.id ?? "").trim() === recommendedDefault,
+    });
+  }
+  return options;
+}
+
 function buildWorkflowContractPackets({
   runId,
   task,
@@ -9917,6 +10000,9 @@ function buildWorkflowContractPackets({
   const projectRef = `meta-kim-governed-execution-${runId}`;
   const primaryDeliverable = `governed-execution-${runId}`;
   const timestamp = nowIso();
+  // Only the route selector's explicit decision card can feed the policy's
+  // branching signal. Worker packets are complementary DAG work, not choices.
+  const planChallengeBranchingOptions = buildRouteBranchingOptions(orchestrationReport);
   const planChallenge = planChallengePreview ?? buildPlanChallengeState({
     task,
     responses: planChallengeResponses,
@@ -9926,6 +10012,7 @@ function buildWorkflowContractPackets({
     priorChallengeState,
     contradictionEvidence,
     requestedSideEffectActions,
+    branchingOptions: planChallengeBranchingOptions,
     outputLanguage,
   });
   const challengePhase = planChallenge.planChallengeState.phase;
@@ -11545,6 +11632,11 @@ export async function runMetaTheoryGovernedExecution({
   artifactDir = null,
   dbPath = DEFAULT_DB_PATH,
   runtime = "codex",
+  // `runtime` is the route's planning target and keeps its default. Provenance
+  // must be able to tell "the caller named a host" from "nobody named one", so
+  // the declared host is a separate option with no default.
+  declaredRuntime = null,
+  hostEnv = process.env,
   osTarget = "windows",
   approvalEvidence = null,
   approvalPacket = null,
@@ -11601,6 +11693,10 @@ export async function runMetaTheoryGovernedExecution({
         taskFingerprint,
       });
   }
+  // No branchingOptions here: this preview runs before route selection, so no
+  // route decision card exists in scope yet. Textual alternatives still use
+  // the policy's explicit branching trigger; the later workflow builder may
+  // add only the route selector's own decision-card options.
   const planChallengePreview = buildPlanChallengeState({
     task: normalizedTask,
     contradictionEvidence: planChallengeContradictionEvidence,
@@ -11633,6 +11729,7 @@ export async function runMetaTheoryGovernedExecution({
     throw new Error("A continuation run must use a new runId instead of overwriting its prior artifact.");
   }
   const jsonPath = resolveOutputFile(outputDir, `${effectiveRunId}.json`);
+  const liveProjectionPath = resolveOutputFile(outputDir, `${effectiveRunId}.live.json`);
   const markdownFileName = `${effectiveRunId}.${resolvedOutputLanguage}.md`;
   const markdownPath = resolveOutputFile(outputDir, markdownFileName);
   const stagingRefs = {
@@ -11945,6 +12042,12 @@ export async function runMetaTheoryGovernedExecution({
     path.join(os.tmpdir(), "meta-kim-project-capability-candidates-"),
   );
   let coreLoop;
+  const hostProvenance = await resolveGovernedRunHostProvenance({
+    projectRoot: path.resolve(projectRoot),
+    runId: effectiveRunId,
+    declaredRuntime,
+    hostEnv,
+  });
   try {
     coreLoop = buildCoreLoopArtifact({
       runId: effectiveRunId,
@@ -11973,10 +12076,25 @@ export async function runMetaTheoryGovernedExecution({
       outputLanguage: resolvedOutputLanguage,
       executionAllowed,
       preDecisionOptionFrame: planChallengePreview,
+      hostProvenance,
     });
   } finally {
     rmSync(projectCapabilityCandidateRoot, { recursive: true, force: true });
   }
+  const spineWorkerBinding = await publishRunnerWorkerBindingsToSpine({
+    projectRoot: path.resolve(projectRoot),
+    runId: effectiveRunId,
+    runtime: routeRuntime,
+    workerTaskPackets: coreLoop.thinkingPacket.workerTaskPackets,
+  });
+  coreLoop = {
+    ...coreLoop,
+    runnerSpineBindingPacket: {
+      schemaVersion: "governed-runner-spine-bindings-v1",
+      runId: effectiveRunId,
+      ...spineWorkerBinding,
+    },
+  };
   let durableCoordinator = null;
   let durableExecution = null;
   let durableBodyError = null;
@@ -12323,6 +12441,7 @@ export async function runMetaTheoryGovernedExecution({
     status: artifactStatus,
     partialReasons,
     task: normalizedTask,
+    ...governedRunConversationFields(hostProvenance),
     coreLoop,
     requestRecord: coreLoop.requestRecord,
     intentPacket: coreLoop.intentPacket,
@@ -12465,6 +12584,10 @@ export async function runMetaTheoryGovernedExecution({
     },
     ...workflowContractPackets,
   };
+  // Prepare and budget the exact bytes before any primary artifact commit.
+  // Projection construction can therefore never leave a newly committed run
+  // behind an older latest pointer.
+  const liveProjectionRecord = prepareLiveProjectionRecord(artifact);
   if (durableCoordinator) {
     let materializationReservation = await readDurableReservation(reservationPath, {
       runId: effectiveRunId,
@@ -12539,6 +12662,7 @@ export async function runMetaTheoryGovernedExecution({
     await atomicWriteFile(jsonPath, `${JSON.stringify(artifact, null, 2)}\n`);
     await atomicWriteFile(markdownPath, userReportMarkdown);
   }
+  await atomicWriteFile(liveProjectionPath, liveProjectionRecord.content);
   await atomicWriteFile(
     latestPath,
     `${JSON.stringify(
@@ -12548,6 +12672,9 @@ export async function runMetaTheoryGovernedExecution({
         resolvedOutputLanguage,
         languageResolution,
         jsonPath: relative(jsonPath),
+        liveProjectionPath: relative(liveProjectionPath),
+        liveProjectionSha256: liveProjectionRecord.sha256,
+        liveProjectionBytes: liveProjectionRecord.bytes,
         markdownPath: relative(markdownPath),
       },
       null,
@@ -12558,6 +12685,7 @@ export async function runMetaTheoryGovernedExecution({
     ...artifact,
     paths: {
       json: jsonPath,
+      liveProjection: liveProjectionPath,
       markdown: markdownPath,
       latest: latestPath,
       db: dbPath,
@@ -12784,7 +12912,11 @@ async function main() {
   const artifactDirArg = argValue("--artifact-dir", null);
   const dbArg = argValue("--db", null);
   const durableDbArg = argValue("--durable-db", null);
-  const runtimeArg = argValue("--runtime", process.env.META_KIM_RUNTIME ?? "codex");
+  // Route planning keeps its default; provenance must not inherit it. Reading the
+  // flag once and letting the default apply only to the route is what keeps a run
+  // nobody declared a host for from being recorded as that default vendor.
+  const declaredRuntimeArg = argValue("--runtime", process.env.META_KIM_RUNTIME ?? null);
+  const runtimeArg = declaredRuntimeArg ?? "codex";
   const osArg = argValue("--os", process.env.META_KIM_OS ?? "windows");
   const cliOutputLanguage = argValue(
     "--output-language",
@@ -12872,6 +13004,7 @@ async function main() {
         : dbArg ?? (taskArg ? DEFAULT_DB_PATH : positional[3] ?? DEFAULT_DB_PATH)
     ),
     runtime,
+    declaredRuntime: declaredRuntimeArg,
     osTarget,
     approvalEvidence: argValue("--approval-evidence", null),
     approvalPacket,

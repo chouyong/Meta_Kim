@@ -1905,6 +1905,12 @@ async function collectRepoCanonicalCapabilities() {
           ? `plugin-marketplace-${skill.id}`
           : `plugin-bundle-${skill.id}`,
         pluginIds,
+        ...(skill.dependencyClass ? { dependencyClass: skill.dependencyClass } : {}),
+        ...(skill.installPolicy ? { installPolicy: skill.installPolicy } : {}),
+        routeEligibility:
+          skill.installPolicy === "explicit_reference_opt_in"
+            ? "reference_only"
+            : "callable_after_install",
         evidence: `config/skills.json skills[id=${skill.id}]`,
       };
     });
@@ -2313,6 +2319,7 @@ const META_KIM_HOOK_FILE_NAMES = new Set([
   "block-dangerous-bash.mjs",
   "codex_hook_adapter.py",
   "codex_hook_runner.mjs",
+  "conversation-binding.mjs",
   "enforce-agent-dispatch.mjs",
   "graphify-context.mjs",
   "hookprompt-adapter.mjs",
@@ -2328,6 +2335,7 @@ const META_KIM_HOOK_FILE_NAMES = new Set([
   "pre-tool-use.ps1",
   "pre-tool-use.sh",
   "pre-compact.sh",
+  "project-root.mjs",
   "session_start.py",
   "session-start.sh",
   "skip-reminder.mjs",

@@ -5,9 +5,11 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  promises as fs,
   readFileSync,
   readdirSync,
   rmSync,
+  statSync,
   symlinkSync,
   utimesSync,
   writeFileSync,
@@ -21,6 +23,7 @@ import {
   assertProjectionPackageWriteBoundary,
   findAuthoritativeGlobalProjectionPackage,
   materializeGlobalProjectionPackage,
+  normalizeStagedBundleMetadata,
   packageContentClosure,
   projectionPackageWriteBoundaryFindings,
   recordGlobalProjectionPackage,
@@ -43,6 +46,21 @@ import {
 
 const RECEIPT_SCHEMA = "meta-kim-global-projection-package-v1";
 const BUNDLE_PURPOSE = "primary-runtime-global-projection-package-runtime-bundle";
+const PROJECTION_STORE_SOURCE = readFileSync(
+  path.join(import.meta.dirname, "..", "..", "scripts", "global-projection-package-store.mjs"),
+  "utf8",
+);
+
+test("same-digest materialization verifies the immutable winner before staging dependencies", () => {
+  const earlyWinnerCheck = PROJECTION_STORE_SOURCE.indexOf(
+    "const existingDigestBeforeInstall",
+  );
+  const stagedDependencyInstall = PROJECTION_STORE_SOURCE.indexOf(
+    "const stageBundleDir",
+  );
+  assert.ok(earlyWinnerCheck >= 0);
+  assert.ok(stagedDependencyInstall > earlyWinnerCheck);
+});
 
 function resolveNpmCliPath() {
   const candidates = [
@@ -126,12 +144,6 @@ function sha256(bytes) {
   return createHash("sha256").update(bytes).digest("hex");
 }
 
-function privateNpmRuntimeRoots() {
-  return readdirSync(os.tmpdir())
-    .filter((name) => name.startsWith("meta-kim-npm-runtime-"))
-    .sort();
-}
-
 function packedDigest(sourceRoot, destinationRoot, env) {
   mkdirSync(destinationRoot, { recursive: true });
   const result = spawnSync(
@@ -163,6 +175,40 @@ function waitForChild(child) {
 
 function portableRelative(from, target) {
   return path.relative(from, target).replaceAll("\\", "/");
+}
+
+/**
+ * Point the projection-package store root env seam at a fresh temp directory
+ * for one test body. Machines whose real ~/.meta-kim store already holds
+ * entries for the fixture version must not influence these cases, and these
+ * cases must never write into the real store.
+ */
+function withIsolatedProjectionStoreRoot(body) {
+  const storeRoot = mkdtempSync(
+    path.join(os.tmpdir(), "meta-kim-projection-store-root-"),
+  );
+  const previousValue = process.env.META_KIM_PROJECTION_PACKAGE_STORE_ROOT;
+  process.env.META_KIM_PROJECTION_PACKAGE_STORE_ROOT = storeRoot;
+  return Promise.resolve(body(storeRoot)).finally(() => {
+    if (previousValue === undefined) {
+      delete process.env.META_KIM_PROJECTION_PACKAGE_STORE_ROOT;
+    } else {
+      process.env.META_KIM_PROJECTION_PACKAGE_STORE_ROOT = previousValue;
+    }
+    rmSync(storeRoot, { recursive: true, force: true });
+  });
+}
+
+function plantDifferentDigestSibling(storeRoot, packageVersion) {
+  const staleDigest = `${"6".repeat(64)}`;
+  const staleDigestDir = path.join(storeRoot, "meta-kim", packageVersion, staleDigest);
+  mkdirSync(path.join(staleDigestDir, "bundle"), { recursive: true });
+  writeFileSync(
+    path.join(staleDigestDir, "bundle", "stale-sibling.txt"),
+    "pre-existing unrelated digest entry\n",
+    "utf8",
+  );
+  return staleDigestDir;
 }
 
 test("stable projection write boundary resolves missing descendants and directory links", async () => {
@@ -475,34 +521,53 @@ test("missing real npm discovery fails before creating projection store state", 
   });
 });
 
-test("cleanup contract: npm lifecycle leaves HOME unchanged outside the store and removes its private runtime", async () => {
+test("cleanup contract: npm lifecycle leaves HOME unchanged outside the store and removes its private runtime", async (t) => {
   await withFixture(async ({ homeRoot, sourceRoot, env }) => {
     const homeBefore = readdirSync(homeRoot).sort();
-    const privateRuntimeRootsBefore = privateNpmRuntimeRoots();
+    const ownedRuntimeRoots = [];
+    const realMkdtemp = fs.mkdtemp;
+    t.mock.method(fs, "mkdtemp", async (...args) => {
+      const createdRoot = await realMkdtemp(...args);
+      if (path.basename(String(args[0])) === "meta-kim-npm-runtime-") {
+        ownedRuntimeRoots.push(createdRoot);
+      }
+      return createdRoot;
+    });
+    // Simulate another process's lifecycle without owning its directory in the probe.
+    const unrelatedRuntime = mkdtempSync(path.join(os.tmpdir(), "meta-kim-npm-runtime-unrelated-"));
 
-    await packageContentClosure(sourceRoot, { env, homeRoot });
-    assert.deepEqual(
-      readdirSync(homeRoot).sort(),
-      homeBefore,
-      "the read-only package closure probe must not persist npm state in HOME",
-    );
-    assert.deepEqual(
-      privateNpmRuntimeRoots(),
-      privateRuntimeRootsBefore,
-      "the read-only closure probe must not leak a private npm runtime",
-    );
+    try {
+      await packageContentClosure(sourceRoot, { env, homeRoot });
+      assert.deepEqual(
+        readdirSync(homeRoot).sort(),
+        homeBefore,
+        "the read-only package closure probe must not persist npm state in HOME",
+      );
+      assert.ok(ownedRuntimeRoots.length > 0, "the probe must exercise a real private npm runtime");
+      assert.deepEqual(
+        ownedRuntimeRoots.filter((root) => existsSync(root)), [],
+        "the read-only closure probe must not leak a private npm runtime",
+      );
+      assert.equal(existsSync(unrelatedRuntime), true, "cleanup must preserve another operation's runtime");
+      const probeRuntimeCount = ownedRuntimeRoots.length;
 
-    await materializeGlobalProjectionPackage({ sourceRoot, homeRoot, env });
-    assert.deepEqual(
-      readdirSync(homeRoot).filter((name) => name !== ".meta-kim").sort(),
-      homeBefore,
-      "materialization may write only its projection store beneath HOME",
-    );
-    assert.deepEqual(
-      privateNpmRuntimeRoots(),
-      privateRuntimeRootsBefore,
-      "materialization must remove only the private npm runtime it created",
-    );
+      rmSync(unrelatedRuntime, { recursive: true, force: true });
+      await materializeGlobalProjectionPackage({ sourceRoot, homeRoot, env });
+      assert.deepEqual(
+        readdirSync(homeRoot).filter((name) => name !== ".meta-kim").sort(),
+        homeBefore,
+        "materialization may write only its projection store beneath HOME",
+      );
+      assert.ok(ownedRuntimeRoots.length > probeRuntimeCount, "materialization must create its own private runtime");
+      assert.deepEqual(
+        ownedRuntimeRoots.filter((root) => existsSync(root)), [],
+        "materialization must remove only the private npm runtime it created",
+      );
+      t.diagnostic(`owned runtime roots: probe=${probeRuntimeCount}, total=${ownedRuntimeRoots.length}, leaked=0; unrelated lifecycle=create/remove`);
+    } finally {
+      t.mock.restoreAll();
+      rmSync(unrelatedRuntime, { recursive: true, force: true });
+    }
   });
 });
 
@@ -552,21 +617,126 @@ test("cleanup contract: successful materialization leaves no stage or swallowed 
 
 test("an exact same-digest materialization retry reuses the verified staged package", async () => {
   await withFixture(async ({ homeRoot, sourceRoot, env }) => {
-    const first = await materializeGlobalProjectionPackage({
-      sourceRoot,
-      homeRoot,
-      env,
+    await withIsolatedProjectionStoreRoot(async (storeRoot) => {
+      assert.equal(existsSync(path.join(storeRoot, "meta-kim")), false);
+      const first = await materializeGlobalProjectionPackage({
+        sourceRoot,
+        homeRoot,
+        env,
+      });
+      const firstClosure = directoryClosureSync(first.digestDir);
+      const firstPackageMtime = statSync(first.packageManifestPath).mtimeMs;
+      const second = await materializeGlobalProjectionPackage({
+        sourceRoot,
+        homeRoot,
+        env,
+      });
+      assert.equal(second.digestDir, first.digestDir);
+      assert.equal(second.packageRoot, first.packageRoot);
+      assert.equal(statSync(second.packageManifestPath).mtimeMs, firstPackageMtime);
+      assert.deepEqual(directoryClosureSync(second.digestDir), firstClosure);
+      assert.deepEqual(readdirSync(first.versionRoot), [first.packageTarballSha256]);
+      assert.equal(
+        existsSync(path.join(homeRoot, ".meta-kim")),
+        false,
+        "materialization must resolve inside the isolated store root, not the fixture home",
+      );
     });
-    const firstClosure = directoryClosureSync(first.digestDir);
-    const second = await materializeGlobalProjectionPackage({
-      sourceRoot,
-      homeRoot,
-      env,
+  });
+});
+
+test("a pre-existing different digest for the same version never collides with a same-digest retry", async () => {
+  await withFixture(async ({ homeRoot, sourceRoot, env, packageManifest }) => {
+    await withIsolatedProjectionStoreRoot(async (storeRoot) => {
+      const staleDigestDir = plantDifferentDigestSibling(
+        storeRoot,
+        packageManifest.version,
+      );
+      const first = await materializeGlobalProjectionPackage({
+        sourceRoot,
+        homeRoot,
+        env,
+      });
+      const firstClosure = directoryClosureSync(first.digestDir);
+      const firstPackageMtime = statSync(first.packageManifestPath).mtimeMs;
+      const second = await materializeGlobalProjectionPackage({
+        sourceRoot,
+        homeRoot,
+        env,
+      });
+      assert.equal(second.digestDir, first.digestDir);
+      assert.equal(statSync(second.packageManifestPath).mtimeMs, firstPackageMtime);
+      assert.deepEqual(directoryClosureSync(second.digestDir), firstClosure);
+      assert.equal(
+        first.digestDir.toLowerCase().startsWith(storeRoot.toLowerCase()),
+        true,
+        "materialization must land inside the isolated store root",
+      );
+      assert.equal(
+        existsSync(path.join(staleDigestDir, "bundle", "stale-sibling.txt")),
+        true,
+        "an unrelated pre-existing digest entry must survive untouched",
+      );
+      assert.equal(
+        existsSync(path.join(homeRoot, ".meta-kim")),
+        false,
+        "the fixture home must stay free of projection store state",
+      );
     });
-    assert.equal(second.digestDir, first.digestDir);
-    assert.equal(second.packageRoot, first.packageRoot);
-    assert.deepEqual(directoryClosureSync(second.digestDir), firstClosure);
-    assert.deepEqual(readdirSync(first.versionRoot), [first.packageTarballSha256]);
+  });
+});
+
+test("a pre-existing different digest for the same version never collides with concurrent materialization", async () => {
+  await withFixture(async ({ homeRoot, sourceRoot, env, packageManifest }) => {
+    await withIsolatedProjectionStoreRoot(async (storeRoot) => {
+      const staleDigestDir = plantDifferentDigestSibling(
+        storeRoot,
+        packageManifest.version,
+      );
+      const [first, second] = await Promise.all([
+        materializeGlobalProjectionPackage({ sourceRoot, homeRoot, env }),
+        materializeGlobalProjectionPackage({ sourceRoot, homeRoot, env }),
+      ]);
+      assert.equal(second.digestDir, first.digestDir);
+      assert.equal(second.packageRoot, first.packageRoot);
+      assert.equal(existsSync(first.receiptPath), true);
+      assert.equal(
+        readdirSync(first.versionRoot).includes(first.packageTarballSha256),
+        true,
+      );
+      assert.equal(
+        first.digestDir.toLowerCase().startsWith(storeRoot.toLowerCase()),
+        true,
+      );
+      assert.equal(
+        existsSync(path.join(staleDigestDir, "bundle", "stale-sibling.txt")),
+        true,
+      );
+    });
+  });
+});
+
+test("a relative projection store root override fails closed", async () => {
+  await withFixture(async ({ homeRoot, packageManifest }) => {
+    const previousValue = process.env.META_KIM_PROJECTION_PACKAGE_STORE_ROOT;
+    process.env.META_KIM_PROJECTION_PACKAGE_STORE_ROOT = "relative/store-root";
+    try {
+      assert.throws(
+        () => resolveGlobalProjectionPackageLayout({
+          homeRoot,
+          packageName: packageManifest.name,
+          packageVersion: packageManifest.version,
+          packageTarballSha256: "0".repeat(64),
+        }),
+        /META_KIM_PROJECTION_PACKAGE_STORE_ROOT must be an absolute directory path/u,
+      );
+    } finally {
+      if (previousValue === undefined) {
+        delete process.env.META_KIM_PROJECTION_PACKAGE_STORE_ROOT;
+      } else {
+        process.env.META_KIM_PROJECTION_PACKAGE_STORE_ROOT = previousValue;
+      }
+    }
   });
 });
 
@@ -643,14 +813,16 @@ test("a stale dead-owner digest lock is quarantined with its evidence", async ()
 
 test("concurrent same-digest materialization leaves one complete verified winner", async () => {
   await withFixture(async ({ homeRoot, sourceRoot, env }) => {
-    const [first, second] = await Promise.all([
-      materializeGlobalProjectionPackage({ sourceRoot, homeRoot, env }),
-      materializeGlobalProjectionPackage({ sourceRoot, homeRoot, env }),
-    ]);
-    assert.equal(second.digestDir, first.digestDir);
-    assert.equal(second.packageRoot, first.packageRoot);
-    assert.equal(existsSync(first.receiptPath), true);
-    assert.deepEqual(readdirSync(first.versionRoot), [first.packageTarballSha256]);
+    await withIsolatedProjectionStoreRoot(async () => {
+      const [first, second] = await Promise.all([
+        materializeGlobalProjectionPackage({ sourceRoot, homeRoot, env }),
+        materializeGlobalProjectionPackage({ sourceRoot, homeRoot, env }),
+      ]);
+      assert.equal(second.digestDir, first.digestDir);
+      assert.equal(second.packageRoot, first.packageRoot);
+      assert.equal(existsSync(first.receiptPath), true);
+      assert.deepEqual(readdirSync(first.versionRoot), [first.packageTarballSha256]);
+    });
   });
 });
 
@@ -787,6 +959,34 @@ test("npm pack truth includes an implicit root README and excludes an unmatched 
   });
 });
 
+test("authority diagnosis distinguishes source evolution from an invalid installed bundle", async () => {
+  await withFixture(async ({ homeRoot, sourceRoot, env }) => {
+    const verified = await materializeGlobalProjectionPackage({ sourceRoot, homeRoot, env });
+    const manifest = manifestFor(verified);
+    writeFileSync(path.join(sourceRoot, "assets", "non-key.txt"), "updated source\n", "utf8");
+    const diagnostics = [];
+    const authority = await findAuthoritativeGlobalProjectionPackage(manifest, {
+      homeRoot,
+      expectedPackageName: verified.packageName,
+      expectedPackageVersion: verified.packageVersion,
+      expectedFirstPartyClosure: await packageContentClosure(sourceRoot, { env, homeRoot }),
+      diagnostics,
+    });
+    assert.equal(authority, null);
+    assert.deepEqual(diagnostics.map(item => item.reason), ["source_closure_mismatch"]);
+    writeFileSync(path.join(verified.packageRoot, "assets", "non-key.txt"), "invalid installed bytes\n", "utf8");
+    const invalidDiagnostics = [];
+    assert.equal(await findAuthoritativeGlobalProjectionPackage(manifest, {
+      homeRoot,
+      expectedPackageName: verified.packageName,
+      expectedPackageVersion: verified.packageVersion,
+      expectedFirstPartyClosure: verified.firstPartyClosure,
+      diagnostics: invalidDiagnostics,
+    }), null);
+    assert.deepEqual(invalidDiagnostics.map(item => item.reason), ["bundle_verification_failed"]);
+  });
+});
+
 test("partially self-consistent manifest and receipt cannot hide stable first-party drift", async () => {
   await withFixture(async ({ homeRoot, sourceRoot, env }) => {
     const verified = await materializeGlobalProjectionPackage({
@@ -850,6 +1050,70 @@ test("mixed-case NODE_OPTIONS cannot execute preload code during materialization
   });
 });
 
+test("the stable child launch anchors local project state on the caller, never on the package root", async () => {
+  await withFixture(async ({ root, homeRoot, sourceRoot, env }) => {
+    const markerPath = path.join(root, "child-env.json");
+    writeFileSync(
+      path.join(sourceRoot, "scripts", "sync-global-meta-theory.mjs"),
+      [
+        'import { writeFileSync } from "node:fs";',
+        `writeFileSync(${JSON.stringify(markerPath)}, JSON.stringify({`,
+        "  callerCwd: process.env.META_KIM_CALLER_CWD ?? null,",
+        "  repoRoot: process.env.META_KIM_REPO_ROOT ?? null,",
+        "  cwd: process.cwd(),",
+        '}), "utf8");',
+        "process.exit(0);",
+      ].join("\n") + "\n",
+      "utf8",
+    );
+    const childEnv = { ...env };
+    delete childEnv.META_KIM_CALLER_CWD;
+
+    const stablePackage = await materializeGlobalProjectionPackage({
+      sourceRoot,
+      homeRoot,
+      env: childEnv,
+    });
+    const callerRoot = path.join(root, "caller-project");
+    mkdirSync(callerRoot, { recursive: true });
+
+    const explicit = await runGlobalProjectionPackageChild(stablePackage, [], {
+      env: childEnv,
+      sourceRoot,
+      callerCwd: callerRoot,
+    });
+    assert.equal(explicit.status, 0, "the fixture child must run to completion");
+    const withCaller = JSON.parse(readFileSync(markerPath, "utf8"));
+    assert.equal(
+      withCaller.callerCwd,
+      callerRoot,
+      "an explicit caller project root must reach the packaged child, or the child resolves local overrides against the package and silently narrows its runtime targets",
+    );
+    assert.equal(
+      path.resolve(withCaller.repoRoot),
+      path.resolve(stablePackage.packageRoot),
+    );
+    assert.notEqual(
+      path.resolve(withCaller.callerCwd),
+      path.resolve(withCaller.cwd),
+      "the caller project root must stay distinct from the child working directory",
+    );
+
+    rmSync(markerPath, { force: true });
+    const inferred = await runGlobalProjectionPackageChild(stablePackage, [], {
+      env: childEnv,
+      sourceRoot,
+    });
+    assert.equal(inferred.status, 0);
+    const withoutCaller = JSON.parse(readFileSync(markerPath, "utf8"));
+    assert.equal(
+      path.resolve(withoutCaller.callerCwd ?? ""),
+      path.resolve(sourceRoot),
+      "a caller that omits the project root must still anchor the child on its own source root, never on the package root",
+    );
+  });
+});
+
 test("Windows authority lookup accepts manifest paths whose case differs only lexically", {
   skip: process.platform !== "win32",
 }, async () => {
@@ -875,4 +1139,62 @@ test("Windows authority lookup accepts manifest paths whose case differs only le
     assert.ok(authority);
     assert.equal(authority.packageRoot.toLowerCase(), verified.packageRoot.toLowerCase());
   });
+});
+
+// The end-to-end defect these guard is only reachable on npm versions that
+// record the archive's staged path as a `file:` dependency. npm 11.16.0
+// records a prefix-relative path with no staged segment, and the store tests
+// run the real npm, so a materialization-level assertion would pass here
+// whether or not the normalization exists. These pin the transform instead.
+test("staged bundle metadata normalization collapses the per-worker segment", () => {
+  const staged = normalizeStagedBundleMetadata(
+    '{"meta-kim":"file:/store/3.1.1/.projection-package-staged-48213-6f1c2a9e-4b73-4d1f-9a08-2c5be7d40f31/meta-kim-3.1.1.tgz"}',
+  );
+
+  assert.equal(
+    staged,
+    '{"meta-kim":"file:/store/3.1.1/.projection-package-staged/meta-kim-3.1.1.tgz"}',
+  );
+});
+
+test("staged bundle metadata normalization makes two workers' bundles converge", () => {
+  // The contract is not "some substring is removed" — it is that bundles
+  // staged by different workers from the same source become byte-identical.
+  // Anything less and the loser's verifyExactWinner closure comparison fails.
+  const bundleFor = (pid, uuid) =>
+    JSON.stringify({
+      dependencies: {
+        "meta-kim": `file:../.projection-package-staged-${pid}-${uuid}/meta-kim-3.1.1.tgz`,
+      },
+      packages: {
+        "": {
+          resolved: `file:../.projection-package-staged-${pid}-${uuid}/meta-kim-3.1.1.tgz`,
+        },
+      },
+    });
+
+  const workerA = bundleFor(48213, "6f1c2a9e-4b73-4d1f-9a08-2c5be7d40f31");
+  const workerB = bundleFor(9007, "b0d4417a-8e21-4c6f-83bb-1de905fa7c62");
+  assert.notEqual(workerA, workerB, "fixture must stage two genuinely different workers");
+
+  // Two occurrences per document: a non-global regex converges the first and
+  // leaves the second divergent.
+  assert.equal(
+    normalizeStagedBundleMetadata(workerA),
+    normalizeStagedBundleMetadata(workerB),
+  );
+});
+
+test("staged bundle metadata normalization leaves everything else byte-exact", () => {
+  const untouched = JSON.stringify({
+    dependencies: { "meta-kim": "file:../meta-kim-3.1.1.tgz" },
+    projectionPackageStagedNote: ".projection-package-staged",
+    // A greedy "match to the path separator" regex would swallow this pid-only
+    // fragment, and with it any sibling text that shares the segment.
+    malformedStagedDir: ".projection-package-staged-48213",
+    lock: ".projection-package-lock-6f1c2a9e-4b73-4d1f-9a08-2c5be7d40f31",
+    integrity: "sha512-6f1c2a9e4b734d1f9a082c5be7d40f31",
+  });
+
+  assert.equal(normalizeStagedBundleMetadata(untouched), untouched);
 });

@@ -4,6 +4,7 @@ import path from "node:path";
 import process from "node:process";
 import {
   buildMetaKimHooksTemplate,
+  hookCommandNode,
   mergeGlobalMetaKimHooksIntoSettings,
   mergeRepoClaudeSettings,
   stripRepoMetaKimHooksFromSettings,
@@ -1438,10 +1439,12 @@ const GLOBAL_META_KIM_HOOK_PACKAGE_FILES = new Set([
   "project-root.mjs",
   "utils.mjs",
   "skip-reminder.mjs",
+  "conversation-binding.mjs",
   "spine-state-utils.mjs",
   "spine-state-gates.mjs",
   "spine-state.mjs",
   "activate-meta-theory-spine.mjs",
+  "planning-continuity.mjs",
   "bash-readonly-whitelist.mjs",
   "block-dangerous-bash.mjs",
   "ecc-permission-cache-wrapper.mjs",
@@ -1466,6 +1469,7 @@ const PROJECT_CLAUDE_HOOK_FILES = new Set([
   "spine-state-utils.mjs",
   "spine-state-gates.mjs",
   "spine-state.mjs",
+  "planning-continuity.mjs",
   "bash-readonly-whitelist.mjs",
   "enforce-agent-dispatch.mjs",
   "graphify-context.mjs",
@@ -2857,6 +2861,7 @@ export function buildCodexProjectHooksJson({
   medusaEnqueueHookPath = ".codex/hooks/medusa-postscan-enqueue.mjs",
   medusaSurfaceHookPath = ".codex/hooks/medusa-findings-surface.mjs",
   hookPromptAdapterPath = null,
+  planningContinuityHookPath = ".codex/hooks/planning-continuity.mjs",
   stopSpineCleanupHookPath = ".codex/hooks/stop-spine-cleanup.mjs",
   packageRoot = null,
   projectRoot = null,
@@ -2880,6 +2885,7 @@ export function buildCodexProjectHooksJson({
     medusaEnqueueHookPath: resolveProjectHookPath(medusaEnqueueHookPath),
     medusaSurfaceHookPath: resolveProjectHookPath(medusaSurfaceHookPath),
     hookPromptAdapterPath: resolveProjectHookPath(hookPromptAdapterPath),
+    planningContinuityHookPath: resolveProjectHookPath(planningContinuityHookPath),
     stopSpineCleanupHookPath: resolveProjectHookPath(stopSpineCleanupHookPath),
     packageRoot,
     nodeExecutable,
@@ -2889,6 +2895,9 @@ export function buildCodexProjectHooksJson({
     {
       matcher: "Edit|Write",
       hooks: [
+        hookCommand(nodeHookCommand(resolveProjectHookPath(planningContinuityHookPath), [
+          "--event", "post-tool", "--runtime", "codex",
+        ], nodeExecutable), 10),
         hookCommand(nodeHookCommand(resolveProjectHookPath(".codex/hooks/post-format.mjs"), [], nodeExecutable)),
         hookCommand(nodeHookCommand(resolveProjectHookPath(".codex/hooks/post-typecheck.mjs"), [], nodeExecutable)),
         hookCommand(nodeHookCommand(resolveProjectHookPath(".codex/hooks/post-console-log-warn.mjs"), [], nodeExecutable)),
@@ -2896,8 +2905,12 @@ export function buildCodexProjectHooksJson({
     },
   ];
   config.hooks.SubagentStart = [
+    ...(config.hooks.SubagentStart ?? []),
     {
-      matcher: "*",
+      // The governance rule set targets the nine meta-* governance agents.
+      // A catch-all matcher would inject it into every run-scoped worker
+      // subagent, which is pure token burn.
+      matcher: "meta-*",
       hooks: [hookCommand(nodeHookCommand(resolveProjectHookPath(".codex/hooks/subagent-context.mjs"), [], nodeExecutable))],
     },
   ];
@@ -2933,40 +2946,53 @@ export function buildCursorProjectHooksJson({
   spineHookPath = ".cursor/hooks/activate-meta-theory-spine.mjs",
   enforceAgentDispatchHookPath = ".cursor/hooks/enforce-agent-dispatch.mjs",
   hookPromptAdapterPath = null,
+  planningContinuityHookPath = null,
   packageRoot = null,
   nodeExecutable = "node",
+  // Global scope must pass an absolute directory. A relative command resolves
+  // against whatever directory the runtime happens to start in, so a global
+  // registration would point at another project's copy or at nothing.
+  hooksDir = ".cursor/hooks",
 } = {}) {
+  const hookScript = (fileName) =>
+    path.isAbsolute(hooksDir) ? path.join(hooksDir, fileName) : `${hooksDir}/${fileName}`;
   const config = buildCursorHooksJson({
     graphifyHookPath,
     memoryHookPath,
     spineHookPath,
     enforceAgentDispatchHookPath,
     hookPromptAdapterPath,
+    planningContinuityHookPath,
     packageRoot,
     nodeExecutable,
   });
   config.hooks.postToolUse = [
     ...(config.hooks.postToolUse ?? []),
     {
+      command: nodeHookCommand(hookScript("post-format.mjs"), [], nodeExecutable),
       matcher: "Edit|Write",
-      hooks: [
-        { command: nodeHookCommand(".cursor/hooks/post-format.mjs", [], nodeExecutable) },
-        { command: nodeHookCommand(".cursor/hooks/post-typecheck.mjs", [], nodeExecutable) },
-        { command: nodeHookCommand(".cursor/hooks/post-console-log-warn.mjs", [], nodeExecutable) },
-      ],
+    },
+    {
+      command: nodeHookCommand(hookScript("post-typecheck.mjs"), [], nodeExecutable),
+      matcher: "Edit|Write",
+    },
+    {
+      command: nodeHookCommand(hookScript("post-console-log-warn.mjs"), [], nodeExecutable),
+      matcher: "Edit|Write",
     },
   ];
   config.hooks.subagentStart = [
+    ...(config.hooks.subagentStart ?? []),
     {
-      command: nodeHookCommand(".cursor/hooks/subagent-context.mjs", [], nodeExecutable),
+      command: nodeHookCommand(hookScript("subagent-context.mjs"), [], nodeExecutable),
     },
   ];
   config.hooks.stop = [
     ...(config.hooks.stop ?? []),
-    { command: nodeHookCommand(".cursor/hooks/stop-compaction.mjs", [], nodeExecutable) },
-    { command: nodeHookCommand(".cursor/hooks/stop-console-log-audit.mjs", [], nodeExecutable) },
-    { command: nodeHookCommand(".cursor/hooks/stop-completion-guard.mjs", [], nodeExecutable) },
-    { command: nodeHookCommand(".cursor/hooks/stop-spine-cleanup.mjs", [], nodeExecutable) },
+    { command: nodeHookCommand(hookScript("stop-compaction.mjs"), [], nodeExecutable) },
+    { command: nodeHookCommand(hookScript("stop-console-log-audit.mjs"), [], nodeExecutable) },
+    { command: nodeHookCommand(hookScript("stop-completion-guard.mjs"), [], nodeExecutable) },
+    { command: nodeHookCommand(hookScript("stop-spine-cleanup.mjs"), [], nodeExecutable) },
   ];
   return config;
 }
@@ -3052,10 +3078,12 @@ const CLAUDE_PROJECT_HOOK_FILES = new Set([
   "project-root.mjs",
   "utils.mjs",
   "skip-reminder.mjs",
+  "conversation-binding.mjs",
   "spine-state-utils.mjs",
   "spine-state-gates.mjs",
   "spine-state.mjs",
   "activate-meta-theory-spine.mjs",
+  "planning-continuity.mjs",
   "bash-readonly-whitelist.mjs",
   "block-dangerous-bash.mjs",
   "ecc-permission-cache-wrapper.mjs",
@@ -3081,6 +3109,7 @@ const CODEX_PROJECT_HOOK_FILES = new Set([
   "project-root.mjs",
   "utils.mjs",
   "skip-reminder.mjs",
+  "conversation-binding.mjs",
   "spine-state-utils.mjs",
   "spine-state-gates.mjs",
   "spine-state.mjs",
@@ -3113,10 +3142,12 @@ const CODEX_ACTIVE_PROJECT_HOOK_FILES = new Set([
   "project-root.mjs",
   "utils.mjs",
   "skip-reminder.mjs",
+  "conversation-binding.mjs",
   "spine-state-utils.mjs",
   "spine-state-gates.mjs",
   "spine-state.mjs",
   "activate-meta-theory-spine.mjs",
+  "planning-continuity.mjs",
   "bash-readonly-whitelist.mjs",
   "enforce-agent-dispatch.mjs",
   "graphify-context.mjs",
@@ -3140,6 +3171,7 @@ const CURSOR_PROJECT_HOOK_FILES = new Set([
   "project-root.mjs",
   "utils.mjs",
   "skip-reminder.mjs",
+  "conversation-binding.mjs",
   "spine-state-utils.mjs",
   "spine-state-gates.mjs",
   "spine-state.mjs",
@@ -3165,6 +3197,7 @@ const CURSOR_ACTIVE_PROJECT_HOOK_FILES = new Set([
   "project-root.mjs",
   "utils.mjs",
   "skip-reminder.mjs",
+  "conversation-binding.mjs",
   "spine-state-utils.mjs",
   "spine-state-gates.mjs",
   "spine-state.mjs",
@@ -3237,6 +3270,22 @@ async function removeProjectMetaKimHooks(hooksDir, platformId, options = {}) {
     );
   }
   return removed;
+}
+
+/** Build the Claude global settings template for the selected runtime home. */
+export async function buildGlobalClaudeSettingsHooksTemplate(runtimeHome) {
+  const hookPromptScript = path.join(runtimeHome, "hooks", "user-prompt-submit.js");
+  let hookPromptCommand = null;
+  try {
+    if ((await fs.stat(hookPromptScript)).isFile()) {
+      hookPromptCommand = hookCommandNode(hookPromptScript);
+    }
+  } catch (error) {
+    if (error.code !== "ENOENT") throw error;
+  }
+  return buildMetaKimHooksTemplate(path.join(runtimeHome, "hooks", "meta-kim"), null, {
+    hookPromptCommand,
+  });
 }
 
 async function syncClaudeProjection(
@@ -3413,12 +3462,9 @@ async function syncClaudeProjection(
         throw error;
       }
     }
-    const globalClaudeMetaKimHooksDir = path.join(
+    const template = await buildGlobalClaudeSettingsHooksTemplate(
       resolveRuntimeHomeDir("claude"),
-      "hooks",
-      "meta-kim",
     );
-    const template = buildMetaKimHooksTemplate(globalClaudeMetaKimHooksDir);
     const merged = mergeGlobalMetaKimHooksIntoSettings(base, template);
     finalSettingsContent = `${JSON.stringify(merged, null, 2)}\n`;
   }
@@ -3514,9 +3560,15 @@ Examples:
   syncScopeForWritePlan = scope;
   const globalOnlyProjectSync =
     scope === "project" &&
-    targetContext.cliTargets.length === 0 &&
     targetContext.localOverrides.projectProjectionMode === "global_only";
   const selectedTargets = globalOnlyProjectSync ? [] : targetContext.activeTargets;
+  // `--targets` selects which runtime receives the project Hook closure. It
+  // must not change the independent global_only project scope decision above,
+  // nor re-enable durable agents/skills/commands for the selected runtime.
+  const globalOnlyExplicitHookTargets =
+    globalOnlyProjectSync && targetContext.cliTargets.length > 0
+      ? new Set(targetContext.activeTargets)
+      : null;
   requestedGlobalAssetTypes = parseGlobalAssetTypesArg(
     cliArgs,
     runtimeProfilesForSync,
@@ -3599,9 +3651,10 @@ Examples:
 
   // `global_only` suppresses durable project agents/skills/commands, but the
   // repo-local governance hook package still has to remain internally
-  // resolvable. Keep the three hook-capable project mirrors paired with the
-  // same shared dependencies (especially activate-meta-theory-spine.mjs +
-  // project-root.mjs). This is deliberately narrower than selecting a runtime:
+  // resolvable. Keep the hook-capable project mirrors paired with the same
+  // shared dependencies (especially activate-meta-theory-spine.mjs +
+  // project-root.mjs). An explicit runtime selection may narrow these Hook
+  // mirrors, but this remains deliberately narrower than selecting a runtime:
   // it does not materialize agents, skills, commands, rules, or MCP config.
   if (globalOnlyProjectSync) {
     const runtimeHookTargets = [
@@ -3630,6 +3683,12 @@ Examples:
       },
     ];
     for (const target of runtimeHookTargets) {
+      if (
+        globalOnlyExplicitHookTargets &&
+        !globalOnlyExplicitHookTargets.has(target.runtime)
+      ) {
+        continue;
+      }
       for (const hookName of target.activeFiles) {
         const hookSource = await canonicalGlobalHookSource(
           hookName,
@@ -4143,6 +4202,10 @@ Examples:
         scope === "global"
           ? path.join(dirs.codexHooksDir, "meta-kim-memory-save.mjs")
           : ".codex/hooks/meta-kim-memory-save.mjs";
+      const codexPlanningContinuityHookPath =
+        scope === "global"
+          ? path.join(dirs.codexHooksDir, "planning-continuity.mjs")
+          : ".codex/hooks/planning-continuity.mjs";
       const codexHookPromptAdapterPath =
         scope === "global"
           ? path.join(path.dirname(dirs.codexHooksDir), "hookprompt-adapter.mjs")
@@ -4161,6 +4224,7 @@ Examples:
               spineHookPath,
               enforceAgentDispatchHookPath,
               hookPromptAdapterPath: codexHookPromptAdapterPath,
+              planningContinuityHookPath: codexPlanningContinuityHookPath,
               stopSpineCleanupHookPath: codexStopSpineCleanupHookPath,
               packageRoot: repoRoot,
               projectRoot: repoRoot,
@@ -4464,6 +4528,8 @@ Examples:
         scope === "global"
           ? path.join(path.dirname(dirs.cursorHooksDir), "hookprompt-adapter.mjs")
           : null;
+      const cursorHooksDir =
+        scope === "global" ? dirs.cursorHooksDir : ".cursor/hooks";
       if (
         (
           await writeGeneratedJson(
@@ -4476,6 +4542,7 @@ Examples:
               hookPromptAdapterPath: cursorHookPromptAdapterPath,
               packageRoot: repoRoot,
               nodeExecutable: process.execPath,
+              hooksDir: cursorHooksDir,
             }),
           )
         ).changed

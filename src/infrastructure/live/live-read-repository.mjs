@@ -9,7 +9,10 @@ import path from "node:path";
 
 export const LIVE_DEFAULT_PROFILE = "default";
 export const LIVE_MAX_JSON_BYTES = 8 * 1024 * 1024;
-export const LIVE_RUN_ID_PATTERN = /^meta-[A-Za-z0-9][A-Za-z0-9._-]{0,119}$/u;
+export const LIVE_MAX_COMPACT_JSON_BYTES = 256 * 1024;
+// Keep this aligned with the governed runner's canonical filename-safe run-id
+// contract. A `meta-` prefix is conventional, not required for explicit ids.
+export const LIVE_RUN_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u;
 export const LIVE_PROFILE_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/u;
 
 function isPathInside(parent, target) {
@@ -121,6 +124,30 @@ function digest(value) {
   return createHash("sha256").update(value, "utf8").digest("hex");
 }
 
+/**
+ * A successful read, with its digest left as work the caller can decline.
+ *
+ * Only the durable-record path below compares this digest against a declared
+ * one. The project catalog is the other reader, and it walks every run of every
+ * registered project on first paint without ever looking at the digest, so
+ * hashing every file on the spot charged that walk for a checksum nobody was
+ * going to be shown.
+ */
+function validRead(value, raw) {
+  return {
+    status: "valid",
+    value,
+    raw,
+    get sha256() {
+      const computed = digest(raw);
+      // Leave the answer behind, so a second reader of the same record does not
+      // pay for the same hash again.
+      Object.defineProperty(this, "sha256", { value: computed, enumerable: true, configurable: true });
+      return computed;
+    },
+  };
+}
+
 function digestFrom(record) {
   const candidates = [
     record?.sha256,
@@ -144,6 +171,18 @@ function jsonPathFromPointer(pointer, root, executionDir, runId) {
   if (!isPathInside(executionDir, candidate) || path.extname(candidate).toLowerCase() !== ".json") {
     return null;
   }
+  return candidate;
+}
+
+function compactPathFromPointer(pointer, root, executionDir, runId) {
+  const requested = typeof pointer?.liveProjectionPath === "string" && pointer.liveProjectionPath.trim()
+    ? pointer.liveProjectionPath.trim()
+    : null;
+  if (requested && path.isAbsolute(requested)) return null;
+  const candidate = requested
+    ? path.resolve(root, requested)
+    : path.join(executionDir, `${runId}.live.json`);
+  if (!isPathInside(executionDir, candidate) || !candidate.endsWith(".live.json")) return null;
   return candidate;
 }
 
@@ -188,7 +227,7 @@ async function safeReadJson(root, targetPath, { maxBytes = LIVE_MAX_JSON_BYTES }
     if (!value || typeof value !== "object" || Array.isArray(value)) {
       return { status: "unknown", value: null };
     }
-    return { status: "valid", value, raw, sha256: digest(raw) };
+    return validRead(value, raw);
   } catch (error) {
     if (error?.code === "ENOENT") return { status: "missing", value: null };
     return { status: "malformed", value: null };
@@ -220,6 +259,18 @@ function isArtifact(value, expectedRunId = null) {
   return Boolean(value?.schemaVersion || value?.status || value?.workerTaskPackets || value?.coreLoop || value?.verificationPacket);
 }
 
+function durableRecordEnvelope(value, sourcePath, sha256) {
+  return {
+    ...value,
+    __sourcePath: sourcePath,
+    __rawSha256: sha256,
+    __source: "durable_status",
+    __updatedAt: metadataTimestamp(
+      value.updatedAt || value.deactivatedAt || value.startedAt || value.triggeredAt,
+    ),
+  };
+}
+
 function stateDirFor(root, profile) {
   return path.join(root, ".meta-kim", "state", sanitizeLiveProfile(profile));
 }
@@ -229,6 +280,7 @@ function stateDirFor(root, profile) {
  * @property {string|null} projectRoot
  * @property {string} profile
  * @property {() => Promise<object|null>} readDurableStatus
+ * @property {(runId:string) => Promise<object|null>} readRunStatus
  * @property {() => Promise<object|null>} readLatestArtifact
  * @property {(runId:string) => Promise<object|null>} readArtifact
  */
@@ -266,15 +318,7 @@ export function createLiveReadRepository(options = {}) {
     for (const candidate of candidates) {
       const result = await safeReadJson(root, candidate);
       if (result.status === "valid" && isDurableStatus(result.value)) {
-        return {
-          ...result.value,
-          __sourcePath: candidate,
-          __rawSha256: result.sha256,
-          __source: "durable_status",
-          __updatedAt: metadataTimestamp(
-            result.value.updatedAt || result.value.deactivatedAt || result.value.startedAt || result.value.triggeredAt,
-          ),
-        };
+        return durableRecordEnvelope(result.value, candidate, result.sha256);
       }
     }
 
@@ -303,13 +347,7 @@ export function createLiveReadRepository(options = {}) {
       records.sort((left, right) => String(right.updatedAt || "").localeCompare(String(left.updatedAt || "")));
       const newest = records[0];
       if (newest) {
-        return {
-          ...newest.value,
-          __sourcePath: newest.candidate,
-          __rawSha256: newest.sha256,
-          __source: "durable_status",
-          __updatedAt: newest.updatedAt,
-        };
+        return durableRecordEnvelope(newest.value, newest.candidate, newest.sha256);
       }
     } catch {
       // A missing runs directory is an ordinary empty-project state.
@@ -317,20 +355,43 @@ export function createLiveReadRepository(options = {}) {
     return null;
   };
 
-  const readArtifactAt = async (targetPath, expectedRunId, pointer = null) => {
+  // The project catalog lists a session whenever `runs/<runId>/status.json`
+  // exists, so a snapshot read has to be able to reach that exact file. Without
+  // this reader, any run that is neither the active durable record nor backed by
+  // a governed artifact was reported as unreadable while its record sat on disk.
+  const readRunStatus = async (runId) => {
+    if (!isLiveRunId(runId)) return null;
+    const root = await getProjectRoot();
+    if (!root) return null;
+    const candidate = path.join(stateDirFor(root, profile), "runs", runId, "status.json");
+    const result = await safeReadJson(root, candidate);
+    if (result.status !== "valid" || !isDurableStatus(result.value)) return null;
+    // Bind identity the way artifact reads do. A record that names a different
+    // run must not be rendered under the requested run's row.
+    if (readRecordRunId(result.value) !== runId) return null;
+    return durableRecordEnvelope(result.value, candidate, result.sha256);
+  };
+
+  const readArtifactAt = async (targetPath, expectedRunId, pointer = null, {
+    maxBytes = LIVE_MAX_JSON_BYTES,
+    source = "governed_artifact",
+    expectedBytes = null,
+  } = {}) => {
     const root = await getProjectRoot();
     if (!root || !targetPath) return null;
-    const result = await safeReadJson(root, targetPath);
+    const result = await safeReadJson(root, targetPath, { maxBytes });
     if (result.status !== "valid" || !isArtifact(result.value, expectedRunId)) return null;
+    if (expectedBytes !== null && Buffer.byteLength(result.raw, "utf8") !== expectedBytes) return null;
     const expectedDigest = digestFrom(pointer);
     if (expectedDigest && expectedDigest !== result.sha256) return null;
     return {
       ...result.value,
       __sourcePath: targetPath,
       __rawSha256: result.sha256,
-      __source: "governed_artifact",
+      __source: source,
       __updatedAt: metadataTimestamp(
-        result.value.updatedAt || result.value.completedAt || result.value.startedAt || result.value.createdAt,
+        result.value.updatedAt || result.value.completedAt || result.value.startedAt || result.value.createdAt ||
+          result.value.run?.updatedAt || result.value.run?.completedAt || result.value.run?.startedAt,
       ),
     };
   };
@@ -345,15 +406,47 @@ export function createLiveReadRepository(options = {}) {
     if (pointerResult.status === "valid") {
       const runId = normalizeLiveRunId(pointerResult.value.runId);
       if (!runId) return null;
-      const artifactPath = jsonPathFromPointer(pointerResult.value, root, executionDir, runId);
-      if (!artifactPath) return null;
-      return readArtifactAt(artifactPath, runId, pointerResult.value);
+      const readRawPointerArtifact = async () => {
+        const artifactPath = jsonPathFromPointer(pointerResult.value, root, executionDir, runId);
+        if (!artifactPath) return null;
+        return readArtifactAt(artifactPath, runId, {
+          sha256: pointerResult.value.sha256 || pointerResult.value.sha256Digest ||
+            pointerResult.value.artifactSha256 || pointerResult.value.jsonSha256 || pointerResult.value.digest,
+        });
+      };
+      if (pointerResult.value.liveProjectionPath !== undefined) {
+        const projectionPath = compactPathFromPointer(pointerResult.value, root, executionDir, runId);
+        const projectionDigest = digestFrom({ sha256: pointerResult.value.liveProjectionSha256 });
+        const projectionBytes = pointerResult.value.liveProjectionBytes;
+        if (
+          projectionPath &&
+          projectionDigest &&
+          Number.isSafeInteger(projectionBytes) &&
+          projectionBytes >= 1 &&
+          projectionBytes <= LIVE_MAX_COMPACT_JSON_BYTES
+        ) {
+          const compact = await readArtifactAt(
+            projectionPath,
+            runId,
+            { sha256: projectionDigest },
+            {
+              maxBytes: LIVE_MAX_COMPACT_JSON_BYTES,
+              source: "live_projection",
+              expectedBytes: projectionBytes,
+            },
+          );
+          if (compact) return compact;
+        }
+        return readRawPointerArtifact();
+      }
+      return readRawPointerArtifact();
     }
 
     const durable = await readDurableStatus();
     const runId = normalizeLiveRunId(durable?.runId);
     if (!runId) return null;
     const candidates = [
+      path.join(executionDir, `${runId}.live.json`),
       path.join(executionDir, `${runId}.json`),
       path.join(stateDir, "runs", runId, "artifact.json"),
       path.join(stateDir, "runs", runId, "run.json"),
@@ -362,7 +455,9 @@ export function createLiveReadRepository(options = {}) {
       path.join(root, ".meta-kim", "runs", runId, "run.json"),
     ];
     for (const candidate of candidates) {
-      const artifact = await readArtifactAt(candidate, runId);
+      const artifact = await readArtifactAt(candidate, runId, null, candidate.endsWith(".live.json")
+        ? { maxBytes: LIVE_MAX_COMPACT_JSON_BYTES, source: "live_projection" }
+        : undefined);
       if (artifact) return artifact;
     }
     return null;
@@ -375,6 +470,7 @@ export function createLiveReadRepository(options = {}) {
     const stateDir = stateDirFor(root, profile);
     const executionDir = path.join(stateDir, "governed-executions");
     const candidates = [
+      path.join(executionDir, `${runId}.live.json`),
       path.join(executionDir, `${runId}.json`),
       path.join(stateDir, "runs", runId, "artifact.json"),
       path.join(stateDir, "runs", runId, "run.json"),
@@ -383,7 +479,9 @@ export function createLiveReadRepository(options = {}) {
       path.join(root, ".meta-kim", "runs", runId, "run.json"),
     ];
     for (const candidate of candidates) {
-      const direct = await readArtifactAt(candidate, runId);
+      const direct = await readArtifactAt(candidate, runId, null, candidate.endsWith(".live.json")
+        ? { maxBytes: LIVE_MAX_COMPACT_JSON_BYTES, source: "live_projection" }
+        : undefined);
       if (direct) return direct;
     }
     const latest = await readLatestArtifact();
@@ -397,6 +495,7 @@ export function createLiveReadRepository(options = {}) {
     profile,
     getProjectRoot,
     readDurableStatus,
+    readRunStatus,
     readLatestArtifact,
     readArtifact,
   };

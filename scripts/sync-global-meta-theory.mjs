@@ -26,9 +26,12 @@ import {
   canonicalSkillRoot,
   canonicalProjectModelChainSkillRoot,
   globalAgentProjectionFileName,
+  globalProjectionIsOwnedBy,
   resolveGlobalAgentProjectionTargets,
   resolveTargetContext,
   resolveRuntimeHomeInfo,
+  localStateRoot,
+  GLOBAL_PROJECTION_OWNER_SYNC_GLOBAL,
 } from "./meta-kim-sync-config.mjs";
 import {
   CODEX_REQUEST_USER_INPUT_FEATURE,
@@ -47,6 +50,7 @@ import { validateSkillFrontmatter } from "./install-skill-sanitizer.mjs";
 import {
   applyRuntimePaths,
   buildCodexSkillContent,
+  buildCursorProjectHooksJson,
   loadCanonicalAgents,
   parseCanonicalAgent,
   renderGlobalAgentProjection,
@@ -82,6 +86,7 @@ let manifestRecorder = null;
 let globalManifestSnapshot = null;
 let executingProjectionPackage = null;
 let checkMissingProjectionPackageAuthority = false;
+const projectionAuthorityDiagnostics = [];
 const manifestRecordFailures = [];
 const PRIMARY_PROJECTION_TARGET_IDS = new Set(["claude", "codex"]);
 function primaryProjectionTargetSelected() {
@@ -134,7 +139,9 @@ function printHelp() {
   console.log(`Usage: node scripts/sync-global-meta-theory.mjs [options]
 
 Options:
-  --check                 Check selected global projections without writing
+  --check                 Check selected global projections without writing.
+                          An already installed global Hook package is audited
+                          for staleness even without --with-global-hooks.
   --print-targets         Print resolved runtime homes and selected targets
   --targets <ids>         Comma-separated runtime ids
   --with-global-hooks     Include global Hook files and runtime registration
@@ -220,10 +227,12 @@ const GLOBAL_HOOK_PACKAGE_FILES = new Set([
   "project-root.mjs",
   "utils.mjs",
   "skip-reminder.mjs",
+  "conversation-binding.mjs",
   "spine-state-utils.mjs",
   "spine-state-gates.mjs",
   "spine-state.mjs",
   "activate-meta-theory-spine.mjs",
+  "planning-continuity.mjs",
   // ── canonical/runtime-assets/claude/hooks/ ──
   "bash-readonly-whitelist.mjs",
   "block-dangerous-bash.mjs",
@@ -654,10 +663,27 @@ async function checkGlobalAgents(plan) {
   for (const { targetId } of globalAgentTargets) {
     const targetEntries = plan.entries.filter((entry) => entry.targetId === targetId);
     let current = 0;
+    const unbound = [];
     for (const entry of targetEntries) {
+      // Judge the same boundary the write path enforces. Reading content through
+      // an out-of-home redirect would report "in sync" for a layout that
+      // syncGlobalAgents refuses to maintain, so the two gates would disagree
+      // about identical on-disk state.
+      try {
+        assertHomeBound(entry.targetPath);
+        await assertRealHomeBound(entry.targetPath);
+      } catch {
+        unbound.push(path.basename(entry.targetPath));
+        continue;
+      }
       if ((await fs.readFile(entry.targetPath, "utf8").catch(() => null)) === entry.expected) current += 1;
     }
     console.log(`${current === targetEntries.length ? `${C.green}✓${C.reset}` : `${C.yellow}⊘${C.reset}`} ${C.dim}${targetId} global agents: ${current}/${targetEntries.length}${C.reset}`);
+    if (unbound.length > 0) {
+      console.log(
+        `  ${C.dim}${unbound.length} agent path(s) resolve outside the configured runtime homes: ${unbound.join(", ")}; redirect the whole runtime home instead of individual assets${C.reset}`,
+      );
+    }
     if (current !== targetEntries.length) inSync = false;
   }
   return inSync;
@@ -837,6 +863,26 @@ function stagedLayoutFor(layout, stageDir) {
   };
 }
 
+async function copyDurableMcpRuntimeFromProjectionAuthority(targetBundleDir) {
+  if (!executingProjectionPackage?.bundleDir) {
+    throw new Error("Verified projection package authority is unavailable for durable MCP copy.");
+  }
+  const sourceBundleDir = executingProjectionPackage.bundleDir;
+  if (
+    !(await pathIsPlainOwnedDirectory(sourceBundleDir)) ||
+    !(await directoryChainHasNoLinks(sourceBundleDir, executingProjectionPackage.packageRoot))
+  ) {
+    throw new Error("Verified projection package bundle is not safe to copy.");
+  }
+  await fs.rm(targetBundleDir, { recursive: true, force: true });
+  await fs.cp(sourceBundleDir, targetBundleDir, {
+    recursive: true,
+    dereference: true,
+    errorOnExist: true,
+    force: false,
+  });
+}
+
 async function materializeDurableMcpRuntime(plan) {
   const { layout, identity } = plan;
   const stageDir = path.join(
@@ -850,21 +896,27 @@ async function materializeDurableMcpRuntime(plan) {
   let promoted = false;
   let promotedClosure = null;
   try {
-    const npmCliPath = resolveNpmCliJsPath();
     if (process.env.META_KIM_TEST_FAIL_DURABLE_MCP_AT === "pack") {
       throw new Error("Injected durable MCP pack failure.");
     }
-    execFileSync(
-      process.execPath,
-      [npmCliPath, "pack", repoRoot, "--pack-destination", stageDir],
-      { cwd: repoRoot, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
-    );
-    const archives = (await fs.readdir(stageDir)).filter((name) => name.endsWith(".tgz"));
-    if (archives.length !== 1) throw new Error(`Expected one packed candidate, found ${archives.length}.`);
-    const archivePath = path.join(stageDir, archives[0]);
-    const sourcePackageSha256 = createHash("sha256")
-      .update(await fs.readFile(archivePath))
-      .digest("hex");
+    let archivePath = null;
+    let sourcePackageSha256 = null;
+    if (executingProjectionPackage) {
+      sourcePackageSha256 = executingProjectionPackage.packageTarballSha256;
+    } else {
+      const npmCliPath = resolveNpmCliJsPath();
+      execFileSync(
+        process.execPath,
+        [npmCliPath, "pack", repoRoot, "--pack-destination", stageDir],
+        { cwd: repoRoot, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
+      );
+      const archives = (await fs.readdir(stageDir)).filter((name) => name.endsWith(".tgz"));
+      if (archives.length !== 1) throw new Error(`Expected one packed candidate, found ${archives.length}.`);
+      archivePath = path.join(stageDir, archives[0]);
+      sourcePackageSha256 = createHash("sha256")
+        .update(await fs.readFile(archivePath))
+        .digest("hex");
+    }
     if (await pathExists(layout.bundleDir)) {
       if (!(await manifestOwnsExactBundle(layout))) {
         throw new Error(`Refusing to replace an unowned durable MCP runtime: ${layout.bundleDir}`);
@@ -878,12 +930,17 @@ async function materializeDurableMcpRuntime(plan) {
     if (process.env.META_KIM_TEST_FAIL_DURABLE_MCP_AT === "install") {
       throw new Error("Injected durable MCP install failure.");
     }
-    execFileSync(
-      process.execPath,
-      [npmCliPath, "install", "--prefix", stageDir, "--omit=dev", "--ignore-scripts", "--no-audit", "--no-fund", archivePath],
-      { cwd: stageDir, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
-    );
-    await fs.rm(archivePath, { force: true });
+    if (executingProjectionPackage) {
+      await copyDurableMcpRuntimeFromProjectionAuthority(stageDir);
+    } else {
+      const npmCliPath = resolveNpmCliJsPath();
+      execFileSync(
+        process.execPath,
+        [npmCliPath, "install", "--prefix", stageDir, "--omit=dev", "--ignore-scripts", "--no-audit", "--no-fund", archivePath],
+        { cwd: stageDir, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
+      );
+      await fs.rm(archivePath, { force: true });
+    }
     await fs.writeFile(
       path.join(stageDir, ".meta-kim-candidate.json"),
       candidateLockContent(identity, sourcePackageSha256),
@@ -1651,34 +1708,6 @@ async function fingerprintSourceForTarget(targetId, skillSourceDir) {
   };
 }
 
-async function fingerprintSelectedFiles(rootDir, allowedNames) {
-  if (!(await pathExists(rootDir))) {
-    return null;
-  }
-
-  const filePaths = [];
-  for (const fileName of [...allowedNames].sort((left, right) => left.localeCompare(right))) {
-    const filePath = path.join(rootDir, fileName);
-    if (await pathExists(filePath)) {
-      filePaths.push(filePath);
-    }
-  }
-
-  const hash = createHash("sha256");
-  for (const filePath of filePaths) {
-    const relativePath = path.relative(rootDir, filePath).replace(/\\/g, "/");
-    hash.update(relativePath);
-    hash.update("\n");
-    hash.update(await fs.readFile(filePath));
-    hash.update("\n");
-  }
-
-  return {
-    fileCount: filePaths.length,
-    hash: hash.digest("hex"),
-  };
-}
-
 async function canonicalHookSourcePath(fileName, runtimeId) {
   const owner = runtimeHookSourceOwner(runtimeId, fileName);
   if (!owner) return null;
@@ -1714,6 +1743,7 @@ async function globalHookPackageSourcePath(fileName, runtimeId) {
 async function fingerprintGlobalHookSources(runtimeId) {
   const hash = createHash("sha256");
   let fileCount = 0;
+  const files = {};
   for (const fileName of globalHookPackageFileNames()) {
     const filePath = await globalHookPackageSourcePath(fileName, runtimeId);
     if (!filePath) {
@@ -1721,13 +1751,19 @@ async function fingerprintGlobalHookSources(runtimeId) {
     }
     hash.update(fileName);
     hash.update("\n");
-    hash.update(await fs.readFile(filePath));
+    const content = await fs.readFile(filePath);
+    hash.update(content);
     hash.update("\n");
+    files[fileName] = {
+      hash: createHash("sha256").update(content).digest("hex"),
+      source: path.relative(repoRoot, filePath).replaceAll("\\", "/"),
+    };
     fileCount += 1;
   }
   return {
     fileCount,
     hash: hash.digest("hex"),
+    files,
   };
 }
 
@@ -1737,19 +1773,70 @@ async function fingerprintInstalledGlobalHooks(rootDir) {
   }
   const hash = createHash("sha256");
   let fileCount = 0;
+  const files = {};
   for (const fileName of globalHookPackageFileNames()) {
     const filePath = path.join(rootDir, fileName);
     if (!(await pathExists(filePath))) continue;
     hash.update(fileName);
     hash.update("\n");
-    hash.update(await fs.readFile(filePath));
+    const content = await fs.readFile(filePath);
+    hash.update(content);
     hash.update("\n");
+    files[fileName] = { hash: createHash("sha256").update(content).digest("hex") };
     fileCount += 1;
   }
   return {
     fileCount,
     hash: hash.digest("hex"),
+    files,
   };
+}
+
+function reportGlobalHookDifferences(expected, installed) {
+  for (const [fileName, source] of Object.entries(expected?.files ?? {})) {
+    const actual = installed?.files?.[fileName];
+    const difference = !actual ? "missing" : actual.hash !== source.hash ? "content-diff" : null;
+    if (difference) {
+      console.log(`  ${difference}: ${fileName} (expected source: ${source.source})`);
+    }
+  }
+}
+
+// `--with-global-hooks` gates *writing* into a runtime home, which is why an
+// absent package stays a non-failure by default. An installed package is a
+// different object: it executes on every prompt entry, and reading it costs
+// nothing. So the default check reports an absent package as skipped and fails
+// on an installed package that no longer matches canonical, rather than
+// declaring the one file that actually runs out of scope.
+async function auditInstalledGlobalHookPackage(runtimeId, label, hooksPath) {
+  const installed = await fingerprintInstalledGlobalHooks(hooksPath);
+  if (installed === null) {
+    console.log(
+      `${C.yellow}⊘${C.reset} ${C.dim}${label} global hooks skipped (use --with-global-hooks to check them): ${hooksPath}${C.reset}`,
+    );
+    return true;
+  }
+
+  const canonicalHooks = await fingerprintGlobalHookSources(runtimeId);
+  const inSync =
+    canonicalHooks !== null &&
+    canonicalHooks.hash === installed.hash &&
+    canonicalHooks.fileCount === installed.fileCount;
+  if (inSync) {
+    console.log(
+      `${C.green}✓${C.reset} ${C.dim}${label} global hooks (meta-kim, installed package audited): ${hooksPath}${C.reset}`,
+    );
+    return true;
+  }
+
+  console.log(
+    `${C.yellow}⊘${C.reset} ${C.dim}${label} global hooks (meta-kim) are installed but stale: ${hooksPath}${C.reset}`,
+  );
+  console.log(
+    `  ${C.dim}canonical ${canonicalHooks?.fileCount ?? 0} file(s), installed ${installed.fileCount} file(s); repair with: npm run meta:sync:global:release${C.reset}`,
+  );
+  reportGlobalHookDifferences(canonicalHooks, installed);
+  return false;
 }
 
 async function copyCanonicalSkill(targetDir, targetId, skillId, skillSourceDir) {
@@ -1967,10 +2054,10 @@ async function ensureCodexGlobalConfigChoiceSurface() {
 
 async function removeIfExists(targetPath) {
   assertHomeBound(targetPath);
-  await assertRealHomeBound(targetPath);
   if (!(await pathExists(targetPath))) {
     return false;
   }
+  await assertRealHomeBound(targetPath);
   await fs.rm(targetPath, { recursive: true, force: true });
   return true;
 }
@@ -2116,12 +2203,41 @@ async function isOwnedRetiredMetaKimHook(filePath, fileName) {
   ].every((marker) => source.includes(marker));
 }
 
+function runtimeGlobalMetaKimHooksDir(runtimeId) {
+  const home = runtimeHomes[runtimeId]?.dir;
+  if (!home) {
+    throw new Error(`No resolved runtime home for ${runtimeId}`);
+  }
+  return path.join(home, "hooks", "meta-kim");
+}
+
+// Cursor assigns its global `hooks` asset to sync-runtimes; Claude and Codex
+// keep theirs here. Both scripts lay down the same canonical bytes, so the split
+// only decides who claims the paths in the install manifest — and a path claimed
+// twice leaves uninstall and drift repair reading whichever record they hit
+// first. Yield the record when the profile names another owner.
+function ownsGlobalHookPackageRecords(runtimeId) {
+  const profile = runtimeProfiles[runtimeId];
+  if (!profile) {
+    throw new Error(`No resolved runtime profile for ${runtimeId}`);
+  }
+  return globalProjectionIsOwnedBy(
+    profile,
+    "hooks",
+    GLOBAL_PROJECTION_OWNER_SYNC_GLOBAL,
+  );
+}
+
 function globalMetaKimHooksDir() {
-  return path.join(runtimeHomes.claude.dir, "hooks", "meta-kim");
+  return runtimeGlobalMetaKimHooksDir("claude");
 }
 
 function codexGlobalMetaKimHooksDir() {
-  return path.join(runtimeHomes.codex.dir, "hooks", "meta-kim");
+  return runtimeGlobalMetaKimHooksDir("codex");
+}
+
+function cursorGlobalMetaKimHooksDir() {
+  return runtimeGlobalMetaKimHooksDir("cursor");
 }
 
 async function copyMedusaGlobalExtraAssets(dest) {
@@ -2225,21 +2341,25 @@ async function copyCanonicalHooksToGlobal() {
   }
 }
 
-async function copyCanonicalHooksToCodexGlobal() {
-  const dest = codexGlobalMetaKimHooksDir();
+// Claude keeps its own copier above because it must also migrate the
+// pre-meta-kim-subdir layout that older installs left in the hooks root. Codex
+// and Cursor both post-date that layout, so they share one body rather than
+// carrying a second and third copy of it.
+async function copyCanonicalHooksToRuntimeGlobal(runtimeId, label) {
+  const dest = runtimeGlobalMetaKimHooksDir(runtimeId);
   assertHomeBound(dest);
   await assertRealHomeBound(dest);
   await fs.mkdir(path.dirname(dest), { recursive: true });
   await backupExistingPath(dest, {
     family: "hook-package",
-    label: "Codex global hook package",
+    label: `${label} global hook package`,
   });
   await fs.rm(dest, { recursive: true, force: true });
   await fs.mkdir(dest, { recursive: true });
   for (const fileName of GLOBAL_HOOK_PACKAGE_FILES) {
-    const sourcePath = await canonicalHookSourcePath(fileName, "codex");
+    const sourcePath = await canonicalHookSourcePath(fileName, runtimeId);
     if (!sourcePath) {
-      throw new Error(`Missing canonical Hook source for codex:${fileName}`);
+      throw new Error(`Missing canonical Hook source for ${runtimeId}:${fileName}`);
     }
     const destPath = path.join(dest, fileName);
     await assertRealHomeBound(destPath);
@@ -2255,10 +2375,14 @@ async function copyCanonicalHooksToCodexGlobal() {
     }
   }
 
+  if (!ownsGlobalHookPackageRecords(runtimeId)) {
+    return;
+  }
+
   recordSafe((rec) =>
     rec.recordDir(dest, {
       source: "sync-global-meta-theory",
-      purpose: "codex-global-hooks-dir",
+      purpose: `${runtimeId}-global-hooks-dir`,
       category: CATEGORIES.B,
     }),
   );
@@ -2269,7 +2393,7 @@ async function copyCanonicalHooksToCodexGlobal() {
       recordSafe((rec) =>
         rec.recordFile(path.join(dest, entry.name), {
           source: "sync-global-meta-theory",
-          purpose: "codex-global-hook",
+          purpose: `${runtimeId}-global-hook`,
           category: CATEGORIES.B,
         }),
       );
@@ -2277,6 +2401,14 @@ async function copyCanonicalHooksToCodexGlobal() {
   } catch {
     /* directory iteration best-effort */
   }
+}
+
+async function copyCanonicalHooksToCodexGlobal() {
+  await copyCanonicalHooksToRuntimeGlobal("codex", "Codex");
+}
+
+async function copyCanonicalHooksToCursorGlobal() {
+  await copyCanonicalHooksToRuntimeGlobal("cursor", "Cursor");
 }
 
 async function syncClaudeGlobalSettingsHooks() {
@@ -2400,12 +2532,59 @@ function buildCodexGlobalHooksTemplate() {
     medusaEnqueueHookPath: path.join(absHooks, "medusa-postscan-enqueue.mjs"),
     medusaSurfaceHookPath: path.join(absHooks, "medusa-findings-surface.mjs"),
     hookPromptAdapterPath: codexGlobalHookPromptAdapterPath(),
+    planningContinuityHookPath: path.join(absHooks, "planning-continuity.mjs"),
     stopSpineCleanupHookPath: path.join(absHooks, "stop-spine-cleanup.mjs"),
     nodeExecutable: process.execPath,
   });
 }
 
-function stripGlobalMetaKimHooksFromCodexConfig(config = {}) {
+function cursorGlobalHooksJsonPath() {
+  return path.join(runtimeHomes.cursor.dir, "hooks.json");
+}
+
+function cursorGlobalHookPromptAdapterPath() {
+  return path.join(runtimeHomes.cursor.dir, "hooks", "hookprompt-adapter.mjs");
+}
+
+async function ensureCursorGlobalHookPromptAdapter() {
+  const adapterPath = cursorGlobalHookPromptAdapterPath();
+  assertHomeBound(adapterPath);
+  await assertRealHomeBound(adapterPath);
+  await fs.mkdir(path.dirname(adapterPath), { recursive: true });
+  await fs.writeFile(adapterPath, buildHookPromptAdapterSource("cursor"), "utf8");
+  if (!ownsGlobalHookPackageRecords("cursor")) {
+    return adapterPath;
+  }
+  recordSafe((rec) =>
+    rec.recordFile(adapterPath, {
+      source: "sync-global-meta-theory",
+      purpose: "cursor-global-hookprompt-adapter",
+      category: CATEGORIES.B,
+    }),
+  );
+  return adapterPath;
+}
+
+function buildCursorGlobalHooksTemplate() {
+  const absHooks = cursorGlobalMetaKimHooksDir();
+  return buildCursorProjectHooksJson({
+    graphifyHookPath: path.join(absHooks, "graphify-context.mjs"),
+    memoryHookPath: path.join(absHooks, "meta-kim-memory-save.mjs"),
+    spineHookPath: path.join(absHooks, "activate-meta-theory-spine.mjs"),
+    packageRoot: repoRoot,
+    enforceAgentDispatchHookPath: path.join(
+      absHooks,
+      "enforce-agent-dispatch.mjs",
+    ),
+    hookPromptAdapterPath: cursorGlobalHookPromptAdapterPath(),
+    hooksDir: absHooks,
+  });
+}
+
+// Codex hooks.json uses nested event blocks; Cursor hooks.json uses native flat
+// command blocks. Both shapes are accepted here, with ownership keyed on the
+// command so a runtime-specific representation is never rewritten.
+function stripGlobalMetaKimHooksFromRuntimeHooksConfig(config = {}) {
   const next = structuredClone(config && typeof config === "object" ? config : {});
   const hooks = {};
   for (const [event, blocks] of Object.entries(next.hooks ?? {})) {
@@ -2441,8 +2620,8 @@ function stripGlobalMetaKimHooksFromCodexConfig(config = {}) {
   return next;
 }
 
-function mergeCodexGlobalHooksIntoConfig(config, template) {
-  const next = stripGlobalMetaKimHooksFromCodexConfig(config);
+function mergeRuntimeGlobalHooksIntoConfig(config, template) {
+  const next = stripGlobalMetaKimHooksFromRuntimeHooksConfig(config);
   next.hooks ??= {};
   for (const [event, additionBlocks] of Object.entries(template.hooks ?? {})) {
     next.hooks[event] = mergeHookMatcherBlocks(
@@ -2465,13 +2644,16 @@ async function readJsonConfig(configPath, label) {
   }
 }
 
-async function syncCodexGlobalHooksJson() {
-  const hooksJsonPath = codexGlobalHooksJsonPath();
+async function syncRuntimeGlobalHooksJson({
+  runtimeId,
+  label,
+  hooksJsonPath,
+  template,
+}) {
   assertHomeBound(hooksJsonPath);
   await assertRealHomeBound(hooksJsonPath);
-  const template = buildCodexGlobalHooksTemplate();
   const base = await readJsonConfig(hooksJsonPath, hooksJsonPath);
-  const merged = mergeCodexGlobalHooksIntoConfig(base, template);
+  const merged = mergeRuntimeGlobalHooksIntoConfig(base, template);
   const out = `${JSON.stringify(merged, null, 2)}\n`;
   const prev = (await pathExists(hooksJsonPath))
     ? await fs.readFile(hooksJsonPath, "utf8")
@@ -2482,7 +2664,7 @@ async function syncCodexGlobalHooksJson() {
     recordSafe((rec) =>
       rec.recordSettingsMerge(hooksJsonPath, managedCommands, {
         source: "sync-global-meta-theory",
-        purpose: "codex-global-hooks-json-merge",
+        purpose: `${runtimeId}-global-hooks-json-merge`,
         category: CATEGORIES.C,
         managedHookFragments: flattenHookFragments(template.hooks),
       }),
@@ -2490,7 +2672,7 @@ async function syncCodexGlobalHooksJson() {
   };
 
   if (prev === out) {
-    console.log(`Codex hooks.json already up to date: ${hooksJsonPath}`);
+    console.log(`${label} hooks.json already up to date: ${hooksJsonPath}`);
     recordHooksJsonMerge();
     return;
   }
@@ -2499,13 +2681,31 @@ async function syncCodexGlobalHooksJson() {
   if (prev !== null) {
     await backupExistingPath(hooksJsonPath, {
       family: "settings",
-      label: "Codex hooks.json",
+      label: `${label} hooks.json`,
     });
   }
 
-  await writeUtf8FileAtomic(hooksJsonPath, out, "codex-hooks");
+  await writeUtf8FileAtomic(hooksJsonPath, out, `${runtimeId}-hooks`);
   console.log(`Merged Meta_Kim hooks into ${hooksJsonPath}`);
   recordHooksJsonMerge();
+}
+
+async function syncCodexGlobalHooksJson() {
+  await syncRuntimeGlobalHooksJson({
+    runtimeId: "codex",
+    label: "Codex",
+    hooksJsonPath: codexGlobalHooksJsonPath(),
+    template: buildCodexGlobalHooksTemplate(),
+  });
+}
+
+async function syncCursorGlobalHooksJson() {
+  await syncRuntimeGlobalHooksJson({
+    runtimeId: "cursor",
+    label: "Cursor",
+    hooksJsonPath: cursorGlobalHooksJsonPath(),
+    template: buildCursorGlobalHooksTemplate(),
+  });
 }
 
 async function readClaudeGlobalSettings(settingsPath) {
@@ -2526,6 +2726,9 @@ function flattenHookCommands(hooks = {}) {
   const commands = [];
   for (const blocks of Object.values(hooks ?? {})) {
     for (const block of blocks ?? []) {
+      if (block?.command) {
+        commands.push(block.command);
+      }
       for (const hook of block?.hooks ?? []) {
         if (hook?.command) {
           commands.push(hook.command);
@@ -2540,6 +2743,15 @@ function flattenHookFragments(hooks = {}) {
   const fragments = [];
   for (const [event, blocks] of Object.entries(hooks ?? {})) {
     for (const block of blocks ?? []) {
+      if (block && typeof block === "object" && !Array.isArray(block)) {
+        if (block.command) {
+          fragments.push({
+            event,
+            matcher: block.matcher ?? null,
+            hook: structuredClone(block),
+          });
+        }
+      }
       for (const hook of block?.hooks ?? []) {
         if (hook && typeof hook === "object" && !Array.isArray(hook)) {
           fragments.push({
@@ -2607,11 +2819,9 @@ async function checkClaudeGlobalSettingsHooks() {
   return inSync;
 }
 
-async function checkCodexGlobalHooksJson() {
-  const hooksJsonPath = codexGlobalHooksJsonPath();
-  const template = buildCodexGlobalHooksTemplate();
+async function checkRuntimeGlobalHooksJson({ label, hooksJsonPath, template }) {
   const config = await readJsonConfig(hooksJsonPath, hooksJsonPath);
-  const expected = mergeCodexGlobalHooksIntoConfig(config, template);
+  const expected = mergeRuntimeGlobalHooksIntoConfig(config, template);
 
   // Object insertion order is not semantic JSON state; array order is. Node's
   // deep strict comparison preserves that boundary without stringifying keys.
@@ -2633,14 +2843,30 @@ async function checkCodexGlobalHooksJson() {
   }
 
   console.log(
-    `${inSync ? `${C.green}✓${C.reset}` : `${C.yellow}⊘${C.reset}`} ${C.dim}Codex global hooks.json: ${hooksJsonPath}${C.reset}`,
+    `${inSync ? `${C.green}✓${C.reset}` : `${C.yellow}⊘${C.reset}`} ${C.dim}${label} global hooks.json: ${hooksJsonPath}${C.reset}`,
   );
   if (!inSync && missingCommands.length > 0) {
     console.log(
-      `${C.yellow}⊘${C.reset} ${C.dim}Missing registered Meta_Kim Codex hook scripts: ${missingCommands.length}${C.reset}`,
+      `${C.yellow}⊘${C.reset} ${C.dim}Missing registered Meta_Kim ${label} hook scripts: ${missingCommands.length}${C.reset}`,
     );
   }
   return inSync;
+}
+
+async function checkCodexGlobalHooksJson() {
+  return checkRuntimeGlobalHooksJson({
+    label: "Codex",
+    hooksJsonPath: codexGlobalHooksJsonPath(),
+    template: buildCodexGlobalHooksTemplate(),
+  });
+}
+
+async function checkCursorGlobalHooksJson() {
+  return checkRuntimeGlobalHooksJson({
+    label: "Cursor",
+    hooksJsonPath: cursorGlobalHooksJsonPath(),
+    template: buildCursorGlobalHooksTemplate(),
+  });
 }
 
 function isOwnedGlobalMetaKimHookCommand(command) {
@@ -2783,6 +3009,7 @@ async function runCheck() {
       `${hooksInSync ? `${C.green}✓${C.reset}` : `${C.yellow}⊘${C.reset}`} ${C.dim}Claude Code global hooks (meta-kim): ${globalHooksPath}${C.reset}`,
     );
     if (!hooksInSync) {
+      reportGlobalHookDifferences(repoHooksFp, globalHooksFp);
       failed = true;
     }
     const settingsHooksInSync = await checkClaudeGlobalSettingsHooks();
@@ -2790,9 +3017,9 @@ async function runCheck() {
       failed = true;
     }
   } else if (selectedTargetIds.includes("claude")) {
-    console.log(
-      `${C.yellow}⊘${C.reset} ${C.dim}Claude Code global hooks skipped (use --with-global-hooks to check them): ${globalMetaKimHooksDir()}${C.reset}`,
-    );
+    if (!(await auditInstalledGlobalHookPackage("claude", "Claude Code", globalMetaKimHooksDir()))) {
+      failed = true;
+    }
   }
 
   if (selectedTargetIds.includes("codex") && withGlobalHooks) {
@@ -2808,6 +3035,7 @@ async function runCheck() {
       `${hooksInSync ? `${C.green}✓${C.reset}` : `${C.yellow}⊘${C.reset}`} ${C.dim}Codex global hooks (meta-kim): ${codexHooksPath}${C.reset}`,
     );
     if (!hooksInSync) {
+      reportGlobalHookDifferences(repoHooksFp, codexHooksFp);
       failed = true;
     }
     const hooksJsonInSync = await checkCodexGlobalHooksJson();
@@ -2815,9 +3043,35 @@ async function runCheck() {
       failed = true;
     }
   } else if (selectedTargetIds.includes("codex")) {
+    if (!(await auditInstalledGlobalHookPackage("codex", "Codex", codexGlobalMetaKimHooksDir()))) {
+      failed = true;
+    }
+  }
+
+  if (selectedTargetIds.includes("cursor") && withGlobalHooks) {
+    const repoHooksFp = await fingerprintGlobalHookSources("cursor");
+    const cursorHooksPath = cursorGlobalMetaKimHooksDir();
+    const cursorHooksFp = await fingerprintInstalledGlobalHooks(cursorHooksPath);
+    const hooksInSync =
+      repoHooksFp !== null &&
+      cursorHooksFp !== null &&
+      repoHooksFp.hash === cursorHooksFp.hash &&
+      repoHooksFp.fileCount === cursorHooksFp.fileCount;
     console.log(
-      `${C.yellow}⊘${C.reset} ${C.dim}Codex global hooks skipped (use --with-global-hooks to check them): ${codexGlobalMetaKimHooksDir()}${C.reset}`,
+      `${hooksInSync ? `${C.green}✓${C.reset}` : `${C.yellow}⊘${C.reset}`} ${C.dim}Cursor global hooks (meta-kim): ${cursorHooksPath}${C.reset}`,
     );
+    if (!hooksInSync) {
+      reportGlobalHookDifferences(repoHooksFp, cursorHooksFp);
+      failed = true;
+    }
+    const hooksJsonInSync = await checkCursorGlobalHooksJson();
+    if (!hooksJsonInSync) {
+      failed = true;
+    }
+  } else if (selectedTargetIds.includes("cursor")) {
+    if (!(await auditInstalledGlobalHookPackage("cursor", "Cursor", cursorGlobalMetaKimHooksDir()))) {
+      failed = true;
+    }
   }
 
   if (selectedTargetIds.includes("claude")) {
@@ -3115,6 +3369,19 @@ async function runSync() {
     );
   }
 
+  if (selectedTargetIds.includes("cursor") && withGlobalHooks) {
+    await copyCanonicalHooksToCursorGlobal();
+    await ensureCursorGlobalHookPromptAdapter();
+    console.log(
+      `${C.green}✓${C.reset} ${C.dim}Synced Cursor global hooks: ${cursorGlobalMetaKimHooksDir()}${C.reset}`,
+    );
+    await syncCursorGlobalHooksJson();
+  } else if (selectedTargetIds.includes("cursor")) {
+    console.log(
+      `${C.yellow}⊘${C.reset} ${C.dim}Skipped Cursor global hooks (opt in with --with-global-hooks).${C.reset}`,
+    );
+  }
+
   if (selectedTargetIds.includes("claude")) {
     const commandPaths = await copyRuntimeCommands("claude", claudeCommandsSourceDir);
     console.log(
@@ -3223,6 +3490,7 @@ async function handOffToStableProjectionPackage() {
       expectedPackageName: currentPackageManifest.name,
       expectedPackageVersion: currentPackageManifest.version,
       expectedFirstPartyClosure: currentPackageContent,
+      diagnostics: projectionAuthorityDiagnostics,
     });
     if (!authority) {
       checkMissingProjectionPackageAuthority = true;
@@ -3239,6 +3507,7 @@ async function handOffToStableProjectionPackage() {
       await runGlobalProjectionPackageChild(authority, cliArgs, {
         env: process.env,
         sourceRoot: repoRoot,
+        callerCwd: localStateRoot,
       }),
     );
     return true;
@@ -3258,6 +3527,7 @@ async function handOffToStableProjectionPackage() {
     await runGlobalProjectionPackageChild(stablePackage, cliArgs, {
       env: process.env,
       sourceRoot: repoRoot,
+      callerCwd: localStateRoot,
     }),
   );
   return true;
@@ -3303,6 +3573,8 @@ function printTargets() {
   console.log("Runtime hooks (only with --with-global-hooks):");
   console.log(`- Codex scripts: ${codexGlobalMetaKimHooksDir()}`);
   console.log(`- Codex merged into: ${codexGlobalHooksJsonPath()}`);
+  console.log(`- Cursor scripts: ${cursorGlobalMetaKimHooksDir()}`);
+  console.log(`- Cursor merged into: ${cursorGlobalHooksJsonPath()}`);
   console.log(`- Scripts: ${globalMetaKimHooksDir()}`);
   console.log(
     `- Claude Code merged into: ${path.join(runtimeHomes.claude.dir, "settings.json")}`,
@@ -3323,6 +3595,11 @@ async function main() {
   if (await handOffToStableProjectionPackage()) return;
   if (checkOnly) {
     if (checkMissingProjectionPackageAuthority) {
+      if (projectionAuthorityDiagnostics.some((item) => item.reason === "source_closure_mismatch")) {
+        console.error("Projection package authority is stale: current source package content has changed (firstPartyClosure mismatch). Refresh with: node scripts/sync-global-meta-theory.mjs --with-global-hooks --skip-durable-mcp");
+      } else {
+        console.error(`Projection package authority diagnosis: ${projectionAuthorityDiagnostics.map((item) => item.reason).join(", ") || "unavailable"}. Refresh with: node scripts/sync-global-meta-theory.mjs --with-global-hooks --skip-durable-mcp`);
+      }
       console.error(
         "Global projection package authority is missing or invalid; " +
         "the current-root check below is diagnostic only and cannot pass release-grade validation.",

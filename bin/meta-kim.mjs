@@ -39,12 +39,12 @@ ${status.usageHeading}:
   meta-kim [install] [options]
   meta-kim update [options]
   meta-kim check [options]
-  meta-kim live [--port <port>] [--profile <name>] [--no-open] [--project-root <dir>] [--json] [--enable-control]
+  meta-kim live [--port <port>] [--profile <name>] [--restart] [--no-open] [--project-root <dir>] [--json] [--enable-control]  Start, reuse, or restart the global local Live Hub
   ${status.usage}
   meta-kim doctor
   meta-kim doctor hooks [--fix] [--project|--all] [--project-root <dir>]
   meta-kim release audit --tag <tag> [--verification-report <file>] [--package-file <tgz>] [--require-exact] [--verify-asset-download] [--json]
-  meta-kim release close --issue <P-NNN> --prd <repo-relative-file> [--profile default] [--json]
+  meta-kim release close --issue <queue-id> --prd <repo-relative-file> [--profile default] [--json]
   meta-kim mcp serve
   meta-kim runtime accept --report <file> --source-kind <kind> --runtime <runtime> --capability <capability> [--mode interactive_host]  # reference-only import
   meta-kim runtime produce --source <source> --runtimes <list> --capabilities <list> [source options]

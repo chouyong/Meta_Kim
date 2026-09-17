@@ -212,7 +212,11 @@ describe("32 — Meta-theory three product goals and support gates", () => {
       assert.equal(report.defaultRuntimePath.langGraphRunPacket.status, "pass");
       assert.equal(report.defaultRuntimePath.peerAgentMeshPacket.status, "pass");
       assert.equal(report.defaultRuntimePath.agentTeamsPlaybookPacket.status, "pass");
-      assert.equal(report.defaultRuntimePath.agentTeamsPlaybookPacket.selected, true);
+      assert.equal(report.defaultRuntimePath.agentTeamsPlaybookPacket.selected, false);
+      assert.equal(
+        report.defaultRuntimePath.agentTeamsPlaybookPacket.acceptance.optionalProviderDoesNotGateNativeFanout,
+        true,
+      );
       assert.deepEqual(
         [
           ...new Set(
@@ -259,7 +263,7 @@ describe("32 — Meta-theory three product goals and support gates", () => {
       assert.equal(invocationByFamily.get("app_visible_subagent").state, "not_required");
       assert.equal(invocationByFamily.get("worker_task").state, "blocked");
       assert.equal(invocationByFamily.get("prompt_rule").state, "applied");
-      assert.equal(invocationByFamily.get("agent_teams_playbook").state, "selected_not_invoked");
+      assert.equal(invocationByFamily.get("agent_teams_playbook").state, "not_required");
       assert.equal(report.defaultRuntimePath.capabilityInvocationProbePacket.status, "not_run");
       assert.equal(
         report.capabilityInvocationTruthPacket.realInvocationCoverage.status,
@@ -953,10 +957,10 @@ describe("32 — Meta-theory three product goals and support gates", () => {
     );
     assert.equal(
       output.defaultBoundaryRun.capabilityInvocationTruth.agentTeamsPlaybookState,
-      "selected_not_invoked",
+      "not_required",
     );
     assert.equal(output.agentTeamsPlaybook.status, "pass");
-    assert.equal(output.agentTeamsPlaybook.selected, true);
+    assert.equal(output.agentTeamsPlaybook.selected, false);
     assert.equal(output.defaultBoundaryRun.visibleMetaTheorySurface, "partial");
     assert.ok(output.userPerceptionCues >= 6);
   });
@@ -1006,11 +1010,30 @@ describe("32 — Meta-theory three product goals and support gates", () => {
       assert.ok(
         marketResearch.capabilityNeed.includes("capability-discovery-and-retrieval")
       );
+      // findskill is registered reference_only / invokeAs: reference, so the
+      // shared provider boundary keeps it out of dynamic lane bindings and it
+      // stays reachable through the dedicated skillDiscovery slot instead. The
+      // property this lane proves is that candidates arrive through
+      // capabilityNeed matching, which holds without naming any one provider.
+      const marketResearchCandidates = marketResearch.capabilitySelection.candidateProviders;
+      assert.equal(
+        marketResearchCandidates.some((provider) => provider.id === "findskill"),
+        false,
+        "a reference-only dependency must not re-enter as a dynamic lane candidate"
+      );
+      const marketResearchMatchedTerms = [
+        ...new Set(marketResearchCandidates.flatMap((provider) => provider.matchedTerms ?? [])),
+      ];
       assert.ok(
-        marketResearch.capabilitySelection.candidateProviders.some(
-          (provider) => provider.id === "findskill"
+        marketResearchMatchedTerms.length > 0,
+        "market-research candidates must be bound by capabilityNeed terms"
+      );
+      assert.deepEqual(
+        marketResearchMatchedTerms.filter((term) =>
+          productExperienceTask.toLowerCase().includes(term)
         ),
-        "findskill should be discovered as a capability-discovery candidate, not injected by user wording"
+        [],
+        "candidates should be discovered through capabilityNeed, not injected by user wording"
       );
       assert.ok(
         rows.every(

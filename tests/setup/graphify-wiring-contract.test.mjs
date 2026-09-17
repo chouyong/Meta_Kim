@@ -59,13 +59,13 @@ describe("graphify idempotent wiring (contract)", () => {
     assert.match(src, /function runRebuild\(\)/);
     assert.match(
       src,
-      /\[\s*"extract",\s*"\.",\s*"--force",\s*\.\.\.\(migrationCodeOnly \? \["--code-only"\] : migrationBackendArgs\),?\s*\]/,
+      /\[\s*"extract",\s*"\.",\s*"--force",\s*"--code-only",?\s*\]/,
     );
     assert.match(src, /\["update", "\."\]/);
     assert.match(src, /graphIdentityMigrationPlan\(/);
     assert.match(src, /GRAPHIFY_MIGRATION_STATE_SCHEMA/);
-    assert.match(src, /\["--backend", "claude-cli"\]/);
-    assert.match(src, /META_KIM_GRAPHIFY_MIGRATION_BACKEND/);
+    assert.doesNotMatch(src, /graphifyMigrationBackendArgs|GRAPHIFY_API_KEY_NAMES|META_KIM_GRAPHIFY_MIGRATION_BACKEND|spawnSync\("claude"/);
+    assert.match(src, /GRAPHIFY_LOCAL_CLUSTER_ARGS = Object\.freeze\(\["--no-label", "--no-viz"\]\)/);
     assert.match(src, /\[\s*"cluster-only",\s*"\.",\s*\.\.\.migrationBackendArgs\]/);
     assert.match(src, /disambiguateGraphFileNodeLabels\(graph, \{/);
     assert.match(src, /finalGraphStats\.nodes\.toLocaleString\("en-US"\)/);
@@ -470,7 +470,7 @@ console.log("forced rebuild ok");
     assert.match(src, /project-post-copy-init\.mjs/);
     assert.match(src, /--package-root/);
     assert.match(src, /spawnSync\(process\.execPath, \[scriptPath, "--auto", "--project-root", root\]/);
-    assert.match(src, /timeout: 4000/);
+    assert.match(src, /timeout: 2000/);
     assert.match(src, /stdio: "ignore"/);
     assert.match(src, /META_KIM_POST_COPY_AUTO === "off"/);
     assert.match(src, /catch \{\s*\/\/ Post-copy auto-init is opportunistic/s);
@@ -482,7 +482,7 @@ console.log("forced rebuild ok");
     assert.doesNotMatch(src, /project-bootstrap-daily-probe\.json/);
     assert.doesNotMatch(src, /packageUpdateReminderFlag/);
     assert.doesNotMatch(src, /META_KIM_UPDATE_REMINDER_DAYS/);
-    assert.doesNotMatch(src, /additionalContext/);
+    assert.match(src, /function emitLiveHubStartedContext[\s\S]*additionalContext/u);
     assert.doesNotMatch(src, /decision: "block"/);
     assert.doesNotMatch(src, /suppressOriginalPrompt: false/);
     assert.doesNotMatch(src, /"--apply"/);

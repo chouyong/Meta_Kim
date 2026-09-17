@@ -10,6 +10,7 @@ import { recordSetupRuntimeExecutableBindings } from "../../scripts/runtime-exec
 const execFileAsync = promisify(execFile);
 const REPO_ROOT = path.join(import.meta.dirname, "..", "..");
 const SCRIPT = path.join(REPO_ROOT, "scripts", "sync-global-meta-theory.mjs");
+const RUNTIME_SYNC_SCRIPT = path.join(REPO_ROOT, "scripts", "sync-runtimes.mjs");
 const PROJECTION_PACKAGE_RECEIPT_PURPOSE =
   "primary-runtime-global-projection-package-runtime-bundle:receipt";
 
@@ -46,10 +47,70 @@ function assertUsesStablePackageRoot(content, stablePackageRoot, label) {
 }
 
 function hookCommands(config) {
-  return Object.values(config.hooks ?? {}).flatMap((blocks) =>
-    (blocks ?? []).flatMap((block) => block.hooks ?? [])
-  ).map((hook) => hook.command).filter((command) => typeof command === "string");
+  return Object.values(commandsByEvent(config)).flat();
 }
+
+// Two block shapes live in these files: `{matcher, hooks:[...]}` and the flat
+// `{command, timeout}` Cursor uses. Walking only one of them is how a dropped
+// registration reads as zero instead of as a failure.
+function commandsByEvent(config) {
+  const byEvent = {};
+  for (const [event, blocks] of Object.entries(config.hooks ?? {})) {
+    const commands = [];
+    for (const block of Array.isArray(blocks) ? blocks : [blocks]) {
+      if (typeof block?.command === "string") {
+        commands.push(block.command);
+      }
+      for (const hook of block?.hooks ?? []) {
+        if (typeof hook?.command === "string") {
+          commands.push(hook.command);
+        }
+      }
+    }
+    byEvent[event] = commands;
+  }
+  return byEvent;
+}
+
+function isManagedGlobalCommand(command) {
+  const normalized = command.replaceAll("\\", "/");
+  return (
+    normalized.includes("hooks/meta-kim/") ||
+    normalized.includes("/hooks/hookprompt-adapter.mjs")
+  );
+}
+
+function managedCommandsByEvent(config) {
+  const byEvent = {};
+  for (const [event, commands] of Object.entries(commandsByEvent(config))) {
+    const managed = commands.filter(isManagedGlobalCommand);
+    if (managed.length > 0) {
+      byEvent[event] = managed;
+    }
+  }
+  return byEvent;
+}
+
+const MANAGED_HOOKS_JSON_EVENT_MINIMUMS = {
+  codex: {
+    UserPromptSubmit: 3,
+    PreToolUse: 3,
+    PostToolUse: 1,
+    SubagentStart: 1,
+    SubagentStop: 1,
+    Skill: 1,
+    SessionStart: 1,
+    Stop: 2,
+  },
+  cursor: {
+    beforeSubmitPrompt: 3,
+    preToolUse: 3,
+    postToolUse: 1,
+    subagentStart: 1,
+    stop: 2,
+    sessionStart: 1,
+  },
+};
 
 function assertHookConfigUsesStablePackageRoot(config, stablePackageRoot, label) {
   const commands = hookCommands(config).map(normalizedPathText);
@@ -122,6 +183,29 @@ function nodeScriptPath(command) {
 function eventArgs(command) {
   const event = String(command ?? "").match(/--event\s+([A-Za-z0-9-]+)/u);
   return event ? ["--event", event[1]] : [];
+}
+
+async function runRuntimeSync(args, env) {
+  return execFileAsync(process.execPath, [RUNTIME_SYNC_SCRIPT, ...args], {
+    cwd: REPO_ROOT,
+    env,
+    maxBuffer: 1024 * 1024 * 8,
+  });
+}
+
+// A failing --check exits 1, which rejects execFile before any assertion runs.
+// Capturing the exit code keeps the reported check line assertable on both sides.
+async function runScriptCapturingExit(args, env) {
+  try {
+    const result = await runScript(args, env);
+    return { stdout: result.stdout, stderr: result.stderr, exitCode: 0 };
+  } catch (error) {
+    return {
+      stdout: error.stdout ?? "",
+      stderr: error.stderr ?? "",
+      exitCode: typeof error.code === "number" ? error.code : 1,
+    };
+  }
 }
 
 describe("sync-global-meta-theory hook policy", () => {
@@ -330,6 +414,262 @@ console.log("About to git push");
       } catch (error) {
         assert.match(error.stdout, /Claude Code global hooks/);
       }
+    });
+  });
+
+  // `--with-global-hooks` gates *writing* into a runtime home, which is why an
+  // absent package stays a non-failure by default. Reading an already installed
+  // package costs nothing, and a package that is present but no longer matches
+  // canonical executes stale code on every prompt entry. Leaving that case
+  // unchecked by default is how a missing hook dependency survived a full
+  // documented maintenance loop.
+  test("stale hook diagnostics identify missing files and the runtime-specific canonical owner", async () => {
+    for (const runtime of ["claude", "codex", "cursor"]) {
+      await withTempRuntimeHomes(async ({ env, root }) => {
+        const hooksRoot = path.join(root, runtime, "hooks", "meta-kim");
+        await mkdir(hooksRoot, { recursive: true });
+        await writeFile(path.join(hooksRoot, "meta-kim-memory-save.mjs"), "PRIVATE_CONTENT_MUST_NOT_BE_LOGGED", "utf8");
+        for (const flags of [[], ["--with-global-hooks"]]) {
+          await assert.rejects(
+            () => runScript(["--check", "--targets", runtime, ...flags], env),
+            (error) => {
+              assert.match(error.stdout, /missing: conversation-binding\.mjs/, `${runtime}: ${error.message}\n${error.stderr ?? ""}`);
+              const owner = runtime === "claude" ? "claude" : "shared";
+              assert.ok(error.stdout.includes(`content-diff: meta-kim-memory-save.mjs (expected source: canonical/runtime-assets/${owner}/hooks/meta-kim-memory-save.mjs)`));
+              assert.doesNotMatch(error.stdout, /PRIVATE_CONTENT_MUST_NOT_BE_LOGGED/);
+              return true;
+            },
+          );
+        }
+      });
+    }
+  });
+
+  for (const runtime of [
+    { id: "claude", home: "claude", label: "Claude Code" },
+    { id: "codex", home: "codex", label: "Codex" },
+    { id: "cursor", home: "cursor", label: "Cursor" },
+  ]) {
+    test(`default check audits an installed ${runtime.label} global hook package`, async () => {
+      await withTempRuntimeHomes(async ({ env, root }) => {
+        await runScript(["--targets", runtime.id, "--with-global-hooks"], env);
+
+        const fresh = await runScript(["--check", "--targets", runtime.id], env);
+        assert.match(
+          fresh.stdout,
+          new RegExp(`${runtime.label} global hooks \\(meta-kim`),
+          "an installed package must be audited by the default check",
+        );
+        assert.doesNotMatch(
+          fresh.stdout,
+          new RegExp(`${runtime.label} global hooks skipped`),
+          "an installed package must not be reported as skipped",
+        );
+
+        await rm(
+          path.join(root, runtime.home, "hooks", "meta-kim", "conversation-binding.mjs"),
+        );
+
+        await assert.rejects(
+          () => runScript(["--check", "--targets", runtime.id], env),
+          (error) => {
+            assert.match(error.stdout, /installed but stale/);
+            assert.match(error.stdout, /meta:sync:global:release/);
+            return true;
+          },
+          "a stale installed hook package must fail the default check",
+        );
+      });
+    });
+  }
+
+  // Codex blocks are all `{matcher, hooks:[...]}`; most Cursor blocks are flat
+  // `{command, timeout}`. A merge that only walks `block.hooks` silently drops
+  // every flat addition after the first one, so a "successful" sync can register
+  // fewer commands than were already there. Assert per event, because a total
+  // count can stay plausible while one event loses all of its entries.
+  for (const runtime of [
+    { id: "codex", home: "codex", label: "Codex" },
+    { id: "cursor", home: "cursor", label: "Cursor" },
+  ]) {
+    test(`global hooks.json registers every managed ${runtime.label} hook command`, async () => {
+      await withTempRuntimeHomes(async ({ env, root }) => {
+        await runScript(["--targets", runtime.id, "--with-global-hooks"], env);
+
+        const hooksJsonPath = path.join(root, runtime.home, "hooks.json");
+        const written = JSON.parse(await readFile(hooksJsonPath, "utf8"));
+        const managed = managedCommandsByEvent(written);
+
+        const managedTotal = Object.values(managed).reduce(
+          (sum, commands) => sum + commands.length,
+          0,
+        );
+        assert.ok(
+          managedTotal >= 7,
+          `${runtime.label} hooks.json must register the full managed set, found ${managedTotal}: ${JSON.stringify(managed, null, 2)}`,
+        );
+
+        // Every managed hook script that was copied into the package must be
+        // reachable from hooks.json. An orphaned script on disk looks installed
+        // and never runs.
+        for (const [event, expectedCount] of Object.entries(
+          MANAGED_HOOKS_JSON_EVENT_MINIMUMS[runtime.id],
+        )) {
+          assert.ok(
+            (managed[event] ?? []).length >= expectedCount,
+            `${runtime.label} hooks.json event ${event} must register at least ${expectedCount} managed command(s), found ${(managed[event] ?? []).length}: ${JSON.stringify(managed[event] ?? [], null, 2)}`,
+          );
+        }
+
+        const allManaged = Object.values(managed).flat().join("\n");
+        assert.match(
+          allManaged,
+          /hookprompt-adapter\.mjs/,
+          `${runtime.label} hooks.json must register the prompt adapter it writes to disk`,
+        );
+        assert.match(
+          allManaged,
+          /meta-kim-memory-save\.mjs --event stop/,
+          `${runtime.label} hooks.json must register the stop-event memory hook`,
+        );
+        assert.match(
+          allManaged,
+          /graphify-context\.mjs/,
+          `${runtime.label} hooks.json must register the graph context hook`,
+        );
+      });
+    });
+  }
+
+  // A Cursor-only sync deliberately runs with no npm and builds no package store
+  // (transient-package-root-portability owns that contract), so its commands name
+  // whatever checkout ran them. The failure worth guarding is the mixed run: the
+  // hand-off re-execs this sync from the pinned bundle, and Cursor's hook template
+  // embeds `--package-root` exactly like Codex's, so once a stable package exists
+  // both runtimes have to land on it. Cursor previously had no such assertion at
+  // all, and the command walker it needs could not see Cursor's flat blocks.
+  test("a Codex+Cursor sync pins Cursor hook commands to the stable package root", async () => {
+    await withTempRuntimeHomes(async ({ env, root }) => {
+      await runScript(["--targets", "codex,cursor", "--with-global-hooks"], env);
+
+      const stablePackageRoot = await stablePackageRootFromManifest(root);
+      for (const runtime of [
+        { home: "codex", label: "Codex" },
+        { home: "cursor", label: "Cursor" },
+      ]) {
+        const written = JSON.parse(
+          await readFile(path.join(root, runtime.home, "hooks.json"), "utf8"),
+        );
+        assertHookConfigUsesStablePackageRoot(
+          written,
+          stablePackageRoot,
+          `global ${runtime.label} hooks after a Codex+Cursor sync`,
+        );
+      }
+    });
+  });
+
+  test("Cursor global check accepts the native flat config emitted by runtime sync", async () => {
+    await withTempRuntimeHomes(async ({ env, root }) => {
+      await runScript(["--targets", "cursor", "--with-global-hooks"], env);
+      await runRuntimeSync(
+        ["--scope", "global", "--targets", "cursor", "--global-assets", "hooks"],
+        env,
+      );
+
+      const hooksPath = path.join(root, "cursor", "hooks.json");
+      const config = JSON.parse(await readFile(hooksPath, "utf8"));
+      assert.ok(
+        config.hooks.postToolUse.some((entry) =>
+          entry.command?.includes("post-format.mjs"),
+        ),
+        "runtime sync must retain its native flat postToolUse hook",
+      );
+      // A relative command resolves against whatever directory Cursor starts
+      // in, so a global registration would run another project's copy or
+      // nothing at all. Global scope must register absolute script paths.
+      const globalCommands = Object.values(config.hooks)
+        .flat()
+        .map((entry) => entry?.command)
+        .filter((command) => typeof command === "string");
+      assert.deepEqual(
+        globalCommands.filter((command) =>
+          /node\s+"?\.[\\/]?cursor[\\/]hooks[\\/]/u.test(command),
+        ),
+        [],
+        `global Cursor hook commands must not be project-relative:\n${globalCommands.join("\n")}`,
+      );
+      config.hooks.beforeSubmitPrompt.unshift({
+        command: "node user-owned-cursor-hook.mjs",
+        timeout: 3,
+      });
+      config.hooks.postToolUse.unshift({
+        command: "node .cursor/hooks/post-format.mjs",
+        matcher: "Read",
+        timeout: 17,
+      });
+      await writeFile(hooksPath, `${JSON.stringify(config, null, 2)}\n`, "utf8");
+      const beforeCheck = await readFile(hooksPath, "utf8");
+
+      const check = await runScriptCapturingExit(
+        ["--check", "--targets", "cursor", "--with-global-hooks"],
+        env,
+      );
+      assert.match(
+        check.stdout,
+        /✓[^\n]*Cursor global hooks\.json: [^\n]*cursor[\\/]hooks\.json/,
+        `Cursor global hooks.json must be reported in sync:\n${check.stdout}`,
+      );
+      assert.equal(check.exitCode, 0, check.stderr);
+      const afterCheck = await readFile(hooksPath, "utf8");
+      assert.equal(afterCheck, beforeCheck, "global hooks check must be read-only");
+      assert.match(afterCheck, /user-owned-cursor-hook\.mjs/);
+    });
+  });
+
+  // Cursor assigns its global `hooks` asset to sync-runtimes, so the hook files
+  // it drops under ~/.cursor/hooks/meta-kim must carry that one source. A second
+  // manifest claim from sync-global-meta-theory leaves uninstall and drift
+  // repair reading whichever record they hit first.
+  test("Cursor global hook files land in the manifest under exactly one source", async () => {
+    await withTempRuntimeHomes(async ({ env, root }) => {
+      await runScript(["--targets", "cursor", "--with-global-hooks"], env);
+      await runRuntimeSync(
+        ["--scope", "global", "--targets", "cursor", "--global-assets", "hooks"],
+        env,
+      );
+
+      const manifest = JSON.parse(
+        await readFile(path.join(root, ".meta-kim", "install-manifest.json"), "utf8"),
+      );
+      const sourcesByPath = new Map();
+      for (const entry of manifest.entries) {
+        if (entry.kind !== "file") continue;
+        const key = path.resolve(entry.path);
+        if (!sourcesByPath.has(key)) sourcesByPath.set(key, new Set());
+        sourcesByPath.get(key).add(entry.source);
+      }
+      const contested = [...sourcesByPath]
+        .filter(([, sources]) => sources.size > 1)
+        .map(([filePath, sources]) => `${filePath} <- ${[...sources].sort().join(" + ")}`)
+        .sort();
+      assert.deepEqual(contested, [], `contested global files:\n${contested.join("\n")}`);
+
+      const cursorHookDir = path.join(root, "cursor", "hooks", "meta-kim");
+      const cursorHookEntries = manifest.entries.filter(
+        (entry) =>
+          entry.kind === "file" &&
+          path.resolve(entry.path).startsWith(path.resolve(cursorHookDir) + path.sep),
+      );
+      assert.ok(
+        cursorHookEntries.length > 0,
+        "the Cursor global hook package must stay recorded, not merely uncontested",
+      );
+      assert.deepEqual(
+        [...new Set(cursorHookEntries.map((entry) => entry.source))],
+        ["sync-runtimes"],
+        "Cursor assigns its global hooks asset to sync-runtimes",
+      );
     });
   });
 

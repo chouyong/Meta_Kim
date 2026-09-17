@@ -99,6 +99,59 @@
   },
   "providers": [
     {
+      "id": "kim-service-agent-contracts",
+      "providerType": "dependency_project",
+      "providerKind": "dependency_project",
+      "summary": "Kim Service professional role contracts discovered from an explicitly bound local package; native execution remains unverified.",
+      "sourceOfTruth": "config/capability-index/dependency-project-registry.json",
+      "mappings": { "dependencyProjectIds": ["kim-service"] },
+      "source": { "sourceOfTruth": "config/capability-index/dependency-project-registry.json", "mappings": { "dependencyProjectIds": ["kim-service"] } },
+      "capabilities": ["professional_agent_contract_discovery", "industry_owner_candidate_matching"],
+      "activation": {
+        "installLayers": ["dependency_registry"],
+        "trigger": "Fetch explicit dependency agent contract discovery",
+        "outputConsumption": "reference_only"
+      },
+      "trust": { "review": "explicit_local_contract_and_hash_review", "required": true },
+      "installMethod": "dependency_registry",
+      "installLayers": ["dependency_registry"],
+      "exposedArtifacts": ["dependency:kim-service/generated/capabilities.json", "dependency:kim-service/agents/<component>/AGENT.md"],
+      "activationEvents": ["Fetch explicit dependency agent contract discovery"],
+      "outputContracts": { "consumption": "reference_only", "mustEnterModelContext": false, "mustEnforcePolicy": false },
+      "risk": { "trustReview": "explicit_local_contract_and_hash_review", "notes": ["Selection is run-scoped; hashes prove local integrity, not native loading or live model quality."] },
+      "safetyBoundary": { "trustReview": "explicit_local_contract_and_hash_review", "notes": ["Read-only contracts; discovery never installs roles, executes dependency code, or authorizes external writes."] },
+      "verification": {
+        "method": "isolated contract-index and route-selection regression",
+        "command": "node scripts/run-node-tests.mjs tests/governance/dependency-agent-discovery.test.mjs --concurrency 1"
+      },
+      "support": {
+        "default": {
+          "state": "declared",
+          "status": "needs_probe",
+          "installLayers": { "dependency_registry": "declared" },
+          "os": { "macos": "needs_probe", "windows": "needs_probe", "linux": "needs_probe", "wsl2": "needs_probe" },
+          "reason": "Source contracts can be discovered locally; runtime-native loading and model delivery require separate evidence."
+        },
+        "runtimes": {}
+      },
+      "runtimeAdapters": {
+        "claude_code": { "state": "declared", "status": "needs_probe", "installLayers": { "dependency_registry": "declared" }, "activationEvent": "Fetch explicit dependency agent contract discovery", "outputContract": "reference_only", "reason": "Source contracts can be discovered locally; runtime-native loading and model delivery require separate evidence." },
+        "codex": { "state": "declared", "status": "needs_probe", "installLayers": { "dependency_registry": "declared" }, "activationEvent": "Fetch explicit dependency agent contract discovery", "outputContract": "reference_only", "reason": "Source contracts can be discovered locally; runtime-native loading and model delivery require separate evidence." },
+        "cursor": { "state": "declared", "status": "needs_probe", "installLayers": { "dependency_registry": "declared" }, "activationEvent": "Fetch explicit dependency agent contract discovery", "outputContract": "reference_only", "reason": "Source contracts can be discovered locally; runtime-native loading and model delivery require separate evidence." },
+        "openclaw": { "state": "declared", "status": "needs_probe", "installLayers": { "dependency_registry": "declared" }, "activationEvent": "Fetch explicit dependency agent contract discovery", "outputContract": "reference_only", "reason": "Source contracts can be discovered locally; runtime-native loading and model delivery require separate evidence." }
+      },
+      "osAdapters": {
+        "macos": { "status": "needs_probe", "risks": ["No native role loading claim."] },
+        "windows": { "status": "needs_probe", "risks": ["No native role loading claim."] },
+        "linux": { "status": "needs_probe", "risks": ["No native role loading claim."] },
+        "wsl2": { "status": "needs_probe", "risks": ["No native role loading claim."] }
+      },
+      "degradation": { "statusByRuntime": { "claude_code": "needs_probe", "codex": "needs_probe", "cursor": "needs_probe", "openclaw": "needs_probe" }, "reason": "Bind reviewed Markdown contracts to a run; do not project durable governance agents or claim native invocation." },
+      "owner": "meta-artisan",
+      "reviewOwner": "meta-prism",
+      "evolutionKey": "provider:kim-service-agent-contracts"
+    },
+    {
       "id": "runtime-native-claude-code",
       "providerType": "runtime_native",
       "summary": "Claude Code formal runtime projection and native capability surface.",
@@ -1771,45 +1824,47 @@
       "evolutionKey": "provider:external-skill-hookprompt"
     },
     {
-      "id": "external-skill-planning-with-files",
-      "providerType": "external_skill",
-      "summary": "Planning files skill used for resumable task state.",
-      "sourceOfTruth": "config/skills.json",
+      "id": "hook-meta-kim-planning-continuity",
+      "providerType": "hook_script",
+      "summary": "Meta_Kim-owned planning continuity kernel for initialization, attested recovery, structured ledger, doctor, and bounded completion gating.",
+      "sourceOfTruth": "canonical/runtime-assets/shared/hooks/planning-continuity.mjs",
       "mappings": {
-        "skillsJsonIds": [
-          "planning-with-files"
+      "runtimeTargets": [
+        "claude_code",
+        "codex"
         ],
-        "dependencyProjectIds": [
-          "planning-with-files"
+        "capabilityInventoryTypes": [
+          "hook",
+          "command"
         ]
       },
       "activation": {
         "installLayers": [
-          "global_home",
-          "plugin_bundle",
-          "dependency_registry"
+          "project_projection",
+          "global_home"
         ],
-        "trigger": "planning files hooks and SKILL.md",
+        "trigger": "governed lifecycle events or explicit planning continuity command",
         "outputConsumption": "model_context"
       },
       "verification": {
-        "method": "dependency compatibility and provider validator",
-        "command": "npm run meta:providers:validate"
+        "method": "first-party unit, hook projection, validator, and dependency absence acceptance",
+        "command": "npm run meta:planning:validate"
       },
       "risk": {
-        "trustReview": "third_party_skill",
+        "trustReview": "first_party_security_review_required",
         "notes": [
-          "Windows PowerShell and symlink/junction behavior must remain explicit."
+          "Attestation is explicit and must not be auto-granted to pre-existing files.",
+          "findings.md remains untrusted evidence and is never auto-injected.",
+      "Cursor and OpenClaw have no executable planning Hook adapter."
         ]
       },
       "support": {
         "default": {
-          "state": "declared",
+          "state": "projected",
           "status": "partial",
           "installLayers": {
-            "global_home": "needs_probe",
-            "plugin_bundle": "partial",
-            "dependency_registry": "verified"
+            "project_projection": "partial",
+            "global_home": "needs_probe"
           },
           "os": {
             "macos": "partial",
@@ -1818,42 +1873,81 @@
             "wsl2": "partial"
           }
         },
-        "runtimes": {}
+        "runtimes": {
+      "cursor": {
+        "state": "blocked_for_execution",
+        "status": "blocked",
+        "installLayers": {
+          "project_projection": "unsupported",
+          "global_home": "unsupported"
+        },
+        "os": {
+          "macos": "unsupported",
+          "windows": "unsupported",
+          "linux": "unsupported",
+          "wsl2": "unsupported"
+        },
+        "reason": "Meta_Kim has no verified Cursor planning-continuity Hook adapter."
       },
-      "providerKind": "external_skill",
+          "openclaw": {
+            "state": "blocked_for_execution",
+            "status": "blocked",
+            "installLayers": {
+              "project_projection": "unsupported",
+              "global_home": "unsupported"
+            },
+            "os": {
+              "macos": "unsupported",
+              "windows": "unsupported",
+              "linux": "unsupported",
+              "wsl2": "unsupported"
+            },
+            "reason": "Meta_Kim has no typed OpenClaw planning-continuity Hook adapter."
+          }
+        }
+      },
+      "providerKind": "hook_script",
       "capabilities": [
-        "Planning files skill used for resumable task state.",
-        "planning-with-files",
-        "planning-with-files"
+        "planning-continuity",
+        "planning-initialization",
+        "attested-planning-recovery",
+        "planning-run-isolation",
+        "planning-doctor",
+        "bounded-completion-gate"
       ],
       "source": {
-        "sourceOfTruth": "config/skills.json",
+        "sourceOfTruth": "canonical/runtime-assets/shared/hooks/planning-continuity.mjs",
         "mappings": {
-          "skillsJsonIds": [
-            "planning-with-files"
+      "runtimeTargets": [
+        "claude_code",
+        "codex"
           ],
-          "dependencyProjectIds": [
-            "planning-with-files"
+          "capabilityInventoryTypes": [
+            "hook",
+            "command"
           ]
         }
       },
       "trust": {
-        "review": "third_party_skill",
+        "review": "first_party_security_review_required",
         "required": true
       },
-      "installMethod": "globalHome",
+      "installMethod": "canonicalRuntimeProjection",
       "installLayers": [
-        "global_home",
-        "plugin_bundle",
-        "dependency_registry"
+        "project_projection",
+        "global_home"
       ],
       "exposedArtifacts": [
-        "config/skills.json",
-        "config/skills.json#planning-with-files",
-        "dependency-project-registry.json#planning-with-files"
+        "canonical/runtime-assets/shared/hooks/planning-continuity.mjs",
+        "config/contracts/planning-continuity-contract.json",
+        "scripts/runtime-hook-mapping.mjs"
       ],
       "activationEvents": [
-        "planning files hooks and SKILL.md"
+        "SessionStart",
+        "UserPromptSubmit",
+        "PostToolUse",
+    "PreCompact",
+    "Stop"
       ],
       "outputContracts": {
         "consumption": "model_context",
@@ -1861,99 +1955,97 @@
         "mustEnforcePolicy": false
       },
       "safetyBoundary": {
-        "trustReview": "third_party_skill",
+        "trustReview": "first_party_security_review_required",
         "notes": [
-          "Windows PowerShell and symlink/junction behavior must remain explicit."
+          "Project root must be trusted and marker-backed.",
+          "Planning files must remain contained regular files.",
+          "Hash drift and control-instruction patterns refuse automatic recovery."
         ]
       },
       "runtimeAdapters": {
         "claude_code": {
-          "state": "declared",
+          "state": "projected",
           "status": "partial",
           "installLayers": {
-            "global_home": "needs_probe",
-            "plugin_bundle": "partial",
-            "dependency_registry": "verified"
+            "project_projection": "partial",
+            "global_home": "needs_probe"
           },
-          "activationEvent": "planning files hooks and SKILL.md",
-          "outputContract": "model_context",
+          "activationEvent": "SessionStart/UserPromptSubmit/PostToolUse/PreCompact/Stop",
+          "outputContract": "model_context_and_bounded_stop_decision",
           "reason": null
         },
         "codex": {
-          "state": "declared",
+          "state": "projected",
           "status": "partial",
           "installLayers": {
-            "global_home": "needs_probe",
-            "plugin_bundle": "partial",
-            "dependency_registry": "verified"
+            "project_projection": "partial",
+            "global_home": "needs_probe"
           },
-          "activationEvent": "planning files hooks and SKILL.md",
-          "outputContract": "model_context",
+          "activationEvent": "SessionStart/UserPromptSubmit/PostToolUse/PreCompact/Stop",
+          "outputContract": "model_context_and_bounded_stop_decision",
           "reason": null
         },
-        "cursor": {
-          "state": "declared",
-          "status": "partial",
-          "installLayers": {
-            "global_home": "needs_probe",
-            "plugin_bundle": "partial",
-            "dependency_registry": "verified"
-          },
-          "activationEvent": "planning files hooks and SKILL.md",
-          "outputContract": "model_context",
-          "reason": null
+    "cursor": {
+      "state": "blocked_for_execution",
+      "status": "blocked",
+      "installLayers": {
+        "project_projection": "unsupported",
+        "global_home": "unsupported"
+      },
+      "activationEvent": null,
+      "outputContract": "none",
+      "reason": "Meta_Kim has no verified Cursor planning-continuity Hook adapter."
         },
         "openclaw": {
-          "state": "declared",
-          "status": "partial",
+          "state": "blocked_for_execution",
+          "status": "blocked",
           "installLayers": {
-            "global_home": "needs_probe",
-            "plugin_bundle": "partial",
-            "dependency_registry": "verified"
+            "project_projection": "unsupported",
+            "global_home": "unsupported"
           },
-          "activationEvent": "planning files hooks and SKILL.md",
-          "outputContract": "model_context",
-          "reason": null
+          "activationEvent": null,
+          "outputContract": "none",
+          "reason": "Meta_Kim has no typed OpenClaw planning-continuity Hook adapter."
         }
       },
       "osAdapters": {
         "macos": {
           "status": "partial",
           "risks": [
-            "Windows PowerShell and symlink/junction behavior must remain explicit."
+            "Fresh and historical packed installation evidence is still required."
           ]
         },
         "windows": {
           "status": "partial",
           "risks": [
-            "Windows PowerShell and symlink/junction behavior must remain explicit."
+            "Path, encoding, lock, and rename behavior require Windows acceptance evidence."
           ]
         },
         "linux": {
           "status": "partial",
           "risks": [
-            "Windows PowerShell and symlink/junction behavior must remain explicit."
+            "Fresh and historical packed installation evidence is still required."
           ]
         },
         "wsl2": {
           "status": "partial",
           "risks": [
-            "Windows PowerShell and symlink/junction behavior must remain explicit."
+            "Windows/WSL path crossing and permission behavior require acceptance evidence."
           ]
         }
       },
       "degradation": {
         "statusByRuntime": {
-          "claude_code": "none",
-          "codex": "none",
-          "cursor": "none",
-          "openclaw": "none"
+      "claude_code": "needs_probe",
+      "codex": "needs_probe",
+      "cursor": "blocked",
+          "openclaw": "blocked"
         },
-        "reason": null
+    "reason": "Claude Code and Codex remain partial until packed/live evidence passes; Cursor and OpenClaw are blocked because no verified adapter exists."
       },
-      "owner": "meta-artisan",
+      "owner": "meta-conductor",
       "reviewOwner": "meta-prism",
-      "evolutionKey": "provider:external-skill-planning-with-files"
+      "evolutionKey": "provider:hook-meta-kim-planning-continuity"
     },
     {
       "id": "plugin-marketplace-cli-anything",
@@ -2947,186 +3039,6 @@
       "owner": "meta-artisan",
       "reviewOwner": "meta-prism",
       "evolutionKey": "provider:plugin-marketplace-ecc"
-    },
-    {
-      "id": "plugin-bundle-planning-with-files-hooks",
-      "providerType": "plugin_bundle",
-      "summary": "Planning-with-files hook bundle compatibility layer.",
-      "sourceOfTruth": "config/skills.json",
-      "mappings": {
-        "skillsJsonIds": [
-          "planning-with-files"
-        ],
-        "capabilityInventoryTypes": [
-          "hook",
-          "plugin"
-        ]
-      },
-      "activation": {
-        "installLayers": [
-          "plugin_bundle",
-          "global_home"
-        ],
-        "trigger": "Codex/Cursor planning hook bundle",
-        "outputConsumption": "model_context"
-      },
-      "verification": {
-        "method": "provider validator and hook install checks",
-        "command": "npm run meta:providers:validate"
-      },
-      "risk": {
-        "trustReview": "third_party_hook",
-        "notes": [
-          "Windows symlink/junction fallback and shell runner must be validated."
-        ]
-      },
-      "support": {
-        "default": {
-          "state": "declared",
-          "status": "partial",
-          "installLayers": {
-            "plugin_bundle": "partial",
-            "global_home": "needs_probe"
-          },
-          "os": {
-            "macos": "partial",
-            "windows": "partial",
-            "linux": "partial",
-            "wsl2": "partial"
-          }
-        },
-        "runtimes": {}
-      },
-      "providerKind": "plugin_bundle",
-      "capabilities": [
-        "Planning-with-files hook bundle compatibility layer.",
-        "hook",
-        "plugin",
-        "planning-with-files"
-      ],
-      "source": {
-        "sourceOfTruth": "config/skills.json",
-        "mappings": {
-          "skillsJsonIds": [
-            "planning-with-files"
-          ],
-          "capabilityInventoryTypes": [
-            "hook",
-            "plugin"
-          ]
-        }
-      },
-      "trust": {
-        "review": "third_party_hook",
-        "required": true
-      },
-      "installMethod": "pluginBundle",
-      "installLayers": [
-        "plugin_bundle",
-        "global_home"
-      ],
-      "exposedArtifacts": [
-        "config/skills.json",
-        "config/skills.json#planning-with-files"
-      ],
-      "activationEvents": [
-        "Codex/Cursor planning hook bundle"
-      ],
-      "outputContracts": {
-        "consumption": "model_context",
-        "mustEnterModelContext": true,
-        "mustEnforcePolicy": false
-      },
-      "safetyBoundary": {
-        "trustReview": "third_party_hook",
-        "notes": [
-          "Windows symlink/junction fallback and shell runner must be validated."
-        ]
-      },
-      "runtimeAdapters": {
-        "claude_code": {
-          "state": "declared",
-          "status": "partial",
-          "installLayers": {
-            "plugin_bundle": "partial",
-            "global_home": "needs_probe"
-          },
-          "activationEvent": "Codex/Cursor planning hook bundle",
-          "outputContract": "model_context",
-          "reason": null
-        },
-        "codex": {
-          "state": "declared",
-          "status": "partial",
-          "installLayers": {
-            "plugin_bundle": "partial",
-            "global_home": "needs_probe"
-          },
-          "activationEvent": "Codex/Cursor planning hook bundle",
-          "outputContract": "model_context",
-          "reason": null
-        },
-        "cursor": {
-          "state": "declared",
-          "status": "partial",
-          "installLayers": {
-            "plugin_bundle": "partial",
-            "global_home": "needs_probe"
-          },
-          "activationEvent": "Codex/Cursor planning hook bundle",
-          "outputContract": "model_context",
-          "reason": null
-        },
-        "openclaw": {
-          "state": "declared",
-          "status": "partial",
-          "installLayers": {
-            "plugin_bundle": "partial",
-            "global_home": "needs_probe"
-          },
-          "activationEvent": "Codex/Cursor planning hook bundle",
-          "outputContract": "model_context",
-          "reason": null
-        }
-      },
-      "osAdapters": {
-        "macos": {
-          "status": "partial",
-          "risks": [
-            "Windows symlink/junction fallback and shell runner must be validated."
-          ]
-        },
-        "windows": {
-          "status": "partial",
-          "risks": [
-            "Windows symlink/junction fallback and shell runner must be validated."
-          ]
-        },
-        "linux": {
-          "status": "partial",
-          "risks": [
-            "Windows symlink/junction fallback and shell runner must be validated."
-          ]
-        },
-        "wsl2": {
-          "status": "partial",
-          "risks": [
-            "Windows symlink/junction fallback and shell runner must be validated."
-          ]
-        }
-      },
-      "degradation": {
-        "statusByRuntime": {
-          "claude_code": "none",
-          "codex": "none",
-          "cursor": "none",
-          "openclaw": "none"
-        },
-        "reason": null
-      },
-      "owner": "meta-artisan",
-      "reviewOwner": "meta-prism",
-      "evolutionKey": "provider:plugin-bundle-planning-with-files-hooks"
     },
     {
       "id": "mcp-server-meta-kim-runtime",

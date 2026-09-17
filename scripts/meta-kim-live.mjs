@@ -15,11 +15,23 @@ import {
   buildLiveSnapshot,
   createLiveControlRoomService,
 } from "../src/application/live/live-control-room-service.mjs";
+import { loadLiveHubLifecycleBudget } from "../src/application/live/live-hub-lifecycle-budget.mjs";
 import {
   createLiveReadRepository,
   LIVE_PROFILE_PATTERN,
   resolveLiveProjectRoot,
 } from "../src/infrastructure/live/live-read-repository.mjs";
+import {
+  ensureLiveHub,
+  removeOwnedLiveHubState,
+  stopLiveHub,
+  writeLiveHubState,
+} from "../src/infrastructure/live/live-hub-lifecycle.mjs";
+import {
+  ensureGovernedLiveProjectRegistration,
+} from "./project-registry.mjs";
+
+const PACKAGE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 class LiveCliUsageError extends Error {
   constructor(message) {
@@ -62,6 +74,18 @@ function parseArgs(argv) {
       options.json = true;
     } else if (arg === "--enable-control") {
       options.enableControl = true;
+    } else if (arg === "--ensure") {
+      options.ensure = true;
+    } else if (arg === "--restart") {
+      options.restart = true;
+    } else if (arg === "--daemon-child") {
+      options.daemonChild = true;
+    } else if (arg === "--project-ref") {
+      options.projectRef = nextValue(argv, index, arg);
+      index += 1;
+    } else if (arg === "--run-id") {
+      options.runId = nextValue(argv, index, arg);
+      index += 1;
     } else if (arg === "--help" || arg === "-h") {
       options.help = true;
     } else {
@@ -73,10 +97,10 @@ function parseArgs(argv) {
 
 function usage() {
   return [
-    "Meta_Kim Live (read-only by default, loopback only)",
-    "Usage: meta-kim live [--project-root DIR] [--profile NAME] [--port PORT] [--no-open] [--json] [--enable-control]",
-    "Default mode serves a read-only local control room on 127.0.0.1 and exposes no mutation endpoint.",
-    "--enable-control opts into a guarded command endpoint; it requires same-origin, a server control token, durable authority, CAS/lease/fence/effect checks, and an injected capable adapter. Without those it remains plan-only and fail-closed.",
+    "Meta_Kim Live Hub (global singleton, read-only by default, loopback only)",
+    "Usage: meta-kim live [--project-root DIR] [--profile NAME] [--port PORT] [--restart] [--no-open] [--json] [--enable-control]",
+    "Default mode starts or reuses one user-level Hub on 127.0.0.1, listing only registered projects and governed sessions; it exposes no mutation endpoint.",
+    "--enable-control records an explicit control request, but the singleton CLI stays read-only unless a complete authority loadout is injected through the programmatic server API; otherwise it is fail-closed.",
   ].join("\n");
 }
 
@@ -103,6 +127,16 @@ export {
   startLiveControlRoom,
 };
 
+export function liveSelectionForRegistration(registration, runId = null) {
+  const projectRef = registration?.registryStatus === "joined"
+    ? registration.projectRef
+    : null;
+  return {
+    projectRef,
+    runId: projectRef ? runId : null,
+  };
+}
+
 export { parseArgs };
 
 async function main(argv = process.argv.slice(2)) {
@@ -111,17 +145,132 @@ async function main(argv = process.argv.slice(2)) {
     process.stdout.write(`${usage()}\n`);
     return null;
   }
-  const controller = createLiveControlRoomServer(options);
-  const address = await controller.start();
+  if (!options.daemonChild) {
+    const projectRoot = await resolveLiveProjectRoot(options);
+    const registration = await ensureGovernedLiveProjectRegistration({
+      homeDir: process.env.META_KIM_LIVE_HOME,
+      repoPath: projectRoot,
+      preferredProjectRef: options.projectRef,
+      runtimeFamily: "shared",
+      sourceRef: "meta-kim-live",
+    });
+    const { projectRef, runId } = liveSelectionForRegistration(registration, options.runId);
+    const profile = options.profile || process.env.META_KIM_PROFILE || "default";
+    const budget = loadLiveHubLifecycleBudget();
+    if (options.restart === true) {
+      const stopped = await stopLiveHub({
+        homeDir: process.env.META_KIM_LIVE_HOME,
+        // A person typing --restart is asking for whichever singleton is
+        // recorded to be replaced, and no instance id is knowable at the command
+        // line. Every other caller must name the Hub it intends to stop.
+        allowAnyInstance: true,
+        timeoutMs: budget.stopBudgetMs,
+      });
+      if (["signal_failed", "stop_timeout"].includes(stopped.status)) {
+        const error = new Error(stopped.status);
+        error.code = stopped.status;
+        throw error;
+      }
+    }
+    const result = await ensureLiveHub({
+      packageRoot: PACKAGE_ROOT,
+      homeDir: process.env.META_KIM_LIVE_HOME,
+      projectRef,
+      runId,
+      port: options.port,
+      profile,
+      // Naming the profile on the command line is a person asking for that
+      // scope. An inherited META_KIM_PROFILE is not: that is how a governed run
+      // silently replaced the Hub someone was watching.
+      allowProfileTakeover: typeof options.profile === "string",
+      // A person running this command is the one asking for their own build to
+      // serve the port. An autostart cannot make that claim: it is pinned to
+      // whichever package root installed the hook.
+      allowBuildTakeover: true,
+      timeoutMs: budget.startupBudgetMs,
+    });
+    if (result.status === "unavailable") {
+      if (result.reason === "profile_in_use") {
+        process.stderr.write(
+          `Live Hub is serving profile "${result.profile}". Run with --profile ${result.profile} to watch it, or --restart to replace it.\n`,
+        );
+      }
+      const error = new Error(result.reason || "startup_unavailable");
+      error.code = result.reason || "startup_unavailable";
+      throw error;
+    }
+    const publicResult = {
+      status: result.status,
+      started: result.started,
+      host: result.host,
+      port: result.port,
+      url: result.url,
+      deepLink: result.deepLink,
+      readOnly: true,
+      controlEnabled: false,
+      controlRequested: options.enableControl === true,
+      controlRisk: options.enableControl === true
+        ? "control_requested_but_unavailable; fail_closed"
+        : "read_only_default",
+      singleton: true,
+      profile,
+      projectRegistered: projectRef !== null,
+    };
+    process.stdout.write(options.json
+      ? `${JSON.stringify(publicResult)}\n`
+      : `Meta_Kim Live Hub ${result.started ? "started" : "reused"} (${options.enableControl ? "control requested; fail-closed read-only" : "read-only"}): ${result.deepLink}\n`);
+    if (options.open !== false) openBrowser(result.deepLink);
+    return null;
+  }
+
+  if (!/^[a-f0-9-]{16,64}$/u.test(process.env.META_KIM_LIVE_INSTANCE_ID || "")) {
+    const error = new Error("daemon child requires a lifecycle-owned instance id");
+    error.code = "daemon_authority_required";
+    throw error;
+  }
+
+  const controller = createLiveControlRoomServer({
+    ...options,
+    globalHub: options.daemonChild === true,
+    homeDir: process.env.META_KIM_LIVE_HOME,
+    instanceId: process.env.META_KIM_LIVE_INSTANCE_ID || null,
+    packageIdentity: process.env.META_KIM_LIVE_PACKAGE_IDENTITY || null,
+    // The lifecycle hands the child both halves of its build authority. Passing
+    // only the digest is what left /api/health unable to name the build it serves.
+    packageVersion: process.env.META_KIM_LIVE_PACKAGE_VERSION || null,
+  });
+  let stopping = false;
+  const stop = async () => {
+    if (stopping) return;
+    stopping = true;
+    try {
+      await controller.close();
+    } finally {
+      await removeOwnedLiveHubState().catch(() => {});
+      // A daemon owns no foreground work after its server is closed. Exit
+      // explicitly so inherited runtime handles cannot leave an unreachable
+      // listener process behind on Windows.
+      process.exit(0);
+    }
+  };
+  process.once("SIGINT", stop);
+  process.once("SIGTERM", stop);
+  let address;
+  try {
+    address = await controller.start();
+    await writeLiveHubState({
+      address,
+      profile: options.profile || process.env.META_KIM_PROFILE || "default",
+    });
+  } catch (error) {
+    await controller.close().catch(() => {});
+    await removeOwnedLiveHubState().catch(() => {});
+    throw error;
+  }
   process.stdout.write(options.json
     ? `${JSON.stringify({ ...address, readOnly: address.readOnly, controlEnabled: address.controlEnabled, controlHeader: address.controlHeader, controlCapabilities: address.controlCapabilities, controlRisk: address.controlRisk })}\n`
     : `Meta_Kim Live (${address.controlEnabled ? "control opt-in; guarded and fail-closed" : options.enableControl === true ? "control requested; fail-closed plan-only" : "read-only"}) listening on ${address.url}\n`);
   if (options.open !== false) openBrowser(address.url);
-  const stop = async () => {
-    await controller.close();
-  };
-  process.once("SIGINT", stop);
-  process.once("SIGTERM", stop);
   return controller;
 }
 
@@ -132,6 +281,12 @@ if (invokedPath && import.meta.url === invokedPath) {
     // exit status without exposing filesystem details.
     const usageError = error instanceof LiveCliUsageError;
     process.stderr.write(`meta-kim-live failed: ${usageError ? error.message : error?.code || "startup_error"}\n`);
+    // A daemon child has no terminal. Its stderr is the user-owned hub log, and
+    // the launcher can only report `daemon_exited_before_ready`, so a bare code
+    // here leaves the singleton's failure with no discoverable cause.
+    if (process.argv.includes("--daemon-child") && !usageError) {
+      process.stderr.write(`${error?.stack || `${error?.name || "Error"}: ${error?.message || "unknown"}`}\n`);
+    }
     process.exitCode = usageError ? 2 : 1;
   });
 }

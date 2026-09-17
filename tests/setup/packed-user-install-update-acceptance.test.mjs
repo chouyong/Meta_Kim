@@ -570,11 +570,18 @@ test("project-aware packed global update alone receives the policy-scoped extend
   );
 });
 
-test("ordinary packed global install receives a dedicated bounded Windows-safe timeout", () => {
+test("project-aware packed global update emits bounded progress around the long-running command", () => {
+  assert.match(acceptanceSource, /packed_project_aware_global_update_start/u);
+  assert.match(acceptanceSource, /packed_project_aware_global_update_complete/u);
+  assert.match(acceptanceSource, /runRuntimeSedimentationLane\(\{[\s\S]*?onProgress/u);
+});
+
+test("ordinary packed global installs and updates receive bounded Windows-safe timeouts", () => {
   assert.equal(
-    releaseVerificationPolicy.packedUserAcceptance.globalUserInstallTimeoutMs,
+    releaseVerificationPolicy.packedUserAcceptance.globalUserUpdateTimeoutMs,
     600_000,
   );
+  assert.equal(PACKED_GLOBAL_USER_UPDATE_TIMEOUT_MS, 600_000);
   assert.equal(PACKED_GLOBAL_USER_INSTALL_TIMEOUT_MS, 600_000);
   const currentLane = acceptanceFunctionSource(
     "runCurrentPackageLane",
@@ -582,31 +589,7 @@ test("ordinary packed global install receives a dedicated bounded Windows-safe t
   );
   assert.match(
     currentLane,
-    /mode === "install"[\s\S]*?PACKED_GLOBAL_USER_INSTALL_TIMEOUT_MS[\s\S]*?: PACKED_GLOBAL_USER_UPDATE_TIMEOUT_MS/u,
-  );
-  const historicalLane = acceptanceFunctionSource(
-    "runHistoricalUpdateLane",
-    "runPackedUserInstallUpdateAcceptance",
-  );
-  assert.match(
-    historicalLane,
-    /historicalDescriptor,[\s\S]*?"install",[\s\S]*?PACKED_GLOBAL_USER_INSTALL_TIMEOUT_MS/u,
-  );
-});
-
-test("ordinary packed global updates receive a dedicated bounded Windows-safe timeout", () => {
-  assert.equal(
-    releaseVerificationPolicy.packedUserAcceptance.globalUserUpdateTimeoutMs,
-    600_000,
-  );
-  assert.equal(PACKED_GLOBAL_USER_UPDATE_TIMEOUT_MS, 600_000);
-  const currentLane = acceptanceFunctionSource(
-    "runCurrentPackageLane",
-    "runHistoricalUpdateLane",
-  );
-  assert.match(
-    currentLane,
-    /: PACKED_GLOBAL_USER_UPDATE_TIMEOUT_MS/u,
+    /mode === "update" \? PACKED_GLOBAL_USER_UPDATE_TIMEOUT_MS : Math\.max\(timeoutMs, PACKED_GLOBAL_USER_INSTALL_TIMEOUT_MS\)/u,
   );
 });
 
@@ -629,6 +612,16 @@ test("historical packed upgrade receives its own bounded Windows-safe timeout", 
   assert.ok(
     historicalLane.indexOf("allowNpmBinShebangCrLfNormalization: true") <
       historicalLane.indexOf("const currentDescriptor"),
+  );
+  assert.match(
+    historicalLane,
+    /historicalDescriptor,[\s\S]*?"install",[\s\S]*?PACKED_HISTORICAL_USER_UPDATE_TIMEOUT_MS/u,
+    "the historical seed must receive the historical Windows-safe timeout",
+  );
+  assert.match(
+    historicalLane,
+    /currentDescriptor,[\s\S]*?"update",[\s\S]*?PACKED_HISTORICAL_USER_UPDATE_TIMEOUT_MS/u,
+    "the historical update must retain the historical Windows-safe timeout",
   );
 });
 

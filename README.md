@@ -45,19 +45,29 @@ Meta_Kim is not a new model and it does not replace Claude Code or Codex. It add
 - The thing you asked for: code, a fix, a PR review, a PRD, documentation, or a release-ready change.
 - A readable explanation of what changed and why.
 - Test and verification evidence, with unknown or unproven claims kept visible instead of being called “done.”
-- A local Live view of the execution graph, workers, evidence, and replay history.
+- A local Live control room whose default view is one execution graph, with named sessions, work-item status, AI roles, tool activity, blockers, outputs, evidence, and replay history.
 
 ### What it looks like while running
 
 <p align="center">
   <a href="docs/images/meta-kim-live-demo.png">
-    <img alt="Meta_Kim Live showing the eight-stage execution graph, worker branches, evidence drawer, minimap, and replay timeline" src="docs/images/meta-kim-live-demo.png" width="100%"/>
+    <img alt="Meta_Kim Live work board view: named sessions on the left, a four-column work board in the center, and AI role, tool, activity, blocker, output, and evidence labels" src="docs/images/meta-kim-live-demo.png" width="100%"/>
   </a>
 </p>
 
-<p align="center"><sub>The real Meta_Kim Live renderer with representative demo data. The page is local and read-only by default.</sub></p>
+<p align="center"><sub>The real Meta_Kim Live renderer with representative demo data, shown on the work board view. The page is local and read-only by default.</sub></p>
 
-The top row is the governed path from understanding the request to verification and learning. Worker branches show who owns each bounded task. Animated edges show active flow; the evidence drawer and replay timeline show why a node has its current status.
+The default view is one execution graph: named sessions on the left, the run's dependency graph on the canvas, and an Inspector that holds secondary evidence when you open it. A four-column work board and a project/session repository view are one click away when you want work-item status or project facts instead of dependencies. Historical status-only records are labeled honestly; new runtime projections preserve conversation identity and richer work telemetry.
+
+### Recent upgrades on `main`
+
+| Upgrade | What changed |
+| --- | --- |
+| One Hub, many projects | One user-level loopback Hub lists explicitly registered Meta_Kim projects and sessions without scanning the disk. |
+| Graph-first default view | One execution graph answers what depends on what, which stage is live, who owns each node, and what evidence exists — with stage progress, minimap, fit/follow/zoom, and replay on the same canvas. |
+| Board and repository views | A four-column work board and a project/session repository view stay one click away for work-item status, ownership, active tool, and project facts. |
+| Cross-runtime conversation identity | Claude Code, Codex, Cursor, and OpenClaw can attach supported conversation metadata to new run records; unsupported legacy records stay visibly unlinked. |
+| Evidence-first and local | Missing telemetry stays visibly unavailable; the UI is loopback-only, has no third-party assets, and remains read-only by default. |
 
 ### What the final handoff looks like
 
@@ -97,7 +107,7 @@ The coding runtime still does the domain work. Meta_Kim makes the route, ownersh
    use parallel work where it is safe, and verify the final result.
    ```
 
-3. See the run:
+3. See the run. The first governed request lazily starts one local Live Hub and returns the current graph link in the conversation. The manual recovery command remains:
 
    ```bash
    meta-kim live
@@ -116,13 +126,15 @@ Good first requests include building a feature across frontend/backend/tests, in
 
 ### Meta_Kim Live: proof you can see
 
-Meta_Kim Live turns the durable run record into a local **Proof-Carrying Run Graph**: current stages, owners, evidence, uncertainty, and replay are visible in one read-only page. It attaches to the project you already run with Codex or Claude Code; it does not replace the agent, create a second scheduler, or pretend an unverified node is done.
+Meta_Kim Live turns durable run records into a local **Proof-Carrying Run Graph**. One user-level Hub lists explicitly registered Meta_Kim projects, then lets you choose a Session / Run and inspect its stages, owners, evidence, uncertainty, and replay. It never scans the whole disk, reads raw Codex or Claude Code conversations, replaces the agent, creates a second scheduler, or pretends an unverified node is done.
+
+The Hub opens in Chinese by default; use the `EN` switch in the top-right corner for English. The preference is remembered locally. A marker-backed project joins the catalog when you explicitly open Live for it or start its first governed run, while an existing explicit skip is preserved.
 
 ```bash
 meta-kim live
 ```
 
-The MVP binds only to `127.0.0.1` and loads no third-party assets. The default surface is read-only; guarded controls are opt-in only with `--enable-control` and a complete injected authority loadout (durable repository, lease/fence/effect checks, control token, and capable adapter). Without that complete authority chain, the service remains plan-only and fail-closed. Reopening a run is available now; automatic execution resume and cross-runtime handoff remain separate capabilities that require lease/fence and side-effect safety evidence.
+The Hub binds only to `127.0.0.1`, loads no third-party assets, and reuses one process through a PID, process-start identity, and instance-health proof; first use after an update safely replaces an older Hub version. The default surface is read-only; guarded controls are opt-in only with `--enable-control` and a complete injected authority loadout (durable repository, lease/fence/effect checks, control token, and capable adapter). Without that complete authority chain, the service remains plan-only and fail-closed. Selecting and reopening an observed run is available now; automatic execution resume and cross-runtime handoff remain separate capabilities that require lease/fence and side-effect safety evidence.
 
 #### M3-L02–L04 sharing and control boundaries
 
@@ -1026,7 +1038,7 @@ Start with `package.json` scripts. The supported maintenance paths are the `meta
 
 Global dependency install/update commands refresh `.meta-kim/state/{profile}/capability-index/global-capabilities.json` after they modify runtime homes, so newly installed agents, skills, commands, MCP providers, hooks, plugins, and runtime tools are available to capability-first routing without a separate manual scan.
 
-`planning-with-files` is a core external dependency, not a project-local `.agents/skills/` mirror. After dependency install, check runtime home directories such as `~/.codex/skills/planning-with-files/`, `~/.claude/skills/planning-with-files/`, `~/.cursor/skills/planning-with-files/`, or `~/.openclaw/skills/planning-with-files/`. Do not conclude it is missing from the absence of `.agents/skills/planning-with-files/` alone.
+Planning continuity is now owned by Meta_Kim's first-party `planning-continuity` runtime. It initializes or resumes `task_plan.md`, `findings.md`, and `progress.md` without requiring an external skill, cache, Hook bundle, or network lookup. The external `OthmanAdi/planning-with-files` dependency has been absorbed and retired from manifests, install routes, runtime homes, Hook registrations, and provider selection; only historical provenance remains.
 
 #### Native dependency installs (Superpowers, ECC, cli-anything)
 

@@ -51,6 +51,7 @@ import { loadEffectiveRuntimeCapabilityClaims } from "./effective-runtime-capabi
 import { loadRuntimeCapabilityAcceptanceAttempts } from "./runtime-capability-acceptance.mjs";
 import { assertExactStandardRuntimeObservationSet } from "./runtime-execution-gate.mjs";
 import { resolveWindowsCliInvocation } from "./runtime-cli-invocation.mjs";
+import { tarExtractCommand } from "./tar-extract-command.mjs";
 import {
   PACKED_SYNC_MANIFEST,
   PACKED_USER_TARGETS,
@@ -107,7 +108,7 @@ export const PACKED_PROJECT_AWARE_GLOBAL_UPDATE_TIMEOUT_MS =
   PACKED_RELEASE_POLICY.packedUserAcceptance.projectAwareGlobalUpdateTimeoutMs;
 export const PACKED_PORTABLE_RUNTIME_GLOBAL_UPDATE_TIMEOUT_MS =
   PACKED_RELEASE_POLICY.packedUserAcceptance.portableRuntimeGlobalUpdateTimeoutMs;
-const ACCEPTANCE_SKILL_FILTER = "planning-with-files";
+const ACCEPTANCE_SKILL_FILTER = "findskill";
 const TRANSIENT_PACKAGE_TARGETS = Object.freeze(["claude", "codex"]);
 const DEFAULT_TIMEOUT_MS =
   PACKED_RELEASE_POLICY.packedUserAcceptance.commandTimeoutMs;
@@ -709,10 +710,11 @@ function packAndExtract({ sourceRoot, destinationRoot, environment, timeoutMs })
     }),
   );
   const tarball = path.join(packDir, parsePackResult(packed));
+  const candidateExtraction = tarExtractCommand(tarball, extractDir);
   requireSuccess(
     "candidate tar extraction",
-    run("tar", ["-xf", tarball, "-C", extractDir], {
-      cwd: sourceRoot,
+    run(candidateExtraction.command, candidateExtraction.args, {
+      cwd: candidateExtraction.cwd,
       env: environment,
       timeoutMs,
     }),
@@ -790,16 +792,16 @@ function makeIsolatedRoots(root, name) {
   for (const directory of Object.values(roots).filter((value) => typeof value === "string")) {
     mkdirSync(directory, { recursive: true });
   }
-  const planningFixture = path.join(roots.localDependencyRoot, "planning-with-files");
-  mkdirSync(path.join(planningFixture, ".git"), { recursive: true });
-  mkdirSync(path.join(planningFixture, "skills", "planning-with-files"), {
-    recursive: true,
-  });
-  writeFileSync(
-    path.join(planningFixture, "skills", "planning-with-files", "SKILL.md"),
-    "---\nname: planning-with-files\ndescription: Deterministic packed acceptance fixture.\n---\n\n# Planning with Files\n",
-    "utf8",
-  );
+  const findskillFixture = path.join(roots.localDependencyRoot, "findskill");
+  mkdirSync(path.join(findskillFixture, ".git"), { recursive: true });
+  for (const platformDir of ["windows", "original"]) {
+    mkdirSync(path.join(findskillFixture, platformDir), { recursive: true });
+    writeFileSync(
+      path.join(findskillFixture, platformDir, "SKILL.md"),
+      "---\nname: findskill\ndescription: Deterministic first-party packed acceptance fixture.\n---\n\n# Findskill\n",
+      "utf8",
+    );
+  }
   writeFileSync(path.join(roots.ordinaryCwd, "user-owned.txt"), "user-owned\n", "utf8");
   return roots;
 }
@@ -1232,6 +1234,8 @@ function runPortableRuntimePreparation({ packageInfo, descriptor, roots, env, ti
   if (!JSON.stringify(settings.hooks ?? {}).includes(seeded.userHookCommand)) {
     throw new Error("packed global Hook update removed an unknown user Hook");
   }
+  const codexHooks = JSON.parse(readFileSync(path.join(roots.codexHome, "hooks.json"), "utf8"));
+  assertPlanningContinuityProjection(roots, settings, codexHooks);
   const config = JSON.parse(readFileSync(seeded.claudeUserConfigPath, "utf8"));
   const forbiddenRoots = [
     packageInfo.sourceRoot,
@@ -2116,6 +2120,22 @@ function filesRecursively(rootPath) {
   return files;
 }
 
+function assertPlanningContinuityProjection(roots, claudeSettings, codexHooks) {
+  const claudeText = JSON.stringify(claudeSettings);
+  const codexText = JSON.stringify(codexHooks);
+  if (!claudeText.includes("planning-continuity.mjs")) {
+    throw new Error("packed global Claude projection is missing planning continuity");
+  }
+  if (!codexText.includes("planning-continuity.mjs") || !codexHooks.hooks?.PostToolUse) {
+    throw new Error("packed global Codex projection is missing planning continuity PostToolUse");
+  }
+  for (const [runtime, runtimeHome] of [["claude", roots.claudeHome], ["codex", roots.codexHome]]) {
+    const hook = filesRecursively(path.join(runtimeHome, "hooks"))
+      .find((filePath) => path.basename(filePath) === "planning-continuity.mjs");
+    if (!hook) throw new Error(`packed global ${runtime} hook file is missing planning continuity`);
+  }
+}
+
 function currentProjectionPackageAuthority(manifestPath, descriptor) {
   const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
   const candidates = manifest.entries
@@ -2278,12 +2298,11 @@ function assertTransientRuntimeReadback({
   )) {
     throw new Error("transient packed update changed user Codex config");
   }
-  if (
-    JSON.parse(readFileSync(codexHooksPath, "utf8"))
-      .userOwnedTransient?.preserve !== true
-  ) {
+  const codexHooks = JSON.parse(readFileSync(codexHooksPath, "utf8"));
+  if (codexHooks.userOwnedTransient?.preserve !== true) {
     throw new Error("transient packed update changed user Codex hooks state");
   }
+  assertPlanningContinuityProjection(roots, settings, codexHooks);
 
   const readbackPaths = [
     path.join(roots.userHome, ".meta-kim", "install-manifest.json"),
@@ -2828,7 +2847,7 @@ function runGlobalReuseNegativeLane({ descriptor, roots, env, fixtures, timeoutM
   };
 }
 
-function runRuntimeSedimentationLane({ descriptor, roots, env, timeoutMs }) {
+function runRuntimeSedimentationLane({ descriptor, roots, env, timeoutMs, onProgress = null }) {
   const fixtures = runtimeSedimentationFixtures(roots);
   const reuseOnlyFixtures = globalReuseOnlyFixtures(roots);
   for (const fixture of fixtures) {
@@ -2913,11 +2932,13 @@ function runRuntimeSedimentationLane({ descriptor, roots, env, timeoutMs }) {
   mkdirSync(path.dirname(unknownProjectFile), { recursive: true });
   writeFileSync(unknownProjectFile, unknownProjectContent, "utf8");
 
+  emit(onProgress, { event: "packed_project_aware_global_update_start" });
   const dependencyUpdate = runInstalledPublicGlobalUpdateFromProject(
     descriptor,
     roots,
     env,
   );
+  emit(onProgress, { event: "packed_project_aware_global_update_complete", status: "passed" });
   assertOrdinaryCwdUntouched(roots.ordinaryCwd);
 
   if (readFileSync(globalArtifacts.codexSkill, "utf8") !== globalSkillExpected) {
@@ -3137,9 +3158,7 @@ function runCurrentPackageLane({
       roots,
       env,
       mode,
-      mode === "install"
-        ? PACKED_GLOBAL_USER_INSTALL_TIMEOUT_MS
-        : PACKED_GLOBAL_USER_UPDATE_TIMEOUT_MS,
+      mode === "update" ? PACKED_GLOBAL_USER_UPDATE_TIMEOUT_MS : Math.max(timeoutMs, PACKED_GLOBAL_USER_INSTALL_TIMEOUT_MS),
     );
     const record = {
       mode,
@@ -3220,6 +3239,7 @@ function runCurrentPackageLane({
     roots,
     env,
     timeoutMs,
+    onProgress,
   });
   const portableRuntimePrepared = runPortableRuntimePreparation({
     packageInfo,
@@ -3263,10 +3283,11 @@ function extractHistoricalSource(repoRoot, root, historicalRef, environment, tim
       timeoutMs,
     }),
   );
+  const historicalExtraction = tarExtractCommand(archivePath, sourceRoot);
   requireSuccess(
     `extract ${historicalRef}`,
-    run("tar", ["-xf", archivePath, "-C", sourceRoot], {
-      cwd: repoRoot,
+    run(historicalExtraction.command, historicalExtraction.args, {
+      cwd: historicalExtraction.cwd,
       env: environment,
       timeoutMs,
     }),
@@ -3312,7 +3333,7 @@ function runHistoricalUpdateLane({
       roots,
       env,
       "install",
-      PACKED_GLOBAL_USER_INSTALL_TIMEOUT_MS,
+      PACKED_HISTORICAL_USER_UPDATE_TIMEOUT_MS,
     ),
   );
   const before = normalizedManifest(artifacts.manifest, roots.userHome);
