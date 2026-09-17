@@ -2577,6 +2577,10 @@ function buildCursorGlobalHooksTemplate() {
       "enforce-agent-dispatch.mjs",
     ),
     hookPromptAdapterPath: cursorGlobalHookPromptAdapterPath(),
+    planningContinuityHookPath: path.join(absHooks, "planning-continuity.mjs"),
+    medusaEnqueueHookPath: path.join(absHooks, "medusa-postscan-enqueue.mjs"),
+    medusaSurfaceHookPath: path.join(absHooks, "medusa-findings-surface.mjs"),
+    nodeExecutable: process.execPath,
     hooksDir: absHooks,
   });
 }

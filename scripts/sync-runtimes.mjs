@@ -2947,6 +2947,8 @@ export function buildCursorProjectHooksJson({
   enforceAgentDispatchHookPath = ".cursor/hooks/enforce-agent-dispatch.mjs",
   hookPromptAdapterPath = null,
   planningContinuityHookPath = null,
+  medusaEnqueueHookPath = ".cursor/hooks/medusa-postscan-enqueue.mjs",
+  medusaSurfaceHookPath = ".cursor/hooks/medusa-findings-surface.mjs",
   packageRoot = null,
   nodeExecutable = "node",
   // Global scope must pass an absolute directory. A relative command resolves
@@ -2963,6 +2965,8 @@ export function buildCursorProjectHooksJson({
     enforceAgentDispatchHookPath,
     hookPromptAdapterPath,
     planningContinuityHookPath,
+    medusaEnqueueHookPath,
+    medusaSurfaceHookPath,
     packageRoot,
     nodeExecutable,
   });
@@ -4528,6 +4532,18 @@ Examples:
         scope === "global"
           ? path.join(path.dirname(dirs.cursorHooksDir), "hookprompt-adapter.mjs")
           : null;
+      const cursorPlanningContinuityHookPath =
+        scope === "global"
+          ? path.join(dirs.cursorHooksDir, "planning-continuity.mjs")
+          : ".cursor/hooks/planning-continuity.mjs";
+      const cursorMedusaEnqueueHookPath =
+        scope === "global"
+          ? path.join(dirs.cursorHooksDir, "medusa-postscan-enqueue.mjs")
+          : ".cursor/hooks/medusa-postscan-enqueue.mjs";
+      const cursorMedusaSurfaceHookPath =
+        scope === "global"
+          ? path.join(dirs.cursorHooksDir, "medusa-findings-surface.mjs")
+          : ".cursor/hooks/medusa-findings-surface.mjs";
       const cursorHooksDir =
         scope === "global" ? dirs.cursorHooksDir : ".cursor/hooks";
       if (
@@ -4540,6 +4556,9 @@ Examples:
               spineHookPath,
               enforceAgentDispatchHookPath,
               hookPromptAdapterPath: cursorHookPromptAdapterPath,
+              planningContinuityHookPath: cursorPlanningContinuityHookPath,
+              medusaEnqueueHookPath: cursorMedusaEnqueueHookPath,
+              medusaSurfaceHookPath: cursorMedusaSurfaceHookPath,
               packageRoot: repoRoot,
               nodeExecutable: process.execPath,
               hooksDir: cursorHooksDir,

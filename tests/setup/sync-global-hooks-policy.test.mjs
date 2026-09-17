@@ -1552,7 +1552,9 @@ description: Meta_Kim executable governance dispatcher
 
       await runScript(["--targets", "claude", "--with-global-hooks"], env);
       const repaired = JSON.parse(await readFile(settingsPath, "utf8"));
-      assert.equal(repaired.hooks.PreCompact, undefined);
+      const repairedPreCompact = JSON.stringify(repaired.hooks.PreCompact ?? []);
+      assert.doesNotMatch(repairedPreCompact, /missing-retired-hook\.mjs/);
+      assert.match(repairedPreCompact, /planning-continuity\.mjs/);
       const repairedStop = JSON.stringify(repaired.hooks.Stop ?? []);
       assert.doesNotMatch(repairedStop, /missing-retired-hook\.mjs/);
       assert.match(repairedStop, /stop-save-progress\.mjs/);
