@@ -2923,9 +2923,9 @@ export function buildCodexProjectHooksJson({
     ...baseStopHooks.filter((hook) =>
       !hook.command?.includes("stop-spine-cleanup.mjs"),
     ),
-    hookCommand(nodeHookCommand(resolveProjectHookPath(".codex/hooks/stop-compaction.mjs"), [], nodeExecutable), 5),
-    hookCommand(nodeHookCommand(resolveProjectHookPath(".codex/hooks/stop-console-log-audit.mjs"), [], nodeExecutable), 5),
-    hookCommand(nodeHookCommand(resolveProjectHookPath(".codex/hooks/stop-completion-guard.mjs"), [], nodeExecutable), 5),
+    hookCommand(nodeHookCommand(resolveProjectHookPath(".codex/hooks/stop-compaction.mjs"), [], nodeExecutable), 10),
+    hookCommand(nodeHookCommand(resolveProjectHookPath(".codex/hooks/stop-console-log-audit.mjs"), [], nodeExecutable), 10),
+    hookCommand(nodeHookCommand(resolveProjectHookPath(".codex/hooks/stop-completion-guard.mjs"), [], nodeExecutable), 10),
     ...lifecycleCleanupHooks,
   ];
   const seenStopCommands = new Set();

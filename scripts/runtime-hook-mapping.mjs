@@ -408,7 +408,8 @@ export function buildCodexHooksJson({
     nodeHookCommand(scriptPath, args);
   const userPromptHooks = [];
   const spineHookArgs = ["--runtime", "codex", ...(packageRoot ? ["--package-root", packageRoot] : [])];
-  const lifecycleHook = () => hookCommand(nodeHookCommand(spineHookPath, spineHookArgs), 5);
+  const lifecycleHook = (timeout = 5) =>
+    hookCommand(nodeHookCommand(spineHookPath, spineHookArgs), timeout);
   if (spineHookPath) {
     userPromptHooks.push(hookCommand(nodeCommand(spineHookPath, spineHookArgs), 5));
   }
@@ -531,7 +532,7 @@ export function buildCodexHooksJson({
     }];
   }
   const stopHooks = [];
-  if (spineHookPath) stopHooks.push(lifecycleHook());
+  if (spineHookPath) stopHooks.push(lifecycleHook(10));
   if (planningContinuityHookPath) {
     stopHooks.push(hookCommand(nodeHookCommand(planningContinuityHookPath, [
       "--event", "stop", "--runtime", "codex",
@@ -560,7 +561,7 @@ export function buildCodexHooksJson({
     );
     const surfaceStop = hookCommand(
       nodeCommand(medusaSurfaceHookPath, ["--event", "stop"]),
-      5,
+      10,
     );
     if (hooks.SessionStart) {
       hooks.SessionStart[0].hooks.push(surfaceSessionStart);

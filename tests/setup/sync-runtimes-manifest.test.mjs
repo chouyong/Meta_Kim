@@ -654,6 +654,27 @@ describe("sync-runtimes / Codex project hooks", () => {
     );
   });
 
+  test("Codex Stop hooks retain enough budget for concurrent global and project cold starts", () => {
+    const projectConfig = buildCodexProjectHooksJson({ packageRoot: "D:/Meta_Kim" });
+    const globalConfig = buildCodexHooksJson({
+      packageRoot: "C:/Users/Example/.meta-kim/runtime/package",
+      planningContinuityHookPath: "C:/Users/Example/.codex/hooks/meta-kim/planning-continuity.mjs",
+      memoryHookPath: "C:/Users/Example/.codex/hooks/meta-kim/meta-kim-memory-save.mjs",
+      stopSpineCleanupHookPath: "C:/Users/Example/.codex/hooks/meta-kim/stop-spine-cleanup.mjs",
+      medusaSurfaceHookPath: "C:/Users/Example/.codex/hooks/meta-kim/medusa-findings-surface.mjs",
+    });
+
+    for (const [scope, config] of [["project", projectConfig], ["global", globalConfig]]) {
+      const stopHooks = (config.hooks.Stop ?? []).flatMap((entry) => entry.hooks ?? []);
+      assert.ok(stopHooks.length > 0, `${scope} Codex Stop hooks should be registered`);
+      assert.deepEqual(
+        stopHooks.filter((hook) => hook.timeout < 10),
+        [],
+        `${scope} Codex Stop hooks must not retain the host's fragile 5-second budget`,
+      );
+    }
+  });
+
   test("Codex HookPrompt adapter injects model-visible additionalContext", () => {
     const codexSource = buildHookPromptAdapterSource("codex");
     const cursorSource = buildHookPromptAdapterSource("cursor");
