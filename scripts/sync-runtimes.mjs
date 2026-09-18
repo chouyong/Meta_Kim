@@ -2898,9 +2898,9 @@ export function buildCodexProjectHooksJson({
         hookCommand(nodeHookCommand(resolveProjectHookPath(planningContinuityHookPath), [
           "--event", "post-tool", "--runtime", "codex",
         ], nodeExecutable), 10),
-        hookCommand(nodeHookCommand(resolveProjectHookPath(".codex/hooks/post-format.mjs"), [], nodeExecutable)),
-        hookCommand(nodeHookCommand(resolveProjectHookPath(".codex/hooks/post-typecheck.mjs"), [], nodeExecutable)),
-        hookCommand(nodeHookCommand(resolveProjectHookPath(".codex/hooks/post-console-log-warn.mjs"), [], nodeExecutable)),
+        hookCommand(nodeHookCommand(resolveProjectHookPath(".codex/hooks/post-format.mjs"), [], nodeExecutable), 5),
+        hookCommand(nodeHookCommand(resolveProjectHookPath(".codex/hooks/post-typecheck.mjs"), [], nodeExecutable), 30),
+        hookCommand(nodeHookCommand(resolveProjectHookPath(".codex/hooks/post-console-log-warn.mjs"), [], nodeExecutable), 5),
       ],
     },
   ];
@@ -2911,7 +2911,7 @@ export function buildCodexProjectHooksJson({
       // A catch-all matcher would inject it into every run-scoped worker
       // subagent, which is pure token burn.
       matcher: "meta-*",
-      hooks: [hookCommand(nodeHookCommand(resolveProjectHookPath(".codex/hooks/subagent-context.mjs"), [], nodeExecutable))],
+      hooks: [hookCommand(nodeHookCommand(resolveProjectHookPath(".codex/hooks/subagent-context.mjs"), [], nodeExecutable), 5)],
     },
   ];
   const baseStopHooks = (config.hooks.Stop ?? [])
@@ -2923,9 +2923,9 @@ export function buildCodexProjectHooksJson({
     ...baseStopHooks.filter((hook) =>
       !hook.command?.includes("stop-spine-cleanup.mjs"),
     ),
-    hookCommand(nodeHookCommand(resolveProjectHookPath(".codex/hooks/stop-compaction.mjs"), [], nodeExecutable)),
-    hookCommand(nodeHookCommand(resolveProjectHookPath(".codex/hooks/stop-console-log-audit.mjs"), [], nodeExecutable)),
-    hookCommand(nodeHookCommand(resolveProjectHookPath(".codex/hooks/stop-completion-guard.mjs"), [], nodeExecutable)),
+    hookCommand(nodeHookCommand(resolveProjectHookPath(".codex/hooks/stop-compaction.mjs"), [], nodeExecutable), 5),
+    hookCommand(nodeHookCommand(resolveProjectHookPath(".codex/hooks/stop-console-log-audit.mjs"), [], nodeExecutable), 5),
+    hookCommand(nodeHookCommand(resolveProjectHookPath(".codex/hooks/stop-completion-guard.mjs"), [], nodeExecutable), 5),
     ...lifecycleCleanupHooks,
   ];
   const seenStopCommands = new Set();
@@ -4029,9 +4029,11 @@ Examples:
         "project-root.mjs",
         "utils.mjs",
         "skip-reminder.mjs",
+        "conversation-binding.mjs",
         "spine-state-utils.mjs",
         "spine-state-gates.mjs",
         "spine-state.mjs",
+        "planning-continuity.mjs",
       ]) {
         const sourcePath = await canonicalGlobalHookSource(hookName, "codex");
         if (!sourcePath) {
@@ -4232,7 +4234,9 @@ Examples:
               stopSpineCleanupHookPath: codexStopSpineCleanupHookPath,
               packageRoot: repoRoot,
               projectRoot: repoRoot,
-              nodeExecutable: process.execPath,
+              // Codex's native hook runner does not handle a quoted absolute
+              // executable path containing spaces. `node` is resolved from PATH.
+              nodeExecutable: "node",
             }),
           )
         ).changed

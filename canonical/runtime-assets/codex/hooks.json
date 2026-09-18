@@ -45,7 +45,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node __REPO_ROOT__/.codex/hooks/graphify-context.mjs"
+            "command": "node __REPO_ROOT__/.codex/hooks/graphify-context.mjs",
+            "timeout": 5
           }
         ]
       }
@@ -56,15 +57,18 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node __REPO_ROOT__/.codex/hooks/post-format.mjs"
+            "command": "node __REPO_ROOT__/.codex/hooks/post-format.mjs",
+            "timeout": 5
           },
           {
             "type": "command",
-            "command": "node __REPO_ROOT__/.codex/hooks/post-typecheck.mjs"
+            "command": "node __REPO_ROOT__/.codex/hooks/post-typecheck.mjs",
+            "timeout": 30
           },
           {
             "type": "command",
-            "command": "node __REPO_ROOT__/.codex/hooks/post-console-log-warn.mjs"
+            "command": "node __REPO_ROOT__/.codex/hooks/post-console-log-warn.mjs",
+            "timeout": 5
           }
         ]
       }
@@ -75,7 +79,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node __REPO_ROOT__/.codex/hooks/subagent-context.mjs"
+            "command": "node __REPO_ROOT__/.codex/hooks/subagent-context.mjs",
+            "timeout": 5
           }
         ]
       }
@@ -103,19 +108,23 @@
           },
           {
             "type": "command",
-            "command": "node __REPO_ROOT__/.codex/hooks/stop-compaction.mjs"
+            "command": "node __REPO_ROOT__/.codex/hooks/stop-compaction.mjs",
+            "timeout": 5
           },
           {
             "type": "command",
-            "command": "node __REPO_ROOT__/.codex/hooks/stop-console-log-audit.mjs"
+            "command": "node __REPO_ROOT__/.codex/hooks/stop-console-log-audit.mjs",
+            "timeout": 5
           },
           {
             "type": "command",
-            "command": "node __REPO_ROOT__/.codex/hooks/stop-completion-guard.mjs"
+            "command": "node __REPO_ROOT__/.codex/hooks/stop-completion-guard.mjs",
+            "timeout": 5
           },
           {
             "type": "command",
-            "command": "node __REPO_ROOT__/.codex/hooks/stop-spine-cleanup.mjs"
+            "command": "node __REPO_ROOT__/.codex/hooks/stop-spine-cleanup.mjs",
+            "timeout": 5
           }
         ]
       }

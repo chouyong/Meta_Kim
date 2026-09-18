@@ -456,7 +456,7 @@ export function buildCodexHooksJson({
       },
       {
         matcher: "Bash",
-        hooks: [hookCommand(nodeCommand(graphifyHookPath))],
+        hooks: [hookCommand(nodeCommand(graphifyHookPath), 5)],
       },
     ],
     PostToolUse: [

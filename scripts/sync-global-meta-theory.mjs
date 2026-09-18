@@ -2534,7 +2534,10 @@ function buildCodexGlobalHooksTemplate() {
     hookPromptAdapterPath: codexGlobalHookPromptAdapterPath(),
     planningContinuityHookPath: path.join(absHooks, "planning-continuity.mjs"),
     stopSpineCleanupHookPath: path.join(absHooks, "stop-spine-cleanup.mjs"),
-    nodeExecutable: process.execPath,
+    // Codex invokes hook commands without a shell. A quoted absolute Node path
+    // containing spaces is parsed as a single executable token by shells but is
+    // rejected by Codex 0.155's native hook runner; resolve Node from PATH.
+    nodeExecutable: "node",
   });
 }
 

@@ -4769,7 +4769,7 @@ async function patchCodexHookPromptForPlatform(spec, runtimeHome, runtimeId) {
         (await pathExists(spineHookPath)) ? spineHookPath : "activate-meta-theory-spine.mjs",
     }),
     hookPromptAdapterPath,
-    nodeExecutable: process.execPath,
+    nodeExecutable: runtimeId === "codex" ? "node" : process.execPath,
     planningContinuityHookPath: null,
   });
 

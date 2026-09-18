@@ -46,8 +46,12 @@ MEMORY_SERVICE_URL = os.environ.get(
     f"http://localhost:{os.environ.get('META_KIM_MEMORY_PORT', '8000')}",
 )
 MEMORY_LIMIT = int(os.environ.get("MCP_MEMORY_LIMIT", "10"))
-TIMEOUT = 3
-HEALTH_TIMEOUT = 0.5
+# SessionStart is a foreground hook. A slow/unavailable memory service must
+# degrade to no memory context instead of consuming Claude's hook budget.
+# Keep the value configurable for local debugging, but fail fast by default.
+TIMEOUT = float(os.environ.get("MCP_MEMORY_HOOK_TIMEOUT", "0.2"))
+HEALTH_TIMEOUT = min(TIMEOUT, 0.1)
+_HEALTH_CACHE = None
 MEMORY_HEALTH_WARNING_INTERVAL = int(os.environ.get("META_KIM_MEMORY_HEALTH_WARNING_INTERVAL_MS", str(60 * 60 * 1000))) / 1000
 MEMORY_AUTOSTART_DISABLED = os.environ.get("META_KIM_DISABLE_MEMORY_AUTOSTART") == "1"
 # L2 relevance threshold — lower for Chinese embeddings which tend to score lower
@@ -114,11 +118,15 @@ def _api_post(path, body):
 
 
 def check_service_health():
+    global _HEALTH_CACHE
+    if _HEALTH_CACHE is not None:
+        return _HEALTH_CACHE
     try:
         data = _api_get("/api/health", timeout=HEALTH_TIMEOUT)
-        return data.get("status") == "healthy"
+        _HEALTH_CACHE = data.get("status") == "healthy"
     except Exception:
-        return False
+        _HEALTH_CACHE = False
+    return _HEALTH_CACHE
 
 
 def _is_loopback_memory_url(url):
