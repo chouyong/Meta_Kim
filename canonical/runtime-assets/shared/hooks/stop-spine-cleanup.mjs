@@ -24,20 +24,15 @@ try {
     removeStateFile: evolutionCompleted,
   });
   if (!result.terminalized) {
-    process.stderr.write(
-      `[spine-cleanup] skipped stale stop request, reason=${result.reason || "authoritative_state_changed"}\n`,
-    );
+    // Stop hooks must stay silent on Codex/Cursor: Codex treats stderr as a
+    // failed hook even when the process exits 0. The authoritative state is
+    // already persisted for diagnostics, so do not turn an informational
+    // stale-stop note into a user-visible Hook failed result.
     process.exit(0);
   }
-  if (evolutionCompleted) {
-    process.stderr.write(
-      `[spine-cleanup] evolution completed, run=${result.runId || "unknown"} terminalized before spine state removal\n`,
-    );
-  } else {
-    process.stderr.write(
-      `[spine-cleanup] spine deactivated at stage=${state.currentStage}, agents dispatched=${state.dispatchedAgents?.length || 0}\n`,
-    );
-  }
+  // Successful cleanup is intentionally silent. Runtime-native Stop surfaces
+  // do not need a diagnostic line, and stderr is interpreted as failure by
+  // Codex even for exit code 0.
 } catch {
   // Non-critical: never block session stop
 }

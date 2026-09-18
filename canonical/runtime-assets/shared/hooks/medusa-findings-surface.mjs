@@ -10,9 +10,10 @@
  *   --event user-prompt     summary only when findings changed since last surface
  *   --event stop            session-close roll-up; also notes pending queue depth
  *
- * Output channel by runtime is auto-detected; both Claude Code and Codex CLI
- * accept the `hookSpecificOutput.additionalContext` JSON shape, while Cursor
- * uses a `prompt`-shaped JSON. fail-open: any error exits 0 with no output.
+ * Output channel by runtime is auto-detected. SessionStart/UserPromptSubmit
+ * accept `hookSpecificOutput.additionalContext` in Claude Code and Codex CLI,
+ * while Cursor uses a `prompt`-shaped JSON. Codex/Cursor Stop has no supported
+ * context envelope here and stays silent. fail-open: errors exit 0.
  */
 
 import { spawn, spawnSync } from "node:child_process";
@@ -403,7 +404,15 @@ async function run() {
     if (fallbackResult.timedOut) {
       lines.push(`[Meta_Kim/medusa] git-diff fallback hit time budget=${fallbackResult.budgetMs}ms; remaining files were skipped (META_KIM_MEDUSA_STOP_FALLBACK_BUDGET_MS).`);
     }
-    process.stderr.write(`${lines.join("\n")}\n`);
+    const summaryText = lines.join("\n");
+    if (detectRuntime() === "codex" || detectRuntime() === "cursor") {
+      // Codex/Cursor Stop events do not accept the UserPromptSubmit-style
+      // additionalContext envelope. Keep the scan/fallback side effects, but
+      // stay silent so an informational roll-up cannot become Hook Failed.
+      void summaryText;
+    } else {
+      process.stderr.write(`${summaryText}\n`);
+    }
     return;
   }
 }
